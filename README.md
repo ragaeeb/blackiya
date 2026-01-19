@@ -31,13 +31,13 @@ bun --version
 
 #### Step 2: Clone or Create Project
 
-**Option A: Clone this repository**
+### Option A: Clone this repository
 ```bash
 git clone <your-repo-url>
 cd blackiya
 ```
 
-**Option B: Create from scratch**
+### Option B: Create from scratch
 ```bash
 # Create project directory
 mkdir blackiya
@@ -373,4 +373,4 @@ For issues and questions:
 
 ---
 
-**Built with ❤️ using WXT, Bun, and Biome**
+# Built with ❤️ using WXT, Bun, and Biome

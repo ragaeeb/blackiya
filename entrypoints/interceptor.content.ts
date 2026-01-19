@@ -11,14 +11,8 @@ export default defineContentScript({
             const response = await originalFetch(...args);
             const url = args[0] instanceof Request ? args[0].url : String(args[0]);
 
-            // Match single conversation endpoint, not list or other endpoints
-            if (/\/backend-api\/conversation\/[a-f0-9-]+$/.test(url)) {
-                // Also match Gemini batchexecute with hNvQHb
-            } else if (url.includes('/_/BardChatUi/data/batchexecute') && url.includes('rpcids=hNvQHb')) {
-                // Should fall through to adapter check below, or we can check here
-            }
-
             const adapter = getPlatformAdapterByApiUrl(url);
+            console.log(`[Blackiya] Intercepted fetch: ${url}, Adapter: ${adapter?.name || 'None'}`);
 
             if (adapter) {
                 const clonedResponse = response.clone();
@@ -42,6 +36,43 @@ export default defineContentScript({
 
             return response;
         }) as any;
-        console.log('[Blackiya] Fetch interceptor initialized for multiple platforms');
+
+        // XHR Interceptor
+        const XHR = window.XMLHttpRequest;
+        const originalOpen = XHR.prototype.open;
+        const originalSend = XHR.prototype.send;
+
+        XHR.prototype.open = function (method: string, url: string | URL) {
+            (this as any)._url = String(url);
+            return originalOpen.apply(this, arguments as any);
+        };
+
+        XHR.prototype.send = function (body: any) {
+            this.addEventListener('load', function () {
+                const url = (this as any)._url;
+                const adapter = getPlatformAdapterByApiUrl(url);
+                console.log(`[Blackiya] Intercepted XHR: ${url}, Adapter: ${adapter?.name || 'None'}`);
+
+                if (adapter) {
+                    try {
+                        const responseText = this.responseText;
+                        window.postMessage(
+                            {
+                                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                                url,
+                                data: responseText,
+                                platform: adapter.name,
+                            },
+                            '*',
+                        );
+                    } catch (e) {
+                        console.error('[Blackiya] Failed to read XHR response', e);
+                    }
+                }
+            });
+            return originalSend.apply(this, arguments as any);
+        };
+
+        console.log('[Blackiya] Fetch & XHR interceptors initialized');
     },
 });

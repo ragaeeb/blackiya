@@ -50,6 +50,7 @@ export function runPlatform(): void {
         cursor: pointer;
         transition: all 0.2s ease;
         box-shadow: 0 2px 4px rgba(16, 163, 127, 0.2);
+        z-index: 9999;
     `;
 
     const BUTTON_HOVER_STYLES = `
@@ -63,6 +64,35 @@ export function runPlatform(): void {
         cursor: wait;
     `;
 
+    const FIXED_STYLES = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    `;
+
+    let isFixedPosition = false;
+
+    function updateButtonStyles(state: 'default' | 'hover' | 'loading'): void {
+        if (!saveButton) {
+            return;
+        }
+
+        let css = BUTTON_STYLES;
+        if (state === 'hover') {
+            css += BUTTON_HOVER_STYLES;
+        } else if (state === 'loading') {
+            css += BUTTON_LOADING_STYLES;
+        }
+
+        if (isFixedPosition) {
+            css += FIXED_STYLES;
+        }
+
+        saveButton.style.cssText = css;
+    }
+
     function createSaveButton(): HTMLButtonElement {
         const button = document.createElement('button');
         button.id = 'llm-capture-save-btn';
@@ -74,17 +104,19 @@ export function runPlatform(): void {
             </svg>
             Save JSON
         `;
+
+        // Initial style
         button.style.cssText = BUTTON_STYLES;
 
         button.addEventListener('mouseenter', () => {
             if (!button.disabled) {
-                button.style.cssText = BUTTON_STYLES + BUTTON_HOVER_STYLES;
+                updateButtonStyles('hover');
             }
         });
 
         button.addEventListener('mouseleave', () => {
             if (!button.disabled) {
-                button.style.cssText = BUTTON_STYLES;
+                updateButtonStyles('default');
             }
         });
 
@@ -111,7 +143,7 @@ export function runPlatform(): void {
                 </svg>
                 Saving...
             `;
-            saveButton.style.cssText = BUTTON_STYLES + BUTTON_LOADING_STYLES;
+            updateButtonStyles('loading');
         } else {
             saveButton.innerHTML = `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -121,7 +153,7 @@ export function runPlatform(): void {
                 </svg>
                 Save JSON
             `;
-            saveButton.style.cssText = BUTTON_STYLES;
+            updateButtonStyles('default');
         }
     }
 
@@ -165,7 +197,9 @@ export function runPlatform(): void {
 
             const message = event.data;
             if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
+                console.log('[Blackiya] Received intercepted data message');
                 if (!currentAdapter) {
+                    console.warn('[Blackiya] No currentAdapter in runner, ignoring message');
                     return;
                 }
 
@@ -173,12 +207,16 @@ export function runPlatform(): void {
                 if (data?.conversation_id) {
                     const conversationId = data.conversation_id;
                     cacheConversation(conversationId, data);
-                    console.log(`[Blackiya] Captured data for conversation: ${conversationId}`);
+                    console.log(`[Blackiya] Successfully captured/cached data for conversation: ${conversationId}`);
 
                     const currentId = currentAdapter.extractConversationId(window.location.href);
+                    console.log(`[Blackiya] Current URL ID: ${currentId}, Captured ID: ${conversationId}`);
+
                     if (currentId === conversationId && saveButton) {
                         saveButton.style.opacity = '1';
                     }
+                } else {
+                    console.warn('[Blackiya] Failed to parse conversation ID from intercepted data');
                 }
             }
         });
@@ -191,6 +229,7 @@ export function runPlatform(): void {
 
         const conversationId = currentAdapter?.extractConversationId(window.location.href);
         if (!conversationId) {
+            console.debug('[Blackiya] No conversation ID found. Button will not be injected.');
             removeSaveButton();
             return;
         }
@@ -202,6 +241,15 @@ export function runPlatform(): void {
         }
 
         saveButton = createSaveButton();
+
+        // If injecting into body/html (fallback), use fixed positioning
+        if (target === document.body || target === document.documentElement) {
+            isFixedPosition = true;
+            updateButtonStyles('default');
+        } else {
+            isFixedPosition = false;
+        }
+
         target.appendChild(saveButton);
         currentConversationId = conversationId;
         console.log('[Blackiya] Save button injected for conversation:', conversationId);
@@ -230,11 +278,19 @@ export function runPlatform(): void {
     }
 
     function setupNavigationObserver(): void {
+        let navigationTimeout: number | undefined;
+
         navigationObserver = new MutationObserver(() => {
-            handleNavigationChange();
-            if (currentConversationId && !document.getElementById('llm-capture-save-btn')) {
-                injectSaveButton();
+            if (navigationTimeout) {
+                clearTimeout(navigationTimeout);
             }
+
+            navigationTimeout = window.setTimeout(() => {
+                handleNavigationChange();
+                if (currentConversationId && !document.getElementById('llm-capture-save-btn')) {
+                    injectSaveButton();
+                }
+            }, 100);
         });
 
         navigationObserver.observe(document.body, {

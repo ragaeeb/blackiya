@@ -272,13 +272,13 @@ export interface Message {
 interface LLMPlatform { /* ... */ }
 
 // Implement platform-specific adapters
-class ChatGPTAdapter implements LLMPlatform { /* ... */ }
-class GeminiAdapter implements LLMPlatform { /* ... */ }
+const chatGPTAdapter: LLMPlatform = { /* ... */ };
+const geminiAdapter: LLMPlatform = { /* ... */ };
 
 // Use polymorphically
 function captureFromPlatform(adapter: LLMPlatform) {
   const id = adapter.extractConversationId(window.location.href);
-  const data = adapter.parseResponse(rawData);
+  const data = adapter.parseInterceptedData(rawData, window.location.href);
   // ... common logic
 }
 ```
@@ -420,9 +420,10 @@ Add JSDoc comments to all major files:
    ```typescript
    export const NewPlatformAdapter: LLMPlatform = {
      name: 'NewPlatform',
-     apiEndpoint: /api-pattern/,
+     urlMatchPattern: 'https://newplatform.com/*',
+     apiEndpointPattern: /api-pattern/,
      extractConversationId: (url) => { /* ... */ },
-     parseResponse: (data) => { /* ... */ },
+     parseInterceptedData: (data, url) => { /* ... */ },
      getButtonInjectionTarget: () => { /* ... */ },
      formatFilename: (data) => { /* ... */ }
    };
