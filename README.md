@@ -153,14 +153,14 @@ blackiya/
 │   ├── background.ts          # Service worker for API interception
 │   ├── content/
 │   │   ├── chatgpt.ts        # ChatGPT content script
-│   │   ├── gemini.ts         # Gemini content script (future)
+│   │   ├── gemini.ts         # Gemini content script
 │   │   └── grok.ts           # Grok content script (future)
 │   └── popup/
 │       ├── index.html        # Extension popup UI (optional)
 │       └── App.tsx           # Popup logic (optional)
 ├── platforms/
 │   ├── chatgpt.ts            # ChatGPT platform adapter
-│   ├── gemini.ts             # Gemini platform adapter (future)
+│   ├── gemini.ts             # Gemini platform adapter
 │   └── types.ts              # Platform interface definitions
 ├── utils/
 │   ├── storage.ts            # Chrome storage utilities
@@ -184,22 +184,24 @@ blackiya/
 
 ## 🎯 Features
 
-### Current (Phase 1 - ChatGPT)
+### Current (Phase 2 - Gemini)
 
-- ✅ Capture full conversation JSON from ChatGPT
+- ✅ Capture full conversation JSON from ChatGPT & Gemini
+- ✅ Support for Gemini's `batchexecute` protocol
 - ✅ One-click download as JSON file
 - ✅ Automatic filename generation with timestamps
-- ✅ UI injection into ChatGPT interface
+- ✅ UI injection into ChatGPT & Gemini interfaces
 - ✅ Preserves complete message tree structure
 
 ### Roadmap
 
-- 🔲 **Phase 2:** Gemini support
+- ✅ **Phase 1:** ChatGPT support
+- ✅ **Phase 2:** Gemini support
 - 🔲 **Phase 3:** Grok support
-- 🔲 **Phase 4:** Settings UI for customization
+- 🔲 **Phase 4:** Claude support
 - 🔲 **Phase 5:** Export formats (Markdown, HTML, PDF)
-- 🔲 **Phase 6:** Conversation history browser
-- 🔲 **Phase 7:** Cloud sync (optional)
+- 🔲 **Phase 6:** Settings UI for customization
+- 🔲 **Phase 7:** Conversation history browser
 
 ## 🔧 Configuration
 
@@ -215,7 +217,8 @@ The extension requires the following permissions:
 ### Host Permissions
 
 - `https://chatgpt.com/*` - ChatGPT platform
-- `https://gemini.google.com/*` - Gemini platform (future)
+- `https://chat.openai.com/*` - Legacy ChatGPT platform
+- `https://gemini.google.com/*` - Gemini platform
 - `https://x.com/*` - Grok platform (future)
 
 ## 🧪 Development Workflow
@@ -265,8 +268,8 @@ The ZIP file will be in `.output/` directory.
 
 ### Basic Usage
 
-1. Navigate to ChatGPT and open a conversation
-2. Click the "Save Conversation" button (injected by extension)
+1. Navigate to ChatGPT or Gemini and open a conversation
+2. Click the "Save JSON" button (injected by extension)
 3. The conversation JSON will download automatically
 4. File format: `{conversation-title}_{timestamp}.json`
 

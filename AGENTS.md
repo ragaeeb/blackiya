@@ -147,6 +147,32 @@ export const chatGPTAdapter: LLMPlatform = {
     // Returns HTMLElement | null
   }
 };
+
+// platforms/gemini.ts
+export const geminiAdapter: LLMPlatform = {
+  name: 'Gemini',
+  urlMatchPattern: 'https://gemini.google.com/*',
+  apiEndpointPattern: /BardChatUi\/data\/batchexecute.*rpcids=.*hNvQHb/,
+  
+  extractConversationId: (url) => {
+    // Extracts hex ID from URL: gemini.google.com/app/{id}
+  },
+  
+  parseInterceptedData: (data, url) => {
+    // 1. Strips magic header: )]}'
+    // 2. Parses double-JSON-encoded batchexecute response
+    // 3. Normalizes conversation ID (stripping 'c_' prefix)
+    // 4. Reconstructs ConversationData from nested message payload
+  },
+  
+  formatFilename: (data) => {
+    // Returns sanitized filename string
+  },
+  
+  getButtonInjectionTarget: () => {
+    // Returns header navigation for button injection
+  }
+};
 ```
 
 #### 4. Utility Modules (`utils/*.ts`)
@@ -567,8 +593,12 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 - Authentication: Session cookies (handled by browser)
 - Rate limiting: Unknown (be respectful)
 
-**Gemini/Grok:**
-- To be determined during implementation
+**Gemini:**
+- API protocol: `batchexecute` (POST request with `f.req` parameter)
+- RPC ID: `hNvQHb` (primary ID for conversation data fetch)
+- Response format: Obfuscated JSON array with security prefix `)]}'\n\n`
+- Data structure: Double-JSON encoded payload at `payload[0][0][0]`
+- ID normalization: Payload IDs prefixed with `c_` are normalized (prefix removed) to match URL IDs.
 
 ## 🎓 Learning Resources
 
