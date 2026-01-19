@@ -354,14 +354,20 @@ bunx biome format --write ./entrypoints/
 
 ### Commit Guidelines
 
-Use conventional commits:
+We follow **Semantic Versioning** rules. The extension version is automatically bumped based on your commit messages.
 
-```text
-feat: add Gemini platform support
-fix: resolve button injection timing issue
-docs: update README with troubleshooting
-refactor: extract common capture logic
-```
+Use **[Conventional Commits](https://www.conventionalcommits.org/)**:
+
+- **`feat:`** -> **Minor** version bump (e.g., `1.1.0` -> `1.2.0`)
+  - Example: `feat: add grok platform support`
+- **`fix:`** -> **Patch** version bump (e.g., `1.1.0` -> `1.1.1`)
+  - Example: `fix: resolve button injection timing issue`
+- **`BREAKING CHANGE:`** -> **Major** version bump (e.g., `1.1.0` -> `2.0.0`)
+  - Example in footer: `BREAKING CHANGE: api structure has completely changed`
+- **`docs:`, `chore:`, `refactor:`, `test:`** -> **No** version bump (unless specified otherwise)
+  - Example: `docs: update README with troubleshooting`
+
+> **Note:** Pull Requests must be squashed or use these conventions in the merge commit message to trigger the release workflow properly.
 
 ## 📄 License
 
