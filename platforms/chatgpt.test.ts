@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { chatGPTAdapter } from './chatgpt';
+import { chatGPTAdapter } from '@/platforms/chatgpt';
 
 describe('ChatGPT Platform Adapter', () => {
     describe('extractConversationId', () => {

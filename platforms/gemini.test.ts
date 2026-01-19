@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
-import type { Message } from '../utils/types';
-import { geminiAdapter } from './gemini';
+import { geminiAdapter } from '@/platforms/gemini';
+import type { Message } from '@/utils/types';
 
 describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;

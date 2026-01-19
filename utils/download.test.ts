@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { generateTimestamp, sanitizeFilename } from './download';
+import { generateTimestamp, sanitizeFilename } from '@/utils/download';
 
 describe('Download Utilities', () => {
     describe('sanitizeFilename', () => {

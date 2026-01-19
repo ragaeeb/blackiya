@@ -1,4 +1,4 @@
-import { getPlatformAdapterByApiUrl } from '../platforms/factory';
+import { getPlatformAdapterByApiUrl } from '@/platforms/factory';
 
 export default defineContentScript({
     matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*', 'https://gemini.google.com/*'],

@@ -1,4 +1,4 @@
-import { runPlatform } from '../utils/platform-runner';
+import { runPlatform } from '@/utils/platform-runner';
 
 /**
  * Unified Content Script for all LLM Platforms

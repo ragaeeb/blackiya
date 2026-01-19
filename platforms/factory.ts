@@ -4,9 +4,9 @@
  * Manages the registration and selection of platform-specific adapters.
  */
 
-import { chatGPTAdapter } from './chatgpt';
-import { geminiAdapter } from './gemini';
-import type { LLMPlatform } from './types';
+import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { geminiAdapter } from '@/platforms/gemini';
+import type { LLMPlatform } from '@/platforms/types';
 
 /**
  * List of all supported platforms

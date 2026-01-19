@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import sampleConversation from '../data/chatgpt/sample_chatgpt_conversation.json';
-import type { ConversationData, MessageNode } from './types';
+import sampleConversation from '@/data/chatgpt/sample_chatgpt_conversation.json';
+import type { ConversationData, MessageNode } from '@/utils/types';
 
 describe('ChatGPT Conversation Data Parsing', () => {
     // Type assertion to verify the sample data matches our types

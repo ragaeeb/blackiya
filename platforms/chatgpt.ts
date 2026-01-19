@@ -7,9 +7,9 @@
  * @module platforms/chatgpt
  */
 
-import { generateTimestamp, sanitizeFilename } from '../utils/download';
-import type { ConversationData } from '../utils/types';
-import type { LLMPlatform } from './types';
+import type { LLMPlatform } from '@/platforms/types';
+import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import type { ConversationData } from '@/utils/types';
 
 /**
  * Maximum length for the title portion of a filename

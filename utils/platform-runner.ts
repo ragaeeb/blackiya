@@ -7,10 +7,10 @@
  * @module utils/platform-runner
  */
 
-import { getPlatformAdapter } from '../platforms/factory';
-import type { LLMPlatform } from '../platforms/types';
-import { downloadAsJSON } from './download';
-import type { ConversationData } from './types';
+import { getPlatformAdapter } from '@/platforms/factory';
+import type { LLMPlatform } from '@/platforms/types';
+import { downloadAsJSON } from '@/utils/download';
+import type { ConversationData } from '@/utils/types';
 
 export function runPlatform(): void {
     let currentAdapter: LLMPlatform | null = null;
@@ -26,7 +26,7 @@ export function runPlatform(): void {
     const MAX_CACHED_CONVERSATIONS = 10;
 
     function cacheConversation(id: string, data: ConversationData): void {
-        if (capturedConversations.size >= MAX_CACHED_CONVERSATIONS) {
+        if (!capturedConversations.has(id) && capturedConversations.size >= MAX_CACHED_CONVERSATIONS) {
             const oldestKey = capturedConversations.keys().next().value;
             if (oldestKey) {
                 capturedConversations.delete(oldestKey);

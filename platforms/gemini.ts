@@ -8,9 +8,9 @@
  * 4. Enhanced logging to debug title extraction
  */
 
-import { generateTimestamp, sanitizeFilename } from '../utils/download';
-import type { ConversationData, MessageNode } from '../utils/types';
-import type { LLMPlatform } from './types';
+import type { LLMPlatform } from '@/platforms/types';
+import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import type { ConversationData, MessageNode } from '@/utils/types';
 
 const MAX_TITLE_LENGTH = 80;
 
