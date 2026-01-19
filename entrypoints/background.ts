@@ -8,23 +8,23 @@
  */
 
 export default defineBackground(() => {
-    console.log('[LLM Capture] Background service worker started', {
+    console.log('[Blackiya] Background service worker started', {
         id: browser.runtime.id,
     });
 
     // Listen for installation/update events
     browser.runtime.onInstalled.addListener((details) => {
         if (details.reason === 'install') {
-            console.log('[LLM Capture] Extension installed');
+            console.log('[Blackiya] Extension installed');
         } else if (details.reason === 'update') {
-            console.log('[LLM Capture] Extension updated to version', browser.runtime.getManifest().version);
+            console.log('[Blackiya] Extension updated to version', browser.runtime.getManifest().version);
         }
     });
 
     // Message handler for future extensibility
     // Currently content script handles everything locally
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        console.log('[LLM Capture] Received message:', message.type, 'from', sender.tab?.url);
+        console.log('[Blackiya] Received message:', message.type, 'from', sender.tab?.url);
 
         // Handle different message types
         switch (message.type) {
@@ -34,7 +34,7 @@ export default defineBackground(() => {
                 break;
 
             default:
-                console.log('[LLM Capture] Unknown message type:', message.type);
+                console.log('[Blackiya] Unknown message type:', message.type);
                 sendResponse({ success: false, error: 'Unknown message type' });
         }
 

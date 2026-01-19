@@ -1,5 +1,5 @@
 /**
- * Type definitions for LLM Response Capture extension
+ * Type definitions for Blackiya extension
  *
  * @module utils/types
  */

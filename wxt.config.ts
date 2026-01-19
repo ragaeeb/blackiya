@@ -4,7 +4,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
     modules: ['@wxt-dev/module-react'],
     manifest: {
-        name: 'LLM Response Capture',
+        name: 'Blackiya',
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',
         version: '0.1.0',
         permissions: ['storage', 'activeTab'],

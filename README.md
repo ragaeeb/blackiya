@@ -1,4 +1,4 @@
-# LLM Response Capture Extension
+# Blackiya
 
 A high-performance Chrome extension for capturing and saving conversation JSON from popular LLM platforms (ChatGPT, Gemini, Grok, etc.).
 

@@ -88,6 +88,12 @@ function createSaveButton(): HTMLButtonElement {
 
     button.addEventListener('click', handleSaveClick);
 
+    // Initial state: dim if no data captured for current conversation
+    const conversationId = chatGPTAdapter.extractConversationId(window.location.href);
+    if (conversationId && !capturedConversations.has(conversationId)) {
+        button.style.opacity = '0.6';
+    }
+
     return button;
 }
 
@@ -122,43 +128,72 @@ function setButtonLoading(loading: boolean): void {
 }
 
 /**
+ * Store for captured conversation data
+ * maps conversationId -> data
+ */
+const capturedConversations = new Map<string, ConversationData>();
+
+/**
  * Handle save button click
  */
 async function handleSaveClick(): Promise<void> {
     const conversationId = chatGPTAdapter.extractConversationId(window.location.href);
 
     if (!conversationId) {
-        console.error('[LLM Capture] No conversation ID found in URL');
+        console.error('[Blackiya] No conversation ID found in URL');
+        alert('Please select a conversation first.');
+        return;
+    }
+
+    const data = capturedConversations.get(conversationId);
+
+    if (!data) {
+        console.warn('[Blackiya] No data captured for this conversation yet.');
+        alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
         return;
     }
 
     setButtonLoading(true);
 
     try {
-        const apiUrl = chatGPTAdapter.buildApiUrl(conversationId);
-        const response = await fetch(apiUrl, {
-            method: 'GET',
-            credentials: 'include', // Include session cookies
-            headers: {
-                Accept: 'application/json',
-            },
-        });
-
-        if (!response.ok) {
-            throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-        }
-
-        const data: ConversationData = await response.json();
         const filename = chatGPTAdapter.formatFilename(data);
-
         downloadAsJSON(data, filename);
-
-        console.log(`[LLM Capture] Saved conversation: ${filename}.json`);
+        console.log(`[Blackiya] Saved conversation: ${filename}.json`);
     } catch (error) {
-        console.error('[LLM Capture] Failed to save conversation:', error);
+        console.error('[Blackiya] Failed to save conversation:', error);
+        alert('Failed to save conversation. Check console for details.');
     } finally {
         setButtonLoading(false);
     }
+}
+
+/**
+ * Listen for messages from the main world interceptor
+ */
+function setupInterceptorListener(): void {
+    window.addEventListener('message', (event) => {
+        // Only accept messages from the same window
+        if (event.source !== window) {
+            return;
+        }
+
+        const message = event.data;
+        if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
+            const data = message.data as ConversationData;
+            const conversationId = data.conversation_id;
+
+            if (conversationId) {
+                capturedConversations.set(conversationId, data);
+                console.log(`[Blackiya] Captured data for conversation: ${conversationId}`);
+
+                // Update the button state if it belongs to this conversation
+                const currentId = chatGPTAdapter.extractConversationId(window.location.href);
+                if (currentId === conversationId && saveButton) {
+                    saveButton.style.opacity = '1';
+                }
+            }
+        }
+    });
 }
 
 /**
@@ -210,7 +245,7 @@ function injectSaveButton(): void {
     const target = findInjectionTarget();
     if (!target) {
         // Target not found, retry later
-        console.log('[LLM Capture] Injection target not found, will retry...');
+        console.log('[Blackiya] Injection target not found, will retry...');
         return;
     }
 
@@ -218,7 +253,7 @@ function injectSaveButton(): void {
     target.appendChild(saveButton);
     currentConversationId = conversationId;
 
-    console.log('[LLM Capture] Save button injected for conversation:', conversationId);
+    console.log('[Blackiya] Save button injected for conversation:', conversationId);
 }
 
 /**
@@ -294,6 +329,7 @@ function addStyles(): void {
  */
 function initialize(): void {
     addStyles();
+    setupInterceptorListener();
     injectSaveButton();
     setupNavigationObserver();
 
@@ -312,7 +348,7 @@ export default defineContentScript({
     matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
     runAt: 'document_idle',
     main() {
-        console.log('[LLM Capture] ChatGPT content script loaded');
+        console.log('[Blackiya] ChatGPT content script loaded');
         initialize();
     },
 });

@@ -4,7 +4,7 @@
 
 ## 🎯 Project Intent
 
-**LLM Response Capture Extension** is a Chrome browser extension designed to capture and save conversation JSON data from popular Large Language Model platforms (ChatGPT, Gemini, Grok, Claude, etc.).
+**Blackiya** is a Chrome browser extension designed to capture and save conversation JSON data from popular Large Language Model platforms (ChatGPT, Gemini, Grok, Claude, etc.).
 
 ### Core Objectives
 
