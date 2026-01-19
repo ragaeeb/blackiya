@@ -42,12 +42,12 @@ export default defineContentScript({
         const originalOpen = XHR.prototype.open;
         const originalSend = XHR.prototype.send;
 
-        XHR.prototype.open = function (method: string, url: string | URL) {
+        XHR.prototype.open = function (_method: string, url: string | URL, ...args: any[]) {
             (this as any)._url = String(url);
-            return originalOpen.apply(this, arguments as any);
+            return originalOpen.apply(this, [_method, url, ...args] as any);
         };
 
-        XHR.prototype.send = function (body: any) {
+        XHR.prototype.send = function (body?: any) {
             this.addEventListener('load', function () {
                 const url = (this as any)._url;
                 const adapter = getPlatformAdapterByApiUrl(url);
@@ -70,7 +70,7 @@ export default defineContentScript({
                     }
                 }
             });
-            return originalSend.apply(this, arguments as any);
+            return originalSend.call(this, body);
         };
 
         console.log('[Blackiya] Fetch & XHR interceptors initialized');

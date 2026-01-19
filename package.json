@@ -2,14 +2,29 @@
     "name": "blackiya",
     "description": "Chrome extension to capture and save conversation JSON from ChatGPT and other LLMs",
     "private": true,
-    "version": "0.1.0",
+    "version": "1.0.0",
     "type": "module",
+    "author": "Ragaeeb Haq",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ragaeeb/blackiya.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ragaeeb/blackiya/issues"
+    },
+    "homepage": "https://github.com/ragaeeb/blackiya#readme",
+    "engines": {
+        "bun": ">=1.3.6",
+        "node": ">=24.0.0"
+    },
+    "packageManager": "bun@1.3.6",
     "scripts": {
         "dev": "wxt",
         "dev:firefox": "wxt -b firefox",
-        "build": "wxt build",
-        "build:firefox": "wxt build -b firefox",
-        "zip": "wxt zip",
+        "build": "bun run check && tsc --noEmit && wxt build",
+        "build:firefox": "bun run check && tsc --noEmit && wxt build -b firefox",
+        "zip": "bun run check && tsc --noEmit && wxt zip",
         "zip:firefox": "wxt zip -b firefox",
         "compile": "tsc --noEmit",
         "postinstall": "wxt prepare",

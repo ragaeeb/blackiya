@@ -59,13 +59,13 @@ describe('ChatGPT Platform Adapter', () => {
                 conversation_id: 'uuid-123',
                 mapping: { 'node-1': {} },
             };
-            const result = chatGPTAdapter.parseInterceptedData(mockData, 'url');
+            const result = chatGPTAdapter.parseInterceptedData(JSON.stringify(mockData), 'url');
             expect(result).not.toBeNull();
             expect(result?.title).toBe('Test Conversation');
         });
 
         it('should return null for invalid data', () => {
-            const result = chatGPTAdapter.parseInterceptedData({ foo: 'bar' }, 'url');
+            const result = chatGPTAdapter.parseInterceptedData(JSON.stringify({ foo: 'bar' }), 'url');
             expect(result).toBeNull();
         });
     });

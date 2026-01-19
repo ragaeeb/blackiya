@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Message } from '../utils/types';
 import { geminiAdapter } from './gemini';
@@ -8,17 +7,15 @@ describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;
     let titlesResponseRaw: string;
 
-    beforeAll(() => {
+    beforeAll(async () => {
         // Load test fixtures from the data/gemini folder
         // Use join(import.meta.dir, '..', 'data', ...) to go up from platforms/ to root
-        conversationResponseRaw = readFileSync(
+        conversationResponseRaw = await Bun.file(
             join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_conversation.txt'),
-            'utf-8',
-        );
-        titlesResponseRaw = readFileSync(
+        ).text();
+        titlesResponseRaw = await Bun.file(
             join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_titles.txt'),
-            'utf-8',
-        );
+        ).text();
     });
 
     describe('URL Handling', () => {

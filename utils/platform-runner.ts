@@ -190,6 +190,7 @@ export function runPlatform(): void {
     }
 
     function setupInterceptorListener(): void {
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Event handler logic requires nested checks
         window.addEventListener('message', (event) => {
             if (event.source !== window) {
                 return;

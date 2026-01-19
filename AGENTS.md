@@ -152,7 +152,7 @@ export const chatGPTAdapter: LLMPlatform = {
 export const geminiAdapter: LLMPlatform = {
   name: 'Gemini',
   urlMatchPattern: 'https://gemini.google.com/*',
-  apiEndpointPattern: /BardChatUi\/data\/batchexecute.*rpcids=.*hNvQHb/,
+  apiEndpointPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*(hNvQHb|MaZiqc)/,
   
   extractConversationId: (url) => {
     // Extracts hex ID from URL: gemini.google.com/app/{id}
@@ -465,31 +465,29 @@ Add JSDoc comments to all major files:
 
 ## 🧪 Testing Guidelines
 
-### Manual Testing Checklist
+### Automated Testing
+The project uses **Bun Test** for unit and integration testing. Platform adapters must have 100% logic coverage using real-world data fixtures.
 
+**Running Tests:**
+```bash
+bun test                 # Run all tests
+bun test platforms/gemini.test.ts # Test Gemini specifically
+```
+
+**Test Data:**
+- Test fixtures live in `data/gemini/` and `data/chatgpt/`.
+- Use real-world intercepted responses, sanitized for PII.
+- Ensure fixtures handle edge cases like literal newlines inside JSON strings.
+
+### Manual Testing Checklist
 For each platform:
 
 - [ ] Button injects correctly on page load
 - [ ] Button appears after SPA navigation
 - [ ] Click triggers conversation capture
 - [ ] JSON downloads with correct filename
-- [ ] Downloaded JSON is valid and complete
-- [ ] Works on empty conversations
+- [ ] Downloaded JSON is valid and complete (check prompts, responses, thinking logs, and titles)
 - [ ] Works on long conversations (>100 messages)
-
-### Automated Testing (Future)
-
-```typescript
-// Example test structure (using Bun test runner)
-import { test, expect } from 'bun:test';
-import { ChatGPTAdapter } from './platforms/chatgpt';
-
-test('ChatGPT adapter extracts conversation ID', () => {
-  const url = 'https://chatgpt.com/c/abc-123-def';
-  const id = ChatGPTAdapter.extractConversationId(url);
-  expect(id).toBe('abc-123-def');
-});
-```
 
 ## 📝 Code Style Guidelines
 
@@ -594,6 +592,24 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 - Response format: Obfuscated JSON array with security prefix `)]}'\n\n`
 - Data structure: Double-JSON encoded payload at `payload[0][0][0]`
 - ID normalization: Payload IDs prefixed with `c_` are normalized (prefix removed) to match URL IDs.
+
+## 🧠 Lessons Learned (For Future Agents)
+
+### 1. Retroactive Async Data
+**Problem:** In Gemini, conversation titles (`MaZiqc` RPC) often arrive after the conversation structure (`hNvQHb` RPC).
+**Solution:** Use an internal `activeConversations` Map to store references to live `ConversationData` objects. When the title arrives, mutate the object directly. Since the object is passed by reference to the UI/Cache, everyone sees the updated title immediately.
+
+### 2. Complex Nested JSON
+**Problem:** Gemini uses double-triple-JSON encoding where strings are escaped inside arrays which are then escaped inside strings.
+**Solution:** Use a robust "balanced bracket" extractor instead of simple regex to find JSON chunks. Standard `JSON.parse` will work if you strip the security prefix `)]}'`.
+
+### 3. Literal Newlines in JSON
+**Problem:** Some LLM responses contain literal newlines inside quoted strings, which are technically invalid JSON but common in raw intercepted fragments.
+**Solution:** When creating test fixtures, ensure literal newlines inside strings are escaped (`\n`) or cleaned. In tests, cleaning `\n` before parsing may be necessary for raw fragments.
+
+### 4. Interceptor World Isolation
+**Problem:** Content scripts cannot access the page's `fetch` or `XHR` objects directly.
+**Solution:** Inject a script into the `MAIN` world (see `interceptor.content.ts`) to wrap `XMLHttpRequest`. Communicate back to the `ISOLATED` content script world via `window.postMessage`.
 
 ## 🎓 Learning Resources
 

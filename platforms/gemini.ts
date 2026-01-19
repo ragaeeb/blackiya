@@ -29,6 +29,7 @@ const activeConversations = new Map<string, ConversationData>();
 /**
  * Parse the MaZiqc response to extract conversation titles
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
 function parseTitlesResponse(data: string, url: string): Map<string, string> | null {
     try {
         console.log('[Blackiya/Gemini/Titles] Attempting to parse titles from:', url);
@@ -209,6 +210,7 @@ export const geminiAdapter: LLMPlatform = {
         return null;
     },
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
     parseInterceptedData(data: string, url: string): ConversationData | null {
         // Check if this is a titles endpoint
         if (isTitlesEndpoint(url)) {
@@ -313,13 +315,13 @@ export const geminiAdapter: LLMPlatform = {
                     if (typeof payloadStr === 'string') {
                         try {
                             const testPayload = JSON.parse(payloadStr);
-                            if (this.isConversationPayload(testPayload)) {
+                            if (this.isConversationPayload?.(testPayload)) {
                                 console.log(`[Blackiya/Gemini] Found conversation data in RPC ID: ${rpcId}`);
                                 rpcResult = item;
                                 foundRpcId = rpcId;
                                 break;
                             }
-                        } catch (e) {}
+                        } catch (_e) {}
                     }
                 }
             }
@@ -456,7 +458,7 @@ export const geminiAdapter: LLMPlatform = {
             if (conversationRoot[3] && Array.isArray(conversationRoot[3]) && conversationRoot[3].length > 21) {
                 const modelSlug = conversationRoot[3][21];
                 if (typeof modelSlug === 'string') {
-                    modelName = 'gemini-' + modelSlug.toLowerCase().replace(/\s+/g, '-');
+                    modelName = `gemini-${modelSlug.toLowerCase().replace(/\s+/g, '-')}`;
                     console.log('[Blackiya/Gemini] Extracted model name:', modelName);
                 }
             }

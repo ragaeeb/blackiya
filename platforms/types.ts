@@ -53,4 +53,10 @@ export interface LLMPlatform {
      * Find the DOM element where the save button should be injected
      */
     getButtonInjectionTarget(): HTMLElement | null;
+
+    /**
+     * Optional helper to check if a payload contains conversation data
+     * Useful for platforms with complex/nested responses (like Gemini)
+     */
+    isConversationPayload?: (payload: any) => boolean;
 }

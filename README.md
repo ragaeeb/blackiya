@@ -1,5 +1,13 @@
 # Blackiya
 
+[![wakatime](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/c697711b-e0aa-47e9-96bd-1ec21e640d07.svg)](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/c697711b-e0aa-47e9-96bd-1ec21e640d07)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/rhaq/blackiya/ci.yml?branch=main)](https://github.com/rhaq/blackiya/actions)
+[![Version](https://img.shields.io/github/v/release/rhaq/blackiya)](https://github.com/rhaq/blackiya/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun&logoColor=white)](https://bun.sh)
+[![Biome](https://img.shields.io/badge/Biome-%2360a5fa.svg?style=flat&logo=biome&logoColor=white)](https://biomejs.dev)
+[![WXT](https://img.shields.io/badge/WXT-%235d2fbf.svg?style=flat&logo=wxt&logoColor=white)](https://wxt.dev)
+
 A high-performance Chrome extension for capturing and saving conversation JSON from popular LLM platforms (ChatGPT, Gemini, Grok, etc.).
 
 ## 🚀 Quick Start
@@ -184,17 +192,20 @@ blackiya/
 
 ### Current (Phase 2 - Gemini)
 
-- ✅ Capture full conversation JSON from ChatGPT & Gemini
-- ✅ Support for Gemini's `batchexecute` protocol
-- ✅ One-click download as JSON file
-- ✅ Automatic filename generation with timestamps
-- ✅ UI injection into ChatGPT & Gemini interfaces
-- ✅ Preserves complete message tree structure
+- ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT & Gemini.
+- ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including **Thinking/Reasoning logs**.
+- ✅ **Smart Titles**: Automatic conversation title capture (with retroactive updates for async title loads).
+- ✅ **One-Click Download**: Instant download as formatted JSON file.
+- ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
+- ✅ **Robust UI**: Seamless button injection into ChatGPT & Gemini interfaces.
+- ✅ **Message Tree**: Preserves complete nested message structure.
+- ✅ **Extensive Testing**: 100% test coverage for platform adapters (Gemini/ChatGPT).
 
 ### Roadmap
 
 - ✅ **Phase 1:** ChatGPT support
-- ✅ **Phase 2:** Gemini support
+- ✅ **Phase 2:** Gemini support (including Reasoning & Titles)
+- ✅ **Phase 2.5:** Robust Unit Testing Suite
 - 🔲 **Phase 3:** Grok support
 - 🔲 **Phase 4:** Claude support
 - 🔲 **Phase 5:** Export formats (Markdown, HTML, PDF)
