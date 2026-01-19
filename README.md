@@ -151,10 +151,8 @@ blackiya/
 │   └── chrome-mv3/            # Chrome extension build
 ├── entrypoints/
 │   ├── background.ts          # Service worker for API interception
-│   ├── content/
-│   │   ├── chatgpt.ts        # ChatGPT content script
-│   │   ├── gemini.ts         # Gemini content script
-│   │   └── grok.ts           # Grok content script (future)
+│   ├── main.content.ts        # Unified content script for all LLMs
+│   ├── interceptor.content.ts # Fetch interceptor
 │   └── popup/
 │       ├── index.html        # Extension popup UI (optional)
 │       └── App.tsx           # Popup logic (optional)

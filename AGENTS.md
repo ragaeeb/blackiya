@@ -351,12 +351,10 @@ observer.observe(document.body, {
 ```text
 blackiya/
 ├── entrypoints/          # WXT entrypoints (auto-detected)
-│   ├── background.ts     # Service worker (SINGLETON)
-│   ├── content/          # Content scripts (PER-PLATFORM)
-│   │   ├── chatgpt.ts    # Injected into chatgpt.com
-│   │   ├── gemini.ts     # Injected into gemini.google.com
-│   │   └── grok.ts       # Injected into x.com
-│   └── popup/            # Extension popup (OPTIONAL)
+│   ├── background.ts          # Service worker (SINGLETON)
+│   ├── main.content.ts        # Unified content script for all LLMs
+│   ├── interceptor.content.ts # Fetch interceptor (MAIN world)
+│   └── popup/                 # Extension popup (OPTIONAL)
 │       ├── index.html
 │       └── App.tsx
 ├── platforms/            # Platform adapters (CORE LOGIC)
@@ -430,16 +428,12 @@ Add JSDoc comments to all major files:
    };
    ```
 
-2. Create content script: `entrypoints/content/new-platform.ts`
+2. Update `entrypoints/main.content.ts` matches:
    ```typescript
-   export default defineContentScript({
-     matches: ['https://newplatform.com/*'],
-     main() {
-       const adapter = NewPlatformAdapter;
-       injectUI(adapter);
-       setupEventListeners(adapter);
-     }
-   });
+   matches: [
+     'https://chatgpt.com/*',
+     'https://newplatform.com/*'  // ADD THIS
+   ]
    ```
 
 3. Update `wxt.config.ts` host permissions:
