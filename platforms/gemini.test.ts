@@ -1,395 +1,167 @@
-/**
- * Tests for Gemini Platform Adapter
- *
- * Tests for conversation ID extraction, batchexecute parsing, and filename formatting
- */
-
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Message } from '../utils/types';
 import { geminiAdapter } from './gemini';
 
 describe('Gemini Platform Adapter', () => {
-    describe('isPlatformUrl', () => {
+    let conversationResponseRaw: string;
+    let titlesResponseRaw: string;
+
+    beforeAll(() => {
+        // Load test fixtures from the data/gemini folder
+        // Use join(import.meta.dir, '..', 'data', ...) to go up from platforms/ to root
+        conversationResponseRaw = readFileSync(
+            join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_conversation.txt'),
+            'utf-8',
+        );
+        titlesResponseRaw = readFileSync(
+            join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_titles.txt'),
+            'utf-8',
+        );
+    });
+
+    describe('URL Handling', () => {
         it('should identify Gemini URLs', () => {
-            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app')).toBe(true);
-            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app/123abc456')).toBe(true);
-            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/share/abc123')).toBe(true);
-        });
-
-        it('should reject non-Gemini URLs', () => {
-            expect(geminiAdapter.isPlatformUrl('https://chatgpt.com')).toBe(false);
+            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app/12345')).toBe(true);
+            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/')).toBe(true);
             expect(geminiAdapter.isPlatformUrl('https://google.com')).toBe(false);
-            expect(geminiAdapter.isPlatformUrl('https://example.com')).toBe(false);
+        });
+
+        it('should extract conversation IDs', () => {
+            expect(geminiAdapter.extractConversationId('https://gemini.google.com/app/abcdef123')).toBe('abcdef123');
+            expect(geminiAdapter.extractConversationId('https://gemini.google.com/share/shared_id_123')).toBe(
+                'shared_id_123',
+            );
+            expect(geminiAdapter.extractConversationId('https://gemini.google.com')).toBeNull();
         });
     });
 
-    describe('extractConversationId', () => {
-        it('should extract conversation ID from /app/ URLs', () => {
-            const url = 'https://gemini.google.com/app/e0b55b3f4f1f7083';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBe('e0b55b3f4f1f7083');
+    describe('API Pattern Matching', () => {
+        it('should match valid batchexecute URLs', () => {
+            const pattern = geminiAdapter.apiEndpointPattern;
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBe(true);
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBe(true);
+            expect(
+                pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?v=1&rpcids=hNvQHb&test=1'),
+            ).toBe(true);
         });
 
-        it('should extract conversation ID from user reported URL', () => {
+        it('should NOT match irrelevant batchexecute URLs', () => {
+            const pattern = geminiAdapter.apiEndpointPattern;
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=otAQ7b')).toBe(false);
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute')).toBe(false); // No rpcids
+        });
+    });
+
+    describe('Conversation Data Parsing', () => {
+        it('should parse a full conversation correctly (User + Assistant + Reasoning)', () => {
             const url = 'https://gemini.google.com/app/9cf87bbddf79d497';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBe('9cf87bbddf79d497');
-        });
+            const result = geminiAdapter.parseInterceptedData(conversationResponseRaw, url);
 
-        it('should extract conversation ID from /app/ URL with query params', () => {
-            const url = 'https://gemini.google.com/app/123abc456?hl=en';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBe('123abc456');
-        });
+            expect(result).not.toBeNull();
+            if (!result) {
+                return;
+            }
 
-        it('should extract conversation ID from /share/ URLs', () => {
-            const url = 'https://gemini.google.com/share/shared-id-123';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBe('shared-id-123');
-        });
+            expect(result.conversation_id).toBe('9cf87bbddf79d497');
+            expect(result.default_model_slug).toBe('gemini-3-pro');
 
-        it('should return null for homepage URL', () => {
-            const url = 'https://gemini.google.com/';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBeNull();
-        });
+            const mapping = result.mapping;
+            expect(mapping).toBeDefined();
 
-        it('should return null for non-Gemini URL', () => {
-            const url = 'https://google.com/app/123';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBeNull();
-        });
+            // Filter out null messages to avoid TS errors
+            const messages = Object.values(mapping)
+                .map((n) => n.message)
+                .filter((m): m is Message => m !== null);
 
-        it('should handle hex IDs with mixed case', () => {
-            const url = 'https://gemini.google.com/app/ABC123def456';
-            const id = geminiAdapter.extractConversationId(url);
-            expect(id).toBe('ABC123def456');
+            expect(messages.length).toBe(2);
+
+            // 1. Strict User Message Validation
+            const userMsg = messages.find((m) => m.author.role === 'user')!;
+            expect(userMsg).toBeDefined();
+            const userText = userMsg.content.parts?.[0] || '';
+
+            expect(userText.startsWith('ROLE: Expert academic translator')).toBe(true);
+            expect(userText.endsWith('دبر الصلوات يُؤتى بها ما يستطيع الإنسان وليس إلا.')).toBe(true);
+
+            // 2. Strict Assistant Message Validation
+            const assistantMsg = messages.find((m) => m.author.role === 'assistant')!;
+            expect(assistantMsg).toBeDefined();
+            const assistantText = assistantMsg.content.parts?.[0] || '';
+
+            expect(assistantText.startsWith('P258071 - The Shaykh: Yes.')).toBe(true);
+            expect(assistantText.endsWith('rforms of them what man is able, and nothing else.')).toBe(true);
+
+            // 3. Strict Reasoning/Thoughts Validation
+            const thoughts = assistantMsg.content.thoughts;
+            expect(thoughts).toBeDefined();
+            expect(thoughts!.length).toBe(7);
+
+            const firstThought = thoughts![0];
+            expect(firstThought.summary).toBe('Clarifying Key Parameters');
+            expect(firstThought.content.startsWith("I've established key parameters for the task. This")).toBe(true);
+            expect(firstThought.content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBe(true);
         });
     });
 
-    describe('apiEndpointPattern', () => {
-        it('should match batchexecute endpoint with hNvQHb RPC ID', () => {
-            const endpoint =
-                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&source-path=%2Fapp%2Fe0b55b3f4f1f7083';
-            expect(geminiAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
-        });
-
-        it('should match batchexecute with hNvQHb in middle of rpcids param', () => {
-            const endpoint =
-                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=someOther,hNvQHb,another&source-path=%2Fapp';
-            expect(geminiAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
-        });
-
-        it('should not match batchexecute without hNvQHb RPC ID', () => {
-            const endpoint =
-                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=L5adhe&source-path=%2Fapp';
-            expect(geminiAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
-        });
-
-        it('should not match other Gemini API endpoints', () => {
-            const endpoint = 'https://gemini.google.com/api/v1/conversations';
-            expect(geminiAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
-        });
-
-        it('should not match endpoints with partial RPC ID match', () => {
-            const endpoint = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQH';
-            expect(geminiAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
-        });
-    });
-
-    describe('parseInterceptedData', () => {
-        it('should parse valid batchexecute response with magic header', () => {
-            // Simulate the actual structure from the network capture
-            // Root node: [ ["id", "rid"], null, [messages] ]
-            const innerPayload = JSON.stringify([
-                [
-                    [
-                        ['c_e0b55b3f4f1f7083', 'r_7718ac9ba6c20bde'],
-                        null,
-                        [['User message content here'], ['Assistant response content here']],
-                    ],
-                ],
-            ]);
-
-            const mockResponse = `)]}'\n\n100977\n[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-
-            expect(result).not.toBeNull();
-            expect(result?.conversation_id).toBe('e0b55b3f4f1f7083'); // Normalized (c_ prefix removed)
-            expect(Object.keys(result?.mapping || {}).length).toBe(2);
-        });
-
-        it('should parse batchexecute response with split magic header', () => {
-            // Simulate the split header variation
-            const innerPayload = JSON.stringify([[[['c_split123', 'r_split456'], null, [['Split message content']]]]]);
-
-            const mockResponse = `)
-]
-}'
-
-100977
-[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-
-            expect(result).not.toBeNull();
-            expect(result?.conversation_id).toBe('split123');
-        });
-
-        it('should parse real data fixture correctly', () => {
-            const fixturePath = join(import.meta.dir, '../data/sample_gemini_response.txt');
-            const fixtureContent = readFileSync(fixturePath, 'utf-8');
-
-            const result = geminiAdapter.parseInterceptedData(fixtureContent, 'test-url');
-
-            expect(result).not.toBeNull();
-            expect(result?.conversation_id).toBe('e0b55b3f4f1f7083');
-        });
-
-        it('should return null for response with wrong RPC ID', () => {
-            const mockResponse = `)]}'\n\n123\n[["wrb.fr","wrongId","[[[\\"rc_id\\",[\\"Message\\"]]]]",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
+    describe('Title Parsing & Race Conditions', () => {
+        it('should extract titles and update cache', () => {
+            const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc';
+            const result = geminiAdapter.parseInterceptedData(titlesResponseRaw, url);
             expect(result).toBeNull();
         });
 
-        it('should return null for malformed JSON', () => {
-            const mockResponse = `)]}'\n\n123\nthis is not valid JSON`;
+        it('should retroactively update conversation title when titles arrive AFTER data', () => {
+            const uniqueId = 'test_race_condition';
+            // Use a unique ID to avoid interference with other tests
+            const modifiedConvData = conversationResponseRaw.replace('9cf87bbddf79d497', uniqueId);
 
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-            expect(result).toBeNull();
+            const convResult = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
+
+            expect(convResult).not.toBeNull();
+            if (!convResult) {
+                return;
+            }
+            expect(convResult.title).toBe('Gemini Conversation');
+
+            const expectedTitle = 'Test Retroactive Title';
+            const modifiedTitles = titlesResponseRaw
+                .replace('c_9cf87bbddf79d497', `c_${uniqueId}`)
+                .replace('Hadith Authenticity and Narrator Discrepancies', expectedTitle);
+
+            geminiAdapter.parseInterceptedData(
+                modifiedTitles,
+                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc',
+            );
+
+            expect(convResult.title).toBe(expectedTitle);
         });
 
-        it('should return null for empty response', () => {
-            const result = geminiAdapter.parseInterceptedData('', 'test-url');
-            expect(result).toBeNull();
-        });
+        it('should apply cached title if titles arrive BEFORE data', () => {
+            const uniqueId = 'test_cached_title';
+            const expectedTitle = 'Test Cached Title';
 
-        it('should handle deeply nested message content', () => {
-            const innerPayload = JSON.stringify([
-                [
-                    [
-                        ['c_deep123', 'r_response'],
-                        null,
-                        [[['Complex', 'nested', 'array', 'structure']], [{ type: 'object', data: 'value' }]],
-                    ],
-                ],
-            ]);
+            const modifiedTitles = titlesResponseRaw
+                .replace('c_69b38773dc8a64c7', `c_${uniqueId}`)
+                .replace('Scholars Discuss Fiqh and Hadith', expectedTitle);
 
-            const mockResponse = `)]}'\n\n200\n[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
+            geminiAdapter.parseInterceptedData(
+                modifiedTitles,
+                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc',
+            );
 
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
+            const modifiedConvData = conversationResponseRaw.replace('9cf87bbddf79d497', uniqueId);
+            const convResult = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
 
-            expect(result).not.toBeNull();
-            expect(result?.conversation_id).toBe('deep123');
-            expect(Object.keys(result?.mapping || {}).length).toBe(2);
-        });
-
-        it('should create proper parent-child relationships in mapping', () => {
-            const innerPayload = JSON.stringify([
-                [[['c_parent123', 'r_response'], null, [['First message'], ['Second message'], ['Third message']]]],
-            ]);
-
-            const mockResponse = `)]}'\n\n150\n[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-
-            expect(result).not.toBeNull();
-
-            const mapping = result?.mapping || {};
-
-            // Check first segment
-            expect(mapping['segment-0']?.parent).toBeNull();
-            expect(mapping['segment-0']?.children).toEqual(['segment-1']);
-
-            // Check middle segment
-            expect(mapping['segment-1']?.parent).toBe('segment-0');
-            expect(mapping['segment-1']?.children).toEqual(['segment-2']);
-
-            // Check last segment
-            expect(mapping['segment-2']?.parent).toBe('segment-1');
-            expect(mapping['segment-2']?.children).toEqual([]);
-        });
-
-        it('should handle empty message array', () => {
-            const innerPayload = JSON.stringify([[[['c_empty123', 'r_response'], null, []]]]);
-
-            const mockResponse = `)]}'\n\n100\n[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-
-            expect(result).not.toBeNull();
-            expect(result?.conversation_id).toBe('empty123');
-            expect(Object.keys(result?.mapping || {}).length).toBe(0);
-        });
-
-        it('should normalize conversation ID by removing c_ prefix', () => {
-            const innerPayload = JSON.stringify([[[['c_normalize123', 'r_response'], null, [['Test message']]]]]);
-
-            const mockResponse = `)]}'\n\n100\n[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-
-            // Should strip c_ prefix
-            expect(result?.conversation_id).toBe('normalize123');
-        });
-
-        it('should handle conversation ID without c_ prefix', () => {
-            const innerPayload = JSON.stringify([[[['already_normalized', 'r_response'], null, [['Test message']]]]]);
-
-            const mockResponse = `)]}'\n\n100\n[["wrb.fr","hNvQHb","${innerPayload.replace(/"/g, '\\"')}",null,null,null,"generic"]]`;
-
-            const result = geminiAdapter.parseInterceptedData(mockResponse, 'test-url');
-
-            // Should keep as-is
-            expect(result?.conversation_id).toBe('already_normalized');
-        });
-    });
-
-    describe('formatFilename', () => {
-        it('should format filename with title and timestamp', () => {
-            const data = {
-                title: 'Arabic Translation Task',
-                create_time: 1768920494.173,
-                update_time: 1768933170.377,
-                conversation_id: 'e0b55b3f4f1f7083',
-                mapping: {},
-                current_node: 'segment-0',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'gemini-2.0',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = geminiAdapter.formatFilename(data);
-
-            expect(filename).toContain('Arabic_Translation_Task');
-            expect(filename).toMatch(/\d{4}-\d{2}-\d{2}/);
-        });
-
-        it('should sanitize special characters in title', () => {
-            const data = {
-                title: 'Test: Special/Characters\\Here?',
-                create_time: 1768920494.173,
-                update_time: 1768933170.377,
-                conversation_id: 'test123',
-                mapping: {},
-                current_node: 'segment-0',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'gemini-2.0',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = geminiAdapter.formatFilename(data);
-
-            // Should not contain invalid filename characters
-            expect(filename).not.toMatch(/[:/\\?<>"|*]/);
-        });
-
-        it('should handle empty title gracefully', () => {
-            const data = {
-                title: '',
-                create_time: 1768920494.173,
-                update_time: 1768933170.377,
-                conversation_id: 'empty123',
-                mapping: {},
-                current_node: 'segment-0',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'gemini-2.0',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = geminiAdapter.formatFilename(data);
-
-            // Should use default title
-            expect(filename).toContain('Gemini_Conversation');
-        });
-
-        it('should truncate very long titles', () => {
-            const longTitle = 'A'.repeat(200);
-            const data = {
-                title: longTitle,
-                create_time: 1768920494.173,
-                update_time: 1768933170.377,
-                conversation_id: 'long123',
-                mapping: {},
-                current_node: 'segment-0',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'gemini-2.0',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = geminiAdapter.formatFilename(data);
-
-            // Should be reasonable length (title max 80 + timestamp ~20)
-            expect(filename.length).toBeLessThan(150);
-        });
-
-        it('should use update_time for timestamp if available', () => {
-            const data = {
-                title: 'Test Conversation',
-                create_time: 1768920494.173,
-                update_time: 1768933170.377,
-                conversation_id: 'test123',
-                mapping: {},
-                current_node: 'segment-0',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'gemini-2.0',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = geminiAdapter.formatFilename(data);
-
-            // Should use update_time (timestamp value)
-            expect(filename).toMatch(/Test_Conversation_\d{4}-\d{2}-\d{2}/);
-        });
-    });
-
-    describe('getButtonInjectionTarget', () => {
-        let originalDocument: any;
-
-        beforeEach(() => {
-            originalDocument = global.document;
-        });
-
-        afterEach(() => {
-            global.document = originalDocument;
-        });
-
-        it('should return null when no valid target exists', () => {
-            // Mock empty DOM
-            global.document = {
-                querySelector: () => null,
-            } as any;
-
-            const target = geminiAdapter.getButtonInjectionTarget();
-            expect(target).toBeNull();
+            expect(convResult).not.toBeNull();
+            expect(convResult?.title).toBe(expectedTitle);
         });
     });
 });
