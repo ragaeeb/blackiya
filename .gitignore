@@ -8,6 +8,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
 .output
 stats.html
 stats-*.json
@@ -15,8 +24,6 @@ stats-*.json
 web-ext.config.ts
 
 # Editor directories and files
-.vscode/*
-!.vscode/extensions.json
 .idea
 .DS_Store
 *.suo
@@ -24,3 +31,11 @@ web-ext.config.ts
 *.njsproj
 *.sln
 *.sw?
+
+# TypeScript, extension signing and coverage artifacts
+dist
+build
+*.tsbuildinfo
+*.pem
++coverage
+.nyc_output

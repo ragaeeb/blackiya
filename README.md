@@ -145,7 +145,7 @@ bun test                 # Run tests (when added)
 
 ## 🏗️ Project Structure
 
-```
+```text
 blackiya/
 ├── .output/                    # Build output (git-ignored)
 │   └── chrome-mv3/            # Chrome extension build
@@ -344,7 +344,7 @@ bunx biome format --write ./entrypoints/
 
 Use conventional commits:
 
-```
+```text
 feat: add Gemini platform support
 fix: resolve button injection timing issue
 docs: update README with troubleshooting

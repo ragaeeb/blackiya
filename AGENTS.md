@@ -26,7 +26,7 @@
 
 ### High-Level Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                    Browser Tab (ChatGPT)                │
 │  ┌────────────────────────────────────────────────────┐ │
@@ -112,9 +112,11 @@
 ```typescript
 export interface LLMPlatform {
   name: string;                    // Platform name (e.g., "ChatGPT")
-  apiEndpoint: RegExp;             // API endpoint pattern
-  extractConversationId: (url: string) => string;
-  parseResponse: (data: any) => ConversationData;
+  urlMatchPattern: string;         // URL pattern for content script matching
+  apiEndpointPattern: RegExp;      // Regex for API endpoint detection
+  extractConversationId: (url: string) => string | null;
+  parseInterceptedData: (data: any, url: string) => ConversationData | null;
+  buildApiUrl?: (conversationId: string) => string;
   getButtonInjectionTarget: () => HTMLElement | null;
   formatFilename: (data: ConversationData) => string;
 }
@@ -123,20 +125,27 @@ export interface LLMPlatform {
 **Example Implementation:**
 ```typescript
 // platforms/chatgpt.ts
-export const ChatGPTAdapter: LLMPlatform = {
+export const chatGPTAdapter: LLMPlatform = {
   name: 'ChatGPT',
-  apiEndpoint: /backend-api\/conversation\/[a-f0-9-]+$/,
+  urlMatchPattern: 'https://chatgpt.com/*',
+  apiEndpointPattern: /backend-api\/conversation\/[a-f0-9-]+$/,
+  
   extractConversationId: (url) => {
-    const match = url.match(/conversation\/([a-f0-9-]+)/);
-    return match ? match[1] : '';
+    // Implementation using URL object and strict validation
+    // Returns string | null
   },
-  parseResponse: (data) => ({
-    title: data.title,
-    messages: data.mapping,
-    createTime: data.create_time,
-    updateTime: data.update_time
-  }),
-  // ... other methods
+  
+  parseInterceptedData: (data, url) => {
+    // Returns ConversationData | null
+  },
+  
+  formatFilename: (data) => {
+    // Returns sanitized filename string
+  },
+  
+  getButtonInjectionTarget: () => {
+    // Returns HTMLElement | null
+  }
 };
 ```
 
@@ -313,8 +322,8 @@ observer.observe(document.body, {
 
 ### Directory Organization
 
-```
-llm-response-capture/
+```text
+blackiya/
 ├── entrypoints/          # WXT entrypoints (auto-detected)
 │   ├── background.ts     # Service worker (SINGLETON)
 │   ├── content/          # Content scripts (PER-PLATFORM)
@@ -501,11 +510,11 @@ function fetchData() {
 
 Project uses Biome for linting/formatting:
 
-- **Indent:** 2 spaces
+- **Indent:** 4 spaces
 - **Quotes:** Single quotes (`'`)
 - **Semicolons:** Always (`;`)
-- **Line width:** 100 characters
-- **Trailing commas:** ES5 style
+- **Line width:** 120 characters
+- **Trailing commas:** all
 
 Run before committing:
 ```bash
@@ -565,11 +574,11 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 
 For AI agents unfamiliar with concepts:
 
-- **WXT Framework:** https://wxt.dev/guide/
-- **Chrome Extensions:** https://developer.chrome.com/docs/extensions/mv3/
-- **Manifest V3 Migration:** https://developer.chrome.com/docs/extensions/migrating/
-- **Content Scripts:** https://developer.chrome.com/docs/extensions/mv3/content_scripts/
-- **Message Passing:** https://developer.chrome.com/docs/extensions/mv3/messaging/
+- **WXT Framework:** [WXT Guide](https://wxt.dev/guide/)
+- **Chrome Extensions:** [Chrome Extensions MV3](https://developer.chrome.com/docs/extensions/mv3/)
+- **Manifest V3 Migration:** [Migration Guide](https://developer.chrome.com/docs/extensions/migrating/)
+- **Content Scripts:** [Content Scripts](https://developer.chrome.com/docs/extensions/mv3/content_scripts/)
+- **Message Passing:** [Message Passing](https://developer.chrome.com/docs/extensions/mv3/messaging/)
 
 ## 📋 Quick Reference
 

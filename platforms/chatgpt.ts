@@ -19,8 +19,9 @@ const MAX_TITLE_LENGTH = 80;
 /**
  * Regex pattern to match a valid ChatGPT conversation UUID
  * Format: 8-4-4-4-12 hex characters
+ * Anchored and case-insensitive
  */
-const CONVERSATION_ID_PATTERN = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/;
+const CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 /**
  * ChatGPT Platform Adapter
@@ -36,6 +37,13 @@ export const chatGPTAdapter: LLMPlatform = {
     apiEndpointPattern: /backend-api\/conversation\/[a-f0-9-]+$/,
 
     /**
+     * Check if a URL belongs to ChatGPT
+     */
+    isPlatformUrl(url: string): boolean {
+        return url.includes('chatgpt.com') || url.includes('chat.openai.com');
+    },
+
+    /**
      * Extract conversation ID from ChatGPT URL
      *
      * Supports:
@@ -48,35 +56,53 @@ export const chatGPTAdapter: LLMPlatform = {
      * @returns The conversation UUID or null if not found/invalid
      */
     extractConversationId(url: string): string | null {
-        // Must be a ChatGPT or legacy OpenAI domain
-        if (!url.includes('chatgpt.com') && !url.includes('chat.openai.com')) {
+        try {
+            const urlObj = new URL(url);
+
+            // Validate strict hostname
+            if (urlObj.hostname !== 'chatgpt.com' && urlObj.hostname !== 'chat.openai.com') {
+                return null;
+            }
+
+            // Look for /c/{uuid} pattern in the pathname
+            const pathMatch = urlObj.pathname.match(/\/c\/([a-f0-9-]+)/i);
+            if (!pathMatch) {
+                return null;
+            }
+
+            const potentialId = pathMatch[1];
+
+            // Validate it's a proper UUID format
+            if (!CONVERSATION_ID_PATTERN.test(potentialId)) {
+                return null;
+            }
+
+            return potentialId;
+        } catch {
+            // Invalid URL format
             return null;
         }
-
-        // Look for /c/{uuid} pattern in the URL path
-        const pathMatch = url.match(/\/c\/([a-f0-9-]+)/);
-        if (!pathMatch) {
-            return null;
-        }
-
-        const potentialId = pathMatch[1].split('?')[0]; // Remove query params
-
-        // Validate it's a proper UUID format
-        if (!CONVERSATION_ID_PATTERN.test(potentialId)) {
-            return null;
-        }
-
-        return potentialId;
     },
 
     /**
-     * Build the API URL for fetching conversation data
+     * Parse intercepted ChatGPT API response
      *
-     * @param conversationId - The conversation UUID
-     * @returns The full API endpoint URL
+     * @param data - Raw text or parsed object
+     * @param _url - The API endpoint URL
+     * @returns Validated ConversationData or null
      */
-    buildApiUrl(conversationId: string): string {
-        return `https://chatgpt.com/backend-api/conversation/${conversationId}`;
+    parseInterceptedData(data: string | any, _url: string): ConversationData | null {
+        try {
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+
+            // Basic validation of ChatGPT structure
+            if (parsed && typeof parsed.title === 'string' && parsed.mapping) {
+                return parsed as ConversationData;
+            }
+        } catch (e) {
+            console.error('[Blackiya] Failed to parse ChatGPT data:', e);
+        }
+        return null;
     },
 
     /**
@@ -105,5 +131,25 @@ export const chatGPTAdapter: LLMPlatform = {
         const timestamp = generateTimestamp(data.update_time || data.create_time);
 
         return `${sanitizedTitle}_${timestamp}`;
+    },
+
+    /**
+     * Find injection target in ChatGPT UI
+     */
+    getButtonInjectionTarget(): HTMLElement | null {
+        const selectors = [
+            '[data-testid="model-switcher-dropdown-button"]',
+            'header nav',
+            '.flex.items-center.justify-between',
+            'header .flex',
+        ];
+
+        for (const selector of selectors) {
+            const target = document.querySelector(selector);
+            if (target) {
+                return (target.parentElement || target) as HTMLElement;
+            }
+        }
+        return null;
     },
 };

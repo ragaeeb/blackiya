@@ -1,0 +1,34 @@
+/**
+ * Platform Adapter Factory
+ *
+ * Manages the registration and selection of platform-specific adapters.
+ */
+
+import { chatGPTAdapter } from './chatgpt';
+import { geminiAdapter } from './gemini';
+import type { LLMPlatform } from './types';
+
+/**
+ * List of all supported platforms
+ */
+const PLATFORMS: LLMPlatform[] = [chatGPTAdapter, geminiAdapter];
+
+/**
+ * Get the appropriate platform adapter for a given URL
+ *
+ * @param url - The URL to check (either page URL or API URL)
+ * @returns The matching platform adapter or null if not found
+ */
+export function getPlatformAdapter(url: string): LLMPlatform | null {
+    return PLATFORMS.find((p) => p.isPlatformUrl(url)) || null;
+}
+
+/**
+ * Get the platform adapter that matches an API endpoint URL
+ *
+ * @param url - The intercepted API endpoint URL
+ * @returns The matching platform adapter or null if not found
+ */
+export function getPlatformAdapterByApiUrl(url: string): LLMPlatform | null {
+    return PLATFORMS.find((p) => p.apiEndpointPattern.test(url)) || null;
+}

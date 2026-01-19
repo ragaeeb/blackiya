@@ -23,6 +23,11 @@ export interface LLMPlatform {
     apiEndpointPattern: RegExp;
 
     /**
+     * Check if a URL belongs to this platform
+     */
+    isPlatformUrl(url: string): boolean;
+
+    /**
      * Extract the conversation ID from the current page URL
      * @param url - The current page URL
      * @returns The conversation ID or null if not found
@@ -30,11 +35,12 @@ export interface LLMPlatform {
     extractConversationId(url: string): string | null;
 
     /**
-     * Build the API URL to fetch conversation data
-     * @param conversationId - The conversation ID
-     * @returns The full API URL
+     * Parse raw intercepted data into standardized ConversationData
+     * @param data - The raw response data (as string)
+     * @param url - The URL of the intercepted request
+     * @returns Standardized conversation data or null if parsing fails
      */
-    buildApiUrl(conversationId: string): string;
+    parseInterceptedData(data: string, url: string): ConversationData | null;
 
     /**
      * Format the filename for the downloaded JSON file
@@ -42,4 +48,9 @@ export interface LLMPlatform {
      * @returns A sanitized filename (without extension)
      */
     formatFilename(data: ConversationData): string;
+
+    /**
+     * Find the DOM element where the save button should be injected
+     */
+    getButtonInjectionTarget(): HTMLElement | null;
 }

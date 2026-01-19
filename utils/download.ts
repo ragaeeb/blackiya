@@ -49,7 +49,7 @@ export function sanitizeFilename(filename: string): string {
  * @returns A timestamp string in format: YYYY-MM-DD_HH-MM-SS
  */
 export function generateTimestamp(unixTime?: number): string {
-    const date = unixTime ? new Date(unixTime * 1000) : new Date();
+    const date = typeof unixTime === 'number' ? new Date(unixTime * 1000) : new Date();
 
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');

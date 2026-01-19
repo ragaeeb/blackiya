@@ -52,11 +52,21 @@ describe('ChatGPT Platform Adapter', () => {
         });
     });
 
-    describe('buildApiUrl', () => {
-        it('should build correct API URL for conversation ID', () => {
-            const conversationId = '696bc3d5-fa84-8328-b209-4d65cb229e59';
-            const apiUrl = chatGPTAdapter.buildApiUrl(conversationId);
-            expect(apiUrl).toBe('https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59');
+    describe('parseInterceptedData', () => {
+        it('should parse valid ChatGPT JSON data', () => {
+            const mockData = {
+                title: 'Test Conversation',
+                conversation_id: 'uuid-123',
+                mapping: { 'node-1': {} },
+            };
+            const result = chatGPTAdapter.parseInterceptedData(mockData, 'url');
+            expect(result).not.toBeNull();
+            expect(result?.title).toBe('Test Conversation');
+        });
+
+        it('should return null for invalid data', () => {
+            const result = chatGPTAdapter.parseInterceptedData({ foo: 'bar' }, 'url');
+            expect(result).toBeNull();
         });
     });
 

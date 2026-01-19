@@ -1,18 +1,27 @@
 /**
- * ChatGPT Content Script
+ * Platform Content Script
  *
- * Injects a "Save Conversation" button into the ChatGPT UI and handles
+ * Injects a "Save JSON" button into the LLM UI and handles
  * capturing and downloading conversation JSON data.
  *
- * @module entrypoints/chatgpt.content
+ * @module entrypoints/platform.content
  */
 
-import { chatGPTAdapter } from '../platforms/chatgpt';
+import { getPlatformAdapter } from '../platforms/factory';
+import type { LLMPlatform } from '../platforms/types';
 import { downloadAsJSON } from '../utils/download';
 import type { ConversationData } from '../utils/types';
 
 /**
- * Button element reference for cleanup
+ * Platform adapter for the current page
+ */
+/**
+ * Platform adapter for the current page
+ */
+let currentAdapter: LLMPlatform | null = null;
+
+/**
+ * Save button element
  */
 let saveButton: HTMLButtonElement | null = null;
 
@@ -89,7 +98,7 @@ function createSaveButton(): HTMLButtonElement {
     button.addEventListener('click', handleSaveClick);
 
     // Initial state: dim if no data captured for current conversation
-    const conversationId = chatGPTAdapter.extractConversationId(window.location.href);
+    const conversationId = currentAdapter?.extractConversationId(window.location.href);
     if (conversationId && !capturedConversations.has(conversationId)) {
         button.style.opacity = '0.6';
     }
@@ -132,12 +141,27 @@ function setButtonLoading(loading: boolean): void {
  * maps conversationId -> data
  */
 const capturedConversations = new Map<string, ConversationData>();
+const MAX_CACHED_CONVERSATIONS = 10;
+
+function cacheConversation(id: string, data: ConversationData): void {
+    if (capturedConversations.size >= MAX_CACHED_CONVERSATIONS) {
+        const oldestKey = capturedConversations.keys().next().value;
+        if (oldestKey) {
+            capturedConversations.delete(oldestKey);
+        }
+    }
+    capturedConversations.set(id, data);
+}
 
 /**
  * Handle save button click
  */
 async function handleSaveClick(): Promise<void> {
-    const conversationId = chatGPTAdapter.extractConversationId(window.location.href);
+    if (!currentAdapter) {
+        return;
+    }
+
+    const conversationId = currentAdapter.extractConversationId(window.location.href);
 
     if (!conversationId) {
         console.error('[Blackiya] No conversation ID found in URL');
@@ -156,7 +180,7 @@ async function handleSaveClick(): Promise<void> {
     setButtonLoading(true);
 
     try {
-        const filename = chatGPTAdapter.formatFilename(data);
+        const filename = currentAdapter.formatFilename(data);
         downloadAsJSON(data, filename);
         console.log(`[Blackiya] Saved conversation: ${filename}.json`);
     } catch (error) {
@@ -179,15 +203,19 @@ function setupInterceptorListener(): void {
 
         const message = event.data;
         if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
-            const data = message.data as ConversationData;
-            const conversationId = data.conversation_id;
+            if (!currentAdapter) {
+                return;
+            }
 
-            if (conversationId) {
-                capturedConversations.set(conversationId, data);
+            const data = currentAdapter.parseInterceptedData(message.data, message.url);
+
+            if (data && data.conversation_id) {
+                const conversationId = data.conversation_id;
+                cacheConversation(conversationId, data);
                 console.log(`[Blackiya] Captured data for conversation: ${conversationId}`);
 
                 // Update the button state if it belongs to this conversation
-                const currentId = chatGPTAdapter.extractConversationId(window.location.href);
+                const currentId = currentAdapter.extractConversationId(window.location.href);
                 if (currentId === conversationId && saveButton) {
                     saveButton.style.opacity = '1';
                 }
@@ -202,27 +230,10 @@ function setupInterceptorListener(): void {
  * Looks for the model selector area or header navigation
  */
 function findInjectionTarget(): HTMLElement | null {
-    // Try to find the header/navigation area where model selector lives
-    // ChatGPT UI structure: look for the dropdown button near the top
-    const selectors = [
-        // Model selector button container
-        '[data-testid="model-switcher-dropdown-button"]',
-        // Header navigation area
-        'header nav',
-        // Main content area top bar
-        '.flex.items-center.justify-between',
-        // Fallback: any flex container in header
-        'header .flex',
-    ];
-
-    for (const selector of selectors) {
-        const target = document.querySelector(selector);
-        if (target) {
-            return target.parentElement || (target as HTMLElement);
-        }
+    if (!currentAdapter) {
+        return null;
     }
-
-    return null;
+    return currentAdapter.getButtonInjectionTarget();
 }
 
 /**
@@ -235,7 +246,7 @@ function injectSaveButton(): void {
     }
 
     // Check if we're on a conversation page
-    const conversationId = chatGPTAdapter.extractConversationId(window.location.href);
+    const conversationId = currentAdapter?.extractConversationId(window.location.href);
     if (!conversationId) {
         // Not on a conversation page, remove button if it exists
         removeSaveButton();
@@ -271,7 +282,11 @@ function removeSaveButton(): void {
  * Handle URL/navigation changes in the SPA
  */
 function handleNavigationChange(): void {
-    const newConversationId = chatGPTAdapter.extractConversationId(window.location.href);
+    if (!currentAdapter) {
+        return;
+    }
+
+    const newConversationId = currentAdapter.extractConversationId(window.location.href);
 
     if (newConversationId !== currentConversationId) {
         // Navigation occurred
@@ -328,12 +343,21 @@ function addStyles(): void {
  * Initialize the content script
  */
 function initialize(): void {
+    if (!currentAdapter) {
+        return;
+    }
+
     addStyles();
     setupInterceptorListener();
-    injectSaveButton();
+
+    // Detect navigation changes (SPA)
+    currentConversationId = currentAdapter.extractConversationId(window.location.href);
     setupNavigationObserver();
 
-    // Retry injection a few times in case the page is still loading
+    // Initial check for injection target
+    injectSaveButton();
+
+    // Retry injection a few times as pages load asynchronously
     const retryIntervals = [1000, 2000, 5000];
     for (const delay of retryIntervals) {
         setTimeout(() => {
@@ -345,10 +369,18 @@ function initialize(): void {
 }
 
 export default defineContentScript({
-    matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
+    matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*', 'https://gemini.google.com/*'],
     runAt: 'document_idle',
     main() {
-        console.log('[Blackiya] ChatGPT content script loaded');
+        // Identity current platform
+        currentAdapter = getPlatformAdapter(window.location.href);
+
+        if (!currentAdapter) {
+            console.warn('[Blackiya] No matching platform adapter for this URL');
+            return;
+        }
+
+        console.log(`[Blackiya] Content script loaded for ${currentAdapter.name}`);
         initialize();
     },
 });
