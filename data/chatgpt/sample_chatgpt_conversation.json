@@ -1,0 +1,217 @@
+{
+    "title": "Sample Conversation",
+    "create_time": 1700000000.123456,
+    "update_time": 1700001000.654321,
+    "mapping": {
+        "client-created-root": {
+            "id": "client-created-root",
+            "message": null,
+            "parent": null,
+            "children": ["aaa11111-1111-1111-1111-111111111111"]
+        },
+        "aaa11111-1111-1111-1111-111111111111": {
+            "id": "aaa11111-1111-1111-1111-111111111111",
+            "message": {
+                "id": "aaa11111-1111-1111-1111-111111111111",
+                "author": {
+                    "role": "system",
+                    "name": null,
+                    "metadata": {}
+                },
+                "create_time": null,
+                "update_time": null,
+                "content": {
+                    "content_type": "text",
+                    "parts": [""]
+                },
+                "status": "finished_successfully",
+                "end_turn": true,
+                "weight": 0,
+                "metadata": {
+                    "is_visually_hidden_from_conversation": true
+                },
+                "recipient": "all",
+                "channel": null
+            },
+            "parent": "client-created-root",
+            "children": ["bbb22222-2222-2222-2222-222222222222"]
+        },
+        "bbb22222-2222-2222-2222-222222222222": {
+            "id": "bbb22222-2222-2222-2222-222222222222",
+            "message": {
+                "id": "bbb22222-2222-2222-2222-222222222222",
+                "author": {
+                    "role": "user",
+                    "name": null,
+                    "metadata": {}
+                },
+                "create_time": 1700000100.0,
+                "update_time": null,
+                "content": {
+                    "content_type": "text",
+                    "parts": [
+                        "Hello! Can you help me understand how to write better code? I'm learning programming and would like some tips on best practices for clean, maintainable code."
+                    ]
+                },
+                "status": "finished_successfully",
+                "end_turn": null,
+                "weight": 1,
+                "metadata": {
+                    "request_id": "req11111-1111-1111-1111-111111111111",
+                    "message_source": null,
+                    "turn_exchange_id": "turn1111-1111-1111-1111-111111111111"
+                },
+                "recipient": "all",
+                "channel": null
+            },
+            "parent": "aaa11111-1111-1111-1111-111111111111",
+            "children": ["ccc33333-3333-3333-3333-333333333333"]
+        },
+        "ccc33333-3333-3333-3333-333333333333": {
+            "id": "ccc33333-3333-3333-3333-333333333333",
+            "message": {
+                "id": "ccc33333-3333-3333-3333-333333333333",
+                "author": {
+                    "role": "assistant",
+                    "name": null,
+                    "metadata": {}
+                },
+                "create_time": 1700000150.123,
+                "update_time": null,
+                "content": {
+                    "content_type": "thoughts",
+                    "thoughts": [
+                        {
+                            "summary": "Considering best practices for code quality",
+                            "content": "The user is asking about clean code practices. I should cover naming conventions, modularity, documentation, and testing.",
+                            "chunks": [
+                                "The user is asking about clean code practices.",
+                                "I should cover naming conventions, modularity, documentation, and testing."
+                            ],
+                            "finished": true
+                        }
+                    ],
+                    "source_analysis_msg_id": "analysis-1111-1111-1111-111111111111"
+                },
+                "status": "finished_successfully",
+                "end_turn": false,
+                "weight": 1,
+                "metadata": {
+                    "reasoning_status": "is_reasoning",
+                    "citations": [],
+                    "content_references": [],
+                    "request_id": "req11111-1111-1111-1111-111111111111",
+                    "message_type": "next",
+                    "model_slug": "gpt-4",
+                    "default_model_slug": "auto",
+                    "parent_id": "bbb22222-2222-2222-2222-222222222222",
+                    "turn_exchange_id": "turn1111-1111-1111-1111-111111111111"
+                },
+                "recipient": "all",
+                "channel": null
+            },
+            "parent": "bbb22222-2222-2222-2222-222222222222",
+            "children": ["ddd44444-4444-4444-4444-444444444444"]
+        },
+        "ddd44444-4444-4444-4444-444444444444": {
+            "id": "ddd44444-4444-4444-4444-444444444444",
+            "message": {
+                "id": "ddd44444-4444-4444-4444-444444444444",
+                "author": {
+                    "role": "assistant",
+                    "name": null,
+                    "metadata": {}
+                },
+                "create_time": 1700000160.456,
+                "update_time": null,
+                "content": {
+                    "content_type": "reasoning_recap",
+                    "content": "Thought for 10s"
+                },
+                "status": "finished_successfully",
+                "end_turn": false,
+                "weight": 1,
+                "metadata": {
+                    "reasoning_status": "reasoning_ended",
+                    "finished_duration_sec": 10,
+                    "request_id": "req11111-1111-1111-1111-111111111111",
+                    "message_type": "next",
+                    "model_slug": "gpt-4",
+                    "default_model_slug": "auto",
+                    "parent_id": "ccc33333-3333-3333-3333-333333333333",
+                    "turn_exchange_id": "turn1111-1111-1111-1111-111111111111"
+                },
+                "recipient": "all",
+                "channel": null
+            },
+            "parent": "ccc33333-3333-3333-3333-333333333333",
+            "children": ["eee55555-5555-5555-5555-555555555555"]
+        },
+        "eee55555-5555-5555-5555-555555555555": {
+            "id": "eee55555-5555-5555-5555-555555555555",
+            "message": {
+                "id": "eee55555-5555-5555-5555-555555555555",
+                "author": {
+                    "role": "assistant",
+                    "name": null,
+                    "metadata": {}
+                },
+                "create_time": 1700000200.789,
+                "update_time": null,
+                "content": {
+                    "content_type": "text",
+                    "parts": [
+                        "Here are some key best practices for writing clean, maintainable code:\n\n1. **Use descriptive names** - Variable and function names should clearly indicate their purpose.\n\n2. **Keep functions small** - Each function should do one thing well.\n\n3. **Write comments wisely** - Comment the 'why', not the 'what'.\n\n4. **Follow consistent formatting** - Use a linter and formatter.\n\n5. **Write tests** - Test-driven development helps catch bugs early.\n\nWould you like me to elaborate on any of these points?"
+                    ]
+                },
+                "status": "finished_successfully",
+                "end_turn": true,
+                "weight": 1,
+                "metadata": {
+                    "finish_details": {
+                        "type": "stop",
+                        "stop_tokens": [200002]
+                    },
+                    "is_complete": true,
+                    "citations": [],
+                    "content_references": [],
+                    "request_id": "req11111-1111-1111-1111-111111111111",
+                    "message_type": "next",
+                    "model_slug": "gpt-4",
+                    "default_model_slug": "auto",
+                    "parent_id": "ddd44444-4444-4444-4444-444444444444",
+                    "turn_exchange_id": "turn1111-1111-1111-1111-111111111111"
+                },
+                "recipient": "all",
+                "channel": "final"
+            },
+            "parent": "ddd44444-4444-4444-4444-444444444444",
+            "children": []
+        }
+    },
+    "moderation_results": [],
+    "current_node": "eee55555-5555-5555-5555-555555555555",
+    "plugin_ids": null,
+    "conversation_id": "12345678-abcd-1234-efgh-123456789abc",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "gizmo_type": null,
+    "is_archived": false,
+    "is_starred": null,
+    "safe_urls": ["https://www.example.com"],
+    "blocked_urls": [],
+    "default_model_slug": "auto",
+    "conversation_origin": null,
+    "is_read_only": null,
+    "voice": null,
+    "async_status": null,
+    "disabled_tool_ids": [],
+    "is_do_not_remember": false,
+    "memory_scope": "global_enabled",
+    "context_scopes": null,
+    "sugar_item_id": null,
+    "sugar_item_visible": false,
+    "pinned_time": null,
+    "is_study_mode": false,
+    "owner": null
+}
