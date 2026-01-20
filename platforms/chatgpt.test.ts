@@ -6,20 +6,15 @@
 
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
 
-// Mock wxt/browser explicitly to avoid logging errors
-const browserMock = {
-    storage: {
-        local: {
-            get: async () => ({}),
-            set: async () => {},
-        },
+// Mock logger to avoid importing wxt/browser in test environment
+mock.module('@/utils/logger', () => ({
+    logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        setLevel: () => {},
     },
-    runtime: {
-        getURL: () => 'chrome-extension://mock/',
-    },
-};
-mock.module('wxt/browser', () => ({
-    browser: browserMock,
 }));
 
 describe('ChatGPT Platform Adapter', () => {
