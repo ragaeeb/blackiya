@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/ragaeeb/blackiya/compare/v1.2.0...v1.3.0) (2026-01-20)
+
+
+### Features
+
+* **branding:** Add branding and copy ([#4](https://github.com/ragaeeb/blackiya/issues/4)) ([42129b1](https://github.com/ragaeeb/blackiya/commit/42129b1bd59c1b53039b7011fb051db488784c46))
+
 # [1.2.0](https://github.com/ragaeeb/blackiya/compare/v1.1.0...v1.2.0) (2026-01-20)
 
 
