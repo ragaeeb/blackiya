@@ -26,3 +26,13 @@ export const SUPPORTED_PLATFORM_URLS = [
  * Type-safe platform URL type
  */
 export type PlatformUrl = (typeof SUPPORTED_PLATFORM_URLS)[number];
+
+/**
+ * Google RPC Constants
+ */
+export const GOOGLE_SECURITY_PREFIX = ")]}'\n\n";
+
+export const GEMINI_RPC_IDS = {
+    TITLES: 'MaZiqc',
+    CONVERSATION: 'hNvQHb',
+} as const;

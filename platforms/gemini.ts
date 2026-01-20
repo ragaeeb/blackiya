@@ -8,9 +8,11 @@
  * 4. Enhanced logging to debug title extraction
  */
 
+import { GEMINI_RPC_IDS } from '@/platforms/constants';
 import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
-import { extractBalancedJsonArray } from '@/utils/json-parser';
+import type { BatchexecuteResult } from '@/utils/google-rpc';
+import { parseBatchexecuteResponse } from '@/utils/google-rpc';
 import { logger } from '@/utils/logger';
 import type { ConversationData, MessageNode } from '@/utils/types';
 
@@ -38,47 +40,18 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
     try {
         logger.info('[Blackiya/Gemini/Titles] Attempting to parse titles from:', url);
 
-        // 1. Strip security prefix
-        const MAGIC_HEADER_REGEX = /^\s*\)\s*\]\s*\}\s*'/;
-        const cleanedData = data.replace(MAGIC_HEADER_REGEX, '').trim();
+        const rpcResults = parseBatchexecuteResponse(data);
 
-        // 2. Extract balanced JSON
-        const jsonStr = extractBalancedJsonArray(cleanedData);
+        // Find the MaZiqc result
+        const titleRpc = rpcResults.find((res) => res.rpcId === GEMINI_RPC_IDS.TITLES);
 
-        if (!jsonStr) {
-            logger.info('[Blackiya/Gemini/Titles] Could not find balanced JSON array');
-            return null;
-        }
-
-        const wrapper = JSON.parse(jsonStr);
-
-        if (!Array.isArray(wrapper) || wrapper.length === 0) {
-            logger.info('[Blackiya/Gemini/Titles] Wrapper is not an array or is empty');
-            return null;
-        }
-
-        // 4. Find the MaZiqc result
-        let rpcResult = null;
-        for (const item of wrapper) {
-            if (Array.isArray(item) && item.length >= 3 && item[0] === 'wrb.fr' && item[1] === 'MaZiqc') {
-                rpcResult = item;
-                logger.debug('[Blackiya/Gemini/Titles] Found MaZiqc result');
-                break;
-            }
-        }
-
-        if (!rpcResult) {
-            logger.debug('[Blackiya/Gemini/Titles] No MaZiqc RPC result found in wrapper');
+        if (!titleRpc || !titleRpc.payload) {
+            logger.debug('[Blackiya/Gemini/Titles] No MaZiqc RPC result found');
             return null;
         }
 
         // 5. Parse the payload
-        const payloadStr = rpcResult[2];
-        if (typeof payloadStr !== 'string') {
-            return null;
-        }
-
-        const payload = JSON.parse(payloadStr);
+        const payload = JSON.parse(titleRpc.payload);
 
         // 6. Extract conversation list
         // Structure: [null, "token", [[conversationData], ...]]
@@ -86,7 +59,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
             return null;
         }
 
-        const conversationList = payload[2];
+        const conversationList = payload?.[2];
         if (!Array.isArray(conversationList)) {
             return null;
         }
@@ -97,28 +70,25 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
 
         // 7. Each conversation entry: ["c_id", "title", null, null, null, [timestamp], ...]
         for (const conv of conversationList) {
-            if (Array.isArray(conv) && conv.length >= 2) {
-                let convId = conv[0];
-                const title = conv[1];
+            if (!Array.isArray(conv) || conv.length < 2) {
+                continue;
+            }
 
-                // Normalize ID (remove c_ prefix)
-                if (typeof convId === 'string' && convId.startsWith('c_')) {
-                    convId = convId.slice(2);
-                }
+            let [convId, title] = conv;
 
-                if (typeof convId === 'string' && typeof title === 'string') {
-                    titles.set(convId, title);
+            // Normalize ID (remove c_ prefix)
+            if (typeof convId === 'string' && convId.startsWith('c_')) {
+                convId = convId.slice(2);
+            }
 
-                    // Retroactively update any active conversation object
-                    if (activeConversations.has(convId)) {
-                        const activeObj = activeConversations.get(convId);
-                        if (activeObj && activeObj.title !== title) {
-                            activeObj.title = title;
-                            logger.info(
-                                `[Blackiya/Gemini/Titles] Retroactively updated title for active conversation: ${convId} -> "${title}"`,
-                            );
-                        }
-                    }
+            if (typeof convId === 'string' && typeof title === 'string') {
+                titles.set(convId, title);
+
+                // Retroactively update active conversation
+                const activeObj = activeConversations.get(convId);
+                if (activeObj?.title && activeObj.title !== title) {
+                    activeObj.title = title;
+                    logger.info(`[Blackiya/Gemini/Titles] Updated: ${convId} -> "${title}"`);
                 }
             }
         }
@@ -139,6 +109,220 @@ function isTitlesEndpoint(url: string): boolean {
         logger.info('[Blackiya/Gemini/Titles] Detected titles endpoint');
     }
     return isTitles;
+}
+
+/**
+ * Finds the valid conversation RPC from a list of batchexecute results
+ */
+function findConversationRpc(
+    results: BatchexecuteResult[],
+    isConversationPayload?: (payload: any) => boolean,
+): { rpcId: string; payload: any } | null {
+    // Try to find by ID or heuristic
+    const conversationRes = results.find((res) => {
+        if (!res.payload) {
+            return false;
+        }
+        if (res.rpcId === GEMINI_RPC_IDS.CONVERSATION) {
+            return true;
+        }
+
+        try {
+            const payload = JSON.parse(res.payload);
+            return isConversationPayload?.(payload);
+        } catch {
+            return false;
+        }
+    });
+
+    if (conversationRes?.payload) {
+        try {
+            const payload = JSON.parse(conversationRes.payload);
+            logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${conversationRes.rpcId}`);
+            return { rpcId: conversationRes.rpcId, payload };
+        } catch {}
+    }
+
+    return null;
+}
+
+/**
+ * Parses the conversation payload into Blackiya's standardized ConversationData
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Helper function logic is complex but necessary
+function parseConversationPayload(
+    payload: any,
+    titlesCache: LRUCache<string, string>,
+    activeConvos: LRUCache<string, ConversationData>,
+): ConversationData | null {
+    // Navigate to conversation data
+    const conversationRoot = payload[0]?.[0];
+    if (!conversationRoot || !Array.isArray(conversationRoot)) {
+        logger.info('[Blackiya/Gemini] Invalid conversation root structure');
+        return null;
+    }
+
+    // Extract IDs
+    const idArray = conversationRoot[0];
+    let conversationId = Array.isArray(idArray) ? idArray[0] : null;
+
+    if (conversationId && typeof conversationId === 'string' && conversationId.startsWith('c_')) {
+        conversationId = conversationId.slice(2);
+    }
+
+    logger.info('[Blackiya/Gemini] Extracted conversation ID:', conversationId);
+
+    // Get title from cache or use default
+    const conversationTitle =
+        conversationId && titlesCache.has(conversationId) ? titlesCache.get(conversationId)! : 'Gemini Conversation';
+
+    logger.info('[Blackiya/Gemini] Title lookup:', {
+        conversationId,
+        cached: conversationId ? titlesCache.has(conversationId) : false,
+        title: conversationTitle,
+    });
+
+    // Extract messages
+    const parsedMessages: any[] = [];
+
+    // Recursive text extractor
+    const extractText = (node: any): string => {
+        if (typeof node === 'string') {
+            return node;
+        }
+        if (!Array.isArray(node) || node.length === 0) {
+            return '';
+        }
+
+        // Specific structure for user message content sometimes: [null, null, "text"]
+        if (node.length >= 3 && node[0] === null && typeof node[2] === 'string') {
+            return node[2];
+        }
+
+        return extractText(node[0]);
+    };
+
+    // User message (index 2)
+    const userSlot = conversationRoot[2];
+    if (userSlot && Array.isArray(userSlot)) {
+        const rawUserContent = extractText(userSlot);
+        if (rawUserContent) {
+            parsedMessages.push({
+                role: 'user',
+                content: rawUserContent,
+            });
+        }
+    }
+
+    // Assistant message (index 3)
+    const assistantSlot = conversationRoot[3];
+    const assistantCandidate = assistantSlot?.[0]?.[0];
+
+    if (Array.isArray(assistantCandidate)) {
+        // Response text is at index 1 -> [0]
+        const textParts = assistantCandidate[1];
+        const assistantContent = Array.isArray(textParts) ? (textParts[0] as string) || '' : '';
+
+        // Extract reasoning/thoughts (index 37 -> [0] -> [0])
+        const reasoningData = assistantCandidate[37];
+        const thinkingText = reasoningData?.[0]?.[0];
+
+        const thoughts: any[] = [];
+        if (typeof thinkingText === 'string' && thinkingText.length > 0) {
+            const sections = thinkingText.split(/\n\*\*([^*]+)\*\*\n/);
+            // sections[0] is usually empty or prelude; pairs follow: title, content
+            for (let i = 1; i < sections.length; i += 2) {
+                const title = sections[i]?.trim();
+                const content = sections[i + 1]?.trim();
+                if (title && content) {
+                    thoughts.push({
+                        summary: title,
+                        content,
+                        chunks: [],
+                        finished: true,
+                    });
+                }
+            }
+        }
+
+        if (assistantContent || thoughts.length > 0) {
+            parsedMessages.push({
+                role: 'assistant',
+                content: assistantContent,
+                thoughts: thoughts.length > 0 ? thoughts : undefined,
+            });
+        }
+    }
+
+    // Build mapping
+    const mapping: Record<string, MessageNode> = {};
+
+    // Extract model name from assistantSlot[21] if available
+    let modelName = 'gemini-2.0';
+    if (conversationRoot[3] && Array.isArray(conversationRoot[3]) && conversationRoot[3].length > 21) {
+        const modelSlug = conversationRoot[3][21];
+        if (typeof modelSlug === 'string') {
+            modelName = `gemini-${modelSlug.toLowerCase().replace(/\s+/g, '-')}`;
+            logger.info('[Blackiya/Gemini] Extracted model name:', modelName);
+        }
+    }
+
+    parsedMessages.forEach((msg, index) => {
+        const id = `segment-${index}`;
+
+        mapping[id] = {
+            id,
+            message: {
+                id,
+                author: {
+                    role: msg.role,
+                    name: msg.role === 'user' ? 'User' : 'Gemini',
+                    metadata: {},
+                },
+                content: {
+                    content_type: msg.thoughts ? 'thoughts' : 'text',
+                    parts: [msg.content],
+                    thoughts: msg.thoughts,
+                },
+                create_time: Date.now() / 1000,
+                update_time: Date.now() / 1000,
+                status: 'finished_successfully',
+                end_turn: true,
+                weight: 1,
+                metadata: {},
+                recipient: 'all',
+                channel: null,
+            },
+            parent: index === 0 ? null : `segment-${index - 1}`,
+            children: index < parsedMessages.length - 1 ? [`segment-${index + 1}`] : [],
+        };
+    });
+
+    logger.info('[Blackiya/Gemini] Successfully parsed conversation with', Object.keys(mapping).length, 'messages');
+
+    const conversationData: ConversationData = {
+        title: conversationTitle, // Use cached title instead of default
+        create_time: Date.now() / 1000,
+        update_time: Date.now() / 1000,
+        conversation_id: conversationId || 'unknown',
+        mapping,
+        current_node: `segment-${Math.max(0, parsedMessages.length - 1)}`,
+        is_archived: false,
+        safe_urls: [],
+        blocked_urls: [],
+        moderation_results: [],
+        plugin_ids: null,
+        gizmo_id: null,
+        gizmo_type: null,
+        default_model_slug: modelName,
+    };
+
+    // Store in active conversations map for potential retroactive title updates
+    if (conversationId) {
+        activeConvos.set(conversationId, conversationData);
+    }
+
+    return conversationData;
 }
 
 export const geminiAdapter: LLMPlatform = {
@@ -172,7 +356,6 @@ export const geminiAdapter: LLMPlatform = {
         return null;
     },
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
     parseInterceptedData(data: string, url: string): ConversationData | null {
         // Check if this is a titles endpoint
         if (isTitlesEndpoint(url)) {
@@ -200,248 +383,17 @@ export const geminiAdapter: LLMPlatform = {
         try {
             logger.info('[Blackiya/Gemini] Attempting to parse response from:', url);
 
-            // 1. Strip security prefix
-            const MAGIC_HEADER_REGEX = /^\s*\)\s*\]\s*\}\s*'/;
-            const cleanedData = data.replace(MAGIC_HEADER_REGEX, '').trim();
+            const rpcResults = parseBatchexecuteResponse(data);
 
-            // 2. Extract balanced JSON
-            const jsonStr = extractBalancedJsonArray(cleanedData);
-
-            if (!jsonStr) {
-                logger.info('[Blackiya/Gemini] Could not find balanced JSON array');
-                return null;
-            }
-
-            const wrapper = JSON.parse(jsonStr);
-
-            if (!Array.isArray(wrapper) || wrapper.length === 0) {
-                logger.info('[Blackiya/Gemini] Wrapper is not an array or is empty');
-                return null;
-            }
-
-            logger.info('[Blackiya/Gemini] Wrapper array length:', wrapper.length);
-
-            // 4. Find conversation data RPC result
-            let rpcResult = null;
-            let foundRpcId = null;
-
-            for (const item of wrapper) {
-                if (Array.isArray(item) && item.length >= 3 && item[0] === 'wrb.fr') {
-                    const rpcId = item[1];
-                    const payloadStr = item[2];
-
-                    logger.info(`[Blackiya/Gemini] Checking RPC ID: ${rpcId}`);
-
-                    if (typeof payloadStr === 'string') {
-                        try {
-                            const testPayload = JSON.parse(payloadStr);
-                            if (this.isConversationPayload?.(testPayload)) {
-                                logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${rpcId}`);
-                                rpcResult = item;
-                                foundRpcId = rpcId;
-                                break;
-                            }
-                        } catch (_e) {}
-                    }
-                }
-            }
-
-            if (!rpcResult) {
+            const conversationRpc = findConversationRpc(rpcResults, this.isConversationPayload);
+            if (!conversationRpc) {
                 logger.info('[Blackiya/Gemini] No RPC result with conversation data found');
                 return null;
             }
 
-            logger.info(`[Blackiya/Gemini] Using RPC ID: ${foundRpcId}`);
+            logger.info(`[Blackiya/Gemini] Using RPC ID: ${conversationRpc.rpcId}`);
 
-            // 5. Parse the payload
-            const payload = JSON.parse(rpcResult[2]);
-
-            // 6. Navigate to conversation data
-            const conversationRoot = payload[0]?.[0];
-            if (!conversationRoot || !Array.isArray(conversationRoot)) {
-                logger.info('[Blackiya/Gemini] Invalid conversation root structure');
-                return null;
-            }
-
-            // Extract IDs
-            const idArray = conversationRoot[0];
-            let conversationId = Array.isArray(idArray) ? idArray[0] : null;
-
-            if (conversationId && typeof conversationId === 'string' && conversationId.startsWith('c_')) {
-                conversationId = conversationId.slice(2);
-            }
-
-            logger.info('[Blackiya/Gemini] Extracted conversation ID:', conversationId);
-
-            // 7. Get title from cache or use default
-            const conversationTitle =
-                conversationId && conversationTitles.has(conversationId)
-                    ? conversationTitles.get(conversationId)!
-                    : 'Gemini Conversation';
-
-            logger.info('[Blackiya/Gemini] Title lookup:', {
-                conversationId,
-                cached: conversationId ? conversationTitles.has(conversationId) : false,
-                title: conversationTitle,
-            });
-
-            // 8. Extract messages
-            const parsedMessages: any[] = [];
-
-            const extractText = (node: any): string => {
-                if (typeof node === 'string') {
-                    return node;
-                }
-                if (Array.isArray(node)) {
-                    if (node.length > 0) {
-                        if (node.length >= 3 && node[0] === null && typeof node[2] === 'string') {
-                            return node[2];
-                        }
-                        return extractText(node[0]);
-                    }
-                }
-                return '';
-            };
-
-            // User message (index 2)
-            const userSlot = conversationRoot[2];
-            if (userSlot && Array.isArray(userSlot)) {
-                const rawUserContent = extractText(userSlot);
-                if (rawUserContent) {
-                    parsedMessages.push({
-                        role: 'user',
-                        content: rawUserContent,
-                    });
-                }
-            }
-
-            // Assistant message (index 3)
-            const assistantSlot = conversationRoot[3];
-            if (assistantSlot && Array.isArray(assistantSlot)) {
-                const candidate = assistantSlot[0];
-                if (candidate && Array.isArray(candidate)) {
-                    const actualCandidate = candidate[0];
-                    if (actualCandidate && Array.isArray(actualCandidate)) {
-                        let assistantContent = '';
-
-                        // Response text is at index 1
-                        const contentNode = actualCandidate[1];
-                        if (Array.isArray(contentNode) && contentNode.length > 0) {
-                            if (typeof contentNode[0] === 'string') {
-                                assistantContent = contentNode[0];
-                            }
-                        }
-
-                        // Extract reasoning/thoughts (index 37)
-                        const thoughts: any[] = [];
-                        const reasoningData = actualCandidate[37];
-
-                        if (Array.isArray(reasoningData) && reasoningData.length > 0) {
-                            const thinkingText = reasoningData[0]?.[0];
-
-                            if (typeof thinkingText === 'string' && thinkingText.length > 0) {
-                                const sections = thinkingText.split(/\n\*\*([^*]+)\*\*\n/);
-
-                                for (let i = 1; i < sections.length; i += 2) {
-                                    const title = sections[i]?.trim();
-                                    const content = sections[i + 1]?.trim();
-
-                                    if (title && content) {
-                                        thoughts.push({
-                                            summary: title,
-                                            content: content,
-                                            chunks: [],
-                                            finished: true,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-
-                        if (assistantContent || thoughts.length > 0) {
-                            parsedMessages.push({
-                                role: 'assistant',
-                                content: assistantContent,
-                                thoughts: thoughts.length > 0 ? thoughts : undefined,
-                            });
-                        }
-                    }
-                }
-            }
-
-            // 9. Build mapping
-            const mapping: Record<string, MessageNode> = {};
-
-            // Extract model name from assistantSlot[21] if available
-            let modelName = 'gemini-2.0';
-            if (conversationRoot[3] && Array.isArray(conversationRoot[3]) && conversationRoot[3].length > 21) {
-                const modelSlug = conversationRoot[3][21];
-                if (typeof modelSlug === 'string') {
-                    modelName = `gemini-${modelSlug.toLowerCase().replace(/\s+/g, '-')}`;
-                    logger.info('[Blackiya/Gemini] Extracted model name:', modelName);
-                }
-            }
-
-            parsedMessages.forEach((msg, index) => {
-                const id = `segment-${index}`;
-
-                mapping[id] = {
-                    id,
-                    message: {
-                        id,
-                        author: {
-                            role: msg.role,
-                            name: msg.role === 'user' ? 'User' : 'Gemini',
-                            metadata: {},
-                        },
-                        content: {
-                            content_type: msg.thoughts ? 'thoughts' : 'text',
-                            parts: [msg.content],
-                            thoughts: msg.thoughts,
-                        },
-                        create_time: Date.now() / 1000,
-                        update_time: Date.now() / 1000,
-                        status: 'finished_successfully',
-                        end_turn: true,
-                        weight: 1,
-                        metadata: {},
-                        recipient: 'all',
-                        channel: null,
-                    },
-                    parent: index === 0 ? null : `segment-${index - 1}`,
-                    children: index < parsedMessages.length - 1 ? [`segment-${index + 1}`] : [],
-                };
-            });
-
-            logger.info(
-                '[Blackiya/Gemini] Successfully parsed conversation with',
-                Object.keys(mapping).length,
-                'messages',
-            );
-
-            const conversationData: ConversationData = {
-                title: conversationTitle, // Use cached title instead of default
-                create_time: Date.now() / 1000,
-                update_time: Date.now() / 1000,
-                conversation_id: conversationId || 'unknown',
-                mapping,
-                current_node: `segment-${Math.max(0, parsedMessages.length - 1)}`,
-                is_archived: false,
-                safe_urls: [],
-                blocked_urls: [],
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                default_model_slug: modelName,
-            };
-
-            // Store in active conversations map for potential retroactive title updates
-            if (conversationId) {
-                activeConversations.set(conversationId, conversationData);
-            }
-
-            return conversationData;
+            return parseConversationPayload(conversationRpc.payload, conversationTitles, activeConversations);
         } catch (e) {
             logger.error('[Blackiya/Gemini] Failed to parse:', e);
             if (e instanceof Error) {

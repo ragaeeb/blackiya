@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
+import packageJson from '../../package.json';
 
 const STORAGE_KEY_LEVEL = 'userSettings.logLevel';
 
@@ -86,6 +87,21 @@ function App() {
             <button type="button" className="secondary" onClick={handleClear}>
                 Clear Logs
             </button>
+
+            <div className="about">
+                <p>Blackiya v{packageJson.version}</p>
+                <p>
+                    By{' '}
+                    <a href="https://github.com/ragaeeb" target="_blank" rel="noreferrer">
+                        {packageJson.author}
+                    </a>
+                </p>
+                <p>
+                    <a href={packageJson.repository.url.replace('git+', '')} target="_blank" rel="noreferrer">
+                        GitHub Repository
+                    </a>
+                </p>
+            </div>
         </div>
     );
 }

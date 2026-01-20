@@ -24,7 +24,7 @@ export function runPlatform(): void {
     // -- Manager Initialization --
 
     // 1. UI Manager
-    const buttonManager = new ButtonManager(handleSaveClick);
+    const buttonManager = new ButtonManager(handleSaveClick, handleCopyClick);
 
     // 2. Data Manager
     const interceptionManager = new InterceptionManager((capturedId) => {
@@ -48,32 +48,66 @@ export function runPlatform(): void {
         if (!currentAdapter) {
             return;
         }
+        const data = await getConversationData();
+        if (!data) {
+            return;
+        }
+
+        buttonManager.setLoading(true, 'save');
+        try {
+            const filename = currentAdapter.formatFilename(data);
+            downloadAsJSON(data, filename);
+            logger.info(`Saved conversation: ${filename}.json`);
+            buttonManager.setSuccess('save');
+        } catch (error) {
+            handleError('save', error);
+            buttonManager.setLoading(false, 'save');
+        }
+    }
+
+    async function handleCopyClick(): Promise<void> {
+        if (!currentAdapter) {
+            return;
+        }
+        const data = await getConversationData();
+        if (!data) {
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+            logger.info('Copied conversation to clipboard');
+            buttonManager.setSuccess('copy');
+        } catch (error) {
+            handleError('copy', error);
+            buttonManager.setLoading(false, 'copy');
+        }
+    }
+
+    async function getConversationData() {
+        if (!currentAdapter) {
+            return null;
+        }
 
         const conversationId = currentAdapter.extractConversationId(window.location.href);
         if (!conversationId) {
             logger.error('No conversation ID found in URL');
             alert('Please select a conversation first.');
-            return;
+            return null;
         }
 
         const data = interceptionManager.getConversation(conversationId);
         if (!data) {
             logger.warn('No data captured for this conversation yet.');
             alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
-            return;
+            return null;
         }
+        return data;
+    }
 
-        buttonManager.setLoading(true);
-        try {
-            const filename = currentAdapter.formatFilename(data);
-            downloadAsJSON(data, filename);
-            logger.info(`Saved conversation: ${filename}.json`);
-        } catch (error) {
-            logger.error('Failed to save conversation:', error);
-            alert('Failed to save conversation. Check console for details.');
-        } finally {
-            buttonManager.setLoading(false);
-        }
+    function handleError(action: 'save' | 'copy', error: unknown) {
+        logger.error(`Failed to ${action} conversation:`, error);
+        alert(`Failed to ${action} conversation. Check console for details.`);
     }
 
     function injectSaveButton(): void {

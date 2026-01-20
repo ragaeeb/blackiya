@@ -70,9 +70,11 @@ describe('Platform Runner', () => {
         // Wait for async injection logic
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        const btn = document.getElementById('llm-capture-save-btn');
-        expect(btn).not.toBeNull();
-        expect(btn?.textContent).toContain('Save JSON');
+        const saveBtn = document.getElementById('blackiya-save-btn');
+        const copyBtn = document.getElementById('blackiya-copy-btn');
+        expect(saveBtn).not.toBeNull();
+        expect(copyBtn).not.toBeNull();
+        expect(saveBtn?.textContent).toContain('Save JSON');
     });
 
     it('should NOT inject button if no adapter matches', async () => {
@@ -81,7 +83,7 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        const btn = document.getElementById('llm-capture-save-btn');
-        expect(btn).toBeNull();
+        const saveBtn = document.getElementById('blackiya-save-btn');
+        expect(saveBtn).toBeNull();
     });
 });

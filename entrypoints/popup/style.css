@@ -68,3 +68,25 @@ select {
     color: white;
     margin-bottom: 12px;
 }
+
+.about {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #333;
+    font-size: 13px;
+    color: #888;
+    text-align: center;
+}
+
+.about p {
+    margin: 4px 0;
+}
+
+.about a {
+    color: #10a37f;
+    text-decoration: none;
+}
+
+.about a:hover {
+    text-decoration: underline;
+}
