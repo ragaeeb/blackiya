@@ -173,6 +173,27 @@ export const geminiAdapter: LLMPlatform = {
     // Returns header navigation for button injection
   }
 };
+
+// platforms/grok.ts
+export const grokAdapter: LLMPlatform = {
+  name: 'Grok',
+  urlMatchPattern: 'https://x.com/i/grok*',
+  apiEndpointPattern: /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)/,
+  
+  extractConversationId: (url) => {
+    // Extracts numeric ID from conversation query param
+  },
+  
+  parseInterceptedData: (data, url) => {
+    // 1. Handles GrokHistory for title caching
+    // 2. Extracts RestID from URL variables to sync IDs
+    // 3. Parses GraphQL response for message items and thinking traces
+  },
+  
+  getButtonInjectionTarget: () => {
+    // Targets grok-header or role="banner"
+  }
+};
 ```
 
 #### 4. Utility Modules (`utils/*.ts`)
@@ -475,7 +496,7 @@ bun test platforms/gemini.test.ts # Test Gemini specifically
 ```
 
 **Test Data:**
-- Test fixtures live in `data/gemini/` and `data/chatgpt/`.
+- Test fixtures live in `data/gemini/`, `data/chatgpt/`, and `data/grok/`.
 - Use real-world intercepted responses, sanitized for PII.
 - Ensure fixtures handle edge cases like literal newlines inside JSON strings.
 
@@ -593,6 +614,13 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 - Data structure: Double-JSON encoded payload at `payload[0][0][0]`
 - ID normalization: Payload IDs prefixed with `c_` are normalized (prefix removed) to match URL IDs.
 
+**Grok:**
+- API protocol: GraphQL (accessible via x.com endpoints)
+- Mutation/Query: `GrokConversationItemsByRestId` for messages, `GrokHistory` for titles.
+- ID Synchronization: Internal `chat_item_id` in response often differs from the URL `conversation` ID.
+- Solution: Extract the true `restId` from the GraphQL `variables` URL query parameter during interception.
+- Thinking Content: Located in `deepsearch_headers` nested structure. Avoid simple loops; use declarative pipelines for extraction.
+
 ## 🧠 Lessons Learned (For Future Agents)
 
 ### 1. Retroactive Async Data
@@ -610,6 +638,18 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 ### 4. Interceptor World Isolation
 **Problem:** Content scripts cannot access the page's `fetch` or `XHR` objects directly.
 **Solution:** Inject a script into the `MAIN` world (see `interceptor.content.ts`) to wrap `XMLHttpRequest`. Communicate back to the `ISOLATED` content script world via `window.postMessage`.
+
+### 5. ID Synchronization Mismatches
+**Problem:** Some platforms (like Grok) use different IDs in the URL vs. the internal response data, causing cache lookup failures.
+**Solution:** Intercept the API request URL/parameters to retrieve the "source of truth" ID (e.g., `restId` on Grok) and force the parsed data to use that ID as its primary key. This ensures the Content Script (which only sees the URL ID) can find the cached data.
+
+### 6. Cognitive Complexity in Parsers
+**Problem:** Deeply nested LLM response structures (like Grok's thinking logs) lead to "Arrow Code" and high cognitive complexity.
+**Solution:** Use declarative pipelines (`flatMap`, `filter`, `map`) instead of nested `for` loops and `if` checks. This makes the code easier to maintain and satisfies linter rules without suppressions.
+
+### 7. Absolute Import Refactoring
+**Problem:** Deeply nested relative imports (`../../utils/...`) make moving files difficult and create brittle paths.
+**Solution:** Implement `@/` path alias pointing to the root. Ensure `tsconfig.json` and build tools are aligned. Refactor all logic and test imports to use absolute paths.
 
 ## 🎓 Learning Resources
 
@@ -649,6 +689,6 @@ bun run check        # Lint & format (auto-fix)
 
 ---
 
-**Last Updated:** 2026-01-17  
-**Agent Version:** 1.0.0  
-**For:** Claude, GPT-4, Cursor, and other AI coding agents
+**Last Updated:** 2026-01-19
+**Agent Version:** 1.1.0 (Post-Grok Integration)
+**For:** Claude, GPT-4o, Gemini 1.5 Pro, and other AI coding agents
