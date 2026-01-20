@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/ragaeeb/blackiya/compare/v1.1.0...v1.2.0) (2026-01-20)
+
+
+### Features
+
+* **logging:** Add logging controls and new icon ([#3](https://github.com/ragaeeb/blackiya/issues/3)) ([5503c10](https://github.com/ragaeeb/blackiya/commit/5503c108435165f7524b78224acf24dec7ab9b25))
+
 # [1.1.0](https://github.com/ragaeeb/blackiya/compare/v1.0.0...v1.1.0) (2026-01-20)
 
 
