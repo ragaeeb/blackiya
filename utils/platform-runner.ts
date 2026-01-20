@@ -201,16 +201,16 @@ export function runPlatform(): void {
 
             // Handle logs from interceptor
             if (message?.type === 'LLM_LOG_ENTRY') {
-                const { level, message: logMsg, data, context } = message.payload;
+                const { level, message: logMessage, data, context } = message.payload;
                 // Forward to logger
                 // We prefix with context to make it clear where it came from
-                const msg = `[${context}] ${logMsg}`;
+                const prefixedMsg = `[${context}] ${logMessage}`;
                 if (level === 'error') {
-                    logger.error(msg, ...(data || []));
+                    logger.error(prefixedMsg, ...(data || []));
                 } else if (level === 'warn') {
-                    logger.warn(msg, ...(data || []));
+                    logger.warn(prefixedMsg, ...(data || []));
                 } else {
-                    logger.info(msg, ...(data || []));
+                    logger.info(prefixedMsg, ...(data || []));
                 }
                 return;
             }

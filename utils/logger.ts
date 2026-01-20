@@ -58,16 +58,8 @@ class ExtensionLogger {
         const meta = (logObj as any)._meta;
         const levelId = meta ? meta.logLevelId : 3;
 
-        let level = 'info';
-        if (levelId === 2) {
-            level = 'debug';
-        }
-        if (levelId === 4) {
-            level = 'warn';
-        }
-        if (levelId >= 5) {
-            level = 'error';
-        }
+        const levelMap: Record<number, string> = { 2: 'debug', 3: 'info', 4: 'warn' };
+        const level = levelId >= 5 ? 'error' : (levelMap[levelId] ?? 'info');
 
         // Construct standardized entry
         const entry: LogEntry = {

@@ -101,13 +101,13 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         for (const item of wrapper) {
             if (Array.isArray(item) && item.length >= 3 && item[0] === 'wrb.fr' && item[1] === 'MaZiqc') {
                 rpcResult = item;
-                // logger.info('[Blackiya/Gemini/Titles] Found MaZiqc result');
+                logger.debug('[Blackiya/Gemini/Titles] Found MaZiqc result');
                 break;
             }
         }
 
         if (!rpcResult) {
-            // logger.info('[Blackiya/Gemini/Titles] No MaZiqc RPC result found in wrapper');
+            logger.debug('[Blackiya/Gemini/Titles] No MaZiqc RPC result found in wrapper');
             return null;
         }
 

@@ -42,7 +42,8 @@ function App() {
                 return;
             }
 
-            const filename = `blackiya-logs-${new Date().toISOString()}`;
+            const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+            const filename = `blackiya-logs-${timestamp}`;
             downloadAsJSON(logs, filename);
 
             logger.info('Logs exported by user');
