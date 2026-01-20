@@ -10,6 +10,8 @@
 
 import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { logger } from '@/utils/logger';
+import { LRUCache } from '@/utils/lru-cache';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
 
 const MAX_TITLE_LENGTH = 80;
@@ -24,26 +26,26 @@ const CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
  * In-memory cache for conversation titles
  * Maps conversation ID (rest_id) to title
  */
-const conversationTitles = new Map<string, string>();
+const conversationTitles = new LRUCache<string, string>(50);
 
 /**
  * Track active conversation objects to allow retroactive title updates
  * Maps conversation ID -> ConversationData object reference
  */
-const activeConversations = new Map<string, ConversationData>();
+const activeConversations = new LRUCache<string, ConversationData>(50);
 
 /**
  * Parse the GrokHistory response to extract conversation titles
  */
 function parseTitlesResponse(data: string, url: string): Map<string, string> | null {
     try {
-        console.log('[Blackiya/Grok/Titles] Attempting to parse titles from:', url);
+        logger.info('[Blackiya/Grok/Titles] Attempting to parse titles from:', url);
 
         const parsed = JSON.parse(data);
         const historyData = parsed?.data?.grok_conversation_history;
 
         if (!historyData || !Array.isArray(historyData.items)) {
-            console.log('[Blackiya/Grok/Titles] No conversation history items found');
+            logger.info('[Blackiya/Grok/Titles] No conversation history items found');
             return null;
         }
 
@@ -61,7 +63,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
                     const activeObj = activeConversations.get(restId);
                     if (activeObj && activeObj.title !== title) {
                         activeObj.title = title;
-                        console.log(
+                        logger.info(
                             `[Blackiya/Grok/Titles] Retroactively updated title for active conversation: ${restId} -> "${title}"`,
                         );
                     }
@@ -69,10 +71,10 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
             }
         }
 
-        console.log(`[Blackiya/Grok/Titles] Extracted ${titles.size} conversation titles`);
+        logger.info(`[Blackiya/Grok/Titles] Extracted ${titles.size} conversation titles`);
         return titles;
     } catch (e) {
-        console.error('[Blackiya/Grok/Titles] Failed to parse titles:', e);
+        logger.error('[Blackiya/Grok/Titles] Failed to parse titles:', e);
         return null;
     }
 }
@@ -83,7 +85,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
 function isTitlesEndpoint(url: string): boolean {
     const isTitles = url.includes('GrokHistory');
     if (isTitles) {
-        console.log('[Blackiya/Grok/Titles] Detected titles endpoint');
+        logger.info('[Blackiya/Grok/Titles] Detected titles endpoint');
     }
     return isTitles;
 }
@@ -149,13 +151,13 @@ function parseGrokResponse(data: any, conversationIdOverride?: string): Conversa
     try {
         const conversationData = data?.data?.grok_conversation_items_by_rest_id;
         if (!conversationData) {
-            console.log('[Blackiya/Grok] No conversation data found in response');
+            logger.info('[Blackiya/Grok] No conversation data found in response');
             return null;
         }
 
         const items = conversationData.items;
         if (!Array.isArray(items) || items.length === 0) {
-            console.log('[Blackiya/Grok] No conversation items found');
+            logger.info('[Blackiya/Grok] No conversation items found');
             return null;
         }
 
@@ -274,7 +276,7 @@ function parseGrokResponse(data: any, conversationIdOverride?: string): Conversa
         // Check if we have a cached title for this conversation
         if (conversationId && conversationTitles.has(conversationId)) {
             conversationTitle = conversationTitles.get(conversationId)!;
-            console.log('[Blackiya/Grok] Using cached title:', conversationTitle);
+            logger.info('[Blackiya/Grok] Using cached title:', conversationTitle);
         }
 
         const result: ConversationData = {
@@ -299,12 +301,12 @@ function parseGrokResponse(data: any, conversationIdOverride?: string): Conversa
             activeConversations.set(conversationId, result);
         }
 
-        console.log('[Blackiya/Grok] Successfully parsed conversation with', Object.keys(mapping).length, 'nodes');
+        logger.info('[Blackiya/Grok] Successfully parsed conversation with', Object.keys(mapping).length, 'nodes');
         return result;
     } catch (e) {
-        console.error('[Blackiya/Grok] Failed to parse conversation:', e);
+        logger.error('[Blackiya/Grok] Failed to parse conversation:', e);
         if (e instanceof Error) {
-            console.error('[Blackiya/Grok] Error stack:', e.stack);
+            logger.error('[Blackiya/Grok] Error stack:', e.stack);
         }
         return null;
     }
@@ -388,9 +390,9 @@ export const grokAdapter: LLMPlatform = {
                 for (const [id, title] of titles) {
                     conversationTitles.set(id, title);
                 }
-                console.log(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
+                logger.info(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
             } else {
-                console.log('[Blackiya/Grok/Titles] Failed to extract titles from this response');
+                logger.info('[Blackiya/Grok/Titles] Failed to extract titles from this response');
             }
             // Don't return ConversationData for title endpoints
             return null;
@@ -423,7 +425,7 @@ export const grokAdapter: LLMPlatform = {
 
             return parseGrokResponse(parsed, conversationIdFromUrl);
         } catch (e) {
-            console.error('[Blackiya/Grok] Failed to parse data:', e);
+            logger.error('[Blackiya/Grok] Failed to parse data:', e);
             return null;
         }
     },

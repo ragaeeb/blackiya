@@ -74,17 +74,3 @@ export interface ConversationData {
     safe_urls: string[];
     blocked_urls: string[];
 }
-
-/**
- * Message types for communication between content script and background script
- */
-export type ExtensionMessage =
-    | { type: 'CAPTURE_CONVERSATION'; conversationId: string }
-    | { type: 'CONVERSATION_DATA'; data: ConversationData; filename: string }
-    | { type: 'DOWNLOAD_JSON'; data: ConversationData; filename: string }
-    | { type: 'ERROR'; error: string };
-
-/**
- * Response from background script to content script
- */
-export type ExtensionResponse = { success: true; data?: unknown } | { success: false; error: string };

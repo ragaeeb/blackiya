@@ -1,15 +1,19 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
-import { geminiAdapter } from '@/platforms/gemini';
-import type { Message } from '@/utils/types';
+
+import type { Message, MessageNode } from '@/utils/types';
 
 describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;
     let titlesResponseRaw: string;
+    let geminiAdapter: any;
 
     beforeAll(async () => {
-        // Load test fixtures from the data/gemini folder
-        // Use join(import.meta.dir, '..', 'data', ...) to go up from platforms/ to root
+        // Dynamic import to ensure mocks apply
+        const module = await import('@/platforms/gemini');
+        geminiAdapter = module.geminiAdapter;
+
+        // Load test fixtures
         conversationResponseRaw = await Bun.file(
             join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_conversation.txt'),
         ).text();
@@ -68,7 +72,7 @@ describe('Gemini Platform Adapter', () => {
             expect(mapping).toBeDefined();
 
             // Filter out null messages to avoid TS errors
-            const messages = Object.values(mapping)
+            const messages = (Object.values(mapping) as MessageNode[])
                 .map((n) => n.message)
                 .filter((m): m is Message => m !== null);
 
