@@ -91,7 +91,7 @@ function isTitlesEndpoint(url: string): boolean {
 /**
  * Extract thinking/reasoning content from Grok message
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsing logic involves nested structures
+
 function extractThinkingContent(chatItem: any):
     | Array<{
           summary: string;
@@ -101,28 +101,19 @@ function extractThinkingContent(chatItem: any):
       }>
     | undefined {
     // Check if there are deepsearch_headers which contain reasoning steps
-    if (chatItem?.deepsearch_headers && Array.isArray(chatItem.deepsearch_headers)) {
-        const thoughts: Array<{
-            summary: string;
-            content: string;
-            chunks: string[];
-            finished: boolean;
-        }> = [];
-
-        for (const header of chatItem.deepsearch_headers) {
-            if (header?.header && header?.steps && Array.isArray(header.steps)) {
-                for (const step of header.steps) {
-                    if (step?.final_message) {
-                        thoughts.push({
-                            summary: header.header || 'Reasoning',
-                            content: step.final_message,
-                            chunks: [],
-                            finished: true,
-                        });
-                    }
-                }
-            }
-        }
+    if (Array.isArray(chatItem?.deepsearch_headers)) {
+        const thoughts = chatItem.deepsearch_headers.flatMap((header: any) =>
+            Array.isArray(header?.steps)
+                ? header.steps
+                      .filter((step: any) => step?.final_message)
+                      .map((step: any) => ({
+                          summary: header.header || 'Reasoning',
+                          content: step.final_message,
+                          chunks: [],
+                          finished: true,
+                      }))
+                : [],
+        );
 
         return thoughts.length > 0 ? thoughts : undefined;
     }
@@ -154,7 +145,7 @@ function createAuthor(senderType: string): Author {
  * Parse Grok API response into ConversationData
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
-function parseGrokResponse(data: any): ConversationData | null {
+function parseGrokResponse(data: any, conversationIdOverride?: string): ConversationData | null {
     try {
         const conversationData = data?.data?.grok_conversation_items_by_rest_id;
         if (!conversationData) {
@@ -201,8 +192,15 @@ function parseGrokResponse(data: any): ConversationData | null {
             const isPartial = item.is_partial || false;
 
             // Extract conversation ID from first message
-            if (i === 0 && chatItemId) {
-                conversationId = chatItemId;
+            if (i === 0) {
+                // Priority 1: Use the override which comes from the URL restId
+                if (conversationIdOverride) {
+                    conversationId = conversationIdOverride;
+                }
+                // Priority 2: Use chat_item_id as fallback, though it may trigger cache mismatches
+                else if (chatItemId) {
+                    conversationId = chatItemId;
+                }
             }
 
             // Extract title from first user message if available (fallback)
@@ -401,40 +399,29 @@ export const grokAdapter: LLMPlatform = {
         // Otherwise, parse as conversation data
         try {
             const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            const conversationData = parseGrokResponse(parsed);
 
-            // Critical Fix: Ensure conversation ID matches the one in the URL if possible
-            // The XHR response often has internal IDs that don't match the URL "conversation" param
-            if (conversationData && url) {
-                // Attempt to extract RestID from the request payload variables if available in the URL
-                // We utilize URLSearchParams to handle decoding automatically
+            // Extract restId from URL if possible to ensure we use the same ID as the cache
+            let conversationIdFromUrl: string | undefined;
+            if (url) {
                 try {
                     const urlObj = new URL(url);
                     const variablesStr = urlObj.searchParams.get('variables');
                     if (variablesStr) {
                         const variables = JSON.parse(variablesStr);
-                        // restId matches what we need to satisfy the URL ID check
                         if (variables?.restId) {
-                            console.log(
-                                `[Blackiya/Grok] Overriding conversation ID from URL params (parsed): ${conversationData.conversation_id} -> ${variables.restId}`,
-                            );
-                            conversationData.conversation_id = variables.restId;
+                            conversationIdFromUrl = variables.restId;
                         }
                     }
-                } catch (e) {
-                    console.warn('[Blackiya/Grok] Failed to parse URL variables, falling back to regex', e);
-                    // Fallback to regex if URL parsing fails
+                } catch {
+                    // Fallback to regex
                     const match = url.match(/%22restId%22%3A%22(\d+)%22/);
                     if (match?.[1]) {
-                        console.log(
-                            `[Blackiya/Grok] Overriding conversation ID from URL params (regex): ${conversationData.conversation_id} -> ${match[1]}`,
-                        );
-                        conversationData.conversation_id = match[1];
+                        conversationIdFromUrl = match[1];
                     }
                 }
             }
 
-            return conversationData;
+            return parseGrokResponse(parsed, conversationIdFromUrl);
         } catch (e) {
             console.error('[Blackiya/Grok] Failed to parse data:', e);
             return null;
@@ -454,7 +441,11 @@ export const grokAdapter: LLMPlatform = {
 
         // If no title, use a default with part of conversation ID
         if (!title.trim()) {
-            title = `grok_conversation_${data.conversation_id.slice(0, 8)}`;
+            const idPart =
+                data.conversation_id && data.conversation_id.length >= 8
+                    ? data.conversation_id.slice(0, 8)
+                    : data.conversation_id || 'unknown';
+            title = `grok_conversation_${idPart}`;
         }
 
         // Sanitize and truncate title

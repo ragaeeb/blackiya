@@ -362,12 +362,14 @@ describe('Grok Platform Adapter', () => {
 
         it('should have messages with correct author roles', () => {
             expect(result).not.toBeNull();
-            const messagesWithContent = Object.values(result!.mapping).filter((n) => n.message !== null);
+            const messagesWithContent = Object.values(result!.mapping).filter(
+                (n): n is MessageNode & { message: Message } => n.message !== null,
+            );
 
             expect(messagesWithContent.length).toBeGreaterThan(0);
 
             for (const node of messagesWithContent) {
-                expect(['user', 'assistant']).toContain(node.message!.author.role);
+                expect(['user', 'assistant']).toContain(node.message.author.role);
             }
         });
 
