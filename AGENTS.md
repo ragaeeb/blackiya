@@ -746,7 +746,3 @@ bun run check        # Lint & format (auto-fix)
 +- **Format:** Single text file (`codebase_snapshot.txt`) optimized for context window efficiency.
 
 ---
-
-**Last Updated:** 2026-01-19
-**Agent Version:** 1.2.0 (Post-Logging Infrastructure)
-**For:** Claude, GPT-4o, Gemini 1.5 Pro, and other AI coding agents

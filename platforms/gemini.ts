@@ -15,17 +15,19 @@ import type { ConversationData, MessageNode } from '@/utils/types';
 
 const MAX_TITLE_LENGTH = 80;
 
-/**
- * In-memory cache for conversation titles
- * Maps normalized conversation ID (without c_ prefix) to title
- */
-const conversationTitles = new Map<string, string>();
+import { LRUCache } from '@/utils/lru-cache';
 
 /**
- * Track active conversation objects to allow retroactive title updates
- * Maps conversation ID -> ConversationData object reference
+ * We keep a small cache of message-titles to apply them
+ * if they arrive *before* the message data.
  */
-const activeConversations = new Map<string, ConversationData>();
+const conversationTitles = new LRUCache<string, string>(50);
+
+/**
+ * We also keep a reference to active conversations so we can update
+ * their titles retroactively if the title arrives *after* the data.
+ */
+const activeConversations = new LRUCache<string, ConversationData>(50);
 
 /**
  * Parse the MaZiqc response to extract conversation titles

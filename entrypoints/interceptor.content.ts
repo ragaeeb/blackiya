@@ -31,6 +31,13 @@ export default defineContentScript({
     world: 'MAIN',
     runAt: 'document_start',
     main() {
+        // Idempotency: prevent double-injection if the extension is reloaded or content script runs twice
+        if ((window as any).__BLACKIYA_INTERCEPTED__) {
+            log('warn', '[Blackiya] Interceptor already initialized, skipping reinjection.');
+            return;
+        }
+        (window as any).__BLACKIYA_INTERCEPTED__ = true;
+
         const originalFetch = window.fetch;
 
         window.fetch = (async (...args: Parameters<typeof fetch>) => {
@@ -52,7 +59,7 @@ export default defineContentScript({
                                 data: text,
                                 platform: adapter.name,
                             },
-                            '*',
+                            window.location.origin,
                         );
                     })
                     .catch((err) => {
@@ -89,7 +96,7 @@ export default defineContentScript({
                                 data: responseText,
                                 platform: adapter.name,
                             },
-                            '*',
+                            window.location.origin,
                         );
                     } catch (e) {
                         log('error', '[Blackiya] Failed to read XHR response', e);

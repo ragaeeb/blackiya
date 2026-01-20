@@ -11,6 +11,7 @@
 import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
 import { logger } from '@/utils/logger';
+import { LRUCache } from '@/utils/lru-cache';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
 
 const MAX_TITLE_LENGTH = 80;
@@ -25,13 +26,13 @@ const CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
  * In-memory cache for conversation titles
  * Maps conversation ID (rest_id) to title
  */
-const conversationTitles = new Map<string, string>();
+const conversationTitles = new LRUCache<string, string>(50);
 
 /**
  * Track active conversation objects to allow retroactive title updates
  * Maps conversation ID -> ConversationData object reference
  */
-const activeConversations = new Map<string, ConversationData>();
+const activeConversations = new LRUCache<string, ConversationData>(50);
 
 /**
  * Parse the GrokHistory response to extract conversation titles

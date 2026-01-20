@@ -1,8 +1,10 @@
 /**
  * Platform Runner Utility
  *
- * Provides a unified logic for all platform content scripts.
- * Handles button injection, navigation observation, and data capture.
+ * Orchestrator that ties together the specialized managers for:
+ * - UI (ButtonManager)
+ * - Data (InterceptionManager)
+ * - Navigation (NavigationManager)
  *
  * @module utils/platform-runner
  */
@@ -11,152 +13,36 @@ import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
-import type { ConversationData } from '@/utils/types';
+import { InterceptionManager } from '@/utils/managers/interception-manager';
+import { NavigationManager } from '@/utils/managers/navigation-manager';
+import { ButtonManager } from '@/utils/ui/button-manager';
 
 export function runPlatform(): void {
     let currentAdapter: LLMPlatform | null = null;
-    let saveButton: HTMLButtonElement | null = null;
-    let navigationObserver: MutationObserver | null = null;
     let currentConversationId: string | null = null;
 
+    // -- Manager Initialization --
+
+    // 1. UI Manager
+    const buttonManager = new ButtonManager(handleSaveClick);
+
+    // 2. Data Manager
+    const interceptionManager = new InterceptionManager((capturedId) => {
+        // Callback when data is captured
+        const currentId = currentAdapter?.extractConversationId(window.location.href);
+        if (currentId && currentId === capturedId && buttonManager.exists()) {
+            buttonManager.setOpacity('1');
+        }
+    });
+
+    // 3. Navigation Manager
+    const navigationManager = new NavigationManager(() => {
+        handleNavigationChange();
+    });
+
     /**
-     * Store for captured conversation data
-     * maps conversationId -> data
+     * Core orchestrator logic functions
      */
-    const capturedConversations = new Map<string, ConversationData>();
-    const MAX_CACHED_CONVERSATIONS = 10;
-
-    function cacheConversation(id: string, data: ConversationData): void {
-        if (!capturedConversations.has(id) && capturedConversations.size >= MAX_CACHED_CONVERSATIONS) {
-            const oldestKey = capturedConversations.keys().next().value;
-            if (oldestKey) {
-                capturedConversations.delete(oldestKey);
-            }
-        }
-        capturedConversations.set(id, data);
-    }
-
-    const BUTTON_STYLES = `
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 14px;
-        margin-left: 8px;
-        border: none;
-        border-radius: 8px;
-        background: linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%);
-        color: white;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 4px rgba(16, 163, 127, 0.2);
-        z-index: 9999;
-    `;
-
-    const BUTTON_HOVER_STYLES = `
-        background: linear-gradient(135deg, #0d8a6a 0%, #0a7359 100%);
-        box-shadow: 0 4px 8px rgba(16, 163, 127, 0.3);
-        transform: translateY(-1px);
-    `;
-
-    const BUTTON_LOADING_STYLES = `
-        opacity: 0.7;
-        cursor: wait;
-    `;
-
-    const FIXED_STYLES = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 10000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    `;
-
-    let isFixedPosition = false;
-
-    function updateButtonStyles(state: 'default' | 'hover' | 'loading'): void {
-        if (!saveButton) {
-            return;
-        }
-
-        let css = BUTTON_STYLES;
-        if (state === 'hover') {
-            css += BUTTON_HOVER_STYLES;
-        } else if (state === 'loading') {
-            css += BUTTON_LOADING_STYLES;
-        }
-
-        if (isFixedPosition) {
-            css += FIXED_STYLES;
-        }
-
-        saveButton.style.cssText = css;
-    }
-
-    function createSaveButton(): HTMLButtonElement {
-        const button = document.createElement('button');
-        button.id = 'llm-capture-save-btn';
-        button.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Save JSON
-        `;
-
-        // Initial style
-        button.style.cssText = BUTTON_STYLES;
-
-        button.addEventListener('mouseenter', () => {
-            if (!button.disabled) {
-                updateButtonStyles('hover');
-            }
-        });
-
-        button.addEventListener('mouseleave', () => {
-            if (!button.disabled) {
-                updateButtonStyles('default');
-            }
-        });
-
-        button.addEventListener('click', handleSaveClick);
-
-        const conversationId = currentAdapter?.extractConversationId(window.location.href);
-        if (conversationId && !capturedConversations.has(conversationId)) {
-            button.style.opacity = '0.6';
-        }
-
-        return button;
-    }
-
-    function setButtonLoading(loading: boolean): void {
-        if (!saveButton) {
-            return;
-        }
-
-        saveButton.disabled = loading;
-        if (loading) {
-            saveButton.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
-                    <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="8"/>
-                </svg>
-                Saving...
-            `;
-            updateButtonStyles('loading');
-        } else {
-            saveButton.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Save JSON
-            `;
-            updateButtonStyles('default');
-        }
-    }
 
     async function handleSaveClick(): Promise<void> {
         if (!currentAdapter) {
@@ -170,14 +56,14 @@ export function runPlatform(): void {
             return;
         }
 
-        const data = capturedConversations.get(conversationId);
+        const data = interceptionManager.getConversation(conversationId);
         if (!data) {
             logger.warn('No data captured for this conversation yet.');
             alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
             return;
         }
 
-        setButtonLoading(true);
+        buttonManager.setLoading(true);
         try {
             const filename = currentAdapter.formatFilename(data);
             downloadAsJSON(data, filename);
@@ -186,70 +72,15 @@ export function runPlatform(): void {
             logger.error('Failed to save conversation:', error);
             alert('Failed to save conversation. Check console for details.');
         } finally {
-            setButtonLoading(false);
+            buttonManager.setLoading(false);
         }
-    }
-
-    function setupInterceptorListener(): void {
-        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Event handler logic requires nested checks
-        window.addEventListener('message', (event) => {
-            if (event.source !== window) {
-                return;
-            }
-
-            const message = event.data;
-
-            // Handle logs from interceptor
-            if (message?.type === 'LLM_LOG_ENTRY') {
-                const { level, message: logMessage, data, context } = message.payload;
-                // Forward to logger
-                // We prefix with context to make it clear where it came from
-                const prefixedMsg = `[${context}] ${logMessage}`;
-                if (level === 'error') {
-                    logger.error(prefixedMsg, ...(data || []));
-                } else if (level === 'warn') {
-                    logger.warn(prefixedMsg, ...(data || []));
-                } else {
-                    logger.info(prefixedMsg, ...(data || []));
-                }
-                return;
-            }
-
-            if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
-                logger.info('Received intercepted data message');
-                if (!currentAdapter) {
-                    logger.warn('No currentAdapter in runner, ignoring message');
-                    return;
-                }
-
-                const data = currentAdapter.parseInterceptedData(message.data, message.url);
-                if (data?.conversation_id) {
-                    const conversationId = data.conversation_id;
-                    cacheConversation(conversationId, data);
-                    logger.info(`Successfully captured/cached data for conversation: ${conversationId}`);
-
-                    const currentId = currentAdapter.extractConversationId(window.location.href);
-                    logger.debug(`Current URL ID: ${currentId}, Captured ID: ${conversationId}`);
-
-                    if (currentId === conversationId && saveButton) {
-                        saveButton.style.opacity = '1';
-                    }
-                } else {
-                    logger.warn('Failed to parse conversation ID from intercepted data');
-                }
-            }
-        });
     }
 
     function injectSaveButton(): void {
-        if (document.getElementById('llm-capture-save-btn')) {
-            return;
-        }
-
-        const conversationId = currentAdapter?.extractConversationId(window.location.href);
+        const conversationId = currentAdapter?.extractConversationId(window.location.href) || null;
         if (!conversationId) {
             logger.debug('No conversation ID found. Button will not be injected.');
-            removeSaveButton();
+            buttonManager.remove();
             return;
         }
 
@@ -259,27 +90,16 @@ export function runPlatform(): void {
             return;
         }
 
-        saveButton = createSaveButton();
-
-        // If injecting into body/html (fallback), use fixed positioning
-        if (target === document.body || target === document.documentElement) {
-            isFixedPosition = true;
-            updateButtonStyles('default');
-        } else {
-            isFixedPosition = false;
-        }
-
-        target.appendChild(saveButton);
+        buttonManager.inject(target, conversationId);
         currentConversationId = conversationId;
-        logger.info('Save button injected for conversation:', conversationId);
-    }
 
-    function removeSaveButton(): void {
-        if (saveButton?.parentElement) {
-            saveButton.parentElement.removeChild(saveButton);
+        // Check if we already have data
+        const hasData = interceptionManager.getConversation(conversationId);
+        if (hasData) {
+            buttonManager.setOpacity('1');
+        } else {
+            buttonManager.setOpacity('0.6');
         }
-        saveButton = null;
-        currentConversationId = null;
     }
 
     function handleNavigationChange(): void {
@@ -289,66 +109,57 @@ export function runPlatform(): void {
 
         const newConversationId = currentAdapter.extractConversationId(window.location.href);
         if (newConversationId !== currentConversationId) {
-            removeSaveButton();
+            buttonManager.remove();
             if (newConversationId) {
+                // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
+                const newAdapter = getPlatformAdapter(window.location.href);
+                if (newAdapter && newAdapter.name !== currentAdapter.name) {
+                    currentAdapter = newAdapter;
+                    updateManagers();
+                }
+
+                setTimeout(injectSaveButton, 500);
+            }
+        } else {
+            // ID hasn't changed, but maybe DOM has (re-render), ensure button exists
+            if (newConversationId && !buttonManager.exists()) {
                 setTimeout(injectSaveButton, 500);
             }
         }
     }
 
-    function setupNavigationObserver(): void {
-        let navigationTimeout: number | undefined;
-
-        navigationObserver = new MutationObserver(() => {
-            if (navigationTimeout) {
-                clearTimeout(navigationTimeout);
-            }
-
-            navigationTimeout = window.setTimeout(() => {
-                handleNavigationChange();
-                if (currentConversationId && !document.getElementById('llm-capture-save-btn')) {
-                    injectSaveButton();
-                }
-            }, 100);
-        });
-
-        navigationObserver.observe(document.body, {
-            childList: true,
-            subtree: true,
-        });
-
-        window.addEventListener('popstate', handleNavigationChange);
+    function updateManagers(): void {
+        interceptionManager.updateAdapter(currentAdapter);
     }
 
-    function addStyles(): void {
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes spin {
-                from { transform: rotate(0deg); }
-                to { transform: rotate(360deg); }
-            }
-        `;
-        document.head.appendChild(style);
-    }
+    // -- Boot Sequence --
 
-    // Initialization
-    currentAdapter = getPlatformAdapter(window.location.href);
+    const url = window.location.href;
+    currentAdapter = getPlatformAdapter(url);
+
     if (!currentAdapter) {
         logger.warn('No matching platform adapter for this URL');
         return;
     }
 
     logger.info(`Content script running for ${currentAdapter.name}`);
-    addStyles();
-    setupInterceptorListener();
-    currentConversationId = currentAdapter.extractConversationId(window.location.href);
-    setupNavigationObserver();
+
+    // Update managers with initial adapter
+    updateManagers();
+
+    // Start listening
+    interceptionManager.start();
+    navigationManager.start();
+
+    // Initial injection
+    currentConversationId = currentAdapter.extractConversationId(url);
     injectSaveButton();
 
+    // Retry logic for initial load (sometimes SPA takes time to render header)
     const retryIntervals = [1000, 2000, 5000];
     for (const delay of retryIntervals) {
         setTimeout(() => {
-            if (!document.getElementById('llm-capture-save-btn')) {
+            if (!buttonManager.exists()) {
                 injectSaveButton();
             }
         }, delay);

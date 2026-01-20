@@ -10,9 +10,12 @@ import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
 
 /**
- * List of all supported platforms
+ * Get all supported platforms
+ * Lazy-loaded to avoid circular dependencies
  */
-const PLATFORMS: LLMPlatform[] = [chatGPTAdapter, geminiAdapter, grokAdapter];
+function getPlatforms(): LLMPlatform[] {
+    return [chatGPTAdapter, geminiAdapter, grokAdapter];
+}
 
 /**
  * Get the appropriate platform adapter for a given URL
@@ -21,7 +24,7 @@ const PLATFORMS: LLMPlatform[] = [chatGPTAdapter, geminiAdapter, grokAdapter];
  * @returns The matching platform adapter or null if not found
  */
 export function getPlatformAdapter(url: string): LLMPlatform | null {
-    return PLATFORMS.find((p) => p.isPlatformUrl(url)) || null;
+    return getPlatforms().find((p) => p.isPlatformUrl(url)) || null;
 }
 
 /**
@@ -31,5 +34,5 @@ export function getPlatformAdapter(url: string): LLMPlatform | null {
  * @returns The matching platform adapter or null if not found
  */
 export function getPlatformAdapterByApiUrl(url: string): LLMPlatform | null {
-    return PLATFORMS.find((p) => p.apiEndpointPattern.test(url)) || null;
+    return getPlatforms().find((p) => p.apiEndpointPattern.test(url)) || null;
 }
