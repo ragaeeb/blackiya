@@ -201,6 +201,8 @@ blackiya/
 - ✅ **Grok Support**: Full support for Grok's GraphQL API, including conversation history and thinking traces.
 - ✅ **Smart Titles**: Automatic conversation title capture (with retroactive updates for async title loads).
 - ✅ **One-Click Download**: Instant download as formatted JSON file.
+- ✅ **Clipboard Copy**: One-click copy of conversation JSON directly to system clipboard.
+- ✅ **About Section**: Dynamic extension metadata (version, author) synchronized from `package.json`.
 - ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
 - ✅ **Robust UI**: Seamless button injection into ChatGPT, Gemini, and Grok interfaces.
 - ✅ **Message Tree**: Preserves complete nested message structure.
@@ -287,10 +289,10 @@ The ZIP file will be in `.output/` directory.
 
 ### Basic Usage
 
-1. Navigate to ChatGPT or Gemini and open a conversation
-2. Click the "Save JSON" button (injected by extension)
-3. The conversation JSON will download automatically
-4. File format: `{conversation-title}_{timestamp}.json`
+1. Navigate to ChatGPT, Gemini, or Grok and open a conversation
+2. Click the **"Save JSON"** button to download the file or **"Copy"** to copy to clipboard.
+3. The conversation JSON will download or be copied automatically.
+4. Download format: `{conversation-title}_{timestamp}.json`
 
 ### Manual Capture
 

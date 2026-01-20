@@ -706,6 +706,18 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 **Problem:** Certain WXT modules like `wxt/storage` can cause "Missing specifier" errors during production builds in some environments.
 **Solution:** Use the standard `browser` polyfill from `wxt/browser` and access `browser.storage.local` directly for critical utilities like the logger. This avoids build-time resolution overhead for virtual modules.
 
+### 10. Multi-Action UI Containers
+**Problem:** Early versions used a single button. Adding "Copy" required a container-based approach for clean grouping and alignment across different platform headers.
+**Solution:** Refactor `ButtonManager` to manage a DOM `container` that wraps all actions. This allows shared styles (like fixed positioning or opacity) to be applied to the group once, rather than to individual buttons.
+
+### 11. Instant Feedback vs. Async Loading
+**Problem:** Showing a "Loading..." state for instant operations (like `navigator.clipboard.writeText`) causes visual "flickering" as the state swaps twice in milliseconds.
+**Solution:** Skip the loading state for synchronous or near-instant operations. Instead, transition directly from the default state to a "Success" state (e.g., "Copied!" with a checkmark) and use a `setTimeout` to reset.
+
+### 12. Dynamic Extension Metadata
+**Problem:** Hardcoding version/author in the Popup UI leads to staleness as `package.json` updates.
+**Solution:** Import `package.json` directly into the entrypoint (e.g., `App.tsx`). WXT/Vite handles this cleanly, allowing you to use `packageJson.version` and `packageJson.author` for "About" sections, ensuring the UI always reflects the truth.
+
 ## 🎓 Learning Resources
 
 For AI agents unfamiliar with concepts:
