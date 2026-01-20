@@ -89,20 +89,9 @@ function isTitlesEndpoint(url: string): boolean {
 }
 
 /**
- * Extract text content from Grok message data
- */
-function extractMessageText(chatItem: any): string {
-    if (!chatItem?.message) {
-        return '';
-    }
-
-    // The message is a string in the chat_item
-    return typeof chatItem.message === 'string' ? chatItem.message : '';
-}
-
-/**
  * Extract thinking/reasoning content from Grok message
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsing logic involves nested structures
 function extractThinkingContent(chatItem: any):
     | Array<{
           summary: string;
@@ -180,8 +169,8 @@ function parseGrokResponse(data: any): ConversationData | null {
         }
 
         // Extract conversation metadata
-        const isPinned = conversationData.is_pinned || false;
-        const cursor = conversationData.cursor || '';
+        const _isPinned = conversationData.is_pinned || false;
+        const _cursor = conversationData.cursor || '';
 
         // Build the conversation mapping
         const mapping: Record<string, MessageNode> = {};
@@ -213,7 +202,6 @@ function parseGrokResponse(data: any): ConversationData | null {
 
             // Extract conversation ID from first message
             if (i === 0 && chatItemId) {
-                // Use the chat_item_id as a reference, but we'll use a more stable ID
                 conversationId = chatItemId;
             }
 
@@ -390,8 +378,8 @@ export const grokAdapter: LLMPlatform = {
      *
      * @param data - Raw text or parsed object
      * @param url - The API endpoint URL
-     * @returns Validated ConversationData or null
      */
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Centralized logic for parsing Grok data
     parseInterceptedData(data: string | any, url: string): ConversationData | null {
         // Check if this is a titles endpoint
         if (isTitlesEndpoint(url)) {
@@ -413,7 +401,40 @@ export const grokAdapter: LLMPlatform = {
         // Otherwise, parse as conversation data
         try {
             const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokResponse(parsed);
+            const conversationData = parseGrokResponse(parsed);
+
+            // Critical Fix: Ensure conversation ID matches the one in the URL if possible
+            // The XHR response often has internal IDs that don't match the URL "conversation" param
+            if (conversationData && url) {
+                // Attempt to extract RestID from the request payload variables if available in the URL
+                // We utilize URLSearchParams to handle decoding automatically
+                try {
+                    const urlObj = new URL(url);
+                    const variablesStr = urlObj.searchParams.get('variables');
+                    if (variablesStr) {
+                        const variables = JSON.parse(variablesStr);
+                        // restId matches what we need to satisfy the URL ID check
+                        if (variables?.restId) {
+                            console.log(
+                                `[Blackiya/Grok] Overriding conversation ID from URL params (parsed): ${conversationData.conversation_id} -> ${variables.restId}`,
+                            );
+                            conversationData.conversation_id = variables.restId;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Blackiya/Grok] Failed to parse URL variables, falling back to regex', e);
+                    // Fallback to regex if URL parsing fails
+                    const match = url.match(/%22restId%22%3A%22(\d+)%22/);
+                    if (match?.[1]) {
+                        console.log(
+                            `[Blackiya/Grok] Overriding conversation ID from URL params (regex): ${conversationData.conversation_id} -> ${match[1]}`,
+                        );
+                        conversationData.conversation_id = match[1];
+                    }
+                }
+            }
+
+            return conversationData;
         } catch (e) {
             console.error('[Blackiya/Grok] Failed to parse data:', e);
             return null;

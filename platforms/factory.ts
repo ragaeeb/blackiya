@@ -6,12 +6,13 @@
 
 import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { geminiAdapter } from '@/platforms/gemini';
+import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
 
 /**
  * List of all supported platforms
  */
-const PLATFORMS: LLMPlatform[] = [chatGPTAdapter, geminiAdapter];
+const PLATFORMS: LLMPlatform[] = [chatGPTAdapter, geminiAdapter, grokAdapter];
 
 /**
  * Get the appropriate platform adapter for a given URL

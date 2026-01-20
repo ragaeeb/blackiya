@@ -99,7 +99,7 @@ describe('Grok Platform Adapter', () => {
         it('should parse valid Grok conversation JSON data from object', () => {
             // Pass as object (TypeScript will accept this as 'any')
             const result = grokAdapter.parseInterceptedData(
-                sampleConversation as any,
+                JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).not.toBeNull();
@@ -118,7 +118,7 @@ describe('Grok Platform Adapter', () => {
 
         it('should return null for invalid data', () => {
             const result = grokAdapter.parseInterceptedData(
-                { invalid: 'data' },
+                JSON.stringify({ invalid: 'data' }),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).toBeNull();
@@ -133,7 +133,7 @@ describe('Grok Platform Adapter', () => {
                 },
             };
             const result = grokAdapter.parseInterceptedData(
-                emptyData,
+                JSON.stringify(emptyData),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).toBeNull();
@@ -141,7 +141,7 @@ describe('Grok Platform Adapter', () => {
 
         it('should extract conversation title from first user message', () => {
             const result = grokAdapter.parseInterceptedData(
-                sampleConversation as any,
+                JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result?.title).toBeDefined();
@@ -150,7 +150,7 @@ describe('Grok Platform Adapter', () => {
 
         it('should create proper message tree structure', () => {
             const result = grokAdapter.parseInterceptedData(
-                sampleConversation as any,
+                JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).not.toBeNull();
@@ -167,7 +167,7 @@ describe('Grok Platform Adapter', () => {
 
         it('should preserve message metadata', () => {
             const result = grokAdapter.parseInterceptedData(
-                sampleConversation as any,
+                JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             const nodes = Object.values(result!.mapping).filter((n) => n.message !== null);
@@ -181,7 +181,7 @@ describe('Grok Platform Adapter', () => {
 
         it('should handle messages with thinking content', () => {
             const result = grokAdapter.parseInterceptedData(
-                sampleConversation as any,
+                JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             const nodes = Object.values(result!.mapping).filter((n) => n.message?.content.content_type === 'thoughts');
@@ -200,14 +200,14 @@ describe('Grok Platform Adapter', () => {
         it('should parse GrokHistory and cache titles', () => {
             // First, parse the history endpoint (returns null but caches titles)
             const historyResult = grokAdapter.parseInterceptedData(
-                sampleHistory as any,
+                JSON.stringify(sampleHistory),
                 'https://x.com/i/api/graphql/test/GrokHistory',
             );
             expect(historyResult).toBeNull(); // History endpoint doesn't return ConversationData
 
             // Then parse a conversation - it should use the cached title
             const conversationResult = grokAdapter.parseInterceptedData(
-                sampleConversation as any,
+                JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
 
@@ -228,7 +228,7 @@ describe('Grok Platform Adapter', () => {
         it('should handle invalid GrokHistory data gracefully', () => {
             const invalidHistory = { data: { invalid: 'structure' } };
             const result = grokAdapter.parseInterceptedData(
-                invalidHistory,
+                JSON.stringify(invalidHistory),
                 'https://x.com/i/api/graphql/test/GrokHistory',
             );
             expect(result).toBeNull();
@@ -330,7 +330,7 @@ describe('Grok Platform Adapter', () => {
 
     describe('conversation data structure validation', () => {
         const result = grokAdapter.parseInterceptedData(
-            sampleConversation as any,
+            JSON.stringify(sampleConversation),
             'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
         );
 
@@ -367,7 +367,7 @@ describe('Grok Platform Adapter', () => {
             expect(messagesWithContent.length).toBeGreaterThan(0);
 
             for (const node of messagesWithContent) {
-                expect(['user', 'assistant']).toContain(node.message?.author.role);
+                expect(['user', 'assistant']).toContain(node.message!.author.role);
             }
         });
 

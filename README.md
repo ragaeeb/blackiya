@@ -390,4 +390,6 @@ For issues and questions:
 
 ---
 
-# Built with ❤️ using WXT, Bun, and Biome
+# Inspiration for the Name
+
+Inspiration for the name came from Asmāʾ, who was one day rolling around by herself saying: “Blackiya ABC”.
