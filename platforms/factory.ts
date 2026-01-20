@@ -10,8 +10,8 @@ import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
 
 /**
- * Get all supported platforms
- * Lazy-loaded to avoid circular dependencies
+ * Get all supported platforms.
+ * Encapsulated in a function to allow future extension (e.g., dynamic registration).
  */
 function getPlatforms(): LLMPlatform[] {
     return [chatGPTAdapter, geminiAdapter, grokAdapter];

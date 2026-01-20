@@ -17,16 +17,41 @@ mock.module('wxt/browser', () => ({
     browser: browserMock,
 }));
 
-import { geminiAdapter } from '@/platforms/gemini';
+// Mock logger locally to ensure it's applied
+mock.module('@/utils/logger', () => ({
+    logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+    },
+}));
+
+// Mock logger locally to ensure it's applied
+mock.module('@/utils/logger', () => ({
+    logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+    },
+}));
+
+// ... mocks are defined above ...
+
 import type { Message } from '@/utils/types';
 
 describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;
     let titlesResponseRaw: string;
+    let geminiAdapter: any;
 
     beforeAll(async () => {
-        // Load test fixtures from the data/gemini folder
-        // Use join(import.meta.dir, '..', 'data', ...) to go up from platforms/ to root
+        // Dynamic import to ensure mocks apply
+        const module = await import('@/platforms/gemini');
+        geminiAdapter = module.geminiAdapter;
+
+        // Load test fixtures
         conversationResponseRaw = await Bun.file(
             join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_conversation.txt'),
         ).text();

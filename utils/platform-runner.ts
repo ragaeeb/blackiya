@@ -164,4 +164,15 @@ export function runPlatform(): void {
             }
         }, delay);
     }
+
+    // Cleanup on unload
+    window.addEventListener('beforeunload', () => {
+        try {
+            interceptionManager.stop();
+            navigationManager.stop();
+            buttonManager.remove();
+        } catch (error) {
+            logger.debug('Error during cleanup:', error);
+        }
+    });
 }

@@ -27,6 +27,12 @@ export class NavigationManager {
             this.observer.disconnect();
             this.observer = null;
         }
+
+        if (this.navigationTimeout) {
+            clearTimeout(this.navigationTimeout);
+            this.navigationTimeout = undefined;
+        }
+
         window.removeEventListener('popstate', this.onNavigationChange);
 
         // Note: we can't easily remove the patched pushState/replaceState hooks

@@ -9,6 +9,7 @@ import { logger } from '@/utils/logger';
 export class ButtonManager {
     private button: HTMLButtonElement | null = null;
     private isFixedPosition = false;
+    private currentOpacity = '1';
     private onSaveClick: () => Promise<void>;
 
     constructor(onSaveClick: () => Promise<void>) {
@@ -54,7 +55,8 @@ export class ButtonManager {
         }
 
         this.button.disabled = loading;
-        this.button.innerHTML = ''; // Clear safely
+        this.button.disabled = loading;
+        this.button.replaceChildren();
 
         if (loading) {
             const icon = this.createIconSVG('loading');
@@ -74,6 +76,7 @@ export class ButtonManager {
     }
 
     public setOpacity(opacity: string): void {
+        this.currentOpacity = opacity;
         if (this.button) {
             this.button.style.opacity = opacity;
         }
@@ -137,6 +140,7 @@ export class ButtonManager {
             transition: all 0.2s ease;
             box-shadow: 0 2px 4px rgba(16, 163, 127, 0.2);
             z-index: 9999;
+            opacity: ${this.currentOpacity};
         `;
 
         if (state === 'hover') {

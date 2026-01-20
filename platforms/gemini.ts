@@ -10,6 +10,7 @@
 
 import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { extractBalancedJsonArray } from '@/utils/json-parser';
 import { logger } from '@/utils/logger';
 import type { ConversationData, MessageNode } from '@/utils/types';
 
@@ -41,56 +42,14 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         const MAGIC_HEADER_REGEX = /^\s*\)\s*\]\s*\}\s*'/;
         const cleanedData = data.replace(MAGIC_HEADER_REGEX, '').trim();
 
-        // 2. Find JSON array
-        const startBracket = cleanedData.indexOf('[');
-        if (startBracket === -1) {
-            logger.info('[Blackiya/Gemini/Titles] No JSON array found');
-            return null;
-        }
+        // 2. Extract balanced JSON
+        const jsonStr = extractBalancedJsonArray(cleanedData);
 
-        // 3. Extract balanced JSON
-        let balance = 0;
-        let endBracket = -1;
-        let insideString = false;
-        let isEscaped = false;
-
-        for (let i = startBracket; i < cleanedData.length; i++) {
-            const char = cleanedData[i];
-
-            if (isEscaped) {
-                isEscaped = false;
-                continue;
-            }
-
-            if (char === '\\') {
-                isEscaped = true;
-                continue;
-            }
-
-            if (char === '"') {
-                insideString = !insideString;
-                continue;
-            }
-
-            if (!insideString) {
-                if (char === '[') {
-                    balance++;
-                } else if (char === ']') {
-                    balance--;
-                    if (balance === 0) {
-                        endBracket = i;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (endBracket === -1) {
+        if (!jsonStr) {
             logger.info('[Blackiya/Gemini/Titles] Could not find balanced JSON array');
             return null;
         }
 
-        const jsonStr = cleanedData.substring(startBracket, endBracket + 1);
         const wrapper = JSON.parse(jsonStr);
 
         if (!Array.isArray(wrapper) || wrapper.length === 0) {
@@ -245,56 +204,14 @@ export const geminiAdapter: LLMPlatform = {
             const MAGIC_HEADER_REGEX = /^\s*\)\s*\]\s*\}\s*'/;
             const cleanedData = data.replace(MAGIC_HEADER_REGEX, '').trim();
 
-            // 2. Find JSON array
-            const startBracket = cleanedData.indexOf('[');
-            if (startBracket === -1) {
-                logger.info('[Blackiya/Gemini] No JSON array found');
-                return null;
-            }
+            // 2. Extract balanced JSON
+            const jsonStr = extractBalancedJsonArray(cleanedData);
 
-            // 3. Extract balanced JSON
-            let balance = 0;
-            let endBracket = -1;
-            let insideString = false;
-            let isEscaped = false;
-
-            for (let i = startBracket; i < cleanedData.length; i++) {
-                const char = cleanedData[i];
-
-                if (isEscaped) {
-                    isEscaped = false;
-                    continue;
-                }
-
-                if (char === '\\') {
-                    isEscaped = true;
-                    continue;
-                }
-
-                if (char === '"') {
-                    insideString = !insideString;
-                    continue;
-                }
-
-                if (!insideString) {
-                    if (char === '[') {
-                        balance++;
-                    } else if (char === ']') {
-                        balance--;
-                        if (balance === 0) {
-                            endBracket = i;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (endBracket === -1) {
+            if (!jsonStr) {
                 logger.info('[Blackiya/Gemini] Could not find balanced JSON array');
                 return null;
             }
 
-            const jsonStr = cleanedData.substring(startBracket, endBracket + 1);
             const wrapper = JSON.parse(jsonStr);
 
             if (!Array.isArray(wrapper) || wrapper.length === 0) {
@@ -362,12 +279,11 @@ export const geminiAdapter: LLMPlatform = {
                     ? conversationTitles.get(conversationId)!
                     : 'Gemini Conversation';
 
-            logger.info('[Blackiya/Gemini] Looking up title for ID:', conversationId);
-            logger.info(
-                '[Blackiya/Gemini] Title cache has this ID:',
-                conversationId ? conversationTitles.has(conversationId) : false,
-            );
-            logger.info('[Blackiya/Gemini] Using title:', conversationTitle);
+            logger.info('[Blackiya/Gemini] Title lookup:', {
+                conversationId,
+                cached: conversationId ? conversationTitles.has(conversationId) : false,
+                title: conversationTitle,
+            });
 
             // 8. Extract messages
             const parsedMessages: any[] = [];

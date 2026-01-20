@@ -43,7 +43,7 @@
 │  - Intercepts network requests (via interceptor)            │
 │  - Processes and stores conversation data                   │
 │  - Unified sink for all extension logs                      │
-│  - Saves logs to chrome.storage.local                       │
+│  - Saves logs to browser.storage.local                       │
 └───────────────────┬─────────────────────────────────────────┘
                     │
                     ▼
@@ -82,7 +82,7 @@
 **Communication:**
 - Listens: `chrome.runtime.onMessage`
 - Sends: `chrome.tabs.sendMessage()`
-- Storage: `chrome.storage.local`
+- Storage: `browser.storage.local`
 - Logging: **Central sink** for all cross-context logs via `LOG_ENTRY` message type.
 
 #### 2. Popup UI (`entrypoints/popup/`)
@@ -240,6 +240,9 @@ export function generateTimestamp(): string
 ```typescript
 export const logger: ExtensionLogger
 // Methods: debug, info, warn, error, setLevel
+// Levels: Debug (0), Info (1), Warn (2), Error (3)
+// Transports: Console + Persistent storage (background only)
+// Cross-context: Logs from content/popup forwarded to background via LOG_ENTRY messages
 ```
 
 **`utils/logs-storage.ts`** - Persistent log management
@@ -249,6 +252,17 @@ export const logsStorage: {
   getLogs(): Promise<LogEntry[]>
   clearLogs(): Promise<void>
 }
+
+export interface LogEntry {
+  timestamp: string
+  level: string
+  context: string
+  message: string
+  data?: any
+}
+
+// Uses ring-buffer to stay under browser.storage.local 5MB quota
+// Buffers writes to reduce I/O (FLUSH_THRESHOLD=50, FLUSH_INTERVAL=2000ms)
 ```
 
 **`utils/types.ts`** - TypeScript definitions
@@ -309,7 +323,7 @@ export interface Message {
 ### Browser APIs
 - **Chrome Extensions API (Manifest V3)**
   - `chrome.runtime` - Message passing
-  - `chrome.storage` - Local storage
+  - `browser.storage` - Local storage
   - `chrome.downloads` - File downloads
   - `chrome.tabs` - Tab management
   - `chrome.webRequest` - Network interception (optional)
@@ -620,7 +634,7 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 
 1. **Manifest V3 Required**
    - Service workers instead of background pages
-   - Limited storage (5MB for `chrome.storage.local`)
+   - Limited storage (5MB for `browser.storage.local`)
    - No `eval()` or inline scripts
 
 2. **Content Script Isolation**
@@ -630,7 +644,7 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 
 3. **Background Script Persistence**
    - Service workers terminate after inactivity
-   - State must be saved to `chrome.storage`
+   - State must be saved to `browser.storage`
    - Event-driven architecture only
 
 ### Platform-Specific Constraints
@@ -685,8 +699,8 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 **Solution:** Implement `@/` path alias pointing to the root. Ensure `tsconfig.json` and build tools are aligned. Refactor all logic and test imports to use absolute paths.
 
 ### 8. Cross-Context Logging Funnel
-**Problem:** `console.log` in Content Scripts is hard to retrieve from the Background script or for user export.
-**Solution:** Implement a custom `tslog` transport that detects the current context. Content script logs are sent via `chrome.runtime.sendMessage` to the Background worker, which acts as a central sink and writes to `chrome.storage.local`.
+**Problem:** `console.log` in Content Scripts is difficult to retrieve from the Background script or for user export.
+**Solution:** Implement a custom `tslog` transport that detects the current context. Content script logs are sent via `chrome.runtime.sendMessage` to the Background worker, which acts as a central sink and writes to `browser.storage.local`.
 
 ### 9. Build-Time Module Resolution Issues
 **Problem:** Certain WXT modules like `wxt/storage` can cause "Missing specifier" errors during production builds in some environments.
@@ -724,7 +738,7 @@ bun run check        # Lint & format (auto-fix)
 
 - `chrome.runtime.sendMessage()` - Send messages
 - `chrome.runtime.onMessage.addListener()` - Receive messages
-- `chrome.storage.local.get/set()` - Persist data
+- `browser.storage.local.get/set()` - Persist data
 - `chrome.downloads.download()` - Download files
 - `chrome.tabs.query()` - Get active tab
 +

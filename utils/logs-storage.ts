@@ -10,46 +10,96 @@ export interface LogEntry {
 
 const MAX_LOGS = 1000;
 const STORAGE_KEY = 'logs';
+const FLUSH_INTERVAL_MS = 2000;
+const FLUSH_THRESHOLD = 50;
 
-export const logsStorage = {
+export class BufferedLogsStorage {
+    private buffer: LogEntry[] = [];
+    private flushTimer: ReturnType<typeof setTimeout> | null = null;
+    private isFlushing = false;
+    private storage: any;
+
+    constructor(storageBackend?: any) {
+        this.storage = storageBackend || browser.storage.local;
+    }
+
     /**
-     * Append a log entry to storage.
-     * Implements a rolling buffer to prevent exceeding storage limits.
+     * Append a log entry to the buffer.
+     * Flushes immediately if threshold is reached.
      */
     async saveLog(entry: LogEntry): Promise<void> {
-        try {
-            // We use raw browser.storage.local
-            // For a high-frequency logger, reading the whole array, appending, and writing back is slow.
-            // But sufficient for this use case.
+        this.buffer.push(entry);
 
-            const result = await browser.storage.local.get(STORAGE_KEY);
-            const logs: LogEntry[] = (result[STORAGE_KEY] as LogEntry[]) || [];
-
-            logs.push(entry);
-
-            // Rotate if too large
-            if (logs.length > MAX_LOGS) {
-                logs.splice(0, logs.length - MAX_LOGS);
-            }
-
-            await browser.storage.local.set({ [STORAGE_KEY]: logs });
-        } catch (e) {
-            console.error('Failed to save log', e);
+        if (this.buffer.length >= FLUSH_THRESHOLD) {
+            await this.flush();
+        } else {
+            this.scheduleFlush();
         }
-    },
+    }
 
     /**
-     * Retrieve all stored logs
+     * Retrieve all stored logs (flushes buffer first)
      */
     async getLogs(): Promise<LogEntry[]> {
-        const result = await browser.storage.local.get(STORAGE_KEY);
+        await this.flush();
+        const result = await this.storage.get(STORAGE_KEY);
         return (result[STORAGE_KEY] as LogEntry[]) || [];
-    },
+    }
 
     /**
      * Clear all logs
      */
     async clearLogs(): Promise<void> {
-        await browser.storage.local.remove(STORAGE_KEY);
-    },
-};
+        this.buffer = [];
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        await this.storage.remove(STORAGE_KEY);
+    }
+
+    private scheduleFlush() {
+        if (this.flushTimer) {
+            return;
+        }
+        this.flushTimer = setTimeout(() => {
+            this.flush();
+        }, FLUSH_INTERVAL_MS);
+    }
+
+    private async flush() {
+        if (this.isFlushing || this.buffer.length === 0) {
+            return;
+        }
+
+        this.isFlushing = true;
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+
+        try {
+            const batch = [...this.buffer];
+            this.buffer = [];
+
+            const result = await this.storage.get(STORAGE_KEY);
+            const currentLogs: LogEntry[] = (result[STORAGE_KEY] as LogEntry[]) || [];
+
+            const mergedLogs = currentLogs.concat(batch);
+
+            // Rotate if too large
+            if (mergedLogs.length > MAX_LOGS) {
+                mergedLogs.splice(0, mergedLogs.length - MAX_LOGS);
+            }
+
+            await this.storage.set({ [STORAGE_KEY]: mergedLogs });
+        } catch (e) {
+            console.error('Failed to flush logs to storage', e);
+            // Put batch back in buffer? Simple retry strategy for now is just basic error logging
+        } finally {
+            this.isFlushing = false;
+        }
+    }
+}
+
+export const logsStorage = new BufferedLogsStorage();

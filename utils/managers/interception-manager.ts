@@ -44,6 +44,10 @@ export class InterceptionManager {
             return;
         }
 
+        if (event.origin !== window.location.origin) {
+            return;
+        }
+
         const message = event.data;
 
         // Handle logs
@@ -59,15 +63,25 @@ export class InterceptionManager {
     };
 
     private handleLogEntry(payload: any): void {
+        if (!payload || typeof payload.message !== 'string') {
+            logger.warn('Malformed LLM_LOG_ENTRY payload', payload);
+            return;
+        }
+
         const { level, message: logMessage, data, context } = payload;
-        const prefixedMsg = `[${context}] ${logMessage}`;
+
+        // Normalize data to array
+        const extra = Array.isArray(data) ? data : data !== undefined ? [data] : [];
+        const prefixedMsg = `[${context ?? 'interceptor'}] ${logMessage}`;
 
         if (level === 'error') {
-            logger.error(prefixedMsg, ...(data || []));
+            logger.error(prefixedMsg, ...extra);
         } else if (level === 'warn') {
-            logger.warn(prefixedMsg, ...(data || []));
+            logger.warn(prefixedMsg, ...extra);
+        } else if (level === 'debug') {
+            logger.debug(prefixedMsg, ...extra);
         } else {
-            logger.info(prefixedMsg, ...(data || []));
+            logger.info(prefixedMsg, ...extra);
         }
     }
 

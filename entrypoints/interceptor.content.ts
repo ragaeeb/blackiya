@@ -22,7 +22,7 @@ function log(level: 'info' | 'warn' | 'error', message: string, ...args: any[]) 
                 context: 'interceptor',
             },
         },
-        '*',
+        window.location.origin,
     );
 }
 
@@ -37,6 +37,15 @@ export default defineContentScript({
             return;
         }
         (window as any).__BLACKIYA_INTERCEPTED__ = true;
+
+        // Store originals for cleanup/restore
+        if (!(window as any).__BLACKIYA_ORIGINALS__) {
+            (window as any).__BLACKIYA_ORIGINALS__ = {
+                fetch: window.fetch,
+                XMLHttpRequestOpen: XMLHttpRequest.prototype.open,
+                XMLHttpRequestSend: XMLHttpRequest.prototype.send,
+            };
+        }
 
         const originalFetch = window.fetch;
 
