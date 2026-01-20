@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/icon_full.png" width="128" alt="Blackiya Logo" />
+  <img src="public/icon.png" width="128" alt="Blackiya Logo" />
 </p>
 
 # Blackiya

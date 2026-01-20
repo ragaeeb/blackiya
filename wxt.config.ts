@@ -10,13 +10,13 @@ export default defineConfig({
         permissions: ['storage', 'activeTab', 'downloads'],
         host_permissions: [...SUPPORTED_PLATFORM_URLS],
         action: {
-            default_icon: 'icon.svg',
+            default_icon: 'icon.png',
         },
         icons: {
-            '16': 'icon.svg',
-            '32': 'icon.svg',
-            '48': 'icon.svg',
-            '128': 'icon.svg',
+            '16': 'icon/16.png',
+            '32': 'icon/32.png',
+            '48': 'icon/48.png',
+            '128': 'icon/128.png',
         },
     },
 });
