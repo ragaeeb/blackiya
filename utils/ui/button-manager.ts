@@ -1,160 +1,159 @@
 /**
  * Button Manager Utility
  *
- * Handles the creation, styling, injecting, and state management of the "Save JSON" button.
- * Decoupled from data processing logic.
+ * Handles the creation, styling, injecting, and state management of the UI buttons (Save JSON, Copy JSON).
  */
 import { logger } from '@/utils/logger';
 
 export class ButtonManager {
-    private button: HTMLButtonElement | null = null;
+    private container: HTMLElement | null = null;
+    private saveStartButton: HTMLButtonElement | null = null;
+    private copyButton: HTMLButtonElement | null = null;
     private isFixedPosition = false;
     private currentOpacity = '1';
     private onSaveClick: () => Promise<void>;
+    private onCopyClick: () => Promise<void>;
 
-    constructor(onSaveClick: () => Promise<void>) {
+    constructor(onSaveClick: () => Promise<void>, onCopyClick: () => Promise<void>) {
         this.onSaveClick = onSaveClick;
+        this.onCopyClick = onCopyClick;
         this.injectStyles();
     }
 
     public inject(target: HTMLElement, conversationId: string | null): void {
-        if (this.button && document.contains(this.button)) {
+        if (this.container && document.contains(this.container)) {
             return;
         }
 
-        this.button = this.createButton();
+        this.container = this.createContainer();
+        this.saveStartButton = this.createButton('save', 'Save JSON', this.onSaveClick);
+        this.copyButton = this.createButton('copy', 'Copy', this.onCopyClick);
 
-        // Fixed position fallback logic
-        if (target === document.body || target === document.documentElement) {
-            this.isFixedPosition = true;
-            this.updateStyles('default');
-        } else {
-            this.isFixedPosition = false;
-            // Reset to default inline styles if previously fixed
-            this.button.style.cssText = this.getStyles('default');
+        if (this.container && this.saveStartButton && this.copyButton) {
+            this.container.appendChild(this.saveStartButton);
+            this.container.appendChild(this.copyButton);
+
+            // Fixed position fallback logic
+            if (target === document.body || target === document.documentElement) {
+                this.isFixedPosition = true;
+                this.updateContainerStyles();
+            } else {
+                this.isFixedPosition = false;
+                this.container.style.cssText = this.getContainerStyles('default');
+            }
+
+            target.appendChild(this.container);
+            logger.info(`Save/Copy buttons injected for conversation: ${conversationId}`);
         }
-
-        target.appendChild(this.button);
-        logger.info(`Save button injected for conversation: ${conversationId}`);
     }
 
     public remove(): void {
-        if (this.button?.parentElement) {
-            this.button.parentElement.removeChild(this.button);
+        if (this.container?.parentElement) {
+            this.container.parentElement.removeChild(this.container);
         }
-        this.button = null;
+        this.container = null;
+        this.saveStartButton = null;
+        this.copyButton = null;
     }
 
     public exists(): boolean {
-        return !!this.button && document.contains(this.button);
+        return !!this.container && document.contains(this.container);
     }
 
-    public setLoading(loading: boolean): void {
-        if (!this.button) {
+    public setLoading(loading: boolean, action: 'save' | 'copy'): void {
+        if (!this.saveStartButton || !this.copyButton) {
             return;
         }
 
-        this.button.disabled = loading;
-        this.button.disabled = loading;
-        this.button.replaceChildren();
+        const activeBtn = action === 'save' ? this.saveStartButton : this.copyButton;
+        const otherBtn = action === 'save' ? this.copyButton : this.saveStartButton;
+
+        activeBtn.disabled = loading;
+        otherBtn.disabled = loading; // Disable both to prevent conflict
+
+        activeBtn.replaceChildren();
 
         if (loading) {
             const icon = this.createIconSVG('loading');
             const textSpan = document.createElement('span');
-            textSpan.textContent = 'Saving...';
-            this.button.appendChild(icon);
-            this.button.appendChild(textSpan);
-            this.updateStyles('loading');
+            textSpan.textContent = action === 'save' ? 'Saving...' : 'Copying...';
+            activeBtn.appendChild(icon);
+            activeBtn.appendChild(textSpan);
+            activeBtn.style.opacity = '0.8';
         } else {
-            const icon = this.createIconSVG('save');
+            const icon = this.createIconSVG(action);
             const textSpan = document.createElement('span');
-            textSpan.textContent = 'Save JSON';
-            this.button.appendChild(icon);
-            this.button.appendChild(textSpan);
-            this.updateStyles('default');
+            textSpan.textContent = action === 'save' ? 'Save JSON' : 'Copy';
+            activeBtn.appendChild(icon);
+            activeBtn.appendChild(textSpan);
+            activeBtn.style.opacity = '1';
         }
     }
 
     public setOpacity(opacity: string): void {
         this.currentOpacity = opacity;
-        if (this.button) {
-            this.button.style.opacity = opacity;
+        if (this.container) {
+            this.container.style.opacity = opacity;
         }
     }
 
-    private createButton(): HTMLButtonElement {
-        const button = document.createElement('button');
-        button.id = 'llm-capture-save-btn';
+    private createContainer(): HTMLElement {
+        const div = document.createElement('div');
+        div.id = 'blackiya-button-container';
+        div.style.cssText = this.getContainerStyles('default');
+        return div;
+    }
 
-        const icon = this.createIconSVG('save');
+    private createButton(type: 'save' | 'copy', label: string, onClick: () => Promise<void>): HTMLButtonElement {
+        const button = document.createElement('button');
+        button.id = `blackiya-${type}-btn`;
+
+        const icon = this.createIconSVG(type);
         const textSpan = document.createElement('span');
-        textSpan.textContent = 'Save JSON';
+        textSpan.textContent = label;
 
         button.appendChild(icon);
         button.appendChild(textSpan);
 
-        button.style.cssText = this.getStyles('default');
+        button.style.cssText = this.getButtonDefaultStyles(type);
 
         button.addEventListener('mouseenter', () => {
             if (!button.disabled) {
-                this.updateStyles('hover');
+                button.style.transform = 'translateY(-1px)';
+                button.style.boxShadow =
+                    type === 'save' ? '0 4px 8px rgba(16, 163, 127, 0.3)' : '0 4px 8px rgba(64, 65, 79, 0.2)';
             }
         });
 
         button.addEventListener('mouseleave', () => {
             if (!button.disabled) {
-                this.updateStyles('default');
+                button.style.transform = 'none';
+                button.style.boxShadow = 'none';
             }
         });
 
-        button.addEventListener('click', this.onSaveClick);
-
-        // If we have an ID but no data yet (handled by caller logic typically,
-        // but here we just set initial opacity if passed)
-        // logic moved to orchestration, but keeping opacity control public
+        button.addEventListener('click', onClick);
 
         return button;
     }
 
-    private updateStyles(state: 'default' | 'hover' | 'loading'): void {
-        if (!this.button) {
+    private updateContainerStyles(): void {
+        if (!this.container) {
             return;
         }
-        this.button.style.cssText = this.getStyles(state);
+        this.container.style.cssText = this.getContainerStyles('default');
     }
 
-    private getStyles(state: 'default' | 'hover' | 'loading'): string {
+    private getContainerStyles(_state: 'default'): string {
         let css = `
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 14px;
+            gap: 8px;
             margin-left: 8px;
-            border: none;
-            border-radius: 8px;
-            background: linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%);
-            color: white;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 4px rgba(16, 163, 127, 0.2);
             z-index: 9999;
             opacity: ${this.currentOpacity};
+            transition: opacity 0.2s ease;
         `;
-
-        if (state === 'hover') {
-            css += `
-                background: linear-gradient(135deg, #0d8a6a 0%, #0a7359 100%);
-                box-shadow: 0 4px 8px rgba(16, 163, 127, 0.3);
-                transform: translateY(-1px);
-            `;
-        } else if (state === 'loading') {
-            css += `
-                opacity: 0.7;
-                cursor: wait;
-            `;
-        }
 
         if (this.isFixedPosition) {
             css += `
@@ -162,6 +161,10 @@ export class ButtonManager {
                 bottom: 20px;
                 right: 20px;
                 z-index: 10000;
+                padding: 10px;
+                background: rgba(30,30,30,0.8);
+                backdrop-filter: blur(4px);
+                border-radius: 12px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             `;
         }
@@ -169,7 +172,68 @@ export class ButtonManager {
         return css;
     }
 
-    private createIconSVG(iconType: 'save' | 'loading'): SVGSVGElement {
+    private getButtonDefaultStyles(type: 'save' | 'copy'): string {
+        const isSave = type === 'save';
+        // Save button: Green; Copy button: Dark/Gray
+        const bg = isSave ? 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)' : '#40414f';
+        const color = '#fff';
+
+        return `
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: ${bg};
+            color: ${color};
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        `;
+    }
+
+    public setSuccess(action: 'save' | 'copy'): void {
+        const activeBtn = action === 'save' ? this.saveStartButton : this.copyButton;
+        const otherBtn = action === 'save' ? this.copyButton : this.saveStartButton;
+
+        if (!activeBtn || !otherBtn) {
+            return;
+        }
+
+        // Clear any previous state
+        activeBtn.replaceChildren();
+        activeBtn.disabled = true;
+        otherBtn.disabled = true;
+
+        const icon = this.createIconSVG('check');
+        const textSpan = document.createElement('span');
+        textSpan.textContent = action === 'save' ? 'Saved!' : 'Copied!';
+
+        activeBtn.appendChild(icon);
+        activeBtn.appendChild(textSpan);
+        activeBtn.style.opacity = '1';
+
+        // Reset back after 2 seconds
+        setTimeout(() => {
+            if (activeBtn && otherBtn) {
+                activeBtn.disabled = false;
+                otherBtn.disabled = false;
+
+                activeBtn.replaceChildren();
+                const defaultIcon = this.createIconSVG(action);
+                const defaultText = document.createElement('span');
+                defaultText.textContent = action === 'save' ? 'Save JSON' : 'Copy';
+
+                activeBtn.appendChild(defaultIcon);
+                activeBtn.appendChild(defaultText);
+            }
+        }, 2000);
+    }
+
+    private createIconSVG(iconType: 'save' | 'copy' | 'loading' | 'check'): SVGSVGElement {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('width', '16');
         svg.setAttribute('height', '16');
@@ -177,6 +241,8 @@ export class ButtonManager {
         svg.setAttribute('fill', 'none');
         svg.setAttribute('stroke', 'currentColor');
         svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
 
         if (iconType === 'loading') {
             svg.style.animation = 'spin 1s linear infinite';
@@ -187,7 +253,12 @@ export class ButtonManager {
             circle.setAttribute('stroke-dasharray', '32');
             circle.setAttribute('stroke-dashoffset', '8');
             svg.appendChild(circle);
-        } else {
+        } else if (iconType === 'check') {
+            const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            polyline.setAttribute('points', '20 6 9 17 4 12');
+            svg.appendChild(polyline);
+        } else if (iconType === 'save') {
+            // Save/Download icon
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4');
             const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
@@ -200,6 +271,19 @@ export class ButtonManager {
             svg.appendChild(path);
             svg.appendChild(polyline);
             svg.appendChild(line);
+        } else {
+            // Copy Icon
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', '9');
+            rect.setAttribute('y', '9');
+            rect.setAttribute('width', '13');
+            rect.setAttribute('height', '13');
+            rect.setAttribute('rx', '2');
+            rect.setAttribute('ry', '2');
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1');
+            svg.appendChild(rect);
+            svg.appendChild(path);
         }
         return svg;
     }
