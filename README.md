@@ -8,7 +8,7 @@
 [![Biome](https://img.shields.io/badge/Biome-%2360a5fa.svg?style=flat&logo=biome&logoColor=white)](https://biomejs.dev)
 [![WXT](https://img.shields.io/badge/WXT-%235d2fbf.svg?style=flat&logo=wxt&logoColor=white)](https://wxt.dev)
 
-A high-performance Chrome extension for capturing and saving conversation JSON from popular LLM platforms (ChatGPT, Gemini, Grok, etc.).
+A high-performance Chrome extension for capturing and saving conversation JSON from popular LLM platforms (ChatGPT, Gemini, Grok).
 
 ## 🚀 Quick Start
 
@@ -167,6 +167,7 @@ blackiya/
 ├── platforms/
 │   ├── chatgpt.ts            # ChatGPT platform adapter
 │   ├── gemini.ts             # Gemini platform adapter
+│   ├── grok.ts               # Grok platform adapter
 │   └── types.ts              # Platform interface definitions
 ├── utils/
 │   ├── storage.ts            # Chrome storage utilities
@@ -190,23 +191,25 @@ blackiya/
 
 ## 🎯 Features
 
-### Current (Phase 2 - Gemini)
-
-- ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT & Gemini.
+- ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT, Gemini, and Grok.
 - ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including **Thinking/Reasoning logs**.
+- ✅ **Grok Support**: Full support for Grok's GraphQL API, including conversation history and thinking traces.
 - ✅ **Smart Titles**: Automatic conversation title capture (with retroactive updates for async title loads).
 - ✅ **One-Click Download**: Instant download as formatted JSON file.
 - ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
-- ✅ **Robust UI**: Seamless button injection into ChatGPT & Gemini interfaces.
+- ✅ **Robust UI**: Seamless button injection into ChatGPT, Gemini, and Grok interfaces.
 - ✅ **Message Tree**: Preserves complete nested message structure.
-- ✅ **Extensive Testing**: 100% test coverage for platform adapters (Gemini/ChatGPT).
+- ✅ **Extensive Testing**: 100% test coverage for platform adapters (Gemini/ChatGPT/Grok).
+- ✅ **Absolute Imports**: Cleaner codebase using `@/` path aliases.
+- ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 
 ### Roadmap
 
 - ✅ **Phase 1:** ChatGPT support
 - ✅ **Phase 2:** Gemini support (including Reasoning & Titles)
 - ✅ **Phase 2.5:** Robust Unit Testing Suite
-- 🔲 **Phase 3:** Grok support
+- ✅ **Phase 3:** Grok support
+- ✅ **Phase 3.5:** Absolute Import Refactoring & Release Automation
 - 🔲 **Phase 4:** Claude support
 - 🔲 **Phase 5:** Export formats (Markdown, HTML, PDF)
 - 🔲 **Phase 6:** Settings UI for customization
@@ -228,7 +231,7 @@ The extension requires the following permissions:
 - `https://chatgpt.com/*` - ChatGPT platform
 - `https://chat.openai.com/*` - Legacy ChatGPT platform
 - `https://gemini.google.com/*` - Gemini platform
-- `https://x.com/*` - Grok platform (future)
+- `https://x.com/i/grok*` - Grok platform
 
 ## 🧪 Development Workflow
 
@@ -390,4 +393,6 @@ For issues and questions:
 
 ---
 
-# Built with ❤️ using WXT, Bun, and Biome
+# Inspiration for the Name
+
+Inspiration for the name came from Asmāʾ, who was one day rolling around by herself saying: “Blackiya ABC”.

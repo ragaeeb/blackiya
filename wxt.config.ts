@@ -1,4 +1,5 @@
 import { defineConfig } from 'wxt';
+import { SUPPORTED_PLATFORM_URLS } from './platforms/constants';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
@@ -7,6 +8,6 @@ export default defineConfig({
         name: 'Blackiya',
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',
         permissions: ['storage', 'activeTab', 'downloads'],
-        host_permissions: ['https://chatgpt.com/*', 'https://chat.openai.com/*', 'https://gemini.google.com/*'],
+        host_permissions: [...SUPPORTED_PLATFORM_URLS],
     },
 });

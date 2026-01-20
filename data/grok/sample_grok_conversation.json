@@ -1,0 +1,41 @@
+{
+    "data": {
+        "grok_conversation_by_rest_id": {
+            "is_pinned": false
+        },
+        "grok_conversation_items_by_rest_id": {
+            "cursor": "CycRAAAAAAwABAqpBhvwqWnWViAAChRBAAABm9cyqysAAA==",
+            "items": [
+                {
+                    "chat_item_id": "2013295305467240448",
+                    "created_at_ms": 1768841980715,
+                    "grok_mode": "Normal",
+                    "message": "ROLE: Expert academic translator of Classical Islamic texts; prioritize accuracy and structure over fluency.\nCRITICAL NEGATIONS: 1. NO SANITIZATION (Do not soften polemics). 2. NO META-TALK (Output translation only).",
+                    "sender_type": "User"
+                },
+                {
+                    "chat_item_id": "2013295305467240449",
+                    "created_at_ms": 1768841985715,
+                    "grok_mode": "Normal",
+                    "message": "P258393 - The Shaykh: In the name of Allah, the Merciful, the Compassionate.\nFrom Jābir, he said: (The Messenger of Allah ﷺ used to pray the Friday prayer, then we would go to our camels and rest them when the sun had passed its zenith) narrated by Aḥmad and Muslim and al-Nasāʾī.",
+                    "thinking_trace": "",
+                    "is_partial": false,
+                    "sender_type": "Agent",
+                    "deepsearch_headers": [
+                        {
+                            "header": "Analysis",
+                            "steps": [
+                                {
+                                    "final_message": "Analyzing the translation requirements and structure"
+                                }
+                            ]
+                        }
+                    ],
+                    "ui_layout": {
+                        "reasoning_ui_layout": "FunctionCall"
+                    }
+                }
+            ]
+        }
+    }
+}

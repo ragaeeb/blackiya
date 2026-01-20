@@ -1,7 +1,8 @@
+import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl } from '@/platforms/factory';
 
 export default defineContentScript({
-    matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*', 'https://gemini.google.com/*'],
+    matches: [...SUPPORTED_PLATFORM_URLS],
     world: 'MAIN',
     runAt: 'document_start',
     main() {
