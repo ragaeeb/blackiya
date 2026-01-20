@@ -1,3 +1,4 @@
+import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { runPlatform } from '@/utils/platform-runner';
 
 /**
@@ -7,8 +8,7 @@ import { runPlatform } from '@/utils/platform-runner';
  * adapter pattern to determine specific behavior.
  */
 export default defineContentScript({
-    // Add all supported LLM domains here
-    matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*', 'https://gemini.google.com/*'],
+    matches: [...SUPPORTED_PLATFORM_URLS],
     runAt: 'document_idle',
     main() {
         runPlatform();
