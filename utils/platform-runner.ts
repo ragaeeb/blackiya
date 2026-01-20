@@ -108,24 +108,31 @@ export function runPlatform(): void {
         }
 
         const newConversationId = currentAdapter.extractConversationId(window.location.href);
-        if (newConversationId !== currentConversationId) {
-            buttonManager.remove();
-            if (newConversationId) {
-                // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
-                const newAdapter = getPlatformAdapter(window.location.href);
-                if (newAdapter && newAdapter.name !== currentAdapter.name) {
-                    currentAdapter = newAdapter;
-                    updateManagers();
-                }
 
-                setTimeout(injectSaveButton, 500);
-            }
+        if (newConversationId !== currentConversationId) {
+            handleConversationSwitch(newConversationId);
         } else {
             // ID hasn't changed, but maybe DOM has (re-render), ensure button exists
             if (newConversationId && !buttonManager.exists()) {
                 setTimeout(injectSaveButton, 500);
             }
         }
+    }
+
+    function handleConversationSwitch(newId: string | null): void {
+        buttonManager.remove();
+        if (!newId) {
+            return;
+        }
+
+        // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
+        const newAdapter = getPlatformAdapter(window.location.href);
+        if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
+            currentAdapter = newAdapter;
+            updateManagers();
+        }
+
+        setTimeout(injectSaveButton, 500);
     }
 
     function updateManagers(): void {

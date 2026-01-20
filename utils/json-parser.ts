@@ -19,39 +19,58 @@ export function extractBalancedJsonArray(data: string, startFrom = 0): string | 
         return null;
     }
 
-    let balance = 0;
-    let insideString = false;
-    let isEscaped = false;
-
-    for (let i = startBracket; i < data.length; i++) {
-        const char = data[i];
-
-        if (isEscaped) {
-            isEscaped = false;
-            continue;
-        }
-
-        if (char === '\\') {
-            isEscaped = true;
-            continue;
-        }
-
-        if (char === '"') {
-            insideString = !insideString;
-            continue;
-        }
-
-        if (!insideString) {
-            if (char === '[') {
-                balance++;
-            } else if (char === ']') {
-                balance--;
-                if (balance === 0) {
-                    return data.substring(startBracket, i + 1);
-                }
-            }
-        }
+    const endBracket = scanForClosingBracket(data, startBracket);
+    if (endBracket !== -1) {
+        return data.substring(startBracket, endBracket + 1);
     }
 
     return null;
+}
+
+interface ParserState {
+    balance: number;
+    insideString: boolean;
+    isEscaped: boolean;
+}
+
+function scanForClosingBracket(data: string, start: number): number {
+    const state: ParserState = { balance: 0, insideString: false, isEscaped: false };
+
+    for (let i = start; i < data.length; i++) {
+        if (processChar(data[i], state)) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+function processChar(char: string, state: ParserState): boolean {
+    if (state.isEscaped) {
+        state.isEscaped = false;
+        return false;
+    }
+
+    if (char === '\\') {
+        state.isEscaped = true;
+        return false;
+    }
+
+    if (char === '"') {
+        state.insideString = !state.insideString;
+        return false;
+    }
+
+    if (state.insideString) {
+        return false;
+    }
+
+    if (char === '[') {
+        state.balance++;
+    } else if (char === ']') {
+        state.balance--;
+        return state.balance === 0;
+    }
+
+    return false;
 }

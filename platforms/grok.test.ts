@@ -24,6 +24,7 @@ mock.module('wxt/browser', () => ({
 
 import sampleConversation from '@/data/grok/sample_grok_conversation.json';
 import sampleHistory from '@/data/grok/sample_grok_history.json';
+import type { MessageNode } from '@/utils/types';
 
 describe('Grok Platform Adapter', () => {
     let grokAdapter: any;
@@ -191,7 +192,7 @@ describe('Grok Platform Adapter', () => {
                 JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
-            const nodes = Object.values(result!.mapping).filter((n) => n.message !== null);
+            const nodes = (Object.values(result!.mapping) as MessageNode[]).filter((n) => n.message !== null);
 
             for (const node of nodes) {
                 expect(node.message?.metadata).toBeDefined();
@@ -205,7 +206,9 @@ describe('Grok Platform Adapter', () => {
                 JSON.stringify(sampleConversation),
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
-            const nodes = Object.values(result!.mapping).filter((n) => n.message?.content.content_type === 'thoughts');
+            const nodes = (Object.values(result!.mapping) as MessageNode[]).filter(
+                (n) => n.message?.content.content_type === 'thoughts',
+            );
 
             if (nodes.length > 0) {
                 for (const node of nodes) {
@@ -366,7 +369,7 @@ describe('Grok Platform Adapter', () => {
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).not.toBeNull();
-            const nodes = Object.values(result!.mapping);
+            const nodes = Object.values(result!.mapping) as MessageNode[];
             expect(nodes.length).toBeGreaterThan(0);
 
             for (const node of nodes) {
@@ -381,7 +384,9 @@ describe('Grok Platform Adapter', () => {
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).not.toBeNull();
-            const messagesWithContent = Object.values(result!.mapping).filter((n): n is any => n.message !== null);
+            const messagesWithContent = (Object.values(result!.mapping) as MessageNode[]).filter(
+                (n): n is any => n.message !== null,
+            );
 
             expect(messagesWithContent.length).toBeGreaterThan(0);
 
@@ -398,11 +403,11 @@ describe('Grok Platform Adapter', () => {
             expect(result).not.toBeNull();
 
             // Find root node
-            const rootNodes = Object.values(result!.mapping).filter((n) => n.parent === null);
+            const rootNodes = (Object.values(result!.mapping) as MessageNode[]).filter((n) => n.parent === null);
             expect(rootNodes.length).toBe(1);
 
             // Verify children point to valid nodes
-            for (const node of Object.values(result!.mapping)) {
+            for (const node of Object.values(result!.mapping) as MessageNode[]) {
                 for (const childId of node.children) {
                     const childNode = result!.mapping[childId];
                     expect(childNode).toBeDefined();

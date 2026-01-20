@@ -39,7 +39,7 @@ mock.module('@/utils/logger', () => ({
 
 // ... mocks are defined above ...
 
-import type { Message } from '@/utils/types';
+import type { Message, MessageNode } from '@/utils/types';
 
 describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;
@@ -110,7 +110,7 @@ describe('Gemini Platform Adapter', () => {
             expect(mapping).toBeDefined();
 
             // Filter out null messages to avoid TS errors
-            const messages = Object.values(mapping)
+            const messages = (Object.values(mapping) as MessageNode[])
                 .map((n) => n.message)
                 .filter((m): m is Message => m !== null);
 
