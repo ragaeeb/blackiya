@@ -1,43 +1,5 @@
-import { beforeAll, describe, expect, it, mock } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
-
-// Mock wxt/browser explicitly to avoid logging errors
-const browserMock = {
-    storage: {
-        local: {
-            get: async () => ({}),
-            set: async () => {},
-        },
-    },
-    runtime: {
-        getURL: () => 'chrome-extension://mock/',
-    },
-};
-mock.module('wxt/browser', () => ({
-    browser: browserMock,
-}));
-
-// Mock logger locally to ensure it's applied
-mock.module('@/utils/logger', () => ({
-    logger: {
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-        debug: () => {},
-    },
-}));
-
-// Mock logger locally to ensure it's applied
-mock.module('@/utils/logger', () => ({
-    logger: {
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-        debug: () => {},
-    },
-}));
-
-// ... mocks are defined above ...
 
 import type { Message, MessageNode } from '@/utils/types';
 

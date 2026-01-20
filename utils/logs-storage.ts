@@ -8,10 +8,10 @@ export interface LogEntry {
     context: 'background' | 'content' | 'popup' | 'unknown';
 }
 
-const MAX_LOGS = 1000;
+export const MAX_LOGS = 1000;
 const STORAGE_KEY = 'logs';
-const FLUSH_INTERVAL_MS = 2000;
-const FLUSH_THRESHOLD = 50;
+export const FLUSH_INTERVAL_MS = 2000;
+export const FLUSH_THRESHOLD = 50;
 
 export class BufferedLogsStorage {
     private buffer: LogEntry[] = [];

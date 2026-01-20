@@ -22,6 +22,16 @@ mock.module('wxt/browser', () => ({
     browser: browserMock,
 }));
 
+// Mock logger locally to ensure it's applied before grok adapter loads
+mock.module('@/utils/logger', () => ({
+    logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+    },
+}));
+
 import sampleConversation from '@/data/grok/sample_grok_conversation.json';
 import sampleHistory from '@/data/grok/sample_grok_history.json';
 import type { MessageNode } from '@/utils/types';

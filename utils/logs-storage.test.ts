@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { BufferedLogsStorage, type LogEntry } from './logs-storage';
-
-const FLUSH_INTERVAL = 2000;
-const FLUSH_THRESHOLD = 50;
+import { BufferedLogsStorage, FLUSH_INTERVAL_MS, FLUSH_THRESHOLD, type LogEntry, MAX_LOGS } from './logs-storage';
 
 describe('BufferedLogsStorage', () => {
     let storedLogs: LogEntry[] = [];
@@ -93,15 +90,13 @@ describe('BufferedLogsStorage', () => {
         expect(setSpy).not.toHaveBeenCalled();
 
         // Wait specifically for flush interval + buffer
-        await new Promise((resolve) => setTimeout(resolve, FLUSH_INTERVAL + 200));
+        await new Promise((resolve) => setTimeout(resolve, FLUSH_INTERVAL_MS + 200));
 
         expect(setSpy).toHaveBeenCalled();
         expect(storedLogs.length).toBe(1);
     });
 
     it('should rotate logs when limit exceeded', async () => {
-        const MAX_LOGS = 1000;
-
         // Simulate existing logs in storage
         const existingLogs: LogEntry[] = Array(MAX_LOGS).fill({
             timestamp: 'old',

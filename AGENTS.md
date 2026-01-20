@@ -741,22 +741,22 @@ bun run check        # Lint & format (auto-fix)
 - `browser.storage.local.get/set()` - Persist data
 - `chrome.downloads.download()` - Download files
 - `chrome.tabs.query()` - Get active tab
-+
-+## 📸 Codebase Snapshots for Reviews
-+
+
+## 📸 Codebase Snapshots for Reviews
+
 +To provide a clean, comprehensive view of the codebase for AI agent reviews, use the following `code2prompt` command. This command specifically targets source and documentation files while excluding build artifacts and binary assets.
-+
-+```bash
+
+```bash
 +# Generate a focused snapshot of .ts, .tsx, and .md files
 +code2prompt . \
-+  -i "**/*.ts,**/*.tsx,**/*.md" \
-+  -e "node_modules,.output,.wxt,.git,bun.lock,bun.lockb" \
-+  > codebase_snapshot.txt
-+```
-+
-+**Snapshot Characteristics:**
-+- **Included:** All TypeScript source logic, React components, and project documentation (.md).
-+- **Excluded:** `node_modules`, build outputs (`.output`, `.wxt`), version control metadata, and package lockfiles.
-+- **Format:** Single text file (`codebase_snapshot.txt`) optimized for context window efficiency.
+  -i "**/*.ts,**/*.tsx,**/*.md" \
+  -e "node_modules,.output,.wxt,.git,bun.lock,bun.lockb" \
+  > codebase_snapshot.txt
+```
+
+**Snapshot Characteristics:**
+- **Included:** All TypeScript source logic, React components, and project documentation (.md).
+- **Excluded:** `node_modules`, build outputs (`.output`, `.wxt`), version control metadata, and package lockfiles.
+- **Format:** Single text file (`codebase_snapshot.txt`) optimized for context window efficiency.
 
 ---

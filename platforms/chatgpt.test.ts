@@ -4,10 +4,33 @@
  * TDD tests for conversation ID extraction, API URL building, and filename formatting
  */
 
-import { describe, expect, it } from 'bun:test';
-import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { beforeAll, describe, expect, it, mock } from 'bun:test';
+
+// Mock wxt/browser explicitly to avoid logging errors
+const browserMock = {
+    storage: {
+        local: {
+            get: async () => ({}),
+            set: async () => {},
+        },
+    },
+    runtime: {
+        getURL: () => 'chrome-extension://mock/',
+    },
+};
+mock.module('wxt/browser', () => ({
+    browser: browserMock,
+}));
 
 describe('ChatGPT Platform Adapter', () => {
+    let chatGPTAdapter: any;
+
+    beforeAll(async () => {
+        // Dynamic import to ensure mocks apply
+        const module = await import('@/platforms/chatgpt');
+        chatGPTAdapter = module.chatGPTAdapter;
+    });
+
     describe('extractConversationId', () => {
         it('should extract conversation ID from standard chat URL', () => {
             const url = 'https://chatgpt.com/c/696bc3d5-fa84-8328-b209-4d65cb229e59';
