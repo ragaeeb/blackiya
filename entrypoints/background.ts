@@ -7,24 +7,38 @@
  * @module entrypoints/background
  */
 
+import { logger } from '@/utils/logger';
+import { logsStorage } from '@/utils/logs-storage';
+
 export default defineBackground(() => {
-    console.log('[Blackiya] Background service worker started', {
+    logger.info('Background service worker started', {
         id: browser.runtime.id,
     });
 
     // Listen for installation/update events
     browser.runtime.onInstalled.addListener((details) => {
         if (details.reason === 'install') {
-            console.log('[Blackiya] Extension installed');
+            logger.info('Extension installed');
         } else if (details.reason === 'update') {
-            console.log('[Blackiya] Extension updated to version', browser.runtime.getManifest().version);
+            logger.info('Extension updated to version', browser.runtime.getManifest().version);
         }
     });
 
     // Message handler for future extensibility
     // Currently content script handles everything locally
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        console.log('[Blackiya] Received message:', message.type, 'from', sender.tab?.url);
+        // Handle log entries first to avoid re-logging them
+        if (message.type === 'LOG_ENTRY') {
+            // Check if payload is valid
+            if (message.payload) {
+                logsStorage.saveLog(message.payload).catch((err) => {
+                    console.error('Failed to save log from content script:', err);
+                });
+            }
+            return; // Don't log LOG_ENTRY messages to avoid loops
+        }
+
+        logger.info('Received message:', message.type, 'from', sender.tab?.url);
 
         // Handle different message types
         switch (message.type) {
@@ -34,7 +48,7 @@ export default defineBackground(() => {
                 break;
 
             default:
-                console.log('[Blackiya] Unknown message type:', message.type);
+                logger.warn('Unknown message type:', message.type);
                 sendResponse({ success: false, error: 'Unknown message type' });
         }
 

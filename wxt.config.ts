@@ -9,5 +9,14 @@ export default defineConfig({
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',
         permissions: ['storage', 'activeTab', 'downloads'],
         host_permissions: [...SUPPORTED_PLATFORM_URLS],
+        action: {
+            default_icon: 'icon.svg',
+        },
+        icons: {
+            '16': 'icon.svg',
+            '32': 'icon.svg',
+            '48': 'icon.svg',
+            '128': 'icon.svg',
+        },
     },
 });

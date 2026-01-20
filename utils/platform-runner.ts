@@ -10,6 +10,7 @@
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
+import { logger } from '@/utils/logger';
 import type { ConversationData } from '@/utils/types';
 
 export function runPlatform(): void {
@@ -164,14 +165,14 @@ export function runPlatform(): void {
 
         const conversationId = currentAdapter.extractConversationId(window.location.href);
         if (!conversationId) {
-            console.error('[Blackiya] No conversation ID found in URL');
+            logger.error('No conversation ID found in URL');
             alert('Please select a conversation first.');
             return;
         }
 
         const data = capturedConversations.get(conversationId);
         if (!data) {
-            console.warn('[Blackiya] No data captured for this conversation yet.');
+            logger.warn('No data captured for this conversation yet.');
             alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
             return;
         }
@@ -180,9 +181,9 @@ export function runPlatform(): void {
         try {
             const filename = currentAdapter.formatFilename(data);
             downloadAsJSON(data, filename);
-            console.log(`[Blackiya] Saved conversation: ${filename}.json`);
+            logger.info(`Saved conversation: ${filename}.json`);
         } catch (error) {
-            console.error('[Blackiya] Failed to save conversation:', error);
+            logger.error('Failed to save conversation:', error);
             alert('Failed to save conversation. Check console for details.');
         } finally {
             setButtonLoading(false);
@@ -197,10 +198,27 @@ export function runPlatform(): void {
             }
 
             const message = event.data;
+
+            // Handle logs from interceptor
+            if (message?.type === 'LLM_LOG_ENTRY') {
+                const { level, message: logMsg, data, context } = message.payload;
+                // Forward to logger
+                // We prefix with context to make it clear where it came from
+                const msg = `[${context}] ${logMsg}`;
+                if (level === 'error') {
+                    logger.error(msg, ...(data || []));
+                } else if (level === 'warn') {
+                    logger.warn(msg, ...(data || []));
+                } else {
+                    logger.info(msg, ...(data || []));
+                }
+                return;
+            }
+
             if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
-                console.log('[Blackiya] Received intercepted data message');
+                logger.info('Received intercepted data message');
                 if (!currentAdapter) {
-                    console.warn('[Blackiya] No currentAdapter in runner, ignoring message');
+                    logger.warn('No currentAdapter in runner, ignoring message');
                     return;
                 }
 
@@ -208,16 +226,16 @@ export function runPlatform(): void {
                 if (data?.conversation_id) {
                     const conversationId = data.conversation_id;
                     cacheConversation(conversationId, data);
-                    console.log(`[Blackiya] Successfully captured/cached data for conversation: ${conversationId}`);
+                    logger.info(`Successfully captured/cached data for conversation: ${conversationId}`);
 
                     const currentId = currentAdapter.extractConversationId(window.location.href);
-                    console.log(`[Blackiya] Current URL ID: ${currentId}, Captured ID: ${conversationId}`);
+                    logger.debug(`Current URL ID: ${currentId}, Captured ID: ${conversationId}`);
 
                     if (currentId === conversationId && saveButton) {
                         saveButton.style.opacity = '1';
                     }
                 } else {
-                    console.warn('[Blackiya] Failed to parse conversation ID from intercepted data');
+                    logger.warn('Failed to parse conversation ID from intercepted data');
                 }
             }
         });
@@ -230,14 +248,14 @@ export function runPlatform(): void {
 
         const conversationId = currentAdapter?.extractConversationId(window.location.href);
         if (!conversationId) {
-            console.debug('[Blackiya] No conversation ID found. Button will not be injected.');
+            logger.debug('No conversation ID found. Button will not be injected.');
             removeSaveButton();
             return;
         }
 
         const target = currentAdapter?.getButtonInjectionTarget();
         if (!target) {
-            console.log('[Blackiya] Injection target not found, will retry...');
+            logger.debug('Injection target not found, will retry...');
             return;
         }
 
@@ -253,7 +271,7 @@ export function runPlatform(): void {
 
         target.appendChild(saveButton);
         currentConversationId = conversationId;
-        console.log('[Blackiya] Save button injected for conversation:', conversationId);
+        logger.info('Save button injected for conversation:', conversationId);
     }
 
     function removeSaveButton(): void {
@@ -316,11 +334,11 @@ export function runPlatform(): void {
     // Initialization
     currentAdapter = getPlatformAdapter(window.location.href);
     if (!currentAdapter) {
-        console.warn('[Blackiya] No matching platform adapter for this URL');
+        logger.warn('No matching platform adapter for this URL');
         return;
     }
 
-    console.log(`[Blackiya] Content script running for ${currentAdapter.name}`);
+    logger.info(`Content script running for ${currentAdapter.name}`);
     addStyles();
     setupInterceptorListener();
     currentConversationId = currentAdapter.extractConversationId(window.location.href);

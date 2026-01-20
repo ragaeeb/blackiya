@@ -10,6 +10,7 @@
 
 import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { logger } from '@/utils/logger';
 import type { ConversationData, MessageNode } from '@/utils/types';
 
 const MAX_TITLE_LENGTH = 80;
@@ -32,7 +33,7 @@ const activeConversations = new Map<string, ConversationData>();
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
 function parseTitlesResponse(data: string, url: string): Map<string, string> | null {
     try {
-        console.log('[Blackiya/Gemini/Titles] Attempting to parse titles from:', url);
+        logger.info('[Blackiya/Gemini/Titles] Attempting to parse titles from:', url);
 
         // 1. Strip security prefix
         const MAGIC_HEADER_REGEX = /^\s*\)\s*\]\s*\}\s*'/;
@@ -41,7 +42,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         // 2. Find JSON array
         const startBracket = cleanedData.indexOf('[');
         if (startBracket === -1) {
-            console.log('[Blackiya/Gemini/Titles] No JSON array found');
+            logger.info('[Blackiya/Gemini/Titles] No JSON array found');
             return null;
         }
 
@@ -83,7 +84,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         }
 
         if (endBracket === -1) {
-            console.log('[Blackiya/Gemini/Titles] Could not find balanced JSON array');
+            logger.info('[Blackiya/Gemini/Titles] Could not find balanced JSON array');
             return null;
         }
 
@@ -91,7 +92,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         const wrapper = JSON.parse(jsonStr);
 
         if (!Array.isArray(wrapper) || wrapper.length === 0) {
-            console.log('[Blackiya/Gemini/Titles] Wrapper is not an array or is empty');
+            logger.info('[Blackiya/Gemini/Titles] Wrapper is not an array or is empty');
             return null;
         }
 
@@ -100,13 +101,13 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         for (const item of wrapper) {
             if (Array.isArray(item) && item.length >= 3 && item[0] === 'wrb.fr' && item[1] === 'MaZiqc') {
                 rpcResult = item;
-                // console.log('[Blackiya/Gemini/Titles] Found MaZiqc result');
+                // logger.info('[Blackiya/Gemini/Titles] Found MaZiqc result');
                 break;
             }
         }
 
         if (!rpcResult) {
-            // console.log('[Blackiya/Gemini/Titles] No MaZiqc RPC result found in wrapper');
+            // logger.info('[Blackiya/Gemini/Titles] No MaZiqc RPC result found in wrapper');
             return null;
         }
 
@@ -129,7 +130,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
             return null;
         }
 
-        console.log('[Blackiya/Gemini/Titles] Found conversation list with', conversationList.length, 'entries');
+        logger.info('[Blackiya/Gemini/Titles] Found conversation list with', conversationList.length, 'entries');
 
         const titles = new Map<string, string>();
 
@@ -152,7 +153,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
                         const activeObj = activeConversations.get(convId);
                         if (activeObj && activeObj.title !== title) {
                             activeObj.title = title;
-                            console.log(
+                            logger.info(
                                 `[Blackiya/Gemini/Titles] Retroactively updated title for active conversation: ${convId} -> "${title}"`,
                             );
                         }
@@ -163,7 +164,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
 
         return titles;
     } catch (e) {
-        console.error('[Blackiya/Gemini/Titles] Failed to parse titles:', e);
+        logger.error('[Blackiya/Gemini/Titles] Failed to parse titles:', e);
         return null;
     }
 }
@@ -174,7 +175,7 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
 function isTitlesEndpoint(url: string): boolean {
     const isTitles = url.includes('rpcids=MaZiqc');
     if (isTitles) {
-        console.log('[Blackiya/Gemini/Titles] Detected titles endpoint');
+        logger.info('[Blackiya/Gemini/Titles] Detected titles endpoint');
     }
     return isTitles;
 }
@@ -220,15 +221,15 @@ export const geminiAdapter: LLMPlatform = {
                 for (const [id, title] of titles) {
                     conversationTitles.set(id, title);
                 }
-                console.log(`[Blackiya/Gemini] Title cache now contains ${conversationTitles.size} entries`);
+                logger.info(`[Blackiya/Gemini] Title cache now contains ${conversationTitles.size} entries`);
 
                 // Log current cache contents for debugging
-                console.log(
+                logger.info(
                     '[Blackiya/Gemini] Current cached conversation IDs:',
                     Array.from(conversationTitles.keys()).slice(0, 5),
                 );
             } else {
-                console.log('[Blackiya/Gemini/Titles] Failed to extract titles from this response');
+                logger.info('[Blackiya/Gemini/Titles] Failed to extract titles from this response');
             }
             // Don't return ConversationData for title endpoints
             return null;
@@ -236,7 +237,7 @@ export const geminiAdapter: LLMPlatform = {
 
         // Otherwise, parse as conversation data
         try {
-            console.log('[Blackiya/Gemini] Attempting to parse response from:', url);
+            logger.info('[Blackiya/Gemini] Attempting to parse response from:', url);
 
             // 1. Strip security prefix
             const MAGIC_HEADER_REGEX = /^\s*\)\s*\]\s*\}\s*'/;
@@ -245,7 +246,7 @@ export const geminiAdapter: LLMPlatform = {
             // 2. Find JSON array
             const startBracket = cleanedData.indexOf('[');
             if (startBracket === -1) {
-                console.log('[Blackiya/Gemini] No JSON array found');
+                logger.info('[Blackiya/Gemini] No JSON array found');
                 return null;
             }
 
@@ -287,7 +288,7 @@ export const geminiAdapter: LLMPlatform = {
             }
 
             if (endBracket === -1) {
-                console.log('[Blackiya/Gemini] Could not find balanced JSON array');
+                logger.info('[Blackiya/Gemini] Could not find balanced JSON array');
                 return null;
             }
 
@@ -295,11 +296,11 @@ export const geminiAdapter: LLMPlatform = {
             const wrapper = JSON.parse(jsonStr);
 
             if (!Array.isArray(wrapper) || wrapper.length === 0) {
-                console.log('[Blackiya/Gemini] Wrapper is not an array or is empty');
+                logger.info('[Blackiya/Gemini] Wrapper is not an array or is empty');
                 return null;
             }
 
-            console.log('[Blackiya/Gemini] Wrapper array length:', wrapper.length);
+            logger.info('[Blackiya/Gemini] Wrapper array length:', wrapper.length);
 
             // 4. Find conversation data RPC result
             let rpcResult = null;
@@ -310,13 +311,13 @@ export const geminiAdapter: LLMPlatform = {
                     const rpcId = item[1];
                     const payloadStr = item[2];
 
-                    console.log(`[Blackiya/Gemini] Checking RPC ID: ${rpcId}`);
+                    logger.info(`[Blackiya/Gemini] Checking RPC ID: ${rpcId}`);
 
                     if (typeof payloadStr === 'string') {
                         try {
                             const testPayload = JSON.parse(payloadStr);
                             if (this.isConversationPayload?.(testPayload)) {
-                                console.log(`[Blackiya/Gemini] Found conversation data in RPC ID: ${rpcId}`);
+                                logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${rpcId}`);
                                 rpcResult = item;
                                 foundRpcId = rpcId;
                                 break;
@@ -327,11 +328,11 @@ export const geminiAdapter: LLMPlatform = {
             }
 
             if (!rpcResult) {
-                console.log('[Blackiya/Gemini] No RPC result with conversation data found');
+                logger.info('[Blackiya/Gemini] No RPC result with conversation data found');
                 return null;
             }
 
-            console.log(`[Blackiya/Gemini] Using RPC ID: ${foundRpcId}`);
+            logger.info(`[Blackiya/Gemini] Using RPC ID: ${foundRpcId}`);
 
             // 5. Parse the payload
             const payload = JSON.parse(rpcResult[2]);
@@ -339,7 +340,7 @@ export const geminiAdapter: LLMPlatform = {
             // 6. Navigate to conversation data
             const conversationRoot = payload[0]?.[0];
             if (!conversationRoot || !Array.isArray(conversationRoot)) {
-                console.log('[Blackiya/Gemini] Invalid conversation root structure');
+                logger.info('[Blackiya/Gemini] Invalid conversation root structure');
                 return null;
             }
 
@@ -351,7 +352,7 @@ export const geminiAdapter: LLMPlatform = {
                 conversationId = conversationId.slice(2);
             }
 
-            console.log('[Blackiya/Gemini] Extracted conversation ID:', conversationId);
+            logger.info('[Blackiya/Gemini] Extracted conversation ID:', conversationId);
 
             // 7. Get title from cache or use default
             const conversationTitle =
@@ -359,12 +360,12 @@ export const geminiAdapter: LLMPlatform = {
                     ? conversationTitles.get(conversationId)!
                     : 'Gemini Conversation';
 
-            console.log('[Blackiya/Gemini] Looking up title for ID:', conversationId);
-            console.log(
+            logger.info('[Blackiya/Gemini] Looking up title for ID:', conversationId);
+            logger.info(
                 '[Blackiya/Gemini] Title cache has this ID:',
                 conversationId ? conversationTitles.has(conversationId) : false,
             );
-            console.log('[Blackiya/Gemini] Using title:', conversationTitle);
+            logger.info('[Blackiya/Gemini] Using title:', conversationTitle);
 
             // 8. Extract messages
             const parsedMessages: any[] = [];
@@ -459,7 +460,7 @@ export const geminiAdapter: LLMPlatform = {
                 const modelSlug = conversationRoot[3][21];
                 if (typeof modelSlug === 'string') {
                     modelName = `gemini-${modelSlug.toLowerCase().replace(/\s+/g, '-')}`;
-                    console.log('[Blackiya/Gemini] Extracted model name:', modelName);
+                    logger.info('[Blackiya/Gemini] Extracted model name:', modelName);
                 }
             }
 
@@ -494,7 +495,7 @@ export const geminiAdapter: LLMPlatform = {
                 };
             });
 
-            console.log(
+            logger.info(
                 '[Blackiya/Gemini] Successfully parsed conversation with',
                 Object.keys(mapping).length,
                 'messages',
@@ -524,9 +525,9 @@ export const geminiAdapter: LLMPlatform = {
 
             return conversationData;
         } catch (e) {
-            console.error('[Blackiya/Gemini] Failed to parse:', e);
+            logger.error('[Blackiya/Gemini] Failed to parse:', e);
             if (e instanceof Error) {
-                console.error('[Blackiya/Gemini] Error stack:', e.stack);
+                logger.error('[Blackiya/Gemini] Error stack:', e.stack);
             }
             return null;
         }

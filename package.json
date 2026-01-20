@@ -2,7 +2,7 @@
     "name": "blackiya",
     "description": "Chrome extension to capture and save conversation JSON from ChatGPT and other LLMs",
     "private": true,
-    "version": "1.1.0",
+    "version": "1.2.0",
     "type": "module",
     "author": "Ragaeeb Haq",
     "license": "MIT",
@@ -36,7 +36,8 @@
     },
     "dependencies": {
         "react": "^19.2.3",
-        "react-dom": "^19.2.3"
+        "react-dom": "^19.2.3",
+        "tslog": "^4.10.2"
     },
     "devDependencies": {
         "@biomejs/biome": "2.3.11",

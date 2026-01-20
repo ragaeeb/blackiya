@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/icon_full.png" width="128" alt="Blackiya Logo" />
+</p>
+
 # Blackiya
 
 [![wakatime](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/c697711b-e0aa-47e9-96bd-1ec21e640d07.svg)](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/c697711b-e0aa-47e9-96bd-1ec21e640d07)
@@ -202,6 +206,8 @@ blackiya/
 - ✅ **Extensive Testing**: 100% test coverage for platform adapters (Gemini/ChatGPT/Grok).
 - ✅ **Absolute Imports**: Cleaner codebase using `@/` path aliases.
 - ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
+- ✅ **Advanced Logging**: Structured, exportable debug logs with privacy-focused persistent storage.
+
 
 ### Roadmap
 
@@ -301,6 +307,13 @@ The JSON file contains:
 - All message content and metadata
 - Model information
 - Plugin IDs (if any)
+
+### Exporting Debug Logs
+
+1. Click the extension icon to open the Popup UI.
+2. View current log count and adjust the **Log Level** (Debug/Info/Warn/Error).
+3. Click "Export Debug Logs" to download a JSON file containing internal extension logs.
+4. Useful for bug reporting and troubleshooting.
 
 ## 🐛 Troubleshooting
 

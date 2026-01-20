@@ -1,0 +1,18 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00f2ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff00cc;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background Circle -->
+  <circle cx="64" cy="64" r="60" fill="#1a1a1a" stroke="url(#glow)" stroke-width="4" />
+  
+  <!-- Stylized Brain Icon (Simplified) -->
+  <path d="M64,25 C45,25 35,40 35,55 C35,70 45,75 45,85 C45,95 55,103 64,103 C73,103 83,95 83,85 C83,75 93,70 93,55 C93,40 83,25 64,25 Z" fill="url(#glow)" />
+  <path d="M64,30 C64,30 55,35 55,55 C55,75 64,80 64,80" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
+  <path d="M64,30 C64,30 73,35 73,55 C73,75 64,80 64,80" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
+  
+  <!-- "B" for Blackiya -->
+  <text x="64" y="72" font-family="Arial" font-size="24" font-weight="bold" fill="#ffffff" text-anchor="middle">B</text>
+</svg>

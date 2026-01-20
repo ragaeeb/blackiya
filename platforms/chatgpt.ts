@@ -9,6 +9,7 @@
 
 import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { logger } from '@/utils/logger';
 import type { ConversationData } from '@/utils/types';
 
 /**
@@ -100,7 +101,7 @@ export const chatGPTAdapter: LLMPlatform = {
                 return parsed as ConversationData;
             }
         } catch (e) {
-            console.error('[Blackiya] Failed to parse ChatGPT data:', e);
+            logger.error('Failed to parse ChatGPT data:', e);
         }
         return null;
     },

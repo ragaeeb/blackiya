@@ -1,6 +1,31 @@
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl } from '@/platforms/factory';
 
+function log(level: 'info' | 'warn' | 'error', message: string, ...args: any[]) {
+    // Keep console output for immediate debugging in the page console
+    if (level === 'error') {
+        console.error(message, ...args);
+    } else if (level === 'warn') {
+        console.warn(message, ...args);
+    } else {
+        console.log(message, ...args);
+    }
+
+    // Send to content script for persistence
+    window.postMessage(
+        {
+            type: 'LLM_LOG_ENTRY',
+            payload: {
+                level,
+                message,
+                data: args,
+                context: 'interceptor',
+            },
+        },
+        '*',
+    );
+}
+
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
     world: 'MAIN',
@@ -13,7 +38,7 @@ export default defineContentScript({
             const url = args[0] instanceof Request ? args[0].url : String(args[0]);
 
             const adapter = getPlatformAdapterByApiUrl(url);
-            console.log(`[Blackiya] Intercepted fetch: ${url}, Adapter: ${adapter?.name || 'None'}`);
+            log('info', `[Blackiya] Intercepted fetch: ${url}, Adapter: ${adapter?.name || 'None'}`);
 
             if (adapter) {
                 const clonedResponse = response.clone();
@@ -31,7 +56,7 @@ export default defineContentScript({
                         );
                     })
                     .catch((err) => {
-                        console.error(`[Blackiya] Failed to read intercepted response from ${adapter.name}:`, err);
+                        log('error', `[Blackiya] Failed to read intercepted response from ${adapter.name}:`, err);
                     });
             }
 
@@ -52,7 +77,7 @@ export default defineContentScript({
             this.addEventListener('load', function () {
                 const url = (this as any)._url;
                 const adapter = getPlatformAdapterByApiUrl(url);
-                console.log(`[Blackiya] Intercepted XHR: ${url}, Adapter: ${adapter?.name || 'None'}`);
+                log('info', `[Blackiya] Intercepted XHR: ${url}, Adapter: ${adapter?.name || 'None'}`);
 
                 if (adapter) {
                     try {
@@ -67,13 +92,13 @@ export default defineContentScript({
                             '*',
                         );
                     } catch (e) {
-                        console.error('[Blackiya] Failed to read XHR response', e);
+                        log('error', '[Blackiya] Failed to read XHR response', e);
                     }
                 }
             });
             return originalSend.call(this, body);
         };
 
-        console.log('[Blackiya] Fetch & XHR interceptors initialized');
+        log('info', '[Blackiya] Fetch & XHR interceptors initialized');
     },
 });

@@ -27,33 +27,38 @@
 ### High-Level Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────┐
-│                    Browser Tab (ChatGPT)                │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │  Content Script (chatgpt.ts)                       │ │
-│  │  - Injects "Save" button into page DOM             │ │
-│  │  - Listens for user clicks                         │ │
-│  │  - Communicates with Background Script             │ │
-│  └────────────────┬───────────────────────────────────┘ │
-└───────────────────┼─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Browser Tab (ChatGPT)                    │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  Content Script (main.content.ts)                      │ │
+│  │  - Injects "Save" button into page DOM                 │ │
+│  │  - Listens for intercepted data                        │ │
+│  │  - Routes logs to Background                           │ │
+│  └────────────────┬───────────────────────────────────────┘ │
+└───────────────────┼─────────────────────────────────────────┘
                     │ chrome.runtime.sendMessage()
                     ▼
-┌─────────────────────────────────────────────────────────┐
-│       Background Service Worker (background.ts)         │
-│  - Intercepts network requests (optional)               │
-│  - Fetches conversation data from API                   │
-│  - Processes and stores data temporarily                │
-│  - Triggers download via chrome.downloads API           │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│       Background Service Worker (background.ts)             │
+│  - Intercepts network requests (via interceptor)            │
+│  - Processes and stores conversation data                   │
+│  - Unified sink for all extension logs                      │
+│  - Saves logs to chrome.storage.local                       │
+└───────────────────┬─────────────────────────────────────────┘
                     │
                     ▼
-┌─────────────────────────────────────────────────────────┐
-│              Platform Adapters (platforms/)             │
-│  - ChatGPT: API endpoint, parsing, UI injection         │
-│  - Gemini: API endpoint, parsing, UI injection          │
-│  - Grok: API endpoint, parsing, UI injection            │
-│  (Each implements LLMPlatform interface)                │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────┬─────────────────────────────────────────┐
+│              Platform Adapters (platforms/)                 │
+│  - ChatGPT, Gemini, Grok (Interface oriented)               │
+└─────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Popup UI (entrypoints/popup/)            │
+│  - View log counts                                          │
+│  - Change log verbosity (Debug/Info/Warn/Error)             │
+│  - Export debug logs as JSON                                │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Breakdown
@@ -78,8 +83,19 @@
 - Listens: `chrome.runtime.onMessage`
 - Sends: `chrome.tabs.sendMessage()`
 - Storage: `chrome.storage.local`
+- Logging: **Central sink** for all cross-context logs via `LOG_ENTRY` message type.
 
-#### 2. Content Scripts (`entrypoints/content/*.ts`)
+#### 2. Popup UI (`entrypoints/popup/`)
+
+**Responsibilities:**
+- **Status Monitoring** - Display current log entry count
+- **Configuration** - Set the active log level (synced across contexts)
+- **Log Export** - Export the structured log buffer as a JSON file
+- **Maintenance** - Clear log history
+
+**Key Logic:**
+- Uses `browser.storage.local` for settings and log retrieval
+- Communicates with `logger` to update verbosity levels dynamically
 
 **Responsibilities:**
 - **UI Injection** - Add "Save Conversation" button to page
@@ -215,9 +231,24 @@ export function generateTimestamp(): string
 
 **`utils/download.ts`** - Download utilities
 ```typescript
-export async function downloadJSON(data: any, filename: string): Promise<void>
-export function createBlobURL(data: any): string
-export function revokeBlobURL(url: string): void
+export function downloadAsJSON(data: any, filename: string): void
+export function sanitizeFilename(filename: string): string
+export function generateTimestamp(): string
+```
+
+**`utils/logger.ts`** - Structured logger
+```typescript
+export const logger: ExtensionLogger
+// Methods: debug, info, warn, error, setLevel
+```
+
+**`utils/logs-storage.ts`** - Persistent log management
+```typescript
+export const logsStorage: {
+  saveLog(entry: LogEntry): Promise<void>
+  getLogs(): Promise<LogEntry[]>
+  clearLogs(): Promise<void>
+}
 ```
 
 **`utils/types.ts`** - TypeScript definitions
@@ -257,9 +288,11 @@ export interface Message {
 
 ### Package Manager
 - **Bun v1.3+** - Fast JavaScript runtime & package manager
-  - 20-40x faster than npm
   - Native TypeScript support
   - Built-in test runner
+- **tslog v4.x** - Powerful, structured logging for TypeScript
+  - JSON transport support
+  - Cross-context log formatting
 
 ### Code Quality
 - **Biome v2.3.11** - Fast linter & formatter (Rust-based)
@@ -651,6 +684,14 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
 **Problem:** Deeply nested relative imports (`../../utils/...`) make moving files difficult and create brittle paths.
 **Solution:** Implement `@/` path alias pointing to the root. Ensure `tsconfig.json` and build tools are aligned. Refactor all logic and test imports to use absolute paths.
 
+### 8. Cross-Context Logging Funnel
+**Problem:** `console.log` in Content Scripts is hard to retrieve from the Background script or for user export.
+**Solution:** Implement a custom `tslog` transport that detects the current context. Content script logs are sent via `chrome.runtime.sendMessage` to the Background worker, which acts as a central sink and writes to `chrome.storage.local`.
+
+### 9. Build-Time Module Resolution Issues
+**Problem:** Certain WXT modules like `wxt/storage` can cause "Missing specifier" errors during production builds in some environments.
+**Solution:** Use the standard `browser` polyfill from `wxt/browser` and access `browser.storage.local` directly for critical utilities like the logger. This avoids build-time resolution overhead for virtual modules.
+
 ## 🎓 Learning Resources
 
 For AI agents unfamiliar with concepts:
@@ -690,5 +731,5 @@ bun run check        # Lint & format (auto-fix)
 ---
 
 **Last Updated:** 2026-01-19
-**Agent Version:** 1.1.0 (Post-Grok Integration)
+**Agent Version:** 1.2.0 (Post-Logging Infrastructure)
 **For:** Claude, GPT-4o, Gemini 1.5 Pro, and other AI coding agents
