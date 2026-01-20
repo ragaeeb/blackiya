@@ -37,5 +37,5 @@ dist
 build
 *.tsbuildinfo
 *.pem
-+coverage
+coverage
 .nyc_output

@@ -25,12 +25,13 @@ const MAX_TITLE_LENGTH = 80;
 const CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 /**
- * ChatGPT Platform Adapter
+ * Create a ChatGPT Platform Adapter instance.
  *
  * Supports both chatgpt.com and legacy chat.openai.com domains.
  * Handles standard /c/{id} format and gizmo /g/{gizmo}/c/{id} format.
  */
-export const chatGPTAdapter: LLMPlatform = {
+export function createChatGPTAdapter(): LLMPlatform {
+    return {
     name: 'ChatGPT',
 
     urlMatchPattern: 'https://chatgpt.com/*',
@@ -153,4 +154,10 @@ export const chatGPTAdapter: LLMPlatform = {
         }
         return null;
     },
-};
+    };
+}
+
+/**
+ * ChatGPT Platform Adapter singleton instance.
+ */
+export const chatGPTAdapter: LLMPlatform = createChatGPTAdapter();
