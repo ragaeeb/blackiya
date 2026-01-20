@@ -1,5 +1,11 @@
 import { browser } from 'wxt/browser';
 
+interface StorageBackend {
+    get: (key: string) => Promise<Record<string, unknown>>;
+    set: (value: Record<string, unknown>) => Promise<void>;
+    remove: (key: string) => Promise<void>;
+}
+
 export interface LogEntry {
     timestamp: string;
     level: string;
@@ -13,14 +19,34 @@ const STORAGE_KEY = 'logs';
 export const FLUSH_INTERVAL_MS = 2000;
 export const FLUSH_THRESHOLD = 50;
 
+function createInMemoryStorage(): StorageBackend {
+    const store = new Map<string, unknown>();
+
+    return {
+        async get(key: string) {
+            return { [key]: store.get(key) };
+        },
+        async set(value: Record<string, unknown>) {
+            for (const [key, entry] of Object.entries(value)) {
+                store.set(key, entry);
+            }
+        },
+        async remove(key: string) {
+            store.delete(key);
+        },
+    };
+}
+
+const fallbackStorage = createInMemoryStorage();
+
 export class BufferedLogsStorage {
     private buffer: LogEntry[] = [];
     private flushTimer: ReturnType<typeof setTimeout> | null = null;
     private isFlushing = false;
-    private storage: any;
+    private storage: StorageBackend;
 
-    constructor(storageBackend?: any) {
-        this.storage = storageBackend || browser.storage.local;
+    constructor(storageBackend?: StorageBackend) {
+        this.storage = storageBackend || browser?.storage?.local || fallbackStorage;
     }
 
     /**

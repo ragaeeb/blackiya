@@ -18,7 +18,6 @@ describe('BufferedLogsStorage', () => {
     let FLUSH_INTERVAL_MS: number;
     let FLUSH_THRESHOLD: number;
     let MAX_LOGS: number;
-    let LogEntry: any;
 
     let storedLogs: any[] = [];
     let storage: any;

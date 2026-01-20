@@ -32,141 +32,141 @@ export function createChatGPTAdapter(): LLMPlatform {
     const conversationIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
     return {
-    name: 'ChatGPT',
+        name: 'ChatGPT',
 
-    urlMatchPattern: 'https://chatgpt.com/*',
+        urlMatchPattern: 'https://chatgpt.com/*',
 
-    apiEndpointPattern: /backend-api\/conversation\/[a-f0-9-]+$/,
+        apiEndpointPattern: /backend-api\/conversation\/[a-f0-9-]+$/,
 
-    /**
-     * Check if a URL belongs to ChatGPT
-     */
-    isPlatformUrl(url: string): boolean {
-        return url.includes('chatgpt.com') || url.includes('chat.openai.com');
-    },
+        /**
+         * Check if a URL belongs to ChatGPT
+         */
+        isPlatformUrl(url: string): boolean {
+            return url.includes('chatgpt.com') || url.includes('chat.openai.com');
+        },
 
-    /**
-     * Extract conversation ID from ChatGPT URL
-     *
-     * Supports:
-     * - https://chatgpt.com/c/{uuid}
-     * - https://chatgpt.com/g/{gizmo-id}/c/{uuid}
-     * - https://chat.openai.com/c/{uuid} (legacy)
-     * - URLs with query parameters
-     *
-     * @param url - The current page URL
-     * @returns The conversation UUID or null if not found/invalid
-     */
-    extractConversationId(url: string): string | null {
-        let hostname: string | null = null;
-        let pathname = '';
+        /**
+         * Extract conversation ID from ChatGPT URL
+         *
+         * Supports:
+         * - https://chatgpt.com/c/{uuid}
+         * - https://chatgpt.com/g/{gizmo-id}/c/{uuid}
+         * - https://chat.openai.com/c/{uuid} (legacy)
+         * - URLs with query parameters
+         *
+         * @param url - The current page URL
+         * @returns The conversation UUID or null if not found/invalid
+         */
+        extractConversationId(url: string): string | null {
+            let hostname: string | null = null;
+            let pathname = '';
 
-        if (typeof URL !== 'undefined') {
+            if (typeof URL !== 'undefined') {
+                try {
+                    const urlObj = new URL(url);
+                    hostname = urlObj.hostname;
+                    pathname = urlObj.pathname;
+                } catch {
+                    return null;
+                }
+            } else {
+                const match = url.match(/^https?:\/\/([^/]+)(\/[^?#]*)?/i);
+                if (!match) {
+                    return null;
+                }
+                hostname = match[1];
+                pathname = match[2] ?? '';
+            }
+
+            // Validate strict hostname
+            if (hostname !== 'chatgpt.com' && hostname !== 'chat.openai.com') {
+                return null;
+            }
+
+            // Look for /c/{uuid} pattern in the pathname
+            const pathMatch = pathname.match(/\/c\/([a-f0-9-]+)/i);
+            if (!pathMatch) {
+                return null;
+            }
+
+            const potentialId = pathMatch[1];
+
+            // Validate it's a proper UUID format
+            if (!conversationIdPattern.test(potentialId)) {
+                return null;
+            }
+
+            return potentialId;
+        },
+
+        /**
+         * Parse intercepted ChatGPT API response
+         *
+         * @param data - Raw text or parsed object
+         * @param _url - The API endpoint URL
+         * @returns Validated ConversationData or null
+         */
+        parseInterceptedData(data: string | any, _url: string): ConversationData | null {
             try {
-                const urlObj = new URL(url);
-                hostname = urlObj.hostname;
-                pathname = urlObj.pathname;
-            } catch {
-                return null;
-            }
-        } else {
-            const match = url.match(/^https?:\/\/([^/]+)(\/[^?#]*)?/i);
-            if (!match) {
-                return null;
-            }
-            hostname = match[1];
-            pathname = match[2] ?? '';
-        }
+                const parsed = typeof data === 'string' ? JSON.parse(data) : data;
 
-        // Validate strict hostname
-        if (hostname !== 'chatgpt.com' && hostname !== 'chat.openai.com') {
+                // Basic validation of ChatGPT structure
+                if (parsed && typeof parsed.title === 'string' && parsed.mapping) {
+                    return parsed as ConversationData;
+                }
+            } catch (e) {
+                logger.error('Failed to parse ChatGPT data:', e);
+            }
             return null;
-        }
+        },
 
-        // Look for /c/{uuid} pattern in the pathname
-        const pathMatch = pathname.match(/\/c\/([a-f0-9-]+)/i);
-        if (!pathMatch) {
-            return null;
-        }
+        /**
+         * Format a filename for the downloaded JSON
+         *
+         * Format: {sanitized_title}_{YYYY-MM-DD_HH-MM-SS}
+         *
+         * @param data - The conversation data
+         * @returns A sanitized filename (without .json extension)
+         */
+        formatFilename(data: ConversationData): string {
+            let title = data.title || '';
 
-        const potentialId = pathMatch[1];
-
-        // Validate it's a proper UUID format
-        if (!conversationIdPattern.test(potentialId)) {
-            return null;
-        }
-
-        return potentialId;
-    },
-
-    /**
-     * Parse intercepted ChatGPT API response
-     *
-     * @param data - Raw text or parsed object
-     * @param _url - The API endpoint URL
-     * @returns Validated ConversationData or null
-     */
-    parseInterceptedData(data: string | any, _url: string): ConversationData | null {
-        try {
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-
-            // Basic validation of ChatGPT structure
-            if (parsed && typeof parsed.title === 'string' && parsed.mapping) {
-                return parsed as ConversationData;
+            // If no title, use a default with part of conversation ID
+            if (!title.trim()) {
+                title = `conversation_${data.conversation_id.slice(0, 8)}`;
             }
-        } catch (e) {
-            logger.error('Failed to parse ChatGPT data:', e);
-        }
-        return null;
-    },
 
-    /**
-     * Format a filename for the downloaded JSON
-     *
-     * Format: {sanitized_title}_{YYYY-MM-DD_HH-MM-SS}
-     *
-     * @param data - The conversation data
-     * @returns A sanitized filename (without .json extension)
-     */
-    formatFilename(data: ConversationData): string {
-        let title = data.title || '';
-
-        // If no title, use a default with part of conversation ID
-        if (!title.trim()) {
-            title = `conversation_${data.conversation_id.slice(0, 8)}`;
-        }
-
-        // Sanitize and truncate title
-        let sanitizedTitle = sanitizeFilename(title);
-        if (sanitizedTitle.length > maxTitleLength) {
-            sanitizedTitle = sanitizedTitle.slice(0, maxTitleLength);
-        }
-
-        // Generate timestamp from update_time or create_time
-        const timestamp = generateTimestamp(data.update_time || data.create_time);
-
-        return `${sanitizedTitle}_${timestamp}`;
-    },
-
-    /**
-     * Find injection target in ChatGPT UI
-     */
-    getButtonInjectionTarget(): HTMLElement | null {
-        const selectors = [
-            '[data-testid="model-switcher-dropdown-button"]',
-            'header nav',
-            '.flex.items-center.justify-between',
-            'header .flex',
-        ];
-
-        for (const selector of selectors) {
-            const target = document.querySelector(selector);
-            if (target) {
-                return (target.parentElement || target) as HTMLElement;
+            // Sanitize and truncate title
+            let sanitizedTitle = sanitizeFilename(title);
+            if (sanitizedTitle.length > maxTitleLength) {
+                sanitizedTitle = sanitizedTitle.slice(0, maxTitleLength);
             }
-        }
-        return null;
-    },
+
+            // Generate timestamp from update_time or create_time
+            const timestamp = generateTimestamp(data.update_time || data.create_time);
+
+            return `${sanitizedTitle}_${timestamp}`;
+        },
+
+        /**
+         * Find injection target in ChatGPT UI
+         */
+        getButtonInjectionTarget(): HTMLElement | null {
+            const selectors = [
+                '[data-testid="model-switcher-dropdown-button"]',
+                'header nav',
+                '.flex.items-center.justify-between',
+                'header .flex',
+            ];
+
+            for (const selector of selectors) {
+                const target = document.querySelector(selector);
+                if (target) {
+                    return (target.parentElement || target) as HTMLElement;
+                }
+            }
+            return null;
+        },
     };
 }
 
