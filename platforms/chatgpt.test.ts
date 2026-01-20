@@ -23,54 +23,54 @@ mock.module('wxt/browser', () => ({
 }));
 
 describe('ChatGPT Platform Adapter', () => {
-    let chatGPTAdapter: any;
+    let adapter: any;
 
     beforeAll(async () => {
         // Dynamic import to ensure mocks apply
         const module = await import('@/platforms/chatgpt');
-        chatGPTAdapter = module.chatGPTAdapter;
+        adapter = module.chatGPTAdapter;
     });
 
     describe('extractConversationId', () => {
         it('should extract conversation ID from standard chat URL', () => {
             const url = 'https://chatgpt.com/c/696bc3d5-fa84-8328-b209-4d65cb229e59';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
 
         it('should extract conversation ID from GPT/gizmo URL format', () => {
             const url = 'https://chatgpt.com/g/g-abc123/c/696bc3d5-fa84-8328-b209-4d65cb229e59';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
 
         it('should extract conversation ID from URL with query parameters', () => {
             const url = 'https://chatgpt.com/c/696bc3d5-fa84-8328-b209-4d65cb229e59?model=gpt-4';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
 
         it('should return null for homepage URL', () => {
             const url = 'https://chatgpt.com/';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBeNull();
         });
 
         it('should return null for non-ChatGPT URL', () => {
             const url = 'https://google.com/c/123';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBeNull();
         });
 
         it('should return null for invalid conversation ID format', () => {
             const url = 'https://chatgpt.com/c/invalid-id';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBeNull();
         });
 
         it('should handle chat.openai.com legacy domain', () => {
             const url = 'https://chat.openai.com/c/696bc3d5-fa84-8328-b209-4d65cb229e59';
-            const id = chatGPTAdapter.extractConversationId(url);
+            const id = adapter.extractConversationId(url);
             expect(id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
     });
@@ -82,13 +82,13 @@ describe('ChatGPT Platform Adapter', () => {
                 conversation_id: 'uuid-123',
                 mapping: { 'node-1': {} },
             };
-            const result = chatGPTAdapter.parseInterceptedData(JSON.stringify(mockData), 'url');
+            const result = adapter.parseInterceptedData(JSON.stringify(mockData), 'url');
             expect(result).not.toBeNull();
             expect(result?.title).toBe('Test Conversation');
         });
 
         it('should return null for invalid data', () => {
-            const result = chatGPTAdapter.parseInterceptedData(JSON.stringify({ foo: 'bar' }), 'url');
+            const result = adapter.parseInterceptedData(JSON.stringify({ foo: 'bar' }), 'url');
             expect(result).toBeNull();
         });
     });
@@ -112,7 +112,7 @@ describe('ChatGPT Platform Adapter', () => {
                 blocked_urls: [],
             };
 
-            const filename = chatGPTAdapter.formatFilename(data);
+            const filename = adapter.formatFilename(data);
 
             // Should contain sanitized title
             expect(filename).toContain('Test_Conversation');
@@ -138,7 +138,7 @@ describe('ChatGPT Platform Adapter', () => {
                 blocked_urls: [],
             };
 
-            const filename = chatGPTAdapter.formatFilename(data);
+            const filename = adapter.formatFilename(data);
 
             // Should not contain invalid filename characters
             expect(filename).not.toMatch(/[:/\\?<>"|*]/);
@@ -162,7 +162,7 @@ describe('ChatGPT Platform Adapter', () => {
                 blocked_urls: [],
             };
 
-            const filename = chatGPTAdapter.formatFilename(data);
+            const filename = adapter.formatFilename(data);
 
             // Should use conversation ID prefix for untitled conversations
             expect(filename).toContain('conversation');
@@ -187,7 +187,7 @@ describe('ChatGPT Platform Adapter', () => {
                 blocked_urls: [],
             };
 
-            const filename = chatGPTAdapter.formatFilename(data);
+            const filename = adapter.formatFilename(data);
 
             // Filename should be reasonable length (under 100 chars for title part)
             expect(filename.length).toBeLessThan(150);
@@ -197,12 +197,12 @@ describe('ChatGPT Platform Adapter', () => {
     describe('apiEndpointPattern', () => {
         it('should match ChatGPT conversation API endpoint', () => {
             const endpoint = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59';
-            expect(chatGPTAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
         });
 
         it('should not match other API endpoints', () => {
             const endpoint = 'https://chatgpt.com/backend-api/models';
-            expect(chatGPTAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(false);
         });
     });
 });

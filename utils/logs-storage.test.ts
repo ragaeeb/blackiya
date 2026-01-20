@@ -1,12 +1,38 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { BufferedLogsStorage, FLUSH_INTERVAL_MS, FLUSH_THRESHOLD, type LogEntry, MAX_LOGS } from './logs-storage';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+
+// Mock wxt/browser at the very top to handle side-effects in logs-storage.ts
+mock.module('wxt/browser', () => ({
+    browser: {
+        storage: {
+            local: {
+                get: async () => ({}),
+                set: async () => {},
+                remove: async () => {},
+            },
+        },
+    },
+}));
 
 describe('BufferedLogsStorage', () => {
-    let storedLogs: LogEntry[] = [];
-    let storage: BufferedLogsStorage;
+    let BufferedLogsStorage: any;
+    let FLUSH_INTERVAL_MS: number;
+    let FLUSH_THRESHOLD: number;
+    let MAX_LOGS: number;
+    let LogEntry: any;
+
+    let storedLogs: any[] = [];
+    let storage: any;
     let setSpy: any;
     let getSpy: any;
     let removeSpy: any;
+
+    beforeAll(async () => {
+        const mod = await import('./logs-storage');
+        BufferedLogsStorage = mod.BufferedLogsStorage;
+        FLUSH_INTERVAL_MS = mod.FLUSH_INTERVAL_MS;
+        FLUSH_THRESHOLD = mod.FLUSH_THRESHOLD;
+        MAX_LOGS = mod.MAX_LOGS;
+    });
 
     beforeEach(() => {
         storedLogs = [];
@@ -45,7 +71,7 @@ describe('BufferedLogsStorage', () => {
     });
 
     it('should buffer logs and not write immediately', async () => {
-        const entry: LogEntry = {
+        const entry = {
             timestamp: 'test',
             level: 'info',
             message: 'test message',
@@ -58,7 +84,7 @@ describe('BufferedLogsStorage', () => {
     });
 
     it('should flush when threshold is reached', async () => {
-        const entry: LogEntry = {
+        const entry = {
             timestamp: 'test',
             level: 'info',
             message: 'test message',
@@ -79,7 +105,7 @@ describe('BufferedLogsStorage', () => {
     });
 
     it('should flush after timeout', async () => {
-        const entry: LogEntry = {
+        const entry = {
             timestamp: 'test',
             level: 'info',
             message: 'test message',
@@ -98,7 +124,7 @@ describe('BufferedLogsStorage', () => {
 
     it('should rotate logs when limit exceeded', async () => {
         // Simulate existing logs in storage
-        const existingLogs: LogEntry[] = Array(MAX_LOGS).fill({
+        const existingLogs = Array(MAX_LOGS).fill({
             timestamp: 'old',
             level: 'info',
             message: 'old message',
