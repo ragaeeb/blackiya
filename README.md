@@ -242,6 +242,34 @@ The extension requires the following permissions:
 - `https://gemini.google.com/*` - Gemini platform
 - `https://x.com/i/grok*` - Grok platform
 
+## 🔒 Privacy & Compliance
+
+### Single Purpose
+Blackiya has a single, narrow purpose: to provide users with a tool to capture and export their conversation data from specific AI platforms (ChatGPT, Gemini, and Grok) as JSON files for personal archiving and analysis.
+
+### Remote Code Disclosure
+- **No Remote Code:** Blackiya does NOT use any remote code. All logic (JavaScript and Wasm) is included directly in the extension's package. We do not use external `<script>` tags, external modules, or `eval()` for executing remote strings.
+
+### Data Usage & Collection
+In accordance with the Chrome Web Store Developer Program Policies, we declare the following regarding data collection:
+
+| Data Category | Status | Justification |
+| :--- | :--- | :--- |
+| **Personally identifiable information** | ❌ Not Collected | None required for functionality. |
+| **Health information** | ❌ Not Collected | None required for functionality. |
+| **Financial and payment information** | ❌ Not Collected | No payments or financial processing within the extension. |
+| **Authentication information** | ❌ Not Collected | No passwords or credentials are stored or transmitted. |
+| **Personal communications** | ❌ Not Collected | Conversations are processed locally and only exported at the user's request. |
+| **Location** | ❌ Not Collected | No GPS or IP-based location tracking. |
+| **Web history** | ❌ Not Collected | We do not track browsing history outside of the supported AI platforms. |
+| **User activity** | ❌ Not Collected | No network monitoring or keystroke logging. |
+| **Website content** | ❌ Not Collected | Content is only read from supported platforms to facilitate the export feature. |
+
+*All processed data remains strictly local to the user's device.*
+
+### Privacy Policy
+For the full legal disclosure, please refer to our [Privacy Policy](./PRIVACY_POLICY.md).
+
 ## 🧪 Development Workflow
 
 ### Making Changes
