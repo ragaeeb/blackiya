@@ -320,6 +320,12 @@ export interface Message {
   - ES2022 target
   - Path aliases configured
 
+### UI Framework
+- **Preact v10.x** - Fast, lightweight React alternative
+  - Used for Extension Popup UI
+  - Configured with `preact/compat` aliases in `wxt.config.ts`
+  - Zero-overhead in content scripts (vanilla JS used there)
+
 ### Browser APIs
 - **Chrome Extensions API (Manifest V3)**
   - `chrome.runtime` - Message passing
@@ -515,6 +521,13 @@ Add JSDoc comments to all major files:
 
 4. Test in dev mode: `bun run dev`
 
+### Release Pipeline
+The project uses **Semantic Release** via GitHub Actions.
+1.  **Commit:** Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, etc.) to trigger version bumps.
+2.  **CI Build:** The `release.yml` workflow builds the extension and creates a zip artifact.
+3.  **Artifacts:** A `blackiya-extension.zip` is available in GitHub Actions run artifacts for Chrome Web Store submission.
+4.  **Publish:** Semantic Release automatically updates `package.json`, creates a Git tag, and generates a GitHub Release.
+
 ### When Debugging
 
 **Common Issues:**
@@ -647,6 +660,13 @@ const id = url.split('/').find(segment => segment.match(/^[a-f0-9-]{36}$/));
    - State must be saved to `browser.storage`
    - Event-driven architecture only
 
+### Privacy & Local-Only Mandate
+
+**Strict Constraint:** Blackiya is a local-only extension.
+- **No Remote Code:** We strictly do not use external scripts or analytics.
+- **No Data Exfiltration:** Conversation data must never leave the user's device (except via user-initiated export).
+- **Compliance:** All features must adhere to the `PRIVACY_POLICY.md`. When adding features, ensure no PII is collected without explicit consent and local scope.
+
 ### Platform-Specific Constraints
 
 **ChatGPT:**
@@ -767,7 +787,7 @@ bun run check        # Lint & format (auto-fix)
 ```
 
 **Snapshot Characteristics:**
-- **Included:** All TypeScript source logic, React components, and project documentation (.md).
+- **Included:** All TypeScript source logic, Preact components, and project documentation (.md).
 - **Excluded:** `node_modules`, build outputs (`.output`, `.wxt`), version control metadata, and package lockfiles.
 - **Format:** Single text file (`codebase_snapshot.txt`) optimized for context window efficiency.
 

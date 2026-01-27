@@ -26,7 +26,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 25
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -38,6 +38,16 @@ jobs:
 
       - name: Verify Build
         run: bun run build
+
+      - name: Create Zip Artifact
+        run: bun run zip
+
+      - name: Upload Extension Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: blackiya-extension
+          path: .output/*.zip
+          retention-days: 10
 
       - name: Publish
         run: bun x semantic-release
