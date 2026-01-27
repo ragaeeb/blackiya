@@ -20,6 +20,7 @@ export const SUPPORTED_PLATFORM_URLS = [
     'https://gemini.google.com/*',
     'https://x.com/i/grok*',
     'https://x.com/i/api/*',
+    'https://grok.com/*',
 ] as const;
 
 /**

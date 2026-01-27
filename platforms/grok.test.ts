@@ -51,6 +51,13 @@ describe('Grok Platform Adapter', () => {
             expect(id).toBe('2013295304527827227');
         });
 
+        it('should extract conversation ID from grok.com URL', () => {
+            const url =
+                'https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29?rid=70bc533c-9bfb-4321-b10f-facaed644858';
+            const id = grokAdapter.extractConversationId(url);
+            expect(id).toBe('01cb0729-6455-471d-b33a-124b3de76a29');
+        });
+
         it('should extract conversation ID from URL with additional query parameters', () => {
             const url = 'https://x.com/i/grok?conversation=2013295304527827227&mode=normal';
             const id = grokAdapter.extractConversationId(url);
@@ -98,6 +105,7 @@ describe('Grok Platform Adapter', () => {
         it('should recognize valid Grok URLs', () => {
             expect(grokAdapter.isPlatformUrl('https://x.com/i/grok?conversation=123')).toBe(true);
             expect(grokAdapter.isPlatformUrl('https://x.com/i/grok')).toBe(true);
+            expect(grokAdapter.isPlatformUrl('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBe(true);
         });
 
         it('should reject non-Grok URLs', () => {
@@ -116,6 +124,25 @@ describe('Grok Platform Adapter', () => {
         it('should match GrokHistory endpoint', () => {
             const endpoint = 'https://x.com/i/api/graphql/9Hyh5D4-WXLnExZkONSkZg/GrokHistory?variables=%7B%7D';
             expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
+        });
+
+        it('should match grok.com conversation endpoints', () => {
+            const pattern = grokAdapter.apiEndpointPattern;
+            expect(
+                pattern.test(
+                    'https://grok.com/rest/app-chat/conversations_v2/01cb0729-6455-471d-b33a-124b3de76a29?includeWorkspaces=true&includeTaskResult=true',
+                ),
+            ).toBe(true);
+            expect(
+                pattern.test(
+                    'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/response-node?includeThreads=true',
+                ),
+            ).toBe(true);
+            expect(
+                pattern.test(
+                    'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
+                ),
+            ).toBe(true);
         });
 
         it('should not match other GraphQL endpoints', () => {
@@ -262,6 +289,85 @@ describe('Grok Platform Adapter', () => {
                 'https://x.com/i/api/graphql/test/GrokHistory',
             );
             expect(result).toBeNull();
+        });
+    });
+
+    describe('parseInterceptedData - grok.com API', () => {
+        it('should handle out-of-order grok.com responses', () => {
+            const conversationId = '01cb0729-6455-471d-b33a-124b3de76a29';
+            const responseNodes = {
+                responseNodes: [
+                    { responseId: '7d2229b8-3ea3-464c-986f-eae03362ca3e', sender: 'human' },
+                    {
+                        responseId: '70bc533c-9bfb-4321-b10f-facaed644858',
+                        sender: 'assistant',
+                        parentResponseId: '7d2229b8-3ea3-464c-986f-eae03362ca3e',
+                    },
+                ],
+                inflightResponses: [],
+            };
+
+            const loadResponses = {
+                responses: [
+                    {
+                        responseId: '7d2229b8-3ea3-464c-986f-eae03362ca3e',
+                        message: 'ROLE: Expert',
+                        sender: 'human',
+                        createTime: '2026-01-26T15:18:04.766Z',
+                        partial: false,
+                        metadata: {
+                            requestModelDetails: {
+                                modelId: 'grok-4-1-thinking-1129',
+                            },
+                        },
+                        model: 'grok-4',
+                    },
+                    {
+                        responseId: '70bc533c-9bfb-4321-b10f-facaed644858',
+                        message: 'T11127 - How is the combining between his statement',
+                        sender: 'assistant',
+                        createTime: '2026-01-26T15:19:19.160Z',
+                        parentResponseId: '7d2229b8-3ea3-464c-986f-eae03362ca3e',
+                        partial: false,
+                        metadata: {},
+                        model: 'grok-4',
+                    },
+                ],
+            };
+
+            const conversationMeta = {
+                conversation: {
+                    conversationId: conversationId,
+                    title: 'Classical Islamic Text Translation Rules',
+                    createTime: '2026-01-26T15:18:04.730551Z',
+                    modifyTime: '2026-01-26T15:19:21.015693Z',
+                },
+            };
+
+            const responseNodeUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`;
+            const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`;
+
+            const nodesResult = grokAdapter.parseInterceptedData(JSON.stringify(responseNodes), responseNodeUrl);
+            expect(nodesResult).toBeNull();
+
+            const responsesResult = grokAdapter.parseInterceptedData(JSON.stringify(loadResponses), loadResponsesUrl);
+            expect(responsesResult).not.toBeNull();
+            expect(responsesResult?.conversation_id).toBe(conversationId);
+            expect(responsesResult?.default_model_slug).toBe('grok-4');
+
+            const metaResult = grokAdapter.parseInterceptedData(JSON.stringify(conversationMeta), metaUrl);
+            expect(metaResult).not.toBeNull();
+            expect(metaResult?.title).toBe('Classical Islamic Text Translation Rules');
+
+            const mapping = (metaResult?.mapping ?? {}) as Record<string, MessageNode>;
+            const rootNode = Object.values(mapping).find((node) => node.parent === null);
+            expect(rootNode).toBeDefined();
+
+            const firstNode = mapping['7d2229b8-3ea3-464c-986f-eae03362ca3e'];
+            const secondNode = mapping['70bc533c-9bfb-4321-b10f-facaed644858'];
+            expect(firstNode?.parent).toBe(rootNode?.id ?? null);
+            expect(secondNode?.parent).toBe(firstNode?.id);
         });
     });
 

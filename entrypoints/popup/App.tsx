@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import type { JSX } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
@@ -27,8 +28,9 @@ function App() {
         });
     }, []);
 
-    const handleLevelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newLevel = e.target.value as LogLevel;
+    const handleLevelChange: JSX.GenericEventHandler<HTMLSelectElement> = (e) => {
+        const target = e.currentTarget as HTMLSelectElement | null;
+        const newLevel = (target?.value || 'info') as LogLevel;
         setLogLevel(newLevel);
         browser.storage.local.set({ [STORAGE_KEY_LEVEL]: newLevel });
         logger.setLevel(newLevel);

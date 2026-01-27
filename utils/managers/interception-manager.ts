@@ -14,13 +14,20 @@ import type { ConversationData } from '@/utils/types';
 export class InterceptionManager {
     private readonly conversationCache: LRUCache<string, ConversationData>;
     private currentAdapter: LLMPlatform | null = null;
+    private readonly windowRef: Window;
+    private readonly globalRef: typeof globalThis;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
     private onDataCaptured: (conversationId: string) => void;
 
-    constructor(onDataCaptured: (conversationId: string) => void) {
+    constructor(
+        onDataCaptured: (conversationId: string) => void,
+        options: { window?: Window; global?: typeof globalThis } = {},
+    ) {
         this.conversationCache = new LRUCache<string, ConversationData>(10);
         this.onDataCaptured = onDataCaptured;
+        this.windowRef = options.window ?? window;
+        this.globalRef = options.global ?? globalThis;
     }
 
     public updateAdapter(adapter: LLMPlatform | null) {
@@ -28,11 +35,20 @@ export class InterceptionManager {
     }
 
     public start(): void {
-        window.addEventListener('message', this.handleMessage);
+        this.windowRef.addEventListener('message', this.handleMessage);
+        this.processQueuedMessages();
+        // In case queued messages are added before the listener is attached
+        setTimeout(() => {
+            this.processQueuedMessages();
+        }, 0);
+    }
+
+    public flushQueuedMessages(): void {
+        this.processQueuedMessages();
     }
 
     public stop(): void {
-        window.removeEventListener('message', this.handleMessage);
+        this.windowRef.removeEventListener('message', this.handleMessage);
     }
 
     public getConversation(id: string): ConversationData | undefined {
@@ -40,11 +56,11 @@ export class InterceptionManager {
     }
 
     private handleMessage = (event: MessageEvent): void => {
-        if (event.source !== window) {
+        if (event.source !== this.windowRef) {
             return;
         }
 
-        if (event.origin !== window.location.origin) {
+        if (event.origin !== this.windowRef.location.origin) {
             return;
         }
 
@@ -110,5 +126,23 @@ export class InterceptionManager {
         } catch (error) {
             logger.error('Error parsing intercepted data:', error);
         }
+    }
+
+    private processQueuedMessages(): void {
+        const globalQueue = (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__;
+        const windowQueue = (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__;
+        const queue = Array.isArray(globalQueue) ? globalQueue : windowQueue;
+        if (!Array.isArray(queue) || queue.length === 0) {
+            return;
+        }
+
+        for (const message of queue) {
+            if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
+                this.handleInterceptedData(message);
+            }
+        }
+
+        (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
+        (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
     }
 }

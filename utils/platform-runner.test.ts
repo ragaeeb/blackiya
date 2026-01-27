@@ -29,6 +29,15 @@ mock.module('@/platforms/factory', () => ({
     getPlatformAdapterByApiUrl: () => currentAdapterMock,
 }));
 
+let runtimeMessageListener: any;
+const downloadCalls: Array<[unknown, string]> = [];
+
+mock.module('@/utils/download', () => ({
+    downloadAsJSON: (...args: [unknown, string]) => {
+        downloadCalls.push(args);
+    },
+}));
+
 // Mock wxt/browser explicitly for this test file to prevent logger errors
 const browserMock = {
     storage: {
@@ -39,6 +48,11 @@ const browserMock = {
     },
     runtime: {
         getURL: () => 'chrome-extension://mock/',
+        onMessage: {
+            addListener: (listener: any) => {
+                runtimeMessageListener = listener;
+            },
+        },
     },
 };
 mock.module('wxt/browser', () => ({
@@ -53,6 +67,8 @@ describe('Platform Runner', () => {
         // Reset DOM
         document.body.innerHTML = '';
         currentAdapterMock = mockAdapter;
+        downloadCalls.length = 0;
+        runtimeMessageListener = undefined;
 
         // Mock window.location properties
         const locationMock = {
@@ -62,6 +78,7 @@ describe('Platform Runner', () => {
 
         delete (window as any).location;
         (window as any).location = locationMock;
+        (global as any).alert = () => {};
     });
 
     it('should inject button when valid adapter and ID found', async () => {
@@ -85,5 +102,50 @@ describe('Platform Runner', () => {
 
         const saveBtn = document.getElementById('blackiya-save-btn');
         expect(saveBtn).toBeNull();
+    });
+
+    it('should respond with cached conversation JSON for external request', async () => {
+        runPlatform();
+
+        const data = { conversation_id: '123', title: 'Test', mapping: {} };
+        currentAdapterMock.parseInterceptedData = () => data;
+        const message = new (window as any).MessageEvent('message', {
+            data: { type: 'LLM_CAPTURE_DATA_INTERCEPTED', url: 'https://test.com/api', data: '{}' },
+            origin: window.location.origin,
+            source: window,
+        });
+        window.dispatchEvent(message);
+
+        let responsePayload: any;
+        const sendResponse = (payload: any) => {
+            responsePayload = payload;
+        };
+        runtimeMessageListener({ type: 'EXTERNAL_GET_CONVERSATION_JSON' }, {}, sendResponse);
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(responsePayload).toEqual({ success: true, data });
+    });
+
+    it('should trigger save flow for external request', async () => {
+        runPlatform();
+
+        const data = { conversation_id: '123', title: 'Test', mapping: {} };
+        currentAdapterMock.parseInterceptedData = () => data;
+        const message = new (window as any).MessageEvent('message', {
+            data: { type: 'LLM_CAPTURE_DATA_INTERCEPTED', url: 'https://test.com/api', data: '{}' },
+            origin: window.location.origin,
+            source: window,
+        });
+        window.dispatchEvent(message);
+
+        let responsePayload: any;
+        const sendResponse = (payload: any) => {
+            responsePayload = payload;
+        };
+        runtimeMessageListener({ type: 'EXTERNAL_TRIGGER_SAVE_JSON' }, {}, sendResponse);
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(downloadCalls).toEqual([[data, 'test.json']]);
+        expect(responsePayload).toEqual({ success: true });
     });
 });

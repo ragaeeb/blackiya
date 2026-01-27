@@ -120,8 +120,7 @@ export class ButtonManager {
         button.addEventListener('mouseenter', () => {
             if (!button.disabled) {
                 button.style.transform = 'translateY(-1px)';
-                button.style.boxShadow =
-                    type === 'save' ? '0 4px 8px rgba(16, 163, 127, 0.3)' : '0 4px 8px rgba(64, 65, 79, 0.2)';
+                button.style.boxShadow = '0 4px 8px rgba(16, 163, 127, 0.3)';
             }
         });
 
@@ -172,23 +171,21 @@ export class ButtonManager {
         return css;
     }
 
-    private getButtonDefaultStyles(type: 'save' | 'copy'): string {
-        const isSave = type === 'save';
-        // Save button: Green; Copy button: Dark/Gray
-        const bg = isSave ? 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)' : '#40414f';
-        const color = '#fff';
-
+    private getButtonDefaultStyles(_type: 'save' | 'copy'): string {
+        const bg = 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
         return `
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 6px;
             padding: 8px 12px;
             border: none;
             border-radius: 6px;
             background: ${bg};
-            color: ${color};
+            color: #fff;
             font-size: 13px;
             font-weight: 500;
+            min-width: 96px;
             cursor: pointer;
             transition: all 0.2s ease;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);

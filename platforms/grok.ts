@@ -20,7 +20,8 @@ const MAX_TITLE_LENGTH = 80;
  * Regex pattern to match a valid Grok conversation ID
  * Format: numeric string (e.g., "2013295304527827227")
  */
-const CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
+const X_CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
+const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 /**
  * In-memory cache for conversation titles
@@ -34,10 +35,292 @@ const conversationTitles = new LRUCache<string, string>(50);
  */
 const activeConversations = new LRUCache<string, ConversationData>(50);
 
+const createGrokComConversation = (conversationId: string) => {
+    const rootId = `grok-com-root-${conversationId}`;
+    const nowSeconds = Date.now() / 1000;
+    const title = conversationTitles.get(conversationId) || 'Grok Conversation';
+
+    const conversation: ConversationData = {
+        title: title,
+        create_time: nowSeconds,
+        update_time: nowSeconds,
+        mapping: {
+            [rootId]: {
+                id: rootId,
+                message: null,
+                parent: null,
+                children: [],
+            },
+        },
+        conversation_id: conversationId,
+        current_node: rootId,
+        moderation_results: [],
+        plugin_ids: null,
+        gizmo_id: null,
+        gizmo_type: null,
+        is_archived: false,
+        default_model_slug: 'grok-4',
+        safe_urls: [],
+        blocked_urls: [],
+    };
+
+    activeConversations.set(conversationId, conversation);
+    return conversation;
+};
+
+const getOrCreateGrokComConversation = (conversationId: string) => {
+    const existing = activeConversations.get(conversationId);
+    if (existing) {
+        return existing;
+    }
+    return createGrokComConversation(conversationId);
+};
+
+const ensureGrokComRoot = (conversation: ConversationData) => {
+    const existingRoot = Object.values(conversation.mapping).find((node) => node.parent === null);
+    if (existingRoot) {
+        return existingRoot.id;
+    }
+
+    const rootId = `grok-com-root-${conversation.conversation_id}`;
+    conversation.mapping[rootId] = {
+        id: rootId,
+        message: null,
+        parent: null,
+        children: [],
+    };
+    conversation.current_node = rootId;
+    return rootId;
+};
+
+const ensureGrokComNode = (conversation: ConversationData, nodeId: string, rootId: string) => {
+    if (!conversation.mapping[nodeId]) {
+        conversation.mapping[nodeId] = {
+            id: nodeId,
+            message: null,
+            parent: rootId,
+            children: [],
+        };
+    }
+    return conversation.mapping[nodeId];
+};
+
+const attachGrokComNodeToParent = (
+    conversation: ConversationData,
+    nodeId: string,
+    parentId: string,
+    rootId: string,
+) => {
+    const parentKey = parentId || rootId;
+    const node = ensureGrokComNode(conversation, nodeId, rootId);
+
+    if (node.parent && conversation.mapping[node.parent]) {
+        const siblings = conversation.mapping[node.parent].children;
+        conversation.mapping[node.parent].children = siblings.filter((child) => child !== nodeId);
+    }
+
+    node.parent = parentKey;
+    const parentNode = ensureGrokComNode(conversation, parentKey, rootId);
+    if (!parentNode.children.includes(nodeId)) {
+        parentNode.children.push(nodeId);
+    }
+};
+
+const hasGrokComMessages = (conversation: ConversationData) =>
+    Object.values(conversation.mapping).some((node) => node.message !== null);
+
+const parseGrokComConversationMeta = (data: any, conversationId: string) => {
+    const conversation = data?.conversation;
+    if (!conversation) {
+        return null;
+    }
+
+    const title = typeof conversation.title === 'string' ? conversation.title : undefined;
+    const createTime = typeof conversation.createTime === 'string' ? Date.parse(conversation.createTime) / 1000 : null;
+    const updateTime = typeof conversation.modifyTime === 'string' ? Date.parse(conversation.modifyTime) / 1000 : null;
+
+    if (title) {
+        conversationTitles.set(conversationId, title);
+    }
+
+    const conversationData = getOrCreateGrokComConversation(conversationId);
+    if (title) {
+        conversationData.title = title;
+    }
+    if (createTime && !Number.isNaN(createTime)) {
+        conversationData.create_time = createTime;
+    }
+    if (updateTime && !Number.isNaN(updateTime)) {
+        conversationData.update_time = updateTime;
+    }
+
+    return hasGrokComMessages(conversationData) ? conversationData : null;
+};
+
+const createGrokComAuthor = (sender: string) => {
+    if (sender === 'human') {
+        const author: Author = {
+            role: 'user',
+            name: 'User',
+            metadata: {},
+        };
+        return author;
+    }
+
+    const author: Author = {
+        role: 'assistant',
+        name: 'Grok',
+        metadata: {},
+    };
+    return author;
+};
+
+const parseGrokComResponseNodes = (data: any, conversationId: string) => {
+    const nodes = Array.isArray(data?.responseNodes) ? data.responseNodes : null;
+    if (!nodes) {
+        return null;
+    }
+
+    const conversation = getOrCreateGrokComConversation(conversationId);
+    const rootId = ensureGrokComRoot(conversation);
+
+    for (const node of nodes) {
+        const responseId = node?.responseId;
+        if (typeof responseId !== 'string') {
+            continue;
+        }
+        const parentId = typeof node?.parentResponseId === 'string' ? node.parentResponseId : rootId;
+        attachGrokComNodeToParent(conversation, responseId, parentId, rootId);
+    }
+
+    return hasGrokComMessages(conversation) ? conversation : null;
+};
+
+const buildGrokComMessage = (
+    responseId: string,
+    sender: string,
+    createdAt: number | null,
+    isPartial: boolean,
+    messageText: string,
+    response: any,
+) => {
+    const content: MessageContent = {
+        content_type: 'text',
+        parts: [messageText],
+    };
+
+    const messageObj: Message = {
+        id: responseId,
+        author: createGrokComAuthor(sender),
+        create_time: createdAt && !Number.isNaN(createdAt) ? createdAt : null,
+        update_time: null,
+        content: content,
+        status: isPartial ? 'in_progress' : 'finished_successfully',
+        end_turn: !isPartial,
+        weight: 1,
+        metadata: {
+            ...response?.metadata,
+            model: response?.model ?? null,
+            requestMetadata: response?.requestMetadata ?? null,
+            sender: sender,
+            partial: isPartial,
+        },
+        recipient: 'all',
+        channel: null,
+    };
+
+    return messageObj;
+};
+
+const parseGrokComResponseItem = (response: any, rootId: string) => {
+    const responseId = typeof response?.responseId === 'string' ? response.responseId : null;
+    if (!responseId) {
+        return null;
+    }
+
+    const createdAt = typeof response?.createTime === 'string' ? Date.parse(response.createTime) / 1000 : null;
+    const messageText = typeof response?.message === 'string' ? response.message : '';
+    const sender = typeof response?.sender === 'string' ? response.sender : 'assistant';
+    const isPartial = Boolean(response?.partial);
+    const parentResponseId = typeof response?.parentResponseId === 'string' ? response.parentResponseId : rootId;
+    const model = typeof response?.model === 'string' ? response.model : null;
+
+    return {
+        responseId,
+        parentResponseId,
+        createdAt,
+        model,
+        messageObj: buildGrokComMessage(responseId, sender, createdAt, isPartial, messageText, response),
+    };
+};
+
+const parseGrokComResponses = (data: any, conversationId: string) => {
+    const responses = Array.isArray(data?.responses) ? data.responses : null;
+    if (!responses) {
+        return null;
+    }
+
+    const conversation = getOrCreateGrokComConversation(conversationId);
+    const rootId = ensureGrokComRoot(conversation);
+    let latestNodeId = conversation.current_node;
+    let latestTimestamp = conversation.update_time;
+
+    for (const response of responses) {
+        const parsedResponse = parseGrokComResponseItem(response, rootId);
+        if (!parsedResponse) {
+            continue;
+        }
+
+        const { responseId, parentResponseId, createdAt, model, messageObj } = parsedResponse;
+        const node = ensureGrokComNode(conversation, responseId, rootId);
+        attachGrokComNodeToParent(conversation, responseId, parentResponseId, rootId);
+        node.message = messageObj;
+
+        if (createdAt && !Number.isNaN(createdAt)) {
+            conversation.update_time = Math.max(conversation.update_time, createdAt);
+            if (createdAt > latestTimestamp) {
+                latestTimestamp = createdAt;
+                latestNodeId = responseId;
+            }
+        }
+
+        if (model && model.trim().length > 0) {
+            conversation.default_model_slug = model;
+        }
+    }
+
+    conversation.current_node = latestNodeId;
+    return conversation;
+};
+
+const isGrokComMetaEndpoint = (url: string) => url.includes('/rest/app-chat/conversations_v2/');
+
+const isGrokComResponseNodesEndpoint = (url: string) =>
+    url.includes('/rest/app-chat/conversations/') && url.includes('/response-node');
+
+const isGrokComLoadResponsesEndpoint = (url: string) =>
+    url.includes('/rest/app-chat/conversations/') && url.includes('/load-responses');
+
+const extractGrokComConversationIdFromUrl = (url: string) => {
+    try {
+        const urlObj = new URL(url);
+        const match = urlObj.pathname.match(
+            /\/rest\/app-chat\/conversations_v2\/([^/]+)|\/rest\/app-chat\/conversations\/([^/]+)/,
+        );
+        const conversationId = match?.[1] ?? match?.[2] ?? null;
+        if (!conversationId) {
+            return null;
+        }
+        return GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
+    } catch {
+        return null;
+    }
+};
+
 /**
  * Parse the GrokHistory response to extract conversation titles
  */
-function parseTitlesResponse(data: string, url: string): Map<string, string> | null {
+const parseTitlesResponse = (data: string, url: string) => {
     try {
         logger.info('[Blackiya/Grok/Titles] Attempting to parse titles from:', url);
 
@@ -77,31 +360,24 @@ function parseTitlesResponse(data: string, url: string): Map<string, string> | n
         logger.error('[Blackiya/Grok/Titles] Failed to parse titles:', e);
         return null;
     }
-}
+};
 
 /**
  * Check if a URL is a GrokHistory (conversation list) endpoint
  */
-function isTitlesEndpoint(url: string): boolean {
+const isTitlesEndpoint = (url: string) => {
     const isTitles = url.includes('GrokHistory');
     if (isTitles) {
         logger.info('[Blackiya/Grok/Titles] Detected titles endpoint');
     }
     return isTitles;
-}
+};
 
 /**
  * Extract thinking/reasoning content from Grok message
  */
 
-function extractThinkingContent(chatItem: any):
-    | Array<{
-          summary: string;
-          content: string;
-          chunks: string[];
-          finished: boolean;
-      }>
-    | undefined {
+const extractThinkingContent = (chatItem: any) => {
     // Check if there are deepsearch_headers which contain reasoning steps
     if (Array.isArray(chatItem?.deepsearch_headers)) {
         const thoughts = chatItem.deepsearch_headers.flatMap((header: any) =>
@@ -121,33 +397,160 @@ function extractThinkingContent(chatItem: any):
     }
 
     return undefined;
-}
+};
 
 /**
  * Determine sender type and create Author object
  */
-function createAuthor(senderType: string): Author {
+const createAuthor = (senderType: string) => {
     if (senderType === 'User') {
-        return {
+        const author: Author = {
             role: 'user',
             name: 'User',
             metadata: {},
         };
+        return author;
     }
 
     // Agent (Grok AI)
-    return {
+    const author: Author = {
         role: 'assistant',
         name: 'Grok',
         metadata: {},
     };
-}
+    return author;
+};
+
+const parseGrokItem = (item: any) => {
+    const chatItemId = item?.chat_item_id;
+    if (!chatItemId) {
+        return null;
+    }
+
+    const createdAtMs = item?.created_at_ms;
+    const grokMode = item?.grok_mode || 'Normal';
+    const messageText = item?.message || '';
+    const senderType = item?.sender_type || 'Agent';
+    const isPartial = item?.is_partial || false;
+    const thoughts = extractThinkingContent(item);
+
+    const content: MessageContent = {
+        content_type: thoughts ? 'thoughts' : 'text',
+        parts: [messageText],
+        thoughts: thoughts,
+    };
+
+    const messageObj: Message = {
+        id: chatItemId,
+        author: createAuthor(senderType),
+        create_time: createdAtMs ? createdAtMs / 1000 : null,
+        update_time: null,
+        content: content,
+        status: isPartial ? 'in_progress' : 'finished_successfully',
+        end_turn: !isPartial,
+        weight: 1,
+        metadata: {
+            grok_mode: grokMode,
+            sender_type: senderType,
+            is_partial: isPartial,
+            thinking_trace: item?.thinking_trace || '',
+            ui_layout: item?.ui_layout || {},
+        },
+        recipient: 'all',
+        channel: null,
+    };
+
+    return {
+        chatItemId,
+        createdAtMs,
+        senderType,
+        messageText,
+        messageObj,
+    };
+};
+
+const getConversationId = (conversationIdOverride: string | undefined, chatItemId: string | undefined) =>
+    conversationIdOverride || chatItemId || '';
+
+const getTitleFromFirstItem = (conversationId: string, senderType: string, messageText: string) => {
+    if (senderType !== 'User' || !messageText || conversationTitles.has(conversationId)) {
+        return null;
+    }
+
+    const firstLine = messageText.split('\n')[0];
+    if (!firstLine || firstLine.length >= 100) {
+        return null;
+    }
+
+    return firstLine;
+};
+
+const createGrokRootNode = () => ({
+    id: 'grok-root',
+    message: null,
+    parent: null,
+    children: [],
+});
+
+const updateConversationFromItem = (
+    state: {
+        mapping: Record<string, MessageNode>;
+        rootId: string;
+        previousNodeId: string;
+        conversationId: string;
+        conversationTitle: string;
+        createTime: number;
+        updateTime: number;
+    },
+    parsedItem: {
+        chatItemId: string;
+        createdAtMs?: number;
+        senderType: string;
+        messageText: string;
+        messageObj: Message;
+    },
+    index: number,
+    conversationIdOverride?: string,
+) => {
+    if (index === 0) {
+        state.conversationId = getConversationId(conversationIdOverride, parsedItem.chatItemId);
+        const titleCandidate = getTitleFromFirstItem(
+            state.conversationId,
+            parsedItem.senderType,
+            parsedItem.messageText,
+        );
+        if (titleCandidate) {
+            state.conversationTitle = titleCandidate;
+        }
+    }
+
+    if (parsedItem.createdAtMs) {
+        const timestamp = parsedItem.createdAtMs / 1000;
+        if (index === 0) {
+            state.createTime = timestamp;
+        }
+        state.updateTime = Math.max(state.updateTime, timestamp);
+    }
+
+    state.mapping[parsedItem.chatItemId] = {
+        id: parsedItem.chatItemId,
+        message: parsedItem.messageObj,
+        parent: state.previousNodeId,
+        children: [],
+    };
+
+    const parentNode = state.mapping[state.previousNodeId];
+    if (parentNode) {
+        parentNode.children.push(parsedItem.chatItemId);
+    }
+
+    state.previousNodeId = parsedItem.chatItemId;
+};
 
 /**
  * Parse Grok API response into ConversationData
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
-function parseGrokResponse(data: any, conversationIdOverride?: string): ConversationData | null {
+const parseGrokResponse = (data: any, conversationIdOverride?: string) => {
     try {
         const conversationData = data?.data?.grok_conversation_items_by_rest_id;
         if (!conversationData) {
@@ -161,10 +564,6 @@ function parseGrokResponse(data: any, conversationIdOverride?: string): Conversa
             return null;
         }
 
-        // Extract conversation metadata
-        const _isPinned = conversationData.is_pinned || false;
-        const _cursor = conversationData.cursor || '';
-
         // Build the conversation mapping
         const mapping: Record<string, MessageNode> = {};
         let conversationId = '';
@@ -172,103 +571,34 @@ function parseGrokResponse(data: any, conversationIdOverride?: string): Conversa
         let createTime = Date.now() / 1000;
         let updateTime = Date.now() / 1000;
 
-        // Create root node
-        const rootId = 'grok-root';
-        mapping[rootId] = {
-            id: rootId,
-            message: null,
-            parent: null,
-            children: [],
+        const rootNode = createGrokRootNode();
+        const rootId = rootNode.id;
+        mapping[rootId] = rootNode;
+
+        const previousNodeId = rootId;
+
+        const state = {
+            mapping,
+            rootId,
+            previousNodeId,
+            conversationId,
+            conversationTitle,
+            createTime,
+            updateTime,
         };
 
-        let previousNodeId = rootId;
-
-        // Process each chat item
         for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            const chatItemId = item.chat_item_id;
-            const createdAtMs = item.created_at_ms;
-            const grokMode = item.grok_mode || 'Normal';
-            const message = item.message || '';
-            const senderType = item.sender_type || 'Agent';
-            const isPartial = item.is_partial || false;
-
-            // Extract conversation ID from first message
-            if (i === 0) {
-                // Priority 1: Use the override which comes from the URL restId
-                if (conversationIdOverride) {
-                    conversationId = conversationIdOverride;
-                }
-                // Priority 2: Use chat_item_id as fallback, though it may trigger cache mismatches
-                else if (chatItemId) {
-                    conversationId = chatItemId;
-                }
+            const parsedItem = parseGrokItem(items[i]);
+            if (!parsedItem) {
+                continue;
             }
-
-            // Extract title from first user message if available (fallback)
-            if (i === 0 && senderType === 'User' && message && !conversationTitles.has(conversationId)) {
-                const firstLine = message.split('\n')[0];
-                if (firstLine && firstLine.length > 0 && firstLine.length < 100) {
-                    conversationTitle = firstLine;
-                }
-            }
-
-            // Update timestamps
-            if (createdAtMs) {
-                const timestamp = createdAtMs / 1000;
-                if (i === 0) {
-                    createTime = timestamp;
-                }
-                updateTime = Math.max(updateTime, timestamp);
-            }
-
-            // Create message content
-            const thoughts = extractThinkingContent(item);
-            const contentType = thoughts ? 'thoughts' : 'text';
-
-            const content: MessageContent = {
-                content_type: contentType,
-                parts: [message],
-                thoughts: thoughts,
-            };
-
-            // Create message
-            const messageObj: Message = {
-                id: chatItemId,
-                author: createAuthor(senderType),
-                create_time: createdAtMs ? createdAtMs / 1000 : null,
-                update_time: null,
-                content: content,
-                status: isPartial ? 'in_progress' : 'finished_successfully',
-                end_turn: !isPartial,
-                weight: 1,
-                metadata: {
-                    grok_mode: grokMode,
-                    sender_type: senderType,
-                    is_partial: isPartial,
-                    thinking_trace: item.thinking_trace || '',
-                    ui_layout: item.ui_layout || {},
-                },
-                recipient: 'all',
-                channel: null,
-            };
-
-            // Create message node
-            const nodeId = chatItemId;
-            mapping[nodeId] = {
-                id: nodeId,
-                message: messageObj,
-                parent: previousNodeId,
-                children: [],
-            };
-
-            // Update parent's children
-            if (mapping[previousNodeId]) {
-                mapping[previousNodeId].children.push(nodeId);
-            }
-
-            previousNodeId = nodeId;
+            updateConversationFromItem(state, parsedItem, i, conversationIdOverride);
         }
+
+        conversationId = state.conversationId;
+        conversationTitle = state.conversationTitle;
+        createTime = state.createTime;
+        updateTime = state.updateTime;
 
         // Get the last node ID
         const lastNodeId = items.length > 0 ? items[items.length - 1].chat_item_id : rootId;
@@ -310,26 +640,27 @@ function parseGrokResponse(data: any, conversationIdOverride?: string): Conversa
         }
         return null;
     }
-}
+};
 
 /**
  * Grok Platform Adapter
  *
- * Supports x.com Grok conversations
+ * Supports grok.com and x.com Grok conversations
  */
 export const grokAdapter: LLMPlatform = {
     name: 'Grok',
 
-    urlMatchPattern: 'https://x.com/i/grok*',
+    urlMatchPattern: 'https://grok.com/*',
 
     // Match BOTH the conversation endpoint AND the history endpoint
-    apiEndpointPattern: /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)/,
+    apiEndpointPattern:
+        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
 
     /**
      * Check if a URL belongs to Grok
      */
-    isPlatformUrl(url: string): boolean {
-        return url.includes('x.com/i/grok');
+    isPlatformUrl(url: string) {
+        return url.includes('x.com/i/grok') || url.includes('grok.com/c/');
     },
 
     /**
@@ -342,11 +673,25 @@ export const grokAdapter: LLMPlatform = {
      * @param url - The current page URL
      * @returns The conversation ID or null if not found/invalid
      */
-    extractConversationId(url: string): string | null {
+    extractConversationId(url: string) {
         try {
             const urlObj = new URL(url);
 
             // Validate hostname
+            if (urlObj.hostname === 'grok.com') {
+                if (!urlObj.pathname.startsWith('/c/')) {
+                    return null;
+                }
+
+                const match = urlObj.pathname.match(/\/c\/([a-f0-9-]+)/i);
+                const conversationId = match?.[1] ?? null;
+                if (!conversationId) {
+                    return null;
+                }
+
+                return GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
+            }
+
             if (urlObj.hostname !== 'x.com') {
                 return null;
             }
@@ -363,7 +708,7 @@ export const grokAdapter: LLMPlatform = {
             }
 
             // Validate format (numeric string)
-            if (!CONVERSATION_ID_PATTERN.test(conversationId)) {
+            if (!X_CONVERSATION_ID_PATTERN.test(conversationId)) {
                 return null;
             }
 
@@ -380,7 +725,7 @@ export const grokAdapter: LLMPlatform = {
      * @param url - The API endpoint URL
      */
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Centralized logic for parsing Grok data
-    parseInterceptedData(data: string | any, url: string): ConversationData | null {
+    parseInterceptedData(data: string | any, url: string) {
         // Check if this is a titles endpoint
         if (isTitlesEndpoint(url)) {
             const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
@@ -398,7 +743,37 @@ export const grokAdapter: LLMPlatform = {
             return null;
         }
 
-        // Otherwise, parse as conversation data
+        // grok.com conversation metadata
+        if (isGrokComMetaEndpoint(url)) {
+            const conversationId = extractGrokComConversationIdFromUrl(url);
+            if (!conversationId) {
+                return null;
+            }
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            return parseGrokComConversationMeta(parsed, conversationId);
+        }
+
+        // grok.com response-node graph
+        if (isGrokComResponseNodesEndpoint(url)) {
+            const conversationId = extractGrokComConversationIdFromUrl(url);
+            if (!conversationId) {
+                return null;
+            }
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            return parseGrokComResponseNodes(parsed, conversationId);
+        }
+
+        // grok.com responses payload
+        if (isGrokComLoadResponsesEndpoint(url)) {
+            const conversationId = extractGrokComConversationIdFromUrl(url);
+            if (!conversationId) {
+                return null;
+            }
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            return parseGrokComResponses(parsed, conversationId);
+        }
+
+        // Otherwise, parse as conversation data (x.com GraphQL)
         try {
             const parsed = typeof data === 'string' ? JSON.parse(data) : data;
 
@@ -438,7 +813,7 @@ export const grokAdapter: LLMPlatform = {
      * @param data - The conversation data
      * @returns A sanitized filename (without .json extension)
      */
-    formatFilename(data: ConversationData): string {
+    formatFilename(data: ConversationData) {
         let title = data.title || '';
 
         // If no title, use a default with part of conversation ID
@@ -465,7 +840,7 @@ export const grokAdapter: LLMPlatform = {
     /**
      * Find injection target in Grok UI
      */
-    getButtonInjectionTarget(): HTMLElement | null {
+    getButtonInjectionTarget() {
         const selectors = ['[data-testid="grok-header"]', '[role="banner"]', 'header nav', 'header', 'body'];
 
         for (const selector of selectors) {

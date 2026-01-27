@@ -3,11 +3,23 @@ import { SUPPORTED_PLATFORM_URLS } from './platforms/constants';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
-    modules: ['@wxt-dev/module-react'],
+    modules: [],
+    vite: () => ({
+        resolve: {
+            alias: {
+                react: 'preact/compat',
+                'react-dom': 'preact/compat',
+                'react-dom/test-utils': 'preact/test-utils',
+            },
+        },
+    }),
     manifest: {
         name: 'Blackiya',
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',
         permissions: ['storage', 'activeTab', 'downloads'],
+        externally_connectable: {
+            ids: ['pngbgngdjojmnajfgfecpgbhpehmcjfj'],
+        },
         host_permissions: [...SUPPORTED_PLATFORM_URLS],
         action: {
             default_icon: 'icon.png',

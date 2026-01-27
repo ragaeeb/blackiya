@@ -9,12 +9,14 @@
  * @module utils/platform-runner
  */
 
+import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
+import type { ConversationData } from '@/utils/types';
 import { ButtonManager } from '@/utils/ui/button-manager';
 
 export function runPlatform(): void {
@@ -27,12 +29,8 @@ export function runPlatform(): void {
     const buttonManager = new ButtonManager(handleSaveClick, handleCopyClick);
 
     // 2. Data Manager
-    const interceptionManager = new InterceptionManager((capturedId) => {
-        // Callback when data is captured
-        const currentId = currentAdapter?.extractConversationId(window.location.href);
-        if (currentId && currentId === capturedId && buttonManager.exists()) {
-            buttonManager.setOpacity('1');
-        }
+    const interceptionManager = new InterceptionManager((_capturedId) => {
+        refreshButtonState();
     });
 
     // 3. Navigation Manager
@@ -52,17 +50,7 @@ export function runPlatform(): void {
         if (!data) {
             return;
         }
-
-        buttonManager.setLoading(true, 'save');
-        try {
-            const filename = currentAdapter.formatFilename(data);
-            downloadAsJSON(data, filename);
-            logger.info(`Saved conversation: ${filename}.json`);
-            buttonManager.setSuccess('save');
-        } catch (error) {
-            handleError('save', error);
-            buttonManager.setLoading(false, 'save');
-        }
+        await saveConversation(data, 'ui');
     }
 
     async function handleCopyClick(): Promise<void> {
@@ -84,7 +72,7 @@ export function runPlatform(): void {
         }
     }
 
-    async function getConversationData() {
+    async function getConversationData(options: { silent?: boolean } = {}) {
         if (!currentAdapter) {
             return null;
         }
@@ -92,22 +80,56 @@ export function runPlatform(): void {
         const conversationId = currentAdapter.extractConversationId(window.location.href);
         if (!conversationId) {
             logger.error('No conversation ID found in URL');
-            alert('Please select a conversation first.');
+            if (!options.silent) {
+                alert('Please select a conversation first.');
+            }
             return null;
         }
 
         const data = interceptionManager.getConversation(conversationId);
         if (!data) {
             logger.warn('No data captured for this conversation yet.');
-            alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
+            if (!options.silent) {
+                alert(
+                    'Conversation data not yet captured. Please refresh the page or wait for the conversation to load.',
+                );
+            }
             return null;
         }
         return data;
     }
 
-    function handleError(action: 'save' | 'copy', error: unknown) {
+    function handleError(action: 'save' | 'copy', error: unknown, silent?: boolean) {
         logger.error(`Failed to ${action} conversation:`, error);
-        alert(`Failed to ${action} conversation. Check console for details.`);
+        if (!silent) {
+            alert(`Failed to ${action} conversation. Check console for details.`);
+        }
+    }
+
+    async function saveConversation(data: ConversationData, source: 'ui' | 'external'): Promise<boolean> {
+        if (!currentAdapter) {
+            return false;
+        }
+
+        if (buttonManager.exists()) {
+            buttonManager.setLoading(true, 'save');
+        }
+
+        try {
+            const filename = currentAdapter.formatFilename(data);
+            downloadAsJSON(data, filename);
+            logger.info(`Saved conversation: ${filename}.json`);
+            if (buttonManager.exists()) {
+                buttonManager.setSuccess('save');
+            }
+            return true;
+        } catch (error) {
+            handleError('save', error, source === 'external');
+            if (buttonManager.exists()) {
+                buttonManager.setLoading(false, 'save');
+            }
+            return false;
+        }
     }
 
     function injectSaveButton(): void {
@@ -127,13 +149,8 @@ export function runPlatform(): void {
         buttonManager.inject(target, conversationId);
         currentConversationId = conversationId;
 
-        // Check if we already have data
-        const hasData = interceptionManager.getConversation(conversationId);
-        if (hasData) {
-            buttonManager.setOpacity('1');
-        } else {
-            buttonManager.setOpacity('0.6');
-        }
+        refreshButtonState(conversationId);
+        scheduleButtonRefresh(conversationId);
     }
 
     function handleNavigationChange(): void {
@@ -149,6 +166,8 @@ export function runPlatform(): void {
             // ID hasn't changed, but maybe DOM has (re-render), ensure button exists
             if (newConversationId && !buttonManager.exists()) {
                 setTimeout(injectSaveButton, 500);
+            } else {
+                refreshButtonState(newConversationId || undefined);
             }
         }
     }
@@ -173,6 +192,80 @@ export function runPlatform(): void {
         interceptionManager.updateAdapter(currentAdapter);
     }
 
+    function refreshButtonState(forConversationId?: string): void {
+        if (!buttonManager.exists() || !currentAdapter) {
+            return;
+        }
+        const conversationId = forConversationId || currentAdapter.extractConversationId(window.location.href);
+        if (!conversationId) {
+            return;
+        }
+        const hasData = interceptionManager.getConversation(conversationId);
+        buttonManager.setOpacity(hasData ? '1' : '0.6');
+    }
+
+    function scheduleButtonRefresh(conversationId: string): void {
+        let attempts = 0;
+        const maxAttempts = 6;
+        const intervalMs = 500;
+
+        const tick = () => {
+            attempts += 1;
+            if (!buttonManager.exists()) {
+                return;
+            }
+            const hasData = interceptionManager.getConversation(conversationId);
+            if (hasData) {
+                buttonManager.setOpacity('1');
+                return;
+            }
+            if (attempts < maxAttempts) {
+                setTimeout(tick, intervalMs);
+            }
+        };
+
+        setTimeout(tick, intervalMs);
+    }
+
+    function registerExternalListener(): void {
+        browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+            if (message?.type === 'EXTERNAL_GET_CONVERSATION_JSON') {
+                getConversationData({ silent: true })
+                    .then((data) => {
+                        if (!data) {
+                            sendResponse({ success: false, error: 'NO_CONVERSATION_DATA' });
+                            return;
+                        }
+                        sendResponse({ success: true, data });
+                    })
+                    .catch((error) => {
+                        logger.error('Failed to handle external get request:', error);
+                        sendResponse({ success: false, error: 'INTERNAL_ERROR' });
+                    });
+                return true;
+            }
+
+            if (message?.type === 'EXTERNAL_TRIGGER_SAVE_JSON') {
+                getConversationData({ silent: true })
+                    .then(async (data) => {
+                        if (!data) {
+                            sendResponse({ success: false, error: 'NO_CONVERSATION_DATA' });
+                            return;
+                        }
+                        const success = await saveConversation(data, 'external');
+                        sendResponse({ success });
+                    })
+                    .catch((error) => {
+                        logger.error('Failed to handle external save request:', error);
+                        sendResponse({ success: false, error: 'INTERNAL_ERROR' });
+                    });
+                return true;
+            }
+
+            return false;
+        });
+    }
+
     // -- Boot Sequence --
 
     const url = window.location.href;
@@ -191,6 +284,7 @@ export function runPlatform(): void {
     // Start listening
     interceptionManager.start();
     navigationManager.start();
+    registerExternalListener();
 
     // Initial injection
     currentConversationId = currentAdapter.extractConversationId(url);

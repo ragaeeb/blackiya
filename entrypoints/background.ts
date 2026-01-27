@@ -11,6 +11,8 @@ import { logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
 
 export default defineBackground(() => {
+    const allowedExternalIds = new Set(['pngbgngdjojmnajfgfecpgbhpehmcjfj']);
+
     logger.info('Background service worker started', {
         id: browser.runtime.id,
     });
@@ -53,6 +55,37 @@ export default defineBackground(() => {
         }
 
         // Return true to indicate async response (even if we respond sync)
+        return true;
+    });
+
+    browser.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+        if (!sender?.id || !allowedExternalIds.has(sender.id)) {
+            sendResponse({ success: false, error: 'UNAUTHORIZED' });
+            return;
+        }
+
+        (async () => {
+            const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+            if (!activeTab?.id) {
+                return { success: false, error: 'NO_ACTIVE_TAB' };
+            }
+
+            if (message?.type === 'GET_CONVERSATION_JSON') {
+                return await browser.tabs.sendMessage(activeTab.id, { type: 'EXTERNAL_GET_CONVERSATION_JSON' });
+            }
+
+            if (message?.type === 'TRIGGER_SAVE_JSON') {
+                return await browser.tabs.sendMessage(activeTab.id, { type: 'EXTERNAL_TRIGGER_SAVE_JSON' });
+            }
+
+            return { success: false, error: 'UNKNOWN_MESSAGE' };
+        })()
+            .then((response) => sendResponse(response))
+            .catch((error) => {
+                logger.error('External message handler failed:', error);
+                sendResponse({ success: false, error: 'INTERNAL_ERROR' });
+            });
+
         return true;
     });
 });

@@ -26,6 +26,16 @@ function log(level: 'info' | 'warn' | 'error', message: string, ...args: any[]) 
     );
 }
 
+function queueInterceptedMessage(payload: { type: string; url: string; data: string; platform: string }) {
+    const queue = ((window as any).__BLACKIYA_CAPTURE_QUEUE__ as (typeof payload)[] | undefined) ?? [];
+    queue.push(payload);
+    // Prevent unbounded growth if the content script initializes late
+    if (queue.length > 50) {
+        queue.splice(0, queue.length - 50);
+    }
+    (window as any).__BLACKIYA_CAPTURE_QUEUE__ = queue;
+}
+
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
     world: 'MAIN',
@@ -61,15 +71,14 @@ export default defineContentScript({
                 clonedResponse
                     .text()
                     .then((text) => {
-                        window.postMessage(
-                            {
-                                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                                url,
-                                data: text,
-                                platform: adapter.name,
-                            },
-                            window.location.origin,
-                        );
+                        const payload = {
+                            type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                            url,
+                            data: text,
+                            platform: adapter.name,
+                        };
+                        queueInterceptedMessage(payload);
+                        window.postMessage(payload, window.location.origin);
                     })
                     .catch((err) => {
                         log('error', `[Blackiya] Failed to read intercepted response from ${adapter.name}:`, err);
@@ -98,15 +107,14 @@ export default defineContentScript({
                 if (adapter) {
                     try {
                         const responseText = this.responseText;
-                        window.postMessage(
-                            {
-                                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                                url,
-                                data: responseText,
-                                platform: adapter.name,
-                            },
-                            window.location.origin,
-                        );
+                        const payload = {
+                            type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                            url,
+                            data: responseText,
+                            platform: adapter.name,
+                        };
+                        queueInterceptedMessage(payload);
+                        window.postMessage(payload, window.location.origin);
                     } catch (e) {
                         log('error', '[Blackiya] Failed to read XHR response', e);
                     }
