@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/ragaeeb/blackiya/compare/v1.3.0...v1.4.0) (2026-01-27)
+
+
+### Features
+
+* **grok:** grok.com support ([e25a125](https://github.com/ragaeeb/blackiya/commit/e25a125cf4a41cf04256c356a0f7a62153e14320))
+
 # [1.3.0](https://github.com/ragaeeb/blackiya/compare/v1.2.0...v1.3.0) (2026-01-20)
 
 
