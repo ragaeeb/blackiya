@@ -124,5 +124,57 @@ export default defineContentScript({
         };
 
         log('info', '[Blackiya] Fetch & XHR interceptors initialized');
+
+        if (!(window as any).__blackiya) {
+            const REQUEST_TYPE = 'BLACKIYA_GET_JSON_REQUEST';
+            const RESPONSE_TYPE = 'BLACKIYA_GET_JSON_RESPONSE';
+            const timeoutMs = 5000;
+
+            const makeRequestId = () => {
+                if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+                    return crypto.randomUUID();
+                }
+                return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            };
+
+            (window as any).__blackiya = {
+                getJSON: () =>
+                    new Promise((resolve, reject) => {
+                        const requestId = makeRequestId();
+                        let timeoutId: number | undefined;
+
+                        const cleanup = () => {
+                            if (timeoutId !== undefined) {
+                                clearTimeout(timeoutId);
+                            }
+                            window.removeEventListener('message', handler);
+                        };
+
+                        const handler = (event: MessageEvent) => {
+                            if (event.source !== window || event.origin !== window.location.origin) {
+                                return;
+                            }
+                            const message = event.data;
+                            if (message?.type !== RESPONSE_TYPE || message.requestId !== requestId) {
+                                return;
+                            }
+                            cleanup();
+                            if (message.success) {
+                                resolve(message.data);
+                            } else {
+                                reject(new Error(message.error || 'FAILED'));
+                            }
+                        };
+
+                        window.addEventListener('message', handler);
+                        window.postMessage({ type: REQUEST_TYPE, requestId }, window.location.origin);
+
+                        timeoutId = window.setTimeout(() => {
+                            cleanup();
+                            reject(new Error('TIMEOUT'));
+                        }, timeoutMs);
+                    }),
+            };
+        }
     },
 });

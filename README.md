@@ -231,7 +231,6 @@ blackiya/
 The extension requires the following permissions:
 
 - **`storage`** - Save user preferences and temporary data
-- **`downloads`** - Download conversation JSON files
 - **`webRequest`** - Intercept API requests (optional, for auto-capture)
 - **`activeTab`** - Access current tab for UI injection
 
@@ -241,6 +240,20 @@ The extension requires the following permissions:
 - `https://chat.openai.com/*` - Legacy ChatGPT platform
 - `https://gemini.google.com/*` - Gemini platform
 - `https://x.com/i/grok*` - Grok platform
+
+### Window API
+
+Blackiya exposes a lightweight bridge on supported LLM pages:
+
+```js
+window.__blackiya.getJSON().then((data) => {
+    console.log(data);
+});
+```
+
+Notes:
+- `getJSON()` returns a Promise and rejects if no conversation data is captured yet.
+- This runs in the page context, so only use it on pages you trust.
 
 ## 🔒 Privacy & Compliance
 
@@ -434,9 +447,3 @@ For issues and questions:
 - Open an issue on GitHub
 - Check existing issues for solutions
 - Read the AGENTS.md file for architecture details
-
----
-
-# Inspiration for the Name
-
-Inspiration for the name came from Asmāʾ, who was one day rolling around by herself saying: “Blackiya ABC”.

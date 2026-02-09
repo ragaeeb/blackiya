@@ -16,10 +16,7 @@ export default defineConfig({
     manifest: {
         name: 'Blackiya',
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',
-        permissions: ['storage', 'activeTab', 'downloads'],
-        externally_connectable: {
-            ids: ['pngbgngdjojmnajfgfecpgbhpehmcjfj'],
-        },
+        permissions: ['storage', 'activeTab'],
         host_permissions: [...SUPPORTED_PLATFORM_URLS],
         action: {
             default_icon: 'icon.png',

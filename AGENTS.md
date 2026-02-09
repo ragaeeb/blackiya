@@ -69,7 +69,7 @@
 - **API Interception** - Monitor network requests to LLM APIs
 - **Data Fetching** - Retrieve conversation JSON from endpoints
 - **Message Handling** - Respond to content script requests
-- **Download Management** - Trigger file downloads via Chrome API
+- **Download Management** - Trigger file downloads via blob URL in the page context
 
 **Key Functions:**
 ```typescript
@@ -330,7 +330,6 @@ export interface Message {
 - **Chrome Extensions API (Manifest V3)**
   - `chrome.runtime` - Message passing
   - `browser.storage` - Local storage
-  - `chrome.downloads` - File downloads
   - `chrome.tabs` - Tab management
   - `chrome.webRequest` - Network interception (optional)
 
@@ -534,7 +533,7 @@ The project uses **Semantic Release** via GitHub Actions.
 
 1. **Button not appearing** → Check DOM selectors in content script
 2. **API not intercepted** → Verify URL patterns in background script
-3. **Download fails** → Check Chrome permissions in manifest
+3. **Download fails** → Check blob download flow and filename handling
 4. **Build errors** → Clear `.output/` and rebuild
 
 **Debug Tools:**
@@ -771,7 +770,6 @@ bun run check        # Lint & format (auto-fix)
 - `chrome.runtime.sendMessage()` - Send messages
 - `chrome.runtime.onMessage.addListener()` - Receive messages
 - `browser.storage.local.get/set()` - Persist data
-- `chrome.downloads.download()` - Download files
 - `chrome.tabs.query()` - Get active tab
 
 ## 📸 Codebase Snapshots for Reviews

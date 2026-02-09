@@ -9,7 +9,6 @@
  * @module utils/platform-runner
  */
 
-import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
@@ -22,6 +21,7 @@ import { ButtonManager } from '@/utils/ui/button-manager';
 export function runPlatform(): void {
     let currentAdapter: LLMPlatform | null = null;
     let currentConversationId: string | null = null;
+    let cleanupWindowBridge: (() => void) | null = null;
 
     // -- Manager Initialization --
 
@@ -46,11 +46,11 @@ export function runPlatform(): void {
         if (!currentAdapter) {
             return;
         }
-        const data = await getConversationData();
-        if (!data) {
-            return;
-        }
-        await saveConversation(data, 'ui');
+            const data = await getConversationData();
+            if (!data) {
+                return;
+            }
+            await saveConversation(data);
     }
 
     async function handleCopyClick(): Promise<void> {
@@ -106,7 +106,7 @@ export function runPlatform(): void {
         }
     }
 
-    async function saveConversation(data: ConversationData, source: 'ui' | 'external'): Promise<boolean> {
+    async function saveConversation(data: ConversationData): Promise<boolean> {
         if (!currentAdapter) {
             return false;
         }
@@ -124,7 +124,7 @@ export function runPlatform(): void {
             }
             return true;
         } catch (error) {
-            handleError('save', error, source === 'external');
+            handleError('save', error);
             if (buttonManager.exists()) {
                 buttonManager.setLoading(false, 'save');
             }
@@ -227,43 +227,58 @@ export function runPlatform(): void {
         setTimeout(tick, intervalMs);
     }
 
-    function registerExternalListener(): void {
-        browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-            if (message?.type === 'EXTERNAL_GET_CONVERSATION_JSON') {
-                getConversationData({ silent: true })
-                    .then((data) => {
-                        if (!data) {
-                            sendResponse({ success: false, error: 'NO_CONVERSATION_DATA' });
-                            return;
-                        }
-                        sendResponse({ success: true, data });
-                    })
-                    .catch((error) => {
-                        logger.error('Failed to handle external get request:', error);
-                        sendResponse({ success: false, error: 'INTERNAL_ERROR' });
-                    });
-                return true;
+    function registerWindowBridge(): () => void {
+        const handler = (event: MessageEvent) => {
+            if (event.source !== window || event.origin !== window.location.origin) {
+                return;
             }
 
-            if (message?.type === 'EXTERNAL_TRIGGER_SAVE_JSON') {
-                getConversationData({ silent: true })
-                    .then(async (data) => {
-                        if (!data) {
-                            sendResponse({ success: false, error: 'NO_CONVERSATION_DATA' });
-                            return;
-                        }
-                        const success = await saveConversation(data, 'external');
-                        sendResponse({ success });
-                    })
-                    .catch((error) => {
-                        logger.error('Failed to handle external save request:', error);
-                        sendResponse({ success: false, error: 'INTERNAL_ERROR' });
-                    });
-                return true;
+            const message = event.data;
+            if (message?.type !== 'BLACKIYA_GET_JSON_REQUEST') {
+                return;
             }
 
-            return false;
-        });
+            const requestId = message.requestId;
+            getConversationData({ silent: true })
+                .then((data) => {
+                    if (!data) {
+                        window.postMessage(
+                            {
+                                type: 'BLACKIYA_GET_JSON_RESPONSE',
+                                requestId,
+                                success: false,
+                                error: 'NO_CONVERSATION_DATA',
+                            },
+                            window.location.origin,
+                        );
+                        return;
+                    }
+                    window.postMessage(
+                        {
+                            type: 'BLACKIYA_GET_JSON_RESPONSE',
+                            requestId,
+                            success: true,
+                            data,
+                        },
+                        window.location.origin,
+                    );
+                })
+                .catch((error) => {
+                    logger.error('Failed to handle window get request:', error);
+                    window.postMessage(
+                        {
+                            type: 'BLACKIYA_GET_JSON_RESPONSE',
+                            requestId,
+                            success: false,
+                            error: 'INTERNAL_ERROR',
+                        },
+                        window.location.origin,
+                    );
+                });
+        };
+
+        window.addEventListener('message', handler);
+        return () => window.removeEventListener('message', handler);
     }
 
     // -- Boot Sequence --
@@ -284,7 +299,7 @@ export function runPlatform(): void {
     // Start listening
     interceptionManager.start();
     navigationManager.start();
-    registerExternalListener();
+    cleanupWindowBridge = registerWindowBridge();
 
     // Initial injection
     currentConversationId = currentAdapter.extractConversationId(url);
@@ -306,6 +321,7 @@ export function runPlatform(): void {
             interceptionManager.stop();
             navigationManager.stop();
             buttonManager.remove();
+            cleanupWindowBridge?.();
         } catch (error) {
             logger.debug('Error during cleanup:', error);
         }
