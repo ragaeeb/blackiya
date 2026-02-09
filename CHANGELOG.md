@@ -1,3 +1,11 @@
+# [1.5.0](https://github.com/ragaeeb/blackiya/compare/v1.4.0...v1.5.0) (2026-02-09)
+
+
+### Features
+
+* **build:** Fix build ([1592179](https://github.com/ragaeeb/blackiya/commit/15921794e5f47e6e5dcf7e43cf34825cff1de37e))
+* **permissions:** Remove unnecessary downloads permission ([cdf6e5c](https://github.com/ragaeeb/blackiya/commit/cdf6e5cabfc65d417642d63ab0ac6442f3fea72c))
+
 # [1.4.0](https://github.com/ragaeeb/blackiya/compare/v1.3.0...v1.4.0) (2026-01-27)
 
 
