@@ -55,5 +55,4 @@ export default defineBackground(() => {
         // Return true to indicate async response (even if we respond sync)
         return true;
     });
-
 });

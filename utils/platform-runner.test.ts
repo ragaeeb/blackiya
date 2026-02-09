@@ -106,20 +106,18 @@ describe('Platform Runner', () => {
         window.dispatchEvent(message);
 
         const responsePromise = new Promise<any>((resolve) => {
-            const handler = (event: MessageEvent) => {
-                if (event.data?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
+            const handler = (event: any) => {
+                const message = event?.data;
+                if (message?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
                     return;
                 }
-                window.removeEventListener('message', handler);
-                resolve(event.data);
+                window.removeEventListener('message', handler as any);
+                resolve(message);
             };
-            window.addEventListener('message', handler);
+            window.addEventListener('message', handler as any);
         });
 
-        window.postMessage(
-            { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-1' },
-            window.location.origin,
-        );
+        window.postMessage({ type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-1' }, window.location.origin);
 
         const responsePayload = await responsePromise;
         expect(responsePayload).toEqual({

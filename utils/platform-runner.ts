@@ -46,11 +46,11 @@ export function runPlatform(): void {
         if (!currentAdapter) {
             return;
         }
-            const data = await getConversationData();
-            if (!data) {
-                return;
-            }
-            await saveConversation(data);
+        const data = await getConversationData();
+        if (!data) {
+            return;
+        }
+        await saveConversation(data);
     }
 
     async function handleCopyClick(): Promise<void> {

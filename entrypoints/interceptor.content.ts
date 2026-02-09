@@ -130,6 +130,14 @@ export default defineContentScript({
             const RESPONSE_TYPE = 'BLACKIYA_GET_JSON_RESPONSE';
             const timeoutMs = 5000;
 
+            const isResponseMessage = (event: MessageEvent, requestId: string) => {
+                if (event.source !== window || event.origin !== window.location.origin) {
+                    return false;
+                }
+                const message = event.data;
+                return message?.type === RESPONSE_TYPE && message.requestId === requestId;
+            };
+
             const makeRequestId = () => {
                 if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
                     return crypto.randomUUID();
@@ -151,13 +159,10 @@ export default defineContentScript({
                         };
 
                         const handler = (event: MessageEvent) => {
-                            if (event.source !== window || event.origin !== window.location.origin) {
+                            if (!isResponseMessage(event, requestId)) {
                                 return;
                             }
                             const message = event.data;
-                            if (message?.type !== RESPONSE_TYPE || message.requestId !== requestId) {
-                                return;
-                            }
                             cleanup();
                             if (message.success) {
                                 resolve(message.data);
