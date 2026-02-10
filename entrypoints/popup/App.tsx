@@ -4,21 +4,26 @@ import { browser } from 'wxt/browser';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
+import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import packageJson from '../../package.json';
-
-const STORAGE_KEY_LEVEL = 'userSettings.logLevel';
 
 function App() {
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
+    const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
 
     useEffect(() => {
         // Load settings
-        browser.storage.local.get(STORAGE_KEY_LEVEL).then((result) => {
-            const level = result[STORAGE_KEY_LEVEL] as LogLevel | undefined;
+        browser.storage.local.get([STORAGE_KEYS.LOG_LEVEL, STORAGE_KEYS.EXPORT_FORMAT]).then((result) => {
+            const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
             if (level) {
                 setLogLevel(level);
                 logger.setLevel(level);
+            }
+
+            const savedFormat = result[STORAGE_KEYS.EXPORT_FORMAT] as ExportFormat | undefined;
+            if (savedFormat === 'common' || savedFormat === 'original') {
+                setExportFormat(savedFormat);
             }
         });
 
@@ -32,9 +37,18 @@ function App() {
         const target = e.currentTarget as HTMLSelectElement | null;
         const newLevel = (target?.value || 'info') as LogLevel;
         setLogLevel(newLevel);
-        browser.storage.local.set({ [STORAGE_KEY_LEVEL]: newLevel });
+        browser.storage.local.set({ [STORAGE_KEYS.LOG_LEVEL]: newLevel });
         logger.setLevel(newLevel);
         logger.info(`Log level changed to ${newLevel}`);
+    };
+
+    const handleExportFormatChange: JSX.GenericEventHandler<HTMLSelectElement> = (e) => {
+        const target = e.currentTarget as HTMLSelectElement | null;
+        const newFormat = (target?.value || DEFAULT_EXPORT_FORMAT) as ExportFormat;
+        const normalizedFormat = newFormat === 'common' ? 'common' : 'original';
+        setExportFormat(normalizedFormat);
+        browser.storage.local.set({ [STORAGE_KEYS.EXPORT_FORMAT]: normalizedFormat });
+        logger.info(`Export format changed to ${normalizedFormat}`);
     };
 
     const handleExport = async () => {
@@ -80,6 +94,17 @@ function App() {
                     <option value="error">Error</option>
                 </select>
                 <div style={{ fontSize: '12px', color: '#666' }}>Current Logs: {logCount} entries</div>
+            </div>
+
+            <div className="section">
+                <label htmlFor="exportFormat">Export Format</label>
+                <select id="exportFormat" value={exportFormat} onChange={handleExportFormatChange}>
+                    <option value="original">Original (Raw JSON)</option>
+                    <option value="common">Common (Normalized)</option>
+                </select>
+                <div style={{ fontSize: '12px', color: '#666' }}>
+                    Applies to Save JSON and Copy actions in supported chat platforms.
+                </div>
             </div>
 
             <button type="button" className="primary" onClick={handleExport}>

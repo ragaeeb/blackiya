@@ -232,7 +232,6 @@ The extension requires the following permissions:
 
 - **`storage`** - Save user preferences and temporary data
 - **`webRequest`** - Intercept API requests (optional, for auto-capture)
-- **`activeTab`** - Access current tab for UI injection
 
 ### Host Permissions
 
@@ -247,6 +246,10 @@ Blackiya exposes a lightweight bridge on supported LLM pages:
 
 ```js
 window.__blackiya.getJSON().then((data) => {
+    console.log(data);
+});
+
+window.__blackiya.getCommonJSON().then((data) => {
     console.log(data);
 });
 ```

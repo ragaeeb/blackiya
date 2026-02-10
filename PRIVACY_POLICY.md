@@ -23,7 +23,6 @@ Blackiya does not use or execute any remote code. All JavaScript and technical a
 ## 5. Permissions
 The extension requests the following permissions for the reasons stated:
 - **`storage`**: Used solely to store your local extension preferences (e.g., log levels) and temporary local debug logs.
-- **`activeTab`**: Used to inject the user interface (buttons) into the supported AI chat platforms.
 - **`host_permissions`**: Required to communicate with the internal APIs of ChatGPT, Gemini, and Grok to retrieve the conversation data for exporting.
 
 ## 6. Website Content

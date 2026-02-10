@@ -127,4 +127,94 @@ describe('Platform Runner', () => {
             data,
         });
     });
+
+    it('should respond with common JSON when requested', async () => {
+        runPlatform();
+
+        const data = {
+            title: 'Test',
+            create_time: 1_700_000_000,
+            update_time: 1_700_000_100,
+            conversation_id: '123',
+            current_node: 'node-2',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['node-1'] },
+                'node-1': {
+                    id: 'node-1',
+                    message: {
+                        id: 'node-1',
+                        author: { role: 'user', name: 'User', metadata: {} },
+                        create_time: 1_700_000_010,
+                        update_time: 1_700_000_010,
+                        content: { content_type: 'text', parts: ['Hello'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'root',
+                    children: ['node-2'],
+                },
+                'node-2': {
+                    id: 'node-2',
+                    message: {
+                        id: 'node-2',
+                        author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                        create_time: 1_700_000_020,
+                        update_time: 1_700_000_020,
+                        content: { content_type: 'text', parts: ['Hi'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'node-1',
+                    children: [],
+                },
+            },
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'test-model',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+        currentAdapterMock.parseInterceptedData = () => data;
+        const message = new (window as any).MessageEvent('message', {
+            data: { type: 'LLM_CAPTURE_DATA_INTERCEPTED', url: 'https://test.com/api', data: '{}' },
+            origin: window.location.origin,
+            source: window,
+        });
+        window.dispatchEvent(message);
+
+        const responsePromise = new Promise<any>((resolve) => {
+            const handler = (event: any) => {
+                const message = event?.data;
+                if (message?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
+                    return;
+                }
+                window.removeEventListener('message', handler as any);
+                resolve(message);
+            };
+            window.addEventListener('message', handler as any);
+        });
+
+        window.postMessage(
+            { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-2', format: 'common' },
+            window.location.origin,
+        );
+
+        const responsePayload = await responsePromise;
+        expect(responsePayload.type).toBe('BLACKIYA_GET_JSON_RESPONSE');
+        expect(responsePayload.requestId).toBe('request-2');
+        expect(responsePayload.success).toBe(true);
+        expect(responsePayload.data.format).toBe('common');
+        expect(responsePayload.data.llm).toBe('TestPlatform');
+    });
 });

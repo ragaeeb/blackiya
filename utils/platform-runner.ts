@@ -9,12 +9,15 @@
  * @module utils/platform-runner
  */
 
+import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import { buildCommonExport } from '@/utils/common-export';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
+import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import type { ConversationData } from '@/utils/types';
 import { ButtonManager } from '@/utils/ui/button-manager';
 
@@ -41,6 +44,36 @@ export function runPlatform(): void {
     /**
      * Core orchestrator logic functions
      */
+    async function getExportFormat(): Promise<ExportFormat> {
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.EXPORT_FORMAT);
+            const value = result[STORAGE_KEYS.EXPORT_FORMAT];
+            if (value === 'common' || value === 'original') {
+                return value;
+            }
+        } catch (error) {
+            logger.warn('Failed to read export format setting, using default.', error);
+        }
+        return DEFAULT_EXPORT_FORMAT;
+    }
+
+    function buildExportPayloadForFormat(data: ConversationData, format: ExportFormat): unknown {
+        if (format !== 'common') {
+            return data;
+        }
+
+        try {
+            return buildCommonExport(data, currentAdapter?.name ?? 'Unknown');
+        } catch (error) {
+            logger.error('Failed to build common export format, falling back to original.', error);
+            return data;
+        }
+    }
+
+    async function buildExportPayload(data: ConversationData): Promise<unknown> {
+        const format = await getExportFormat();
+        return buildExportPayloadForFormat(data, format);
+    }
 
     async function handleSaveClick(): Promise<void> {
         if (!currentAdapter) {
@@ -63,7 +96,8 @@ export function runPlatform(): void {
         }
 
         try {
-            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+            const exportPayload = await buildExportPayload(data);
+            await navigator.clipboard.writeText(JSON.stringify(exportPayload, null, 2));
             logger.info('Copied conversation to clipboard');
             buttonManager.setSuccess('copy');
         } catch (error) {
@@ -117,7 +151,8 @@ export function runPlatform(): void {
 
         try {
             const filename = currentAdapter.formatFilename(data);
-            downloadAsJSON(data, filename);
+            const exportPayload = await buildExportPayload(data);
+            downloadAsJSON(exportPayload, filename);
             logger.info(`Saved conversation: ${filename}.json`);
             if (buttonManager.exists()) {
                 buttonManager.setSuccess('save');
@@ -239,6 +274,7 @@ export function runPlatform(): void {
             }
 
             const requestId = message.requestId;
+            const requestFormat = message.format === 'common' ? 'common' : 'original';
             getConversationData({ silent: true })
                 .then((data) => {
                     if (!data) {
@@ -253,12 +289,13 @@ export function runPlatform(): void {
                         );
                         return;
                     }
+                    const payload = buildExportPayloadForFormat(data, requestFormat);
                     window.postMessage(
                         {
                             type: 'BLACKIYA_GET_JSON_RESPONSE',
                             requestId,
                             success: true,
-                            data,
+                            data: payload,
                         },
                         window.location.origin,
                     );
