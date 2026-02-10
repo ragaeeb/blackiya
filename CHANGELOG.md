@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/ragaeeb/blackiya/compare/v1.5.0...v1.6.0) (2026-02-10)
+
+
+### Features
+
+* **common:** Add common export JSON format ([fcc7930](https://github.com/ragaeeb/blackiya/commit/fcc7930fe1ec4129620f9e1ab1b534dd8e0b23ae))
+
 # [1.5.0](https://github.com/ragaeeb/blackiya/compare/v1.4.0...v1.5.0) (2026-02-09)
 
 
