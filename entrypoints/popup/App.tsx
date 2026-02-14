@@ -4,6 +4,7 @@ import { browser } from 'wxt/browser';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
+import { downloadMinimalDebugReport } from '@/utils/minimal-logs';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import packageJson from '../../package.json';
 
@@ -70,6 +71,22 @@ function App() {
         }
     };
 
+    const handleDebugExport = async () => {
+        try {
+            const logs = await logsStorage.getLogs();
+            if (logs.length === 0) {
+                alert('No logs to export.');
+                return;
+            }
+
+            downloadMinimalDebugReport(logs);
+            logger.info('Debug report exported by user');
+        } catch (error) {
+            console.error('Failed to export debug report', error);
+            logger.error('Failed to export debug report', error);
+        }
+    };
+
     const handleClear = async () => {
         if (confirm('Are you sure you want to clear all logs?')) {
             await logsStorage.clearLogs();
@@ -108,7 +125,11 @@ function App() {
             </div>
 
             <button type="button" className="primary" onClick={handleExport}>
-                Export Debug Logs
+                Export Full Logs (JSON)
+            </button>
+
+            <button type="button" className="primary" onClick={handleDebugExport}>
+                Export Debug Report (TXT)
             </button>
 
             <button type="button" className="secondary" onClick={handleClear}>

@@ -333,6 +333,7 @@ export const geminiAdapter: LLMPlatform = {
     // Match batchexecute endpoints containing specific RPC IDs:
     // hNvQHb (Conversation Data) OR MaZiqc (Conversation Titles)
     apiEndpointPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*(hNvQHb|MaZiqc)/,
+    completionTriggerPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*hNvQHb/,
 
     isPlatformUrl(url: string): boolean {
         return url.includes('gemini.google.com');
@@ -352,7 +353,12 @@ export const geminiAdapter: LLMPlatform = {
         if (shareMatch) {
             return shareMatch[1];
         }
+        return null;
+    },
 
+    extractConversationIdFromUrl(_url: string): string | null {
+        // Gemini batchexecute URLs do not reliably contain the conversation ID.
+        // We fall back to the currently active conversation ID from the page URL.
         return null;
     },
 

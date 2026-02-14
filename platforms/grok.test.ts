@@ -106,6 +106,7 @@ describe('Grok Platform Adapter', () => {
             expect(grokAdapter.isPlatformUrl('https://x.com/i/grok?conversation=123')).toBe(true);
             expect(grokAdapter.isPlatformUrl('https://x.com/i/grok')).toBe(true);
             expect(grokAdapter.isPlatformUrl('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBe(true);
+            expect(grokAdapter.isPlatformUrl('https://grok.com/')).toBe(true);
         });
 
         it('should reject non-Grok URLs', () => {
@@ -153,6 +154,53 @@ describe('Grok Platform Adapter', () => {
         it('should not match non-API URLs', () => {
             const endpoint = 'https://x.com/i/grok?conversation=123';
             expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
+        });
+
+        it('should match completion trigger URLs for x.com and grok.com response endpoints', () => {
+            const pattern = grokAdapter.completionTriggerPattern;
+            expect(
+                pattern.test(
+                    'https://x.com/i/api/graphql/6QmFgXuRQyOnW2iJ7nIk7g/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222013295304527827227%22%7D',
+                ),
+            ).toBe(true);
+            expect(
+                pattern.test(
+                    'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
+                ),
+            ).toBe(true);
+            expect(
+                pattern.test('https://x.com/i/api/graphql/9Hyh5D4-WXLnExZkONSkZg/GrokHistory?variables=%7B%7D'),
+            ).toBe(false);
+        });
+    });
+
+    describe('extractConversationIdFromUrl', () => {
+        it('should extract x.com restId from GraphQL variables', () => {
+            const variables = JSON.stringify({ restId: '2013295304527827227' });
+            const url = `https://x.com/i/api/graphql/6QmFgXuRQyOnW2iJ7nIk7g/GrokConversationItemsByRestId?variables=${encodeURIComponent(variables)}`;
+            expect(grokAdapter.extractConversationIdFromUrl(url)).toBe('2013295304527827227');
+        });
+
+        it('should extract grok.com UUID from REST URLs', () => {
+            const url =
+                'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses';
+            expect(grokAdapter.extractConversationIdFromUrl(url)).toBe('01cb0729-6455-471d-b33a-124b3de76a29');
+        });
+    });
+
+    describe('buildApiUrls', () => {
+        it('should provide grok.com fetch candidates for UUID conversation IDs', () => {
+            const id = '01cb0729-6455-471d-b33a-124b3de76a29';
+            const urls = grokAdapter.buildApiUrls?.(id) ?? [];
+            expect(urls.length).toBe(3);
+            expect(urls[0]).toContain(`/conversations/${id}/load-responses`);
+            expect(urls[1]).toContain(`/conversations/${id}/response-node`);
+            expect(urls[2]).toContain(`/conversations_v2/${id}`);
+        });
+
+        it('should not provide grok.com fetch candidates for x.com numeric IDs', () => {
+            const urls = grokAdapter.buildApiUrls?.('2013295304527827227') ?? [];
+            expect(urls).toEqual([]);
         });
     });
 
@@ -368,6 +416,26 @@ describe('Grok Platform Adapter', () => {
             const secondNode = mapping['70bc533c-9bfb-4321-b10f-facaed644858'];
             expect(firstNode?.parent).toBe(rootNode?.id ?? null);
             expect(secondNode?.parent).toBe(firstNode?.id);
+        });
+
+        it('should parse load-responses entries when a line is a single response object', () => {
+            const conversationId = '01cb0729-6455-471d-b33a-124b3de76a29';
+            const lineObject = {
+                responseId: '70bc533c-9bfb-4321-b10f-facaed644858',
+                message: 'Single NDJSON response payload',
+                sender: 'assistant',
+                createTime: '2026-01-26T15:19:19.160Z',
+                partial: false,
+                metadata: {},
+                model: 'grok-4',
+            };
+
+            const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+            const result = grokAdapter.parseInterceptedData(JSON.stringify(lineObject), loadResponsesUrl);
+
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe(conversationId);
+            expect(result?.mapping['70bc533c-9bfb-4321-b10f-facaed644858']?.message).not.toBeNull();
         });
     });
 

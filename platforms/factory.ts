@@ -36,3 +36,13 @@ export function getPlatformAdapter(url: string): LLMPlatform | null {
 export function getPlatformAdapterByApiUrl(url: string): LLMPlatform | null {
     return getPlatforms().find((p) => p.apiEndpointPattern.test(url)) || null;
 }
+
+/**
+ * Get the platform adapter that matches a completion trigger URL.
+ *
+ * @param url - The intercepted completion-trigger URL
+ * @returns The matching platform adapter or null if not found
+ */
+export function getPlatformAdapterByCompletionUrl(url: string): LLMPlatform | null {
+    return getPlatforms().find((p) => p.completionTriggerPattern?.test(url)) || null;
+}

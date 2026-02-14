@@ -5,6 +5,9 @@ GlobalRegistrator.register();
 
 // Mock wxt/browser
 const storageMock = {
+    onChanged: {
+        addListener: () => {},
+    },
     local: {
         get: async () => ({}),
         set: async () => {},

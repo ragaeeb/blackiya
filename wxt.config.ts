@@ -13,6 +13,7 @@ export default defineConfig({
             },
         },
     }),
+    outDir: 'dist',
     manifest: {
         name: 'Blackiya',
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',

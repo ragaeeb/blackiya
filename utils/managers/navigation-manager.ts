@@ -7,16 +7,35 @@
  */
 import { logger } from '@/utils/logger';
 
+interface HistoryHook {
+    originalPushState: History['pushState'];
+    originalReplaceState: History['replaceState'];
+    listeners: Set<() => void>;
+}
+
+const HISTORY_HOOK_KEY = '__BLACKIYA_NAV_HISTORY_HOOK__';
+
 export class NavigationManager {
     private observer: MutationObserver | null = null;
     private navigationTimeout: number | undefined;
     private onNavigationChange: () => void;
+    private lastKnownUrl = '';
+    private readonly handlePotentialNavigation = () => {
+        const nextUrl = window.location.href;
+        if (nextUrl === this.lastKnownUrl) {
+            return;
+        }
+        this.lastKnownUrl = nextUrl;
+        logger.debug('[NavigationManager] URL change detected:', nextUrl);
+        this.onNavigationChange();
+    };
 
     constructor(onNavigationChange: () => void) {
         this.onNavigationChange = onNavigationChange;
     }
 
     public start(): void {
+        this.lastKnownUrl = window.location.href;
         this.setupMutationObserver();
         this.setupHistoryListeners();
         logger.info('NavigationManager started');
@@ -33,11 +52,8 @@ export class NavigationManager {
             this.navigationTimeout = undefined;
         }
 
-        window.removeEventListener('popstate', this.onNavigationChange);
-
-        // Note: we can't easily remove the patched pushState/replaceState hooks
-        // safely without potentially breaking other scripts, so we leave them be.
-        // This is a trade-off for SPA monitoring.
+        window.removeEventListener('popstate', this.handlePotentialNavigation);
+        this.unregisterHistoryListener();
     }
 
     private setupMutationObserver(): void {
@@ -48,7 +64,7 @@ export class NavigationManager {
 
             // Debounce navigation checks
             this.navigationTimeout = window.setTimeout(() => {
-                this.onNavigationChange();
+                this.handlePotentialNavigation();
             }, 300); // 300ms debounce
         });
 
@@ -62,20 +78,58 @@ export class NavigationManager {
     }
 
     private setupHistoryListeners(): void {
-        window.addEventListener('popstate', this.onNavigationChange);
+        window.addEventListener('popstate', this.handlePotentialNavigation);
+        this.registerHistoryListener();
+    }
 
-        // Monkey-patch history to detect pushState/replaceState
-        // This is standard for SPA extensions to catch soft navigations
-        const originalPushState = history.pushState;
-        history.pushState = (...args) => {
-            originalPushState.apply(history, args);
-            this.onNavigationChange();
-        };
+    private registerHistoryListener(): void {
+        const registry = window as Window & { [HISTORY_HOOK_KEY]?: HistoryHook };
+        let hook = registry[HISTORY_HOOK_KEY];
+        if (!hook) {
+            const originalPushState = history.pushState;
+            const originalReplaceState = history.replaceState;
+            const listeners = new Set<() => void>();
 
-        const originalReplaceState = history.replaceState;
-        history.replaceState = (...args) => {
-            originalReplaceState.apply(history, args);
-            this.onNavigationChange();
-        };
+            history.pushState = ((...args: Parameters<History['pushState']>) => {
+                originalPushState.apply(history, args);
+                for (const listener of listeners) {
+                    listener();
+                }
+            }) as History['pushState'];
+
+            history.replaceState = ((...args: Parameters<History['replaceState']>) => {
+                originalReplaceState.apply(history, args);
+                for (const listener of listeners) {
+                    listener();
+                }
+            }) as History['replaceState'];
+
+            hook = {
+                originalPushState,
+                originalReplaceState,
+                listeners,
+            };
+            registry[HISTORY_HOOK_KEY] = hook;
+        }
+
+        hook.listeners.add(this.handlePotentialNavigation);
+    }
+
+    private unregisterHistoryListener(): void {
+        const registry = window as Window & { [HISTORY_HOOK_KEY]?: HistoryHook };
+        const hook = registry[HISTORY_HOOK_KEY];
+        if (!hook) {
+            return;
+        }
+
+        hook.listeners.delete(this.handlePotentialNavigation);
+
+        if (hook.listeners.size > 0) {
+            return;
+        }
+
+        history.pushState = hook.originalPushState;
+        history.replaceState = hook.originalReplaceState;
+        delete registry[HISTORY_HOOK_KEY];
     }
 }

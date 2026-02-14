@@ -18,10 +18,10 @@ export class InterceptionManager {
     private readonly globalRef: typeof globalThis;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
-    private onDataCaptured: (conversationId: string) => void;
+    private onDataCaptured: (conversationId: string, data: ConversationData) => void;
 
     constructor(
-        onDataCaptured: (conversationId: string) => void,
+        onDataCaptured: (conversationId: string, data: ConversationData) => void,
         options: { window?: Window; global?: typeof globalThis } = {},
     ) {
         this.conversationCache = new LRUCache<string, ConversationData>(10);
@@ -37,9 +37,11 @@ export class InterceptionManager {
     public start(): void {
         this.windowRef.addEventListener('message', this.handleMessage);
         this.processQueuedMessages();
+        this.processQueuedLogMessages();
         // In case queued messages are added before the listener is attached
         setTimeout(() => {
             this.processQueuedMessages();
+            this.processQueuedLogMessages();
         }, 0);
     }
 
@@ -53,6 +55,28 @@ export class InterceptionManager {
 
     public getConversation(id: string): ConversationData | undefined {
         return this.conversationCache.get(id);
+    }
+
+    public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }): void {
+        this.handleInterceptedData({
+            type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+            ...message,
+        });
+    }
+
+    public ingestConversationData(data: ConversationData, source = 'snapshot'): void {
+        if (!this.isValidConversationData(data)) {
+            logger.warn('Ignoring invalid ConversationData payload', { source });
+            return;
+        }
+
+        const conversationId = data.conversation_id;
+        this.conversationCache.set(conversationId, data);
+        logger.info(`Successfully captured/cached data for conversation: ${conversationId}`, {
+            source,
+            directIngest: true,
+        });
+        this.onDataCaptured(conversationId, data);
     }
 
     private handleMessage = (event: MessageEvent): void => {
@@ -88,7 +112,8 @@ export class InterceptionManager {
 
         // Normalize data to array
         const extra = Array.isArray(data) ? data : data !== undefined ? [data] : [];
-        const prefixedMsg = `[${context ?? 'interceptor'}] ${logMessage}`;
+        const ctx = context === 'interceptor' ? 'i' : (context ?? '?');
+        const prefixedMsg = `[${ctx}] ${logMessage}`;
 
         if (level === 'error') {
             logger.error(prefixedMsg, ...extra);
@@ -102,7 +127,10 @@ export class InterceptionManager {
     }
 
     private handleInterceptedData(message: any): void {
-        logger.info('Received intercepted data message');
+        logger.info('Intercepted payload received', {
+            platform: this.currentAdapter?.name ?? 'unknown',
+            size: typeof message.data === 'string' ? message.data.length : 0,
+        });
 
         if (!this.currentAdapter) {
             logger.warn('No currentAdapter in manager, ignoring message');
@@ -119,13 +147,48 @@ export class InterceptionManager {
                 logger.info(`Successfully captured/cached data for conversation: ${conversationId}`);
 
                 // Notify runner to update UI if this matches current view
-                this.onDataCaptured(conversationId);
+                this.onDataCaptured(conversationId, data);
             } else {
-                logger.warn('Failed to parse conversation ID from intercepted data');
+                const level = this.getParseMissLevel(message.url);
+                const payload = {
+                    adapter: this.currentAdapter.name,
+                    url: message.url,
+                    parsedTitle: data?.title ?? null,
+                };
+
+                if (level === 'info') {
+                    logger.info('Failed to parse conversation ID from intercepted data', payload);
+                } else {
+                    logger.warn('Failed to parse conversation ID from intercepted data', payload);
+                }
             }
         } catch (error) {
             logger.error('Error parsing intercepted data:', error);
         }
+    }
+
+    private isValidConversationData(data: ConversationData): boolean {
+        return (
+            !!data &&
+            typeof data === 'object' &&
+            typeof data.conversation_id === 'string' &&
+            data.conversation_id.length > 0 &&
+            !!data.mapping &&
+            typeof data.mapping === 'object'
+        );
+    }
+
+    private getParseMissLevel(url: unknown): 'info' | 'warn' {
+        if (typeof url !== 'string') {
+            return 'warn';
+        }
+
+        const isExpectedAuxMiss =
+            url.includes('/rest/app-chat/conversations_v2/') ||
+            url.includes('/rest/app-chat/conversations/new') ||
+            (url.includes('/rest/app-chat/conversations/') && url.includes('/response-node'));
+
+        return isExpectedAuxMiss ? 'info' : 'warn';
     }
 
     private processQueuedMessages(): void {
@@ -144,5 +207,23 @@ export class InterceptionManager {
 
         (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
         (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
+    }
+
+    private processQueuedLogMessages(): void {
+        const globalQueue = (this.globalRef as any).__BLACKIYA_LOG_QUEUE__;
+        const windowQueue = (this.windowRef as any).__BLACKIYA_LOG_QUEUE__;
+        const queue = Array.isArray(globalQueue) ? globalQueue : windowQueue;
+        if (!Array.isArray(queue) || queue.length === 0) {
+            return;
+        }
+
+        for (const message of queue) {
+            if (message?.type === 'LLM_LOG_ENTRY') {
+                this.handleLogEntry(message.payload);
+            }
+        }
+
+        (this.globalRef as any).__BLACKIYA_LOG_QUEUE__ = [];
+        (this.windowRef as any).__BLACKIYA_LOG_QUEUE__ = [];
     }
 }
