@@ -333,6 +333,7 @@ export const geminiAdapter: LLMPlatform = {
     // Match batchexecute endpoints containing specific RPC IDs:
     // hNvQHb (Conversation Data) OR MaZiqc (Conversation Titles)
     apiEndpointPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*(hNvQHb|MaZiqc)/,
+    completionTriggerPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*hNvQHb/,
 
     isPlatformUrl(url: string): boolean {
         return url.includes('gemini.google.com');
@@ -340,19 +341,31 @@ export const geminiAdapter: LLMPlatform = {
 
     extractConversationId(url: string): string | null {
         if (!this.isPlatformUrl(url)) {
+            logger.debug('[Blackiya/Gemini] URL not a Gemini platform URL:', url);
             return null;
         }
 
+        logger.debug('[Blackiya/Gemini] Extracting conversation ID from URL:', url);
+
         const appMatch = url.match(/\/app\/([a-zA-Z0-9_-]+)/i);
         if (appMatch) {
+            logger.debug('[Blackiya/Gemini] Found /app/ ID:', appMatch[1]);
             return appMatch[1];
         }
 
         const shareMatch = url.match(/\/share\/([a-zA-Z0-9_-]+)/i);
         if (shareMatch) {
+            logger.debug('[Blackiya/Gemini] Found /share/ ID:', shareMatch[1]);
             return shareMatch[1];
         }
 
+        logger.debug('[Blackiya/Gemini] No conversation ID found in URL');
+        return null;
+    },
+
+    extractConversationIdFromUrl(_url: string): string | null {
+        // Gemini batchexecute URLs do not reliably contain the conversation ID.
+        // We fall back to the currently active conversation ID from the page URL.
         return null;
     },
 

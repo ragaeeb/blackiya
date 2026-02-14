@@ -254,8 +254,32 @@ const parseGrokComResponseItem = (response: any, rootId: string) => {
     };
 };
 
+const normalizeGrokComResponses = (data: any): any[] | null => {
+    if (Array.isArray(data?.responses)) {
+        return data.responses;
+    }
+
+    if (data && typeof data === 'object') {
+        if (typeof data.responseId === 'string') {
+            return [data];
+        }
+        if (data.response && typeof data.response === 'object') {
+            return [data.response];
+        }
+    }
+
+    if (Array.isArray(data)) {
+        const directResponses = data.filter((item) => item && typeof item?.responseId === 'string');
+        if (directResponses.length > 0) {
+            return directResponses;
+        }
+    }
+
+    return null;
+};
+
 const parseGrokComResponses = (data: any, conversationId: string) => {
-    const responses = Array.isArray(data?.responses) ? data.responses : null;
+    const responses = normalizeGrokComResponses(data);
     if (!responses) {
         return null;
     }
@@ -301,6 +325,8 @@ const isGrokComResponseNodesEndpoint = (url: string) =>
 const isGrokComLoadResponsesEndpoint = (url: string) =>
     url.includes('/rest/app-chat/conversations/') && url.includes('/load-responses');
 
+const isXGraphqlEndpoint = (url: string) => url.includes('/i/api/graphql/');
+
 const extractGrokComConversationIdFromUrl = (url: string) => {
     try {
         const urlObj = new URL(url);
@@ -314,6 +340,33 @@ const extractGrokComConversationIdFromUrl = (url: string) => {
         return GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
     } catch {
         return null;
+    }
+};
+
+const extractRestIdFromVariables = (variablesStr: string | null): string | null => {
+    if (!variablesStr) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(variablesStr);
+        const restId = parsed?.restId;
+        return typeof restId === 'string' ? restId : null;
+    } catch {
+        const decoded = decodeURIComponent(variablesStr);
+        const match = decoded.match(/restId["\\]*\s*:\s*["\\]*(\d+)/);
+        return match?.[1] ?? null;
+    }
+};
+
+const extractXConversationIdFromApiUrl = (url: string): string | null => {
+    try {
+        const urlObj = new URL(url);
+        const variablesStr = urlObj.searchParams.get('variables');
+        return extractRestIdFromVariables(variablesStr);
+    } catch {
+        const match = url.match(/%22restId%22%3A%22(\d+)%22/);
+        return match?.[1] ?? null;
     }
 };
 
@@ -655,12 +708,22 @@ export const grokAdapter: LLMPlatform = {
     // Match BOTH the conversation endpoint AND the history endpoint
     apiEndpointPattern:
         /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
+    completionTriggerPattern:
+        /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|grok\.com\/rest\/app-chat\/conversations\/[^/]+\/(response-node|load-responses)/,
 
     /**
      * Check if a URL belongs to Grok
      */
     isPlatformUrl(url: string) {
-        return url.includes('x.com/i/grok') || url.includes('grok.com/c/');
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.hostname === 'grok.com' || urlObj.hostname === 'www.grok.com') {
+                return true;
+            }
+            return urlObj.hostname === 'x.com' && urlObj.pathname.startsWith('/i/grok');
+        } catch {
+            return false;
+        }
     },
 
     /**
@@ -689,7 +752,8 @@ export const grokAdapter: LLMPlatform = {
                     return null;
                 }
 
-                return GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
+                const isValid = GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId);
+                return isValid ? conversationId : null;
             }
 
             if (urlObj.hostname !== 'x.com') {
@@ -716,6 +780,26 @@ export const grokAdapter: LLMPlatform = {
         } catch {
             return null;
         }
+    },
+
+    extractConversationIdFromUrl(url: string): string | null {
+        const grokComId = extractGrokComConversationIdFromUrl(url);
+        if (grokComId) {
+            return grokComId;
+        }
+        return extractXConversationIdFromApiUrl(url);
+    },
+
+    buildApiUrls(conversationId: string): string[] {
+        if (!GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId)) {
+            return [];
+        }
+
+        return [
+            `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`,
+            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
+            `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
+        ];
     },
 
     /**
@@ -763,14 +847,43 @@ export const grokAdapter: LLMPlatform = {
             return parseGrokComResponseNodes(parsed, conversationId);
         }
 
-        // grok.com responses payload
+        // grok.com responses payload (may be NDJSON)
         if (isGrokComLoadResponsesEndpoint(url)) {
             const conversationId = extractGrokComConversationIdFromUrl(url);
             if (!conversationId) {
                 return null;
             }
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokComResponses(parsed, conversationId);
+
+            // Handle NDJSON format (multiple JSON objects separated by newlines)
+            const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+            const lines = dataStr
+                .trim()
+                .split('\n')
+                .filter((line) => line.trim());
+
+            if (lines.length > 1) {
+                // NDJSON format - parse each line and merge
+                logger.info(`[Blackiya/Grok] Parsing NDJSON with ${lines.length} lines`);
+                let result: ConversationData | null = null;
+
+                for (const line of lines) {
+                    try {
+                        const parsed = JSON.parse(line);
+                        const lineResult = parseGrokComResponses(parsed, conversationId);
+                        if (lineResult) {
+                            result = lineResult; // Keep updating with latest
+                        }
+                    } catch (_e) {
+                        logger.warn(`[Blackiya/Grok] Failed to parse NDJSON line: ${line.slice(0, 100)}`);
+                    }
+                }
+
+                return result;
+            } else {
+                // Single JSON object
+                const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+                return parseGrokComResponses(parsed, conversationId);
+            }
         }
 
         // Otherwise, parse as conversation data (x.com GraphQL)
@@ -779,22 +892,10 @@ export const grokAdapter: LLMPlatform = {
 
             // Extract restId from URL if possible to ensure we use the same ID as the cache
             let conversationIdFromUrl: string | undefined;
-            if (url) {
-                try {
-                    const urlObj = new URL(url);
-                    const variablesStr = urlObj.searchParams.get('variables');
-                    if (variablesStr) {
-                        const variables = JSON.parse(variablesStr);
-                        if (variables?.restId) {
-                            conversationIdFromUrl = variables.restId;
-                        }
-                    }
-                } catch {
-                    // Fallback to regex
-                    const match = url.match(/%22restId%22%3A%22(\d+)%22/);
-                    if (match?.[1]) {
-                        conversationIdFromUrl = match[1];
-                    }
+            if (url && isXGraphqlEndpoint(url)) {
+                const extracted = extractXConversationIdFromApiUrl(url);
+                if (extracted) {
+                    conversationIdFromUrl = extracted;
                 }
             }
 

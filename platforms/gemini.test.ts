@@ -53,6 +53,20 @@ describe('Gemini Platform Adapter', () => {
             expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=otAQ7b')).toBe(false);
             expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute')).toBe(false); // No rpcids
         });
+
+        it('should match completion trigger URLs for conversation RPC', () => {
+            const pattern = geminiAdapter.completionTriggerPattern;
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBe(true);
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBe(false);
+        });
+
+        it('should return null when extracting conversation ID from Gemini API URL', () => {
+            expect(
+                geminiAdapter.extractConversationIdFromUrl(
+                    'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb',
+                ),
+            ).toBeNull();
+        });
     });
 
     describe('Conversation Data Parsing', () => {

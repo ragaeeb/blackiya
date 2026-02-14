@@ -74,7 +74,7 @@ describe('ChatGPT Platform Adapter', () => {
         it('should parse valid ChatGPT JSON data', () => {
             const mockData = {
                 title: 'Test Conversation',
-                conversation_id: 'uuid-123',
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
                 mapping: { 'node-1': {} },
             };
             const result = adapter.parseInterceptedData(JSON.stringify(mockData), 'url');
@@ -82,9 +82,63 @@ describe('ChatGPT Platform Adapter', () => {
             expect(result?.title).toBe('Test Conversation');
         });
 
+        it('should normalize id to conversation_id when needed', () => {
+            const mockData = {
+                title: 'Test Conversation',
+                id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                mapping: { 'node-1': {} },
+            };
+            const result = adapter.parseInterceptedData(JSON.stringify(mockData), 'url');
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+        });
+
+        it('should parse wrapped conversation payload', () => {
+            const wrapped = {
+                conversation: {
+                    title: 'Wrapped',
+                    conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                    mapping: { 'node-1': {} },
+                },
+            };
+            const result = adapter.parseInterceptedData(JSON.stringify(wrapped), 'url');
+            expect(result).not.toBeNull();
+            expect(result?.title).toBe('Wrapped');
+            expect(result?.conversation_id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+        });
+
         it('should return null for invalid data', () => {
             const result = adapter.parseInterceptedData(JSON.stringify({ foo: 'bar' }), 'url');
             expect(result).toBeNull();
+        });
+
+        it('should parse conversation payloads with missing title by normalizing to empty string', () => {
+            const mockData = {
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                mapping: { root: { id: 'root', message: null, parent: null, children: [] } },
+                current_node: 'root',
+            };
+            const result = adapter.parseInterceptedData(JSON.stringify(mockData), 'url');
+            expect(result).not.toBeNull();
+            expect(result?.title).toBe('');
+        });
+
+        it('should parse ChatGPT f/conversation SSE payload into synthetic conversation data', () => {
+            const ssePayload = [
+                'event: message',
+                'data: {"conversation_id":"696bc3d5-fa84-8328-b209-4d65cb229e59","message":{"id":"msg-user","author":{"role":"user","name":null,"metadata":{}},"create_time":1735689600,"update_time":1735689600,"content":{"content_type":"text","parts":["What is calibration?"]},"status":"finished_successfully","end_turn":true,"weight":1,"metadata":{},"recipient":"all","channel":null}}',
+                '',
+                'event: message',
+                'data: {"conversation_id":"696bc3d5-fa84-8328-b209-4d65cb229e59","message":{"id":"msg-assistant","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1735689602,"update_time":1735689602,"content":{"content_type":"thoughts","thoughts":[{"summary":"Considering the user question","content":"Calibration means adapting capture logic to observed runtime signals.","chunks":[],"finished":true}]},"status":"finished_successfully","end_turn":true,"weight":1,"metadata":{"resolved_model_slug":"gpt-5-t-mini"},"recipient":"all","channel":null}}',
+                '',
+                'data: [DONE]',
+            ].join('\n');
+
+            const result = adapter.parseInterceptedData(ssePayload, 'https://chatgpt.com/backend-api/f/conversation');
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+            expect(Object.keys(result?.mapping ?? {}).length).toBeGreaterThan(2);
+            expect(result?.default_model_slug).toBe('gpt-5-t-mini');
         });
     });
 
@@ -195,9 +249,57 @@ describe('ChatGPT Platform Adapter', () => {
             expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
         });
 
+        it('should match ChatGPT conversation API endpoint with query params', () => {
+            const endpoint =
+                'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59?foo=bar';
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
+        });
+
         it('should not match other API endpoints', () => {
             const endpoint = 'https://chatgpt.com/backend-api/models';
             expect(adapter.apiEndpointPattern.test(endpoint)).toBe(false);
+        });
+
+        it('should match ChatGPT f/conversation endpoint', () => {
+            const endpoint = 'https://chatgpt.com/backend-api/f/conversation';
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
+        });
+    });
+
+    describe('completion trigger flow', () => {
+        it('should match stream_status completion endpoint', () => {
+            const url =
+                'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/stream_status';
+            expect(adapter.completionTriggerPattern.test(url)).toBe(true);
+        });
+
+        it('should match textdocs completion endpoint', () => {
+            const url = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/textdocs';
+            expect(adapter.completionTriggerPattern.test(url)).toBe(true);
+        });
+
+        it('should extract conversation ID from completion endpoint URL', () => {
+            const url =
+                'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/stream_status';
+            expect(adapter.extractConversationIdFromUrl(url)).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+        });
+
+        it('should extract conversation ID from textdocs endpoint URL', () => {
+            const url = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/textdocs';
+            expect(adapter.extractConversationIdFromUrl(url)).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+        });
+
+        it('should build full conversation API URL from conversation ID', () => {
+            const url = adapter.buildApiUrl('696bc3d5-fa84-8328-b209-4d65cb229e59');
+            expect(url).toBe('https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59');
+        });
+
+        it('should provide multiple fetch URL candidates for calibration retries', () => {
+            const urls = adapter.buildApiUrls('696bc3d5-fa84-8328-b209-4d65cb229e59');
+            expect(urls).toContain('https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59');
+            expect(urls).toContain(
+                'https://chatgpt.com/backend-api/f/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59',
+            );
         });
     });
 });

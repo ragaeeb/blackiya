@@ -9,14 +9,20 @@ export class ButtonManager {
     private container: HTMLElement | null = null;
     private saveStartButton: HTMLButtonElement | null = null;
     private copyButton: HTMLButtonElement | null = null;
+    private calibrateButton: HTMLButtonElement | null = null;
     private isFixedPosition = false;
-    private currentOpacity = '1';
     private onSaveClick: () => Promise<void>;
     private onCopyClick: () => Promise<void>;
+    private onCalibrateClick: () => Promise<void>;
 
-    constructor(onSaveClick: () => Promise<void>, onCopyClick: () => Promise<void>) {
+    constructor(
+        onSaveClick: () => Promise<void>,
+        onCopyClick: () => Promise<void>,
+        onCalibrateClick: () => Promise<void>,
+    ) {
         this.onSaveClick = onSaveClick;
         this.onCopyClick = onCopyClick;
+        this.onCalibrateClick = onCalibrateClick;
         this.injectStyles();
     }
 
@@ -28,10 +34,12 @@ export class ButtonManager {
         this.container = this.createContainer();
         this.saveStartButton = this.createButton('save', 'Save JSON', this.onSaveClick);
         this.copyButton = this.createButton('copy', 'Copy', this.onCopyClick);
+        this.calibrateButton = this.createButton('calibrate', 'Calibrate', this.onCalibrateClick);
 
-        if (this.container && this.saveStartButton && this.copyButton) {
+        if (this.container && this.saveStartButton && this.copyButton && this.calibrateButton) {
             this.container.appendChild(this.saveStartButton);
             this.container.appendChild(this.copyButton);
+            this.container.appendChild(this.calibrateButton);
 
             // Fixed position fallback logic
             if (target === document.body || target === document.documentElement) {
@@ -54,6 +62,7 @@ export class ButtonManager {
         this.container = null;
         this.saveStartButton = null;
         this.copyButton = null;
+        this.calibrateButton = null;
     }
 
     public exists(): boolean {
@@ -91,10 +100,56 @@ export class ButtonManager {
     }
 
     public setOpacity(opacity: string): void {
-        this.currentOpacity = opacity;
-        if (this.container) {
-            this.container.style.opacity = opacity;
+        if (this.saveStartButton) {
+            this.saveStartButton.style.opacity = opacity;
         }
+        if (this.copyButton) {
+            this.copyButton.style.opacity = opacity;
+        }
+    }
+
+    public setActionButtonsEnabled(enabled: boolean): void {
+        if (this.saveStartButton) {
+            this.saveStartButton.disabled = !enabled;
+        }
+        if (this.copyButton) {
+            this.copyButton.disabled = !enabled;
+        }
+    }
+
+    public setCalibrationState(state: 'idle' | 'waiting' | 'capturing' | 'success' | 'error'): void {
+        if (!this.calibrateButton) {
+            return;
+        }
+
+        this.calibrateButton.disabled = state === 'capturing';
+        this.calibrateButton.style.opacity = state === 'capturing' ? '0.85' : '1';
+        this.calibrateButton.style.cursor = state === 'capturing' ? 'wait' : 'pointer';
+        this.calibrateButton.replaceChildren();
+
+        const iconType = state === 'capturing' ? 'loading' : state === 'success' ? 'check' : 'calibrate';
+        const icon = this.createIconSVG(iconType);
+        const text = document.createElement('span');
+
+        if (state === 'waiting') {
+            text.textContent = 'Done';
+            this.calibrateButton.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+        } else if (state === 'capturing') {
+            text.textContent = 'Capturing...';
+            this.calibrateButton.style.background = 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
+        } else if (state === 'success') {
+            text.textContent = 'Captured';
+            this.calibrateButton.style.background = 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+        } else if (state === 'error') {
+            text.textContent = 'Retry';
+            this.calibrateButton.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+        } else {
+            text.textContent = 'Calibrate';
+            this.calibrateButton.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
+        }
+
+        this.calibrateButton.appendChild(icon);
+        this.calibrateButton.appendChild(text);
     }
 
     private createContainer(): HTMLElement {
@@ -104,7 +159,11 @@ export class ButtonManager {
         return div;
     }
 
-    private createButton(type: 'save' | 'copy', label: string, onClick: () => Promise<void>): HTMLButtonElement {
+    private createButton(
+        type: 'save' | 'copy' | 'calibrate',
+        label: string,
+        onClick: () => Promise<void>,
+    ): HTMLButtonElement {
         const button = document.createElement('button');
         button.id = `blackiya-${type}-btn`;
 
@@ -150,8 +209,6 @@ export class ButtonManager {
             gap: 8px;
             margin-left: 8px;
             z-index: 9999;
-            opacity: ${this.currentOpacity};
-            transition: opacity 0.2s ease;
         `;
 
         if (this.isFixedPosition) {
@@ -171,8 +228,11 @@ export class ButtonManager {
         return css;
     }
 
-    private getButtonDefaultStyles(_type: 'save' | 'copy'): string {
-        const bg = 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+    private getButtonDefaultStyles(type: 'save' | 'copy' | 'calibrate'): string {
+        const bg =
+            type === 'calibrate'
+                ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+                : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
         return `
             display: inline-flex;
             align-items: center;
@@ -189,6 +249,7 @@ export class ButtonManager {
             cursor: pointer;
             transition: all 0.2s ease;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            opacity: 1;
         `;
     }
 
@@ -230,7 +291,7 @@ export class ButtonManager {
         }, 2000);
     }
 
-    private createIconSVG(iconType: 'save' | 'copy' | 'loading' | 'check'): SVGSVGElement {
+    private createIconSVG(iconType: 'save' | 'copy' | 'calibrate' | 'loading' | 'check'): SVGSVGElement {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('width', '16');
         svg.setAttribute('height', '16');
@@ -267,6 +328,16 @@ export class ButtonManager {
             line.setAttribute('y2', '3');
             svg.appendChild(path);
             svg.appendChild(polyline);
+            svg.appendChild(line);
+        } else if (iconType === 'calibrate') {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', 'M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8L12 2z');
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', '19');
+            line.setAttribute('y1', '19');
+            line.setAttribute('x2', '19');
+            line.setAttribute('y2', '19');
+            svg.appendChild(path);
             svg.appendChild(line);
         } else {
             // Copy Icon

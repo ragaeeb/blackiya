@@ -48,6 +48,7 @@ export class NavigationManager {
 
             // Debounce navigation checks
             this.navigationTimeout = window.setTimeout(() => {
+                logger.debug('[NavigationManager] URL change detected:', window.location.href);
                 this.onNavigationChange();
             }, 300); // 300ms debounce
         });
