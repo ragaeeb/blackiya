@@ -117,7 +117,10 @@ export class ButtonManager {
         }
     }
 
-    public setCalibrationState(state: 'idle' | 'waiting' | 'capturing' | 'success' | 'error'): void {
+    public setCalibrationState(
+        state: 'idle' | 'waiting' | 'capturing' | 'success' | 'error',
+        options?: { timestampLabel?: string | null },
+    ): void {
         if (!this.calibrateButton) {
             return;
         }
@@ -138,7 +141,7 @@ export class ButtonManager {
             text.textContent = 'Capturing...';
             this.calibrateButton.style.background = 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
         } else if (state === 'success') {
-            text.textContent = 'Captured';
+            text.textContent = options?.timestampLabel ? `Captured • ${options.timestampLabel}` : 'Captured';
             this.calibrateButton.style.background = 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
         } else if (state === 'error') {
             text.textContent = 'Retry';

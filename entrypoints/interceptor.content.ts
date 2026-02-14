@@ -1,6 +1,13 @@
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import { isConversationReady } from '@/utils/conversation-readiness';
+import {
+    extractForwardableHeadersFromFetchArgs,
+    type HeaderRecord,
+    mergeHeaderRecords,
+    toForwardableHeaderRecord,
+} from '@/utils/proactive-fetch-headers';
 
 interface CapturePayload {
     type: 'LLM_CAPTURE_DATA_INTERCEPTED';
@@ -502,6 +509,71 @@ function getRequestMethod(args: Parameters<typeof fetch>): string {
     return args[1]?.method || (args[0] instanceof Request ? args[0].method : 'GET');
 }
 
+function appendHeadersToRecord(target: Record<string, string>, headers: HeadersInit | undefined): void {
+    if (!headers) {
+        return;
+    }
+
+    if (headers instanceof Headers) {
+        headers.forEach((value, key) => {
+            target[key.toLowerCase()] = value;
+        });
+        return;
+    }
+
+    if (Array.isArray(headers)) {
+        for (const [key, value] of headers) {
+            target[String(key).toLowerCase()] = String(value);
+        }
+        return;
+    }
+
+    for (const [key, value] of Object.entries(headers)) {
+        target[key.toLowerCase()] = String(value);
+    }
+}
+
+function collectFetchRequestHeaders(args: Parameters<typeof fetch>): Record<string, string> | undefined {
+    const headers: Record<string, string> = {};
+    if (args[0] instanceof Request) {
+        appendHeadersToRecord(headers, args[0].headers);
+    }
+    appendHeadersToRecord(headers, args[1]?.headers);
+    return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+function sanitizeHeaderValueForLog(name: string, value: string): string {
+    const normalized = name.toLowerCase();
+    const trimmed = value.trim();
+    if (
+        normalized === 'authorization' ||
+        normalized.includes('token') ||
+        normalized.includes('cookie') ||
+        normalized.includes('csrf') ||
+        normalized.includes('api-key')
+    ) {
+        return `<redacted:${trimmed.length}>`;
+    }
+
+    if (trimmed.length > 140) {
+        return `${trimmed.slice(0, 140)}...`;
+    }
+
+    return trimmed;
+}
+
+function sanitizeHeadersForLog(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+    if (!headers) {
+        return undefined;
+    }
+
+    const sanitized: Record<string, string> = {};
+    for (const [name, value] of Object.entries(headers)) {
+        sanitized[name] = sanitizeHeaderValueForLog(name, value);
+    }
+    return sanitized;
+}
+
 function emitCapturePayload(url: string, data: string, platform: string): void {
     const payload: CapturePayload = {
         type: 'LLM_CAPTURE_DATA_INTERCEPTED',
@@ -761,11 +833,13 @@ export default defineContentScript({
                 fetch: window.fetch,
                 XMLHttpRequestOpen: XMLHttpRequest.prototype.open,
                 XMLHttpRequestSend: XMLHttpRequest.prototype.send,
+                XMLHttpRequestSetRequestHeader: XMLHttpRequest.prototype.setRequestHeader,
             };
         }
 
         const originalFetch = window.fetch;
         const inFlightFetches = new Map<string, Promise<void>>();
+        const proactiveHeadersByKey = new Map<string, HeaderRecord>();
         // ChatGPT can materialize the full conversation payload late; keep retries bounded but longer.
         const proactiveBackoffMs = [900, 1800, 3200, 5000, 7000, 9000, 12000, 15000];
 
@@ -776,11 +850,20 @@ export default defineContentScript({
             conversationId: string,
             attempt: number,
             apiUrl: string,
+            requestHeaders?: HeaderRecord,
         ) => {
             try {
                 log('info', `fetching ${conversationId}`, { attempt });
+                if (attempt === 1 && requestHeaders) {
+                    log('info', 'proactive fetch request headers', {
+                        conversationId,
+                        path: safePathname(apiUrl),
+                        headers: sanitizeHeadersForLog(requestHeaders),
+                    });
+                }
                 const response = await originalFetch(apiUrl, {
                     credentials: 'include',
+                    headers: requestHeaders,
                 });
                 log('info', 'fetch response', {
                     conversationId,
@@ -794,10 +877,23 @@ export default defineContentScript({
                 }
 
                 const text = await response.text();
+                const parsed = adapter.parseInterceptedData(text, apiUrl);
+                const isComplete = !!parsed?.conversation_id && isConversationReady(parsed);
+                if (!isComplete) {
+                    log('info', 'fetch payload incomplete', {
+                        conversationId,
+                        attempt,
+                        path: safePathname(apiUrl),
+                        bytes: text.length,
+                        parsedConversationId: parsed?.conversation_id ?? null,
+                    });
+                    return false;
+                }
+
                 log('info', `fetched ${conversationId} ${text.length}b`, {
                     path: safePathname(apiUrl),
                 });
-                emitCapturePayload(apiUrl, text, adapter.name);
+                emitCapturePayload(apiUrl, JSON.stringify(parsed), adapter.name);
                 return true;
             } catch (error) {
                 log('error', `fetch err ${conversationId}`, {
@@ -808,12 +904,19 @@ export default defineContentScript({
             }
         };
 
-        const runProactiveFetch = async (adapter: LLMPlatform, conversationId: string) => {
+        const runProactiveFetch = async (adapter: LLMPlatform, conversationId: string, key: string) => {
             for (let attempt = 0; attempt < proactiveBackoffMs.length; attempt++) {
                 await delay(proactiveBackoffMs[attempt]);
                 const apiUrls = getApiUrlCandidates(adapter, conversationId);
+                const requestHeaders = proactiveHeadersByKey.get(key);
                 for (const apiUrl of apiUrls) {
-                    const success = await tryFetchConversation(adapter, conversationId, attempt + 1, apiUrl);
+                    const success = await tryFetchConversation(
+                        adapter,
+                        conversationId,
+                        attempt + 1,
+                        apiUrl,
+                        requestHeaders,
+                    );
                     if (success) {
                         return;
                     }
@@ -822,7 +925,11 @@ export default defineContentScript({
             log('info', `fetch gave up ${conversationId}`);
         };
 
-        const fetchFullConversationWithBackoff = async (adapter: LLMPlatform, triggerUrl: string) => {
+        const fetchFullConversationWithBackoff = async (
+            adapter: LLMPlatform,
+            triggerUrl: string,
+            requestHeaders?: HeaderRecord,
+        ) => {
             if (!isFetchReady(adapter)) {
                 return;
             }
@@ -833,26 +940,47 @@ export default defineContentScript({
             }
 
             const key = `${adapter.name}:${conversationId}`;
+            const mergedHeaders = mergeHeaderRecords(proactiveHeadersByKey.get(key), requestHeaders);
+            if (mergedHeaders) {
+                proactiveHeadersByKey.set(key, mergedHeaders);
+            }
+
             if (inFlightFetches.has(key)) {
                 return;
             }
 
             log('info', `trigger ${adapter.name} ${conversationId}`);
 
-            const run = runProactiveFetch(adapter, conversationId);
+            const run = runProactiveFetch(adapter, conversationId, key);
 
             inFlightFetches.set(key, run);
             run.finally(() => {
                 inFlightFetches.delete(key);
+                proactiveHeadersByKey.delete(key);
             });
         };
 
         window.fetch = (async (...args: Parameters<typeof fetch>) => {
+            const outgoingUrl = getRequestUrl(args[0]);
+            const outgoingMethod = getRequestMethod(args);
+            if (outgoingUrl.includes('/backend-api/')) {
+                const path = safePathname(outgoingUrl);
+                if (shouldLogTransient(`outgoing:fetch:${outgoingMethod}:${path}`, 2500)) {
+                    log('info', 'outgoing request', {
+                        channel: 'fetch',
+                        method: outgoingMethod,
+                        path,
+                        headers: sanitizeHeadersForLog(collectFetchRequestHeaders(args)),
+                    });
+                }
+            }
+
             const response = await originalFetch(...args);
-            const url = getRequestUrl(args[0]);
+            const url = outgoingUrl;
             const completionAdapter = getPlatformAdapterByCompletionUrl(url);
             if (completionAdapter) {
-                void fetchFullConversationWithBackoff(completionAdapter, url);
+                const requestHeaders = extractForwardableHeadersFromFetchArgs(args);
+                void fetchFullConversationWithBackoff(completionAdapter, url, requestHeaders);
             }
             handleFetchInterception(args, response);
             return response;
@@ -862,20 +990,42 @@ export default defineContentScript({
         const XHR = window.XMLHttpRequest;
         const originalOpen = XHR.prototype.open;
         const originalSend = XHR.prototype.send;
+        const originalSetRequestHeader = XHR.prototype.setRequestHeader;
 
         XHR.prototype.open = function (_method: string, url: string | URL, ...args: any[]) {
             (this as any)._url = String(url);
             (this as any)._method = _method;
+            (this as any)._headers = {};
             return originalOpen.apply(this, [_method, url, ...args] as any);
+        };
+
+        XHR.prototype.setRequestHeader = function (header: string, value: string) {
+            const existing = ((this as any)._headers as Record<string, string> | undefined) ?? {};
+            existing[String(header).toLowerCase()] = String(value);
+            (this as any)._headers = existing;
+            return originalSetRequestHeader.call(this, header, value);
         };
 
         XHR.prototype.send = function (body?: any) {
             const method = (this as any)._method || 'GET';
+            const xhrUrl = (this as any)._url;
+            if (typeof xhrUrl === 'string' && xhrUrl.includes('/backend-api/')) {
+                const path = safePathname(xhrUrl);
+                if (shouldLogTransient(`outgoing:xhr:${method}:${path}`, 2500)) {
+                    log('info', 'outgoing request', {
+                        channel: 'xhr',
+                        method,
+                        path,
+                        headers: sanitizeHeadersForLog(toForwardableHeaderRecord((this as any)._headers)),
+                    });
+                }
+            }
             this.addEventListener('load', function () {
                 const xhr = this as XMLHttpRequest;
                 const completionAdapter = getPlatformAdapterByCompletionUrl((xhr as any)._url);
                 if (completionAdapter) {
-                    void fetchFullConversationWithBackoff(completionAdapter, (xhr as any)._url);
+                    const requestHeaders = toForwardableHeaderRecord((xhr as any)._headers);
+                    void fetchFullConversationWithBackoff(completionAdapter, (xhr as any)._url, requestHeaders);
                 }
                 handleXhrLoad(xhr, method);
             });

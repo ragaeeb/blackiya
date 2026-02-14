@@ -191,6 +191,13 @@ describe('Minimal Debug Report', () => {
             },
             {
                 timestamp: '',
+                level: 'debug',
+                message:
+                    '[NavigationManager] URL change detected: https://chatgpt.com/c/696bc3d5-fa84-8328-b209-4d65cb229e59',
+                context: 'content',
+            },
+            {
+                timestamp: '',
                 level: 'info',
                 message: '[i] trigger ChatGPT 696bc3d5-fa84-8328-b209-4d65cb229e59',
                 context: 'content',
@@ -201,6 +208,7 @@ describe('Minimal Debug Report', () => {
 
         expect(report).not.toContain('Fetch intercepted');
         expect(report).not.toContain('API adapter');
+        expect(report).not.toContain('[NavigationManager] URL change detected');
         expect(report).toContain('trigger ChatGPT');
     });
 

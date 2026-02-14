@@ -75,6 +75,7 @@ function isNoiseLine(line: string): boolean {
         line.includes('Intercepted XHR:') ||
         line.includes('[Blackiya/Grok] Extracting ID from grok.com URL:') ||
         line.includes('[Blackiya/Grok] Extracted ID:') ||
+        line.includes('[NavigationManager] URL change detected:') ||
         line.startsWith('Has ') ||
         line.includes('Response text preview') ||
         line.includes('Full response text')

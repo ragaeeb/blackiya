@@ -13,6 +13,7 @@ import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { buildCommonExport } from '@/utils/common-export';
+import { isConversationReady } from '@/utils/conversation-readiness';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -26,15 +27,66 @@ interface SnapshotMessageCandidate {
     text: string;
 }
 
+type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
+type CalibrationMode = 'manual' | 'auto';
+
+interface CalibrationProfile {
+    preferredStep: CalibrationStep;
+    updatedAt: string;
+}
+
+type CalibrationProfilesStore = Record<string, CalibrationProfile>;
+type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
+
+export function buildCalibrationOrderForMode(
+    preferredStep: CalibrationStep | null,
+    mode: CalibrationMode,
+    platformName?: string,
+): CalibrationStep[] {
+    const defaultOrder: CalibrationStep[] = ['queue-flush', 'passive-wait', 'endpoint-retry', 'page-snapshot'];
+    if (!preferredStep) {
+        return defaultOrder;
+    }
+
+    if (mode === 'auto' && preferredStep === 'page-snapshot') {
+        // For ChatGPT, snapshot fallback is currently the most reliable and avoids long endpoint-retry delays.
+        if (platformName === 'ChatGPT') {
+            return ['queue-flush', 'page-snapshot', 'passive-wait', 'endpoint-retry'];
+        }
+        return defaultOrder;
+    }
+
+    const reordered = [preferredStep, ...defaultOrder.filter((step) => step !== preferredStep)];
+    if (mode !== 'auto') {
+        return reordered;
+    }
+
+    // In auto mode, keep page-snapshot as a last resort to reduce premature partial captures.
+    const withoutSnapshot = reordered.filter((step) => step !== 'page-snapshot');
+    return [...withoutSnapshot, 'page-snapshot'];
+}
+
+export function shouldPersistCalibrationProfile(mode: CalibrationMode): boolean {
+    return mode === 'manual';
+}
+
 export function runPlatform(): void {
     let currentAdapter: LLMPlatform | null = null;
     let currentConversationId: string | null = null;
     let cleanupWindowBridge: (() => void) | null = null;
     let cleanupCompletionWatcher: (() => void) | null = null;
+    let cleanupButtonHealthCheck: (() => void) | null = null;
     let lastButtonStateLog = '';
-    let calibrationState: 'idle' | 'waiting' | 'capturing' | 'success' | 'error' = 'idle';
+    let calibrationState: CalibrationUiState = 'idle';
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
+    let rememberedPreferredStep: CalibrationStep | null = null;
+    let rememberedCalibrationUpdatedAt: string | null = null;
+    let calibrationPreferenceLoaded = false;
+    let calibrationPreferenceLoading: Promise<void> | null = null;
+    const autoCaptureAttempts = new Map<string, number>();
+    const autoCaptureRetryTimers = new Map<string, number>();
+    const autoCaptureDeferredLogged = new Set<string>();
 
     // -- Manager Initialization --
 
@@ -45,7 +97,7 @@ export function runPlatform(): void {
     const interceptionManager = new InterceptionManager((capturedId, data) => {
         currentConversationId = capturedId;
         refreshButtonState(capturedId);
-        if (isConversationComplete(data)) {
+        if (isConversationReady(data)) {
             handleResponseFinished('network', capturedId);
         }
     });
@@ -69,6 +121,110 @@ export function runPlatform(): void {
             logger.warn('Failed to read export format setting, using default.', error);
         }
         return DEFAULT_EXPORT_FORMAT;
+    }
+
+    async function loadCalibrationPreference(platformName: string): Promise<void> {
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
+            const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as CalibrationProfilesStore | undefined) ?? {};
+            rememberedPreferredStep = store[platformName]?.preferredStep ?? null;
+            rememberedCalibrationUpdatedAt = store[platformName]?.updatedAt ?? null;
+            calibrationPreferenceLoaded = true;
+            syncCalibrationButtonDisplay();
+        } catch (error) {
+            logger.warn('Failed to load calibration profile', error);
+            calibrationPreferenceLoaded = true;
+            syncCalibrationButtonDisplay();
+        }
+    }
+
+    function ensureCalibrationPreferenceLoaded(platformName: string): Promise<void> {
+        if (calibrationPreferenceLoaded) {
+            return Promise.resolve();
+        }
+
+        if (calibrationPreferenceLoading) {
+            return calibrationPreferenceLoading;
+        }
+
+        calibrationPreferenceLoading = loadCalibrationPreference(platformName).finally(() => {
+            calibrationPreferenceLoading = null;
+        });
+        return calibrationPreferenceLoading;
+    }
+
+    async function rememberCalibrationSuccess(platformName: string, step: CalibrationStep): Promise<void> {
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
+            const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as CalibrationProfilesStore | undefined) ?? {};
+            store[platformName] = {
+                preferredStep: step,
+                updatedAt: new Date().toISOString(),
+            };
+            rememberedPreferredStep = step;
+            rememberedCalibrationUpdatedAt = store[platformName]?.updatedAt ?? null;
+            calibrationPreferenceLoaded = true;
+            await browser.storage.local.set({
+                [STORAGE_KEYS.CALIBRATION_PROFILES]: store,
+            });
+        } catch (error) {
+            logger.warn('Failed to save calibration profile', error);
+        }
+    }
+
+    function resolveDisplayedCalibrationState(conversationId: string | null): CalibrationUiState {
+        if (calibrationState === 'idle' && !!rememberedPreferredStep) {
+            return 'success';
+        }
+        return calibrationState;
+    }
+
+    function syncCalibrationButtonDisplay(): void {
+        if (!buttonManager.exists() || !currentAdapter) {
+            return;
+        }
+        const conversationId = currentAdapter.extractConversationId(window.location.href);
+        const displayState = resolveDisplayedCalibrationState(conversationId);
+        buttonManager.setCalibrationState(displayState, {
+            timestampLabel:
+                displayState === 'success' ? formatCalibrationTimestampLabel(rememberedCalibrationUpdatedAt) : null,
+        });
+    }
+
+    function formatCalibrationTimestampLabel(updatedAt: string | null): string | null {
+        if (!updatedAt) {
+            return null;
+        }
+
+        const parsed = new Date(updatedAt);
+        if (Number.isNaN(parsed.getTime())) {
+            return null;
+        }
+
+        const now = Date.now();
+        const ageMs = Math.max(0, now - parsed.getTime());
+        const minuteMs = 60 * 1000;
+        const hourMs = 60 * minuteMs;
+        const dayMs = 24 * hourMs;
+
+        if (ageMs < minuteMs) {
+            return 'just now';
+        }
+
+        if (ageMs < hourMs) {
+            const mins = Math.floor(ageMs / minuteMs);
+            return `${mins}m ago`;
+        }
+
+        if (ageMs < dayMs) {
+            const hours = Math.floor(ageMs / hourMs);
+            return `${hours}h ago`;
+        }
+
+        return parsed.toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+        });
     }
 
     function buildExportPayloadForFormat(data: ConversationData, format: ExportFormat): unknown {
@@ -126,7 +282,7 @@ export function runPlatform(): void {
         }
 
         if (calibrationState === 'waiting') {
-            await runCalibrationCapture();
+            await runCalibrationCapture('manual');
             return;
         }
 
@@ -137,7 +293,10 @@ export function runPlatform(): void {
 
     function setCalibrationStatus(status: 'idle' | 'waiting' | 'capturing' | 'success' | 'error'): void {
         calibrationState = status;
-        buttonManager.setCalibrationState(status);
+        buttonManager.setCalibrationState(status, {
+            timestampLabel:
+                status === 'success' ? formatCalibrationTimestampLabel(rememberedCalibrationUpdatedAt) : null,
+        });
     }
 
     function markCalibrationSuccess(conversationId: string): void {
@@ -192,6 +351,7 @@ export function runPlatform(): void {
         apiUrl: string,
         attempt: number,
         platformName: string,
+        mode: CalibrationMode,
     ): Promise<boolean> {
         try {
             const response = await fetch(apiUrl, { credentials: 'include' });
@@ -213,7 +373,7 @@ export function runPlatform(): void {
                 platform: platformName,
             });
 
-            return !!interceptionManager.getConversation(conversationId);
+            return isCalibrationCaptureSatisfied(conversationId, mode);
         } catch (error) {
             logger.error('Calibration fetch error', error);
             return false;
@@ -238,6 +398,7 @@ export function runPlatform(): void {
         adapter: LLMPlatform,
         conversationId: string,
         backoff: number[],
+        mode: CalibrationMode,
     ): Promise<boolean> {
         const urls = getFetchUrlCandidates(adapter, conversationId);
         if (urls.length === 0) {
@@ -255,7 +416,7 @@ export function runPlatform(): void {
             }
 
             for (const apiUrl of urls) {
-                const captured = await tryCalibrationFetch(conversationId, apiUrl, attempt + 1, adapter.name);
+                const captured = await tryCalibrationFetch(conversationId, apiUrl, attempt + 1, adapter.name, mode);
                 if (captured) {
                     return true;
                 }
@@ -303,6 +464,13 @@ export function runPlatform(): void {
 
     function hasCapturedConversation(conversationId: string): boolean {
         return !!interceptionManager.getConversation(conversationId);
+    }
+
+    function isCalibrationCaptureSatisfied(conversationId: string, mode: CalibrationMode): boolean {
+        if (mode === 'auto') {
+            return isConversationReadyForActions(conversationId);
+        }
+        return hasCapturedConversation(conversationId);
     }
 
     function isRawCaptureSnapshot(
@@ -573,7 +741,11 @@ export function runPlatform(): void {
         return 2000;
     }
 
-    async function waitForPassiveCapture(adapter: LLMPlatform, conversationId: string): Promise<boolean> {
+    async function waitForPassiveCapture(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+    ): Promise<boolean> {
         const timeoutMs = getCalibrationPassiveWaitMs(adapter);
         const intervalMs = 250;
 
@@ -586,7 +758,7 @@ export function runPlatform(): void {
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
             interceptionManager.flushQueuedMessages();
-            if (hasCapturedConversation(conversationId)) {
+            if (isCalibrationCaptureSatisfied(conversationId, mode)) {
                 logger.info('Calibration passive wait captured', {
                     conversationId,
                     platform: adapter.name,
@@ -604,7 +776,85 @@ export function runPlatform(): void {
         return false;
     }
 
-    async function captureFromSnapshot(adapter: LLMPlatform, conversationId: string): Promise<boolean> {
+    async function waitForDomQuietPeriod(
+        adapter: LLMPlatform,
+        conversationId: string,
+        quietMs: number,
+        maxWaitMs: number,
+    ): Promise<boolean> {
+        const root = document.querySelector('main') ?? document.body;
+        if (!root) {
+            return true;
+        }
+
+        logger.info('Calibration snapshot quiet-wait start', {
+            conversationId,
+            platform: adapter.name,
+            quietMs,
+            maxWaitMs,
+        });
+
+        return await new Promise((resolve) => {
+            const startedAt = Date.now();
+            let lastMutationAt = Date.now();
+            let done = false;
+
+            const finalize = (settled: boolean) => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                observer.disconnect();
+                clearInterval(intervalId);
+                logger.info('Calibration snapshot quiet-wait result', {
+                    conversationId,
+                    platform: adapter.name,
+                    settled,
+                    elapsedMs: Date.now() - startedAt,
+                });
+                resolve(settled);
+            };
+
+            const observer = new MutationObserver(() => {
+                lastMutationAt = Date.now();
+            });
+
+            observer.observe(root, {
+                childList: true,
+                subtree: true,
+                characterData: true,
+            });
+
+            const intervalId = window.setInterval(() => {
+                const now = Date.now();
+                if (now - lastMutationAt >= quietMs) {
+                    finalize(true);
+                    return;
+                }
+                if (now - startedAt >= maxWaitMs) {
+                    finalize(false);
+                }
+            }, 250);
+        });
+    }
+
+    async function captureFromSnapshot(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+    ): Promise<boolean> {
+        if (mode === 'auto' && (adapter.name === 'Gemini' || adapter.name === 'ChatGPT')) {
+            const quietSettled = await waitForDomQuietPeriod(adapter, conversationId, 1400, 20000);
+            if (!quietSettled) {
+                logger.info('Calibration snapshot deferred; DOM still active', {
+                    conversationId,
+                    platform: adapter.name,
+                    mode,
+                });
+                return false;
+            }
+        }
+
         logger.info('Calibration snapshot fallback requested', { conversationId });
         const snapshot = await requestPageSnapshot(conversationId);
         let isolatedSnapshot = snapshot ? null : buildIsolatedDomSnapshot(adapter, conversationId);
@@ -643,7 +893,7 @@ export function runPlatform(): void {
                         platform: effectiveSnapshot.platform ?? adapter.name,
                     });
 
-                    if (hasCapturedConversation(conversationId)) {
+                    if (isCalibrationCaptureSatisfied(conversationId, mode)) {
                         logger.info('Calibration raw snapshot replay captured', {
                             conversationId,
                             platform: adapter.name,
@@ -663,7 +913,7 @@ export function runPlatform(): void {
             // Ignore ingestion errors; handled by cache check below.
         }
 
-        if (!hasCapturedConversation(conversationId) && isRawCaptureSnapshot(effectiveSnapshot)) {
+        if (!isCalibrationCaptureSatisfied(conversationId, mode) && isRawCaptureSnapshot(effectiveSnapshot)) {
             logger.info('Calibration snapshot replay did not capture conversation', {
                 conversationId,
                 platform: adapter.name,
@@ -683,15 +933,22 @@ export function runPlatform(): void {
             }
         }
 
-        return hasCapturedConversation(conversationId);
+        return isCalibrationCaptureSatisfied(conversationId, mode);
     }
 
-    async function captureFromRetries(adapter: LLMPlatform, conversationId: string): Promise<boolean> {
+    async function captureFromRetries(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+    ): Promise<boolean> {
         const backoff = [0, 1500, 3000, 5000, 8000, 12000];
-        return await runCalibrationRetries(adapter, conversationId, backoff);
+        return await runCalibrationRetries(adapter, conversationId, backoff, mode);
     }
 
-    async function runCalibrationCapture(): Promise<void> {
+    async function runCalibrationCapture(
+        mode: CalibrationMode = 'manual',
+        hintedConversationId?: string,
+    ): Promise<void> {
         if (calibrationState === 'capturing') {
             return;
         }
@@ -699,44 +956,60 @@ export function runPlatform(): void {
         if (!context) {
             return;
         }
-        const { adapter, conversationId } = context;
+        const { adapter } = context;
+        const conversationId = hintedConversationId || context.conversationId;
 
-        setCalibrationStatus('capturing');
+        if (mode === 'manual') {
+            setCalibrationStatus('capturing');
+        } else {
+            calibrationState = 'capturing';
+        }
         logger.info('Calibration capture started', { conversationId, platform: adapter.name });
+        const strategyOrder = buildCalibrationOrderForMode(rememberedPreferredStep, mode, adapter.name);
         logger.info('Calibration strategy', {
             platform: adapter.name,
-            steps: ['queue-flush', 'passive-wait', 'endpoint-retry', 'page-snapshot'],
+            steps: strategyOrder,
+            mode,
+            remembered: rememberedPreferredStep,
         });
 
-        interceptionManager.flushQueuedMessages();
-        if (hasCapturedConversation(conversationId)) {
-            markCalibrationSuccess(conversationId);
+        for (const step of strategyOrder) {
+            let captured = false;
+            if (step === 'queue-flush') {
+                interceptionManager.flushQueuedMessages();
+                captured = isCalibrationCaptureSatisfied(conversationId, mode);
+            } else if (step === 'passive-wait') {
+                captured = await waitForPassiveCapture(adapter, conversationId, mode);
+            } else if (step === 'endpoint-retry') {
+                captured = await captureFromRetries(adapter, conversationId, mode);
+            } else if (step === 'page-snapshot') {
+                captured = await captureFromSnapshot(adapter, conversationId, mode);
+            }
+
+            if (!captured) {
+                continue;
+            }
+
+            if (mode === 'manual') {
+                markCalibrationSuccess(conversationId);
+            } else {
+                calibrationState = 'success';
+                refreshButtonState(conversationId);
+            }
+
+            if (shouldPersistCalibrationProfile(mode)) {
+                await rememberCalibrationSuccess(adapter.name, step);
+            }
+            logger.info('Calibration capture succeeded', { conversationId, step, mode });
             return;
         }
 
-        const passiveCapture = await waitForPassiveCapture(adapter, conversationId);
-        if (passiveCapture) {
-            markCalibrationSuccess(conversationId);
-            logger.info('Calibration passive capture succeeded', { conversationId });
-            return;
+        if (mode === 'manual') {
+            setCalibrationStatus('error');
+            refreshButtonState(conversationId);
+        } else {
+            calibrationState = 'idle';
         }
-
-        const capturedFromRetries = await captureFromRetries(adapter, conversationId);
-        if (capturedFromRetries) {
-            markCalibrationSuccess(conversationId);
-            logger.info('Calibration capture succeeded', { conversationId });
-            return;
-        }
-
-        const capturedFromSnapshot = await captureFromSnapshot(adapter, conversationId);
-        if (capturedFromSnapshot) {
-            markCalibrationSuccess(conversationId);
-            logger.info('Calibration snapshot capture succeeded', { conversationId });
-            return;
-        }
-
-        setCalibrationStatus('error');
-        refreshButtonState(conversationId);
         logger.warn('Calibration capture failed after retries', { conversationId });
     }
 
@@ -761,6 +1034,18 @@ export function runPlatform(): void {
                 alert(
                     'Conversation data not yet captured. Please refresh the page or wait for the conversation to load.',
                 );
+            }
+            return null;
+        }
+
+        const shouldBlockForGeneration = currentAdapter.name === 'ChatGPT';
+        if (!isConversationReady(data) || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
+            logger.warn('Conversation is still generating; export blocked until completion.', {
+                conversationId,
+                platform: currentAdapter.name,
+            });
+            if (!options.silent) {
+                alert('Response is still generating. Please wait for completion, then try again.');
             }
             return null;
         }
@@ -813,7 +1098,11 @@ export function runPlatform(): void {
         }
 
         buttonManager.inject(target, conversationId);
-        buttonManager.setCalibrationState(calibrationState);
+        const displayState = resolveDisplayedCalibrationState(conversationId);
+        buttonManager.setCalibrationState(displayState, {
+            timestampLabel:
+                displayState === 'success' ? formatCalibrationTimestampLabel(rememberedCalibrationUpdatedAt) : null,
+        });
 
         if (!conversationId) {
             logger.info('No conversation ID yet; showing calibration only');
@@ -864,9 +1153,17 @@ export function runPlatform(): void {
         if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
             currentAdapter = newAdapter;
             updateManagers();
+            calibrationPreferenceLoaded = false;
+            calibrationPreferenceLoading = null;
+            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
         }
 
         setTimeout(injectSaveButton, 500);
+        setTimeout(() => {
+            if (newId) {
+                maybeRunAutoCapture(newId, 'navigation');
+            }
+        }, 1800);
     }
 
     function updateManagers(): void {
@@ -881,16 +1178,17 @@ export function runPlatform(): void {
         if (!conversationId) {
             return;
         }
-        const hasData = interceptionManager.getConversation(conversationId);
+        const hasData = isConversationReadyForActions(conversationId);
         const opacity = hasData ? '1' : '0.6';
+        buttonManager.setActionButtonsEnabled(hasData);
         buttonManager.setOpacity(opacity);
-        logButtonStateIfChanged(conversationId, !!hasData, opacity);
+        logButtonStateIfChanged(conversationId, hasData, opacity);
         if (hasData && calibrationState !== 'capturing') {
             calibrationState = 'success';
-            buttonManager.setCalibrationState('success');
+            syncCalibrationButtonDisplay();
         } else if (!hasData && calibrationState === 'success') {
             calibrationState = 'idle';
-            buttonManager.setCalibrationState('idle');
+            syncCalibrationButtonDisplay();
         }
     }
 
@@ -904,12 +1202,14 @@ export function runPlatform(): void {
             if (!buttonManager.exists()) {
                 return;
             }
-            const hasData = interceptionManager.getConversation(conversationId);
+            const hasData = isConversationReadyForActions(conversationId);
             if (hasData) {
+                buttonManager.setActionButtonsEnabled(true);
                 buttonManager.setOpacity('1');
                 logButtonStateIfChanged(conversationId, true, '1');
                 return;
             }
+            buttonManager.setActionButtonsEnabled(false);
             if (attempts < maxAttempts) {
                 setTimeout(tick, intervalMs);
             } else {
@@ -918,25 +1218,6 @@ export function runPlatform(): void {
         };
 
         setTimeout(tick, intervalMs);
-    }
-
-    function isConversationComplete(data: ConversationData): boolean {
-        const messages = Object.values(data.mapping)
-            .map((node) => node.message)
-            .filter(
-                (message): message is NonNullable<typeof message> => !!message && message.author.role === 'assistant',
-            );
-
-        if (messages.length === 0) {
-            return false;
-        }
-
-        const inProgress = messages.some((message) => message.status === 'in_progress');
-        if (inProgress) {
-            return false;
-        }
-
-        return messages.some((message) => message.status === 'finished_successfully');
     }
 
     function isChatGPTGenerating(): boolean {
@@ -955,6 +1236,84 @@ export function runPlatform(): void {
         }
 
         return !!document.querySelector('[data-is-streaming="true"], [data-testid*="streaming"]');
+    }
+
+    function hasEnabledStopControl(selectors: string[]): boolean {
+        for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const element of elements) {
+                if (!(element instanceof HTMLButtonElement)) {
+                    continue;
+                }
+                if (!element.disabled) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function isGeminiGenerating(): boolean {
+        const stopSelectors = [
+            'button[aria-label*="Stop"]',
+            'button[aria-label*="stop"]',
+            'button[title*="Stop"]',
+            'button[title*="stop"]',
+            'button[data-test-id*="stop"]',
+            'button[data-testid*="stop"]',
+        ];
+
+        if (hasEnabledStopControl(stopSelectors)) {
+            return true;
+        }
+
+        return !!document.querySelector(
+            '[data-test-id*="thinking"], [data-testid*="thinking"], [class*="generating"], [class*="streaming"]',
+        );
+    }
+
+    function isGrokGenerating(): boolean {
+        const stopSelectors = [
+            'button[aria-label*="Stop"]',
+            'button[aria-label*="stop"]',
+            'button[data-testid*="stop"]',
+        ];
+
+        if (hasEnabledStopControl(stopSelectors)) {
+            return true;
+        }
+
+        return !!document.querySelector('[data-testid*="typing"], [class*="generating"], [class*="streaming"]');
+    }
+
+    function isPlatformGenerating(adapter: LLMPlatform | null): boolean {
+        if (!adapter) {
+            return false;
+        }
+        if (adapter.name === 'ChatGPT') {
+            return isChatGPTGenerating();
+        }
+        if (adapter.name === 'Gemini') {
+            return isGeminiGenerating();
+        }
+        if (adapter.name === 'Grok') {
+            return isGrokGenerating();
+        }
+        return false;
+    }
+
+    function isConversationReadyForActions(conversationId: string): boolean {
+        const data = interceptionManager.getConversation(conversationId);
+        if (!data) {
+            return false;
+        }
+        if (!isConversationReady(data)) {
+            return false;
+        }
+        if (currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter)) {
+            return false;
+        }
+        return true;
     }
 
     function resolveActiveConversationId(hintedConversationId?: string): string | null {
@@ -978,6 +1337,63 @@ export function runPlatform(): void {
         return true;
     }
 
+    function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation'): void {
+        if (!currentAdapter || calibrationState !== 'idle' || isConversationReadyForActions(conversationId)) {
+            return;
+        }
+
+        const attemptKey = `${currentAdapter.name}:${conversationId}`;
+        const shouldDeferWhileGenerating = currentAdapter.name === 'ChatGPT';
+        if (shouldDeferWhileGenerating && isPlatformGenerating(currentAdapter)) {
+            if (!autoCaptureRetryTimers.has(attemptKey)) {
+                if (!autoCaptureDeferredLogged.has(attemptKey)) {
+                    logger.info('Auto calibration deferred: response still generating', {
+                        platform: currentAdapter.name,
+                        conversationId,
+                        reason,
+                    });
+                    autoCaptureDeferredLogged.add(attemptKey);
+                }
+                const timerId = window.setTimeout(() => {
+                    autoCaptureRetryTimers.delete(attemptKey);
+                    maybeRunAutoCapture(conversationId, reason);
+                }, 4000);
+                autoCaptureRetryTimers.set(attemptKey, timerId);
+            }
+            return;
+        }
+        autoCaptureDeferredLogged.delete(attemptKey);
+
+        const now = Date.now();
+        const lastAttempt = autoCaptureAttempts.get(attemptKey) ?? 0;
+        if (now - lastAttempt < 12000) {
+            return;
+        }
+        autoCaptureAttempts.set(attemptKey, now);
+
+        const run = () => {
+            if (!currentAdapter || calibrationState !== 'idle' || isConversationReadyForActions(conversationId)) {
+                return;
+            }
+            if (!rememberedPreferredStep) {
+                return;
+            }
+            logger.info('Auto calibration run from remembered strategy', {
+                platform: currentAdapter.name,
+                conversationId,
+                preferredStep: rememberedPreferredStep,
+                reason,
+            });
+            void runCalibrationCapture('auto', conversationId);
+        };
+
+        if (rememberedPreferredStep || calibrationPreferenceLoaded) {
+            run();
+        } else {
+            void ensureCalibrationPreferenceLoaded(currentAdapter.name).then(run);
+        }
+    }
+
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
         const conversationId = resolveActiveConversationId(hintedConversationId);
         if (!shouldProcessFinishedSignal(conversationId)) {
@@ -995,13 +1411,13 @@ export function runPlatform(): void {
         });
 
         if (calibrationState === 'waiting') {
-            void runCalibrationCapture();
             return;
         }
 
         if (conversationId) {
             refreshButtonState(conversationId);
             scheduleButtonRefresh(conversationId);
+            maybeRunAutoCapture(conversationId, 'response-finished');
         }
     }
 
@@ -1112,6 +1528,29 @@ export function runPlatform(): void {
         return () => window.removeEventListener('message', handler);
     }
 
+    function registerButtonHealthCheck(): () => void {
+        const intervalId = window.setInterval(() => {
+            if (!currentAdapter) {
+                return;
+            }
+
+            const activeConversationId =
+                currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+            if (!activeConversationId) {
+                return;
+            }
+
+            if (!buttonManager.exists()) {
+                injectSaveButton();
+                return;
+            }
+
+            refreshButtonState(activeConversationId);
+        }, 1800);
+
+        return () => clearInterval(intervalId);
+    }
+
     function logButtonStateIfChanged(conversationId: string, hasData: boolean, opacity: string): void {
         const key = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
         if (lastButtonStateLog === key) {
@@ -1143,12 +1582,34 @@ export function runPlatform(): void {
 
     // Update managers with initial adapter
     updateManagers();
+    void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+
+    const storageChangeListener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
+        if (areaName !== 'local') {
+            return;
+        }
+        if (!changes[STORAGE_KEYS.CALIBRATION_PROFILES] || !currentAdapter) {
+            return;
+        }
+
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        autoCaptureAttempts.clear();
+        autoCaptureDeferredLogged.clear();
+        for (const timerId of autoCaptureRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        autoCaptureRetryTimers.clear();
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    };
+    browser.storage.onChanged.addListener(storageChangeListener);
 
     // Start listening
     interceptionManager.start();
     navigationManager.start();
     cleanupWindowBridge = registerWindowBridge();
     cleanupCompletionWatcher = registerCompletionWatcher();
+    cleanupButtonHealthCheck = registerButtonHealthCheck();
 
     // Initial injection
     currentConversationId = currentAdapter.extractConversationId(url);
@@ -1172,6 +1633,13 @@ export function runPlatform(): void {
             buttonManager.remove();
             cleanupWindowBridge?.();
             cleanupCompletionWatcher?.();
+            cleanupButtonHealthCheck?.();
+            browser.storage.onChanged.removeListener(storageChangeListener);
+            for (const timerId of autoCaptureRetryTimers.values()) {
+                clearTimeout(timerId);
+            }
+            autoCaptureRetryTimers.clear();
+            autoCaptureDeferredLogged.clear();
         } catch (error) {
             logger.debug('Error during cleanup:', error);
         }

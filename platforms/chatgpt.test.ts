@@ -273,9 +273,9 @@ describe('ChatGPT Platform Adapter', () => {
             expect(adapter.completionTriggerPattern.test(url)).toBe(true);
         });
 
-        it('should match textdocs completion endpoint', () => {
+        it('should not match textdocs endpoint as completion signal', () => {
             const url = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/textdocs';
-            expect(adapter.completionTriggerPattern.test(url)).toBe(true);
+            expect(adapter.completionTriggerPattern.test(url)).toBe(false);
         });
 
         it('should extract conversation ID from completion endpoint URL', () => {
@@ -284,9 +284,9 @@ describe('ChatGPT Platform Adapter', () => {
             expect(adapter.extractConversationIdFromUrl(url)).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
 
-        it('should extract conversation ID from textdocs endpoint URL', () => {
+        it('should not extract conversation ID from textdocs endpoint URL', () => {
             const url = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/textdocs';
-            expect(adapter.extractConversationIdFromUrl(url)).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+            expect(adapter.extractConversationIdFromUrl(url)).toBeNull();
         });
 
         it('should build full conversation API URL from conversation ID', () => {

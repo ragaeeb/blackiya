@@ -504,8 +504,7 @@ export const createChatGPTAdapter = (): LLMPlatform => {
          */
         apiEndpointPattern:
             /(?:backend-api\/conversation\/[a-f0-9-]+(?:\/)?(?:\?.*)?$|backend-api\/f\/conversation(?:\/[a-f0-9-]+)?(?:\/)?(?:\?.*)?$)/i,
-        completionTriggerPattern:
-            /backend-api\/(?:f\/)?conversation\/[a-f0-9-]+\/(?:stream_status|textdocs)(?:\?.*)?$/i,
+        completionTriggerPattern: /backend-api\/(?:f\/)?conversation\/[a-f0-9-]+\/stream_status(?:\?.*)?$/i,
 
         /**
          * Check if a URL belongs to ChatGPT
@@ -567,7 +566,7 @@ export const createChatGPTAdapter = (): LLMPlatform => {
         },
 
         extractConversationIdFromUrl(url: string): string | null {
-            const match = url.match(/\/backend-api\/(?:f\/)?conversation\/([a-f0-9-]+)\/(?:stream_status|textdocs)/i);
+            const match = url.match(/\/backend-api\/(?:f\/)?conversation\/([a-f0-9-]+)\/stream_status/i);
             if (!match?.[1]) {
                 return null;
             }

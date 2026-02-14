@@ -62,4 +62,19 @@ describe('ButtonManager', () => {
         expect(calibrateBtn?.disabled).toBe(false);
         expect(calibrateBtn?.style.opacity).toBe('1');
     });
+
+    it('shows friendly calibration timestamp when provided in success state', () => {
+        const manager = new ButtonManager(
+            async () => {},
+            async () => {},
+            async () => {},
+        );
+        manager.inject(document.body as any, '123');
+
+        manager.setCalibrationState('success', { timestampLabel: '5m ago' });
+        const calibrateBtn = document.getElementById('blackiya-calibrate-btn') as HTMLButtonElement | null;
+
+        expect(calibrateBtn?.textContent).toContain('Captured');
+        expect(calibrateBtn?.textContent).toContain('5m ago');
+    });
 });

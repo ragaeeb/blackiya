@@ -341,25 +341,18 @@ export const geminiAdapter: LLMPlatform = {
 
     extractConversationId(url: string): string | null {
         if (!this.isPlatformUrl(url)) {
-            logger.debug('[Blackiya/Gemini] URL not a Gemini platform URL:', url);
             return null;
         }
 
-        logger.debug('[Blackiya/Gemini] Extracting conversation ID from URL:', url);
-
         const appMatch = url.match(/\/app\/([a-zA-Z0-9_-]+)/i);
         if (appMatch) {
-            logger.debug('[Blackiya/Gemini] Found /app/ ID:', appMatch[1]);
             return appMatch[1];
         }
 
         const shareMatch = url.match(/\/share\/([a-zA-Z0-9_-]+)/i);
         if (shareMatch) {
-            logger.debug('[Blackiya/Gemini] Found /share/ ID:', shareMatch[1]);
             return shareMatch[1];
         }
-
-        logger.debug('[Blackiya/Gemini] No conversation ID found in URL');
         return null;
     },
 
