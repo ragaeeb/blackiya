@@ -24,7 +24,7 @@ import { buildCommonExport } from '@/utils/common-export';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
-import { loadCalibrationProfileV2, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
+import { loadCalibrationProfileV2IfPresent, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
@@ -42,13 +42,6 @@ interface SnapshotMessageCandidate {
 type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
 type CalibrationMode = 'manual' | 'auto';
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
-
-interface LegacyCalibrationProfile {
-    preferredStep: CalibrationStep;
-    updatedAt: string;
-}
-
-type LegacyCalibrationProfilesStore = Record<string, LegacyCalibrationProfile>;
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
 const SFE_SHADOW_ENABLED = true;
 
@@ -129,6 +122,7 @@ export function runPlatform(): void {
     let lifecycleState: LifecycleUiState = 'idle';
     let lastStreamProbeKey = '';
     const liveStreamPreviewByConversation = new Map<string, string>();
+    const streamProbeControllers = new Map<string, AbortController>();
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
     let rememberedPreferredStep: CalibrationStep | null = null;
@@ -204,6 +198,7 @@ export function runPlatform(): void {
         const previous = attemptByConversation.get(conversationId);
         if (previous && previous !== attemptId) {
             sfe.getAttemptTracker().markSuperseded(previous, attemptId);
+            cancelStreamDoneProbe(previous, 'superseded');
             emitAttemptDisposed(previous, 'superseded');
             structuredLogger.emit(
                 previous,
@@ -215,6 +210,63 @@ export function runPlatform(): void {
             );
         }
         attemptByConversation.set(conversationId, attemptId);
+    }
+
+    function isAttemptDisposedOrSuperseded(attemptId: string): boolean {
+        const phase = sfe.resolve(attemptId).phase;
+        return phase === 'disposed' || phase === 'superseded';
+    }
+
+    function isStaleAttemptMessage(
+        attemptId: string,
+        conversationId: string | undefined,
+        signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
+    ): boolean {
+        if (isAttemptDisposedOrSuperseded(attemptId)) {
+            structuredLogger.emit(
+                attemptId,
+                'debug',
+                'stale_signal_ignored',
+                'Ignored stale attempt signal',
+                { signalType, reason: 'disposed_or_superseded', conversationId: conversationId ?? null },
+                `stale:${signalType}:${conversationId ?? 'unknown'}:disposed`,
+            );
+            return true;
+        }
+
+        if (conversationId) {
+            const mapped = attemptByConversation.get(conversationId);
+            if (mapped && mapped !== attemptId) {
+                structuredLogger.emit(
+                    attemptId,
+                    'debug',
+                    'stale_signal_ignored',
+                    'Ignored stale attempt signal',
+                    { signalType, reason: 'conversation_mismatch', conversationId, activeAttemptId: mapped },
+                    `stale:${signalType}:${conversationId}:${mapped}`,
+                );
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function cancelStreamDoneProbe(attemptId: string, reason: 'superseded' | 'disposed' | 'navigation' | 'teardown'): void {
+        const controller = streamProbeControllers.get(attemptId);
+        if (!controller) {
+            return;
+        }
+        streamProbeControllers.delete(attemptId);
+        controller.abort();
+        structuredLogger.emit(
+            attemptId,
+            'debug',
+            'probe_canceled',
+            'Stream done probe canceled',
+            { reason },
+            `probe-cancel:${reason}`,
+        );
     }
 
     function evaluateReadinessForData(data: ConversationData): PlatformReadiness {
@@ -353,26 +405,13 @@ export function runPlatform(): void {
 
     async function loadCalibrationPreference(platformName: string): Promise<void> {
         try {
-            const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
-            const rawStore = result[STORAGE_KEYS.CALIBRATION_PROFILES] as
-                | (LegacyCalibrationProfilesStore & Record<string, unknown>)
-                | undefined;
-            const legacyStore = rawStore ?? {};
-            const legacyProfile = legacyStore[platformName];
-
-            if (legacyProfile?.preferredStep) {
-                rememberedPreferredStep = legacyProfile.preferredStep;
-                rememberedCalibrationUpdatedAt = legacyProfile.updatedAt ?? null;
+            const profileV2 = await loadCalibrationProfileV2IfPresent(platformName);
+            if (profileV2) {
+                rememberedPreferredStep = preferredStepFromStrategy(profileV2.strategy);
+                rememberedCalibrationUpdatedAt = profileV2.updatedAt;
             } else {
-                const maybeV2 = rawStore?.[platformName];
-                if (maybeV2 && typeof maybeV2 === 'object') {
-                    const profileV2 = await loadCalibrationProfileV2(platformName);
-                    rememberedPreferredStep = preferredStepFromStrategy(profileV2.strategy);
-                    rememberedCalibrationUpdatedAt = profileV2.updatedAt;
-                } else {
-                    rememberedPreferredStep = null;
-                    rememberedCalibrationUpdatedAt = null;
-                }
+                rememberedPreferredStep = null;
+                rememberedCalibrationUpdatedAt = null;
             }
 
             calibrationPreferenceLoaded = true;
@@ -401,18 +440,9 @@ export function runPlatform(): void {
 
     async function rememberCalibrationSuccess(platformName: string, step: CalibrationStep): Promise<void> {
         try {
-            const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
-            const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as LegacyCalibrationProfilesStore | undefined) ?? {};
-            store[platformName] = {
-                preferredStep: step,
-                updatedAt: new Date().toISOString(),
-            };
             rememberedPreferredStep = step;
-            rememberedCalibrationUpdatedAt = store[platformName]?.updatedAt ?? null;
+            rememberedCalibrationUpdatedAt = new Date().toISOString();
             calibrationPreferenceLoaded = true;
-            await browser.storage.local.set({
-                [STORAGE_KEYS.CALIBRATION_PROFILES]: store,
-            });
 
             await saveCalibrationProfileV2({
                 schemaVersion: 2,
@@ -595,10 +625,18 @@ export function runPlatform(): void {
         return assistantTexts.join('\n\n').trim();
     }
 
-    async function runStreamDoneProbe(conversationId: string): Promise<void> {
+    async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
         if (!currentAdapter) {
             return;
         }
+
+        const attemptId = hintedAttemptId ?? resolveAttemptId(conversationId);
+        if (isAttemptDisposedOrSuperseded(attemptId)) {
+            return;
+        }
+        cancelStreamDoneProbe(attemptId, 'superseded');
+        const controller = new AbortController();
+        streamProbeControllers.set(attemptId, controller);
 
         const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
         lastStreamProbeKey = probeKey;
@@ -619,8 +657,12 @@ export function runPlatform(): void {
         }
 
         for (const apiUrl of apiUrls) {
+            if (controller.signal.aborted || isAttemptDisposedOrSuperseded(attemptId)) {
+                streamProbeControllers.delete(attemptId);
+                return;
+            }
             try {
-                const response = await fetch(apiUrl, { credentials: 'include' });
+                const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
                 if (!response.ok) {
                     continue;
                 }
@@ -642,6 +684,7 @@ export function runPlatform(): void {
                     conversationId,
                     textLength: normalizedBody.length,
                 });
+                streamProbeControllers.delete(attemptId);
                 return;
             } catch {
                 // try next candidate
@@ -658,6 +701,7 @@ export function runPlatform(): void {
             platform: currentAdapter.name,
             conversationId,
         });
+        streamProbeControllers.delete(attemptId);
     }
 
     function buildExportPayloadForFormat(data: ConversationData, format: ExportFormat): unknown {
@@ -1576,6 +1620,7 @@ export function runPlatform(): void {
     function disposeInFlightAttemptsOnNavigation(): void {
         const disposedAttemptIds = sfe.getAttemptTracker().disposeAllForRouteChange();
         for (const attemptId of disposedAttemptIds) {
+            cancelStreamDoneProbe(attemptId, 'navigation');
             emitAttemptDisposed(attemptId, 'navigation');
             structuredLogger.emit(
                 attemptId,
@@ -1930,6 +1975,9 @@ export function runPlatform(): void {
         const typed = message as ResponseFinishedMessage;
         const hintedConversationId = typeof message.conversationId === 'string' ? message.conversationId : undefined;
         const attemptId = typed.attemptId;
+        if (isStaleAttemptMessage(attemptId, hintedConversationId, 'finished')) {
+            return true;
+        }
         activeAttemptId = attemptId;
         if (hintedConversationId) {
             bindAttempt(hintedConversationId, attemptId);
@@ -1951,6 +1999,9 @@ export function runPlatform(): void {
         const platform = typed.platform;
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
         const attemptId = typed.attemptId;
+        if (isStaleAttemptMessage(attemptId, conversationId, 'lifecycle')) {
+            return true;
+        }
 
         if (conversationId) {
             currentConversationId = conversationId;
@@ -1989,7 +2040,7 @@ export function runPlatform(): void {
         if (phase === 'completed') {
             setLifecycleState('completed', conversationId);
             if (conversationId) {
-                void runStreamDoneProbe(conversationId);
+                void runStreamDoneProbe(conversationId, attemptId);
             }
         } else if (phase === 'prompt-sent' || phase === 'streaming') {
             setLifecycleState(phase, conversationId);
@@ -2018,13 +2069,16 @@ export function runPlatform(): void {
             typeof message.conversationId === 'string' && message.conversationId.length > 0
                 ? message.conversationId
                 : currentConversationId;
+        const typed = message as StreamDeltaMessage;
+        const attemptId = typed.attemptId;
+        if (isStaleAttemptMessage(attemptId, conversationId ?? undefined, 'delta')) {
+            return true;
+        }
 
         if (!conversationId) {
             return true;
         }
 
-        const typed = message as StreamDeltaMessage;
-        const attemptId = typed.attemptId;
         activeAttemptId = attemptId;
         bindAttempt(conversationId, attemptId);
         appendLiveStreamProbeText(conversationId, text);
@@ -2039,6 +2093,9 @@ export function runPlatform(): void {
         const typed = message as ConversationIdResolvedMessage;
         if (typeof typed.attemptId !== 'string' || typeof typed.conversationId !== 'string') {
             return false;
+        }
+        if (isStaleAttemptMessage(typed.attemptId, typed.conversationId, 'conversation-resolved')) {
+            return true;
         }
 
         activeAttemptId = typed.attemptId;
@@ -2055,6 +2112,7 @@ export function runPlatform(): void {
         if (typeof typed.attemptId !== 'string') {
             return false;
         }
+        cancelStreamDoneProbe(typed.attemptId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
         sfe.dispose(typed.attemptId);
         for (const [conversationId, attemptId] of attemptByConversation.entries()) {
             if (attemptId === typed.attemptId) {
@@ -2242,6 +2300,7 @@ export function runPlatform(): void {
         try {
             const disposed = sfe.disposeAll();
             for (const attemptId of disposed) {
+                cancelStreamDoneProbe(attemptId, 'teardown');
                 emitAttemptDisposed(attemptId, 'teardown');
             }
             interceptionManager.stop();

@@ -90,8 +90,22 @@ describe('Platform Runner', () => {
         storageDataMock = {
             'userSettings.calibrationProfiles': {
                 Gemini: {
-                    preferredStep: 'passive-wait',
+                    schemaVersion: 2,
+                    platform: 'Gemini',
+                    strategy: 'aggressive',
+                    disabledSources: ['snapshot_fallback'],
+                    timingsMs: {
+                        passiveWait: 900,
+                        domQuietWindow: 500,
+                        maxStabilizationWait: 12000,
+                    },
+                    retry: {
+                        maxAttempts: 3,
+                        backoffMs: [300, 800, 1300],
+                        hardTimeoutMs: 12000,
+                    },
                     updatedAt: '2026-02-14T00:00:00.000Z',
+                    lastModifiedBy: 'manual',
                 },
             },
         };
@@ -113,8 +127,22 @@ describe('Platform Runner', () => {
         storageDataMock = {
             'userSettings.calibrationProfiles': {
                 Gemini: {
-                    preferredStep: 'passive-wait',
+                    schemaVersion: 2,
+                    platform: 'Gemini',
+                    strategy: 'aggressive',
+                    disabledSources: ['snapshot_fallback'],
+                    timingsMs: {
+                        passiveWait: 900,
+                        domQuietWindow: 500,
+                        maxStabilizationWait: 12000,
+                    },
+                    retry: {
+                        maxAttempts: 3,
+                        backoffMs: [300, 800, 1300],
+                        hardTimeoutMs: 12000,
+                    },
                     updatedAt: '2026-02-14T00:00:00.000Z',
+                    lastModifiedBy: 'manual',
                 },
             },
         };
@@ -137,8 +165,22 @@ describe('Platform Runner', () => {
         storageDataMock = {
             'userSettings.calibrationProfiles': {
                 Gemini: {
-                    preferredStep: 'passive-wait',
+                    schemaVersion: 2,
+                    platform: 'Gemini',
+                    strategy: 'aggressive',
+                    disabledSources: ['snapshot_fallback'],
+                    timingsMs: {
+                        passiveWait: 900,
+                        domQuietWindow: 500,
+                        maxStabilizationWait: 12000,
+                    },
+                    retry: {
+                        maxAttempts: 3,
+                        backoffMs: [300, 800, 1300],
+                        hardTimeoutMs: 12000,
+                    },
                     updatedAt: fiveMinutesAgo,
+                    lastModifiedBy: 'manual',
                 },
             },
         };
@@ -279,6 +321,81 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should ignore disposed attempt lifecycle messages', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:stale-1',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_ATTEMPT_DISPOSED',
+                attemptId: 'attempt:stale-1',
+                reason: 'navigation',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:stale-1',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).not.toContain('Completed');
+    });
+
+    it('should ignore stale stream delta from superseded attempt', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:new-active',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:old-stale',
+                conversationId: '123',
+                text: 'Should not render',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText.includes('Should not render')).toBe(false);
     });
 
     it('should NOT inject button if no adapter matches', async () => {

@@ -171,8 +171,16 @@ export function validateCalibrationProfileV2(input: unknown, platform: string): 
 }
 
 export async function loadCalibrationProfileV2(platform: string): Promise<CalibrationProfileV2> {
+    const existing = await loadCalibrationProfileV2IfPresent(platform);
+    return existing ?? buildDefaultCalibrationProfile(platform, 'conservative');
+}
+
+export async function loadCalibrationProfileV2IfPresent(platform: string): Promise<CalibrationProfileV2 | null> {
     const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
     const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as CalibrationProfileV2Store | undefined) ?? {};
+    if (!store[platform]) {
+        return null;
+    }
     return validateCalibrationProfileV2(store[platform], platform);
 }
 

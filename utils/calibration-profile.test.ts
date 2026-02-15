@@ -21,6 +21,7 @@ mock.module('wxt/browser', () => ({
 import {
     buildDefaultCalibrationProfile,
     loadCalibrationProfileV2,
+    loadCalibrationProfileV2IfPresent,
     saveCalibrationProfileV2,
     validateCalibrationProfileV2,
 } from '@/utils/calibration-profile';
@@ -70,5 +71,11 @@ describe('calibration-profile', () => {
         const loaded = await loadCalibrationProfileV2('Grok');
         expect(loaded.platform).toBe('Grok');
         expect(loaded.schemaVersion).toBe(2);
+    });
+
+    it('returns null when profile is not present', async () => {
+        stored = {};
+        const loaded = await loadCalibrationProfileV2IfPresent('ChatGPT');
+        expect(loaded).toBeNull();
     });
 });
