@@ -88,6 +88,11 @@ function isCriticalLine(line: string): boolean {
         line.includes('[DISCOVERY]') ||
         line.includes('Successfully captured') ||
         line.includes('captured/cached') ||
+        line.includes('SFE lifecycle phase update') ||
+        line.includes('SFE canonical sample processed') ||
+        line.includes('Legacy/SFE readiness mismatch') ||
+        line.includes('Attempt disposed on navigation') ||
+        line.includes('Attempt superseded by newer prompt') ||
         line.includes('response finished hint') ||
         line.includes('Response finished signal') ||
         line.includes('Calibration ') ||

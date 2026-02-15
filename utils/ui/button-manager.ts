@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger';
 
 export class ButtonManager {
     private container: HTMLElement | null = null;
+    private lifecycleBadge: HTMLElement | null = null;
     private saveStartButton: HTMLButtonElement | null = null;
     private copyButton: HTMLButtonElement | null = null;
     private calibrateButton: HTMLButtonElement | null = null;
@@ -32,11 +33,13 @@ export class ButtonManager {
         }
 
         this.container = this.createContainer();
+        this.lifecycleBadge = this.createLifecycleBadge();
         this.saveStartButton = this.createButton('save', 'Save JSON', this.onSaveClick);
         this.copyButton = this.createButton('copy', 'Copy', this.onCopyClick);
         this.calibrateButton = this.createButton('calibrate', 'Calibrate', this.onCalibrateClick);
 
-        if (this.container && this.saveStartButton && this.copyButton && this.calibrateButton) {
+        if (this.container && this.lifecycleBadge && this.saveStartButton && this.copyButton && this.calibrateButton) {
+            this.container.appendChild(this.lifecycleBadge);
             this.container.appendChild(this.saveStartButton);
             this.container.appendChild(this.copyButton);
             this.container.appendChild(this.calibrateButton);
@@ -60,6 +63,7 @@ export class ButtonManager {
             this.container.parentElement.removeChild(this.container);
         }
         this.container = null;
+        this.lifecycleBadge = null;
         this.saveStartButton = null;
         this.copyButton = null;
         this.calibrateButton = null;
@@ -67,6 +71,13 @@ export class ButtonManager {
 
     public exists(): boolean {
         return !!this.container && document.contains(this.container);
+    }
+
+    public setReadinessSource(source: 'legacy' | 'sfe'): void {
+        if (!this.container) {
+            return;
+        }
+        this.container.setAttribute('data-readiness-source', source);
     }
 
     public setLoading(loading: boolean, action: 'save' | 'copy'): void {
@@ -155,11 +166,72 @@ export class ButtonManager {
         this.calibrateButton.appendChild(text);
     }
 
+    public setLifecycleState(state: 'idle' | 'prompt-sent' | 'streaming' | 'completed'): void {
+        if (!this.lifecycleBadge) {
+            return;
+        }
+
+        const stylesByState: Record<string, { label: string; background: string; border: string; color: string }> = {
+            idle: {
+                label: 'Idle',
+                background: 'rgba(107, 114, 128, 0.16)',
+                border: 'rgba(107, 114, 128, 0.45)',
+                color: '#374151',
+            },
+            'prompt-sent': {
+                label: 'Prompt Sent',
+                background: 'rgba(37, 99, 235, 0.14)',
+                border: 'rgba(37, 99, 235, 0.5)',
+                color: '#1d4ed8',
+            },
+            streaming: {
+                label: 'Streaming',
+                background: 'rgba(217, 119, 6, 0.14)',
+                border: 'rgba(217, 119, 6, 0.45)',
+                color: '#b45309',
+            },
+            completed: {
+                label: 'Completed',
+                background: 'rgba(16, 163, 127, 0.14)',
+                border: 'rgba(16, 163, 127, 0.45)',
+                color: '#0d8a6a',
+            },
+        };
+
+        const next = stylesByState[state];
+        this.lifecycleBadge.textContent = next.label;
+        this.lifecycleBadge.style.background = next.background;
+        this.lifecycleBadge.style.borderColor = next.border;
+        this.lifecycleBadge.style.color = next.color;
+    }
+
     private createContainer(): HTMLElement {
         const div = document.createElement('div');
         div.id = 'blackiya-button-container';
         div.style.cssText = this.getContainerStyles('default');
         return div;
+    }
+
+    private createLifecycleBadge(): HTMLElement {
+        const badge = document.createElement('div');
+        badge.id = 'blackiya-lifecycle-badge';
+        badge.style.cssText = `
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 32px;
+            padding: 0 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(107, 114, 128, 0.45);
+            background: rgba(107, 114, 128, 0.16);
+            color: #374151;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            white-space: nowrap;
+        `;
+        badge.textContent = 'Idle';
+        return badge;
     }
 
     private createButton(

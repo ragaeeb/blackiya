@@ -165,6 +165,104 @@ describe('Platform Runner', () => {
         expect(saveBtn?.textContent).toContain('Save JSON');
     });
 
+    it('should update lifecycle badge from network lifecycle messages', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const idleBadge = document.getElementById('blackiya-lifecycle-badge');
+        expect(idleBadge?.textContent).toContain('Idle');
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                phase: 'prompt-sent',
+                source: 'network',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                phase: 'streaming',
+                source: 'network',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                phase: 'completed',
+                source: 'network',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
+    it('should append live stream delta text to stream probe panel', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                conversationId: '123',
+                text: 'Hello ',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                conversationId: '123',
+                text: 'world',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panel = document.getElementById('blackiya-stream-probe');
+        expect(panel).not.toBeNull();
+        expect(panel?.textContent).toContain('stream: live mirror');
+        expect(panel?.textContent).toContain('Hello world');
+    });
+
+    it('should process typed lifecycle messages that include attemptId', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:test',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
     it('should NOT inject button if no adapter matches', async () => {
         currentAdapterMock = null;
         runPlatform();

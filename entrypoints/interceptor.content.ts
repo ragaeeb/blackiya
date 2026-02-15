@@ -1,6 +1,17 @@
+import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import {
+    createAttemptId,
+    type AttemptDisposedMessage,
+    type CaptureInterceptedMessage as CapturePayload,
+    type ConversationIdResolvedMessage,
+    type LogEntryMessage as InterceptorLogPayload,
+    type ResponseFinishedMessage as ResponseFinishedSignal,
+    type ResponseLifecycleMessage as ResponseLifecycleSignal,
+    type StreamDeltaMessage as ResponseStreamDeltaSignal,
+} from '@/utils/protocol/messages';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import {
     extractForwardableHeadersFromFetchArgs,
@@ -8,13 +19,6 @@ import {
     mergeHeaderRecords,
     toForwardableHeaderRecord,
 } from '@/utils/proactive-fetch-headers';
-
-interface CapturePayload {
-    type: 'LLM_CAPTURE_DATA_INTERCEPTED';
-    url: string;
-    data: string;
-    platform: string;
-}
 
 interface RawCaptureSnapshot {
     __blackiyaSnapshotType: 'raw-capture';
@@ -24,15 +28,6 @@ interface RawCaptureSnapshot {
     conversationId?: string;
 }
 
-interface InterceptorLogPayload {
-    type: 'LLM_LOG_ENTRY';
-    payload: {
-        level: 'info' | 'warn' | 'error';
-        message: string;
-        data: any[];
-        context: 'interceptor';
-    };
-}
 
 interface PageSnapshotRequest {
     type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST';
@@ -48,25 +43,22 @@ interface PageSnapshotResponse {
     error?: string;
 }
 
-interface ResponseFinishedSignal {
-    type: 'BLACKIYA_RESPONSE_FINISHED';
-    platform: string;
-    source: 'network';
-    conversationId?: string;
-}
-
 const completionSignalCache = new Map<string, number>();
 const transientLogCache = new Map<string, number>();
+const capturePayloadCache = new Map<string, number>();
+const lifecycleSignalCache = new Map<string, number>();
+const attemptByConversationId = new Map<string, string>();
+const conversationResolvedSignalCache = new Map<string, number>();
+const disposedAttemptIds = new Set<string>();
+let latestChatGptAttemptId: string | null = null;
 
 function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
-    // Keep console output for immediate debugging in the page console
+    // Keep page-console output for warnings/errors while avoiding info-level floods.
     const displayData = data ? ` ${JSON.stringify(data)}` : '';
     if (level === 'error') {
         console.error(message + displayData);
     } else if (level === 'warn') {
         console.warn(message + displayData);
-    } else {
-        console.log(message + displayData);
     }
 
     // Send to content script for persistence
@@ -154,6 +146,19 @@ function safePathname(url: string): string {
     }
 }
 
+function shouldEmitCapturedPayload(adapterName: string, url: string, payload: string, intervalMs = 5000): boolean {
+    const path = safePathname(url);
+    const suffix = payload.length > 128 ? payload.slice(payload.length - 128) : payload;
+    const key = `${adapterName}:${path}:${payload.length}:${suffix}`;
+    const now = Date.now();
+    const last = capturePayloadCache.get(key) ?? 0;
+    if (now - last < intervalMs) {
+        return false;
+    }
+    capturePayloadCache.set(key, now);
+    return true;
+}
+
 function logConversationSkip(channel: 'API' | 'XHR', url: string): void {
     const path = safePathname(url);
     const key = `${channel}:skip:${path}`;
@@ -176,8 +181,52 @@ function shouldLogTransient(key: string, intervalMs = 2000): boolean {
     return true;
 }
 
+function bindAttemptToConversation(attemptId: string | null | undefined, conversationId: string | undefined): void {
+    if (!attemptId || !conversationId) {
+        return;
+    }
+    attemptByConversationId.set(conversationId, attemptId);
+}
+
+function resolveAttemptIdForConversation(conversationId?: string): string {
+    if (conversationId) {
+        const bound = attemptByConversationId.get(conversationId);
+        if (bound) {
+            return bound;
+        }
+    }
+    if (latestChatGptAttemptId) {
+        return latestChatGptAttemptId;
+    }
+    return createAttemptId('chatgpt');
+}
+
+function emitConversationIdResolvedSignal(attemptId: string, conversationId: string): void {
+    const key = `${attemptId}:${conversationId}`;
+    const now = Date.now();
+    const last = conversationResolvedSignalCache.get(key) ?? 0;
+    if (now - last < 1200) {
+        return;
+    }
+    conversationResolvedSignalCache.set(key, now);
+    bindAttemptToConversation(attemptId, conversationId);
+
+    const payload: ConversationIdResolvedMessage = {
+        type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+        platform: 'ChatGPT',
+        attemptId,
+        conversationId,
+    };
+    window.postMessage(payload, window.location.origin);
+}
+
+function isAttemptDisposed(attemptId: string | undefined): boolean {
+    return !!attemptId && disposedAttemptIds.has(attemptId);
+}
+
 function emitResponseFinishedSignal(adapter: LLMPlatform, url: string): void {
     const conversationId = adapter.extractConversationIdFromUrl?.(url) ?? undefined;
+    const attemptId = resolveAttemptIdForConversation(conversationId);
     const dedupeKey = `${adapter.name}:${conversationId ?? safePathname(url)}`;
     const now = Date.now();
     const last = completionSignalCache.get(dedupeKey) ?? 0;
@@ -189,7 +238,7 @@ function emitResponseFinishedSignal(adapter: LLMPlatform, url: string): void {
     const payload: ResponseFinishedSignal = {
         type: 'BLACKIYA_RESPONSE_FINISHED',
         platform: adapter.name,
-        source: 'network',
+        attemptId,
         conversationId,
     };
     window.postMessage(payload, window.location.origin);
@@ -198,6 +247,317 @@ function emitResponseFinishedSignal(adapter: LLMPlatform, url: string): void {
         conversationId: conversationId ?? null,
         path: safePathname(url),
     });
+}
+
+function extractConversationIdFromChatGptUrl(url: string): string | undefined {
+    const match = url.match(/\/c\/([a-f0-9-]{36})/i);
+    return match?.[1];
+}
+
+function extractConversationIdFromAnyUrl(url: string): string | undefined {
+    const match = url.match(/\b([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i);
+    return match?.[1];
+}
+
+function extractConversationIdFromRequestBody(args: Parameters<typeof fetch>): string | undefined {
+    const initBody = args[1]?.body;
+    if (typeof initBody !== 'string') {
+        return undefined;
+    }
+
+    try {
+        const parsed = JSON.parse(initBody);
+        const conversationId =
+            typeof parsed?.conversation_id === 'string'
+                ? parsed.conversation_id
+                : typeof parsed?.conversationId === 'string'
+                  ? parsed.conversationId
+                  : undefined;
+        if (!conversationId || conversationId === 'null') {
+            return undefined;
+        }
+        return /^[a-f0-9-]{36}$/i.test(conversationId) ? conversationId : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function resolveLifecycleConversationId(args: Parameters<typeof fetch>): string | undefined {
+    return extractConversationIdFromRequestBody(args) ?? extractConversationIdFromChatGptUrl(window.location.href);
+}
+
+function shouldEmitLifecycleSignal(phase: ResponseLifecycleSignal['phase'], conversationId?: string): boolean {
+    const key = `${phase}:${conversationId ?? 'unknown'}`;
+    const now = Date.now();
+    const last = lifecycleSignalCache.get(key) ?? 0;
+    if (now - last < 300) {
+        return false;
+    }
+    lifecycleSignalCache.set(key, now);
+    return true;
+}
+
+function emitLifecycleSignal(attemptId: string, phase: ResponseLifecycleSignal['phase'], conversationId?: string): void {
+    if (!shouldEmitLifecycleSignal(phase, conversationId)) {
+        return;
+    }
+
+    if (isAttemptDisposed(attemptId)) {
+        return;
+    }
+    bindAttemptToConversation(attemptId, conversationId);
+
+    const payload: ResponseLifecycleSignal = {
+        type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+        platform: chatGPTAdapter.name,
+        attemptId,
+        phase,
+        conversationId,
+    };
+    window.postMessage(payload, window.location.origin);
+    log('info', 'lifecycle signal', {
+        platform: 'ChatGPT',
+        phase,
+        conversationId: conversationId ?? null,
+    });
+}
+
+function emitStreamDeltaSignal(attemptId: string, conversationId: string | undefined, text: string): void {
+    const trimmed = text.trim();
+    if (trimmed.length === 0 || /^v\d+$/i.test(trimmed)) {
+        return;
+    }
+    if (isAttemptDisposed(attemptId)) {
+        return;
+    }
+    bindAttemptToConversation(attemptId, conversationId);
+    const payload: ResponseStreamDeltaSignal = {
+        type: 'BLACKIYA_STREAM_DELTA',
+        platform: chatGPTAdapter.name,
+        attemptId,
+        conversationId,
+        text: trimmed,
+    };
+    window.postMessage(payload, window.location.origin);
+}
+
+function extractAssistantTextSnapshotFromSseBuffer(sseBuffer: string): string | null {
+    const parsed = chatGPTAdapter.parseInterceptedData(sseBuffer, 'https://chatgpt.com/backend-api/f/conversation');
+    if (!parsed) {
+        return null;
+    }
+
+    const assistantMessages = Object.values(parsed.mapping)
+        .map((node) => node.message)
+        .filter(
+            (message): message is NonNullable<(typeof parsed.mapping)[string]['message']> =>
+                !!message && message.author.role === 'assistant',
+        );
+
+    if (assistantMessages.length === 0) {
+        return null;
+    }
+
+    const latest = assistantMessages[assistantMessages.length - 1];
+    const parts = latest.content.parts ?? [];
+    const text = parts.filter((part) => typeof part === 'string').join('');
+    const normalized = text.trim();
+    if (normalized.length === 0 || /^v\d+$/i.test(normalized)) {
+        return null;
+    }
+    return normalized;
+}
+
+function isLikelyReadableToken(value: string): boolean {
+    const trimmed = value.trim();
+    if (trimmed.length < 2 || trimmed.length > 4000) {
+        return false;
+    }
+    if (/^v\d+$/i.test(trimmed)) {
+        return false;
+    }
+    if (/^[a-f0-9-]{24,}$/i.test(trimmed)) {
+        return false;
+    }
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        return false;
+    }
+    if (/^[[\]{}(),:;._\-+=/\\|`~!@#$%^&*<>?]+$/.test(trimmed)) {
+        return false;
+    }
+    return true;
+}
+
+function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void {
+    if (depth > 8 || out.length > 80) {
+        return;
+    }
+
+    if (typeof node === 'string') {
+        if (isLikelyReadableToken(node)) {
+            out.push(node.trim());
+        }
+        return;
+    }
+
+    if (!node || typeof node !== 'object') {
+        return;
+    }
+
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            collectLikelyTextValues(child, out, depth + 1);
+        }
+        return;
+    }
+
+    const obj = node as Record<string, unknown>;
+    const preferredKeys = ['text', 'delta', 'content', 'message', 'output_text', 'token', 'part'];
+    for (const key of preferredKeys) {
+        if (key in obj) {
+            collectLikelyTextValues(obj[key], out, depth + 1);
+        }
+    }
+
+    for (const value of Object.values(obj)) {
+        collectLikelyTextValues(value, out, depth + 1);
+    }
+}
+
+function extractLikelyTextFromSsePayload(payload: string): string[] {
+    try {
+        const parsed = JSON.parse(payload);
+        const values: string[] = [];
+        collectLikelyTextValues(parsed, values);
+        const deduped: string[] = [];
+        const seen = new Set<string>();
+        for (const value of values) {
+            if (seen.has(value)) {
+                continue;
+            }
+            seen.add(value);
+            deduped.push(value);
+        }
+        return deduped;
+    } catch {
+        return [];
+    }
+}
+
+async function monitorChatGptSseLifecycle(response: Response, attemptId: string, conversationId?: string): Promise<void> {
+    if (!response.body) {
+        return;
+    }
+
+    const reader = response.body.getReader();
+    let lifecycleConversationId = conversationId;
+    let sawContent = false;
+    let doneSignalSeen = false;
+    let streamBuffer = '';
+    let sseBufferForAdapter = '';
+    let lastDelta = '';
+    let sampledFrames = 0;
+    const decoder = new TextDecoder();
+    if (lifecycleConversationId) {
+        emitConversationIdResolvedSignal(attemptId, lifecycleConversationId);
+    }
+
+    try {
+        while (true) {
+            if (isAttemptDisposed(attemptId)) {
+                break;
+            }
+            const { value, done } = await reader.read();
+            if (done) {
+                break;
+            }
+            if (!value || value.length === 0) {
+                continue;
+            }
+
+            const chunkText = decoder.decode(value, { stream: true });
+            if (!lifecycleConversationId) {
+                const idMatch = chunkText.match(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i);
+                if (idMatch?.[0]) {
+                    lifecycleConversationId = idMatch[0];
+                    emitConversationIdResolvedSignal(attemptId, lifecycleConversationId);
+                }
+            }
+            if (!sawContent && chunkText.trim().length > 0) {
+                sawContent = true;
+                emitLifecycleSignal(attemptId, 'streaming', lifecycleConversationId);
+            }
+
+            streamBuffer += chunkText;
+
+            let delimiterIndex = streamBuffer.indexOf('\n\n');
+            while (delimiterIndex >= 0) {
+                const frame = streamBuffer.slice(0, delimiterIndex);
+                streamBuffer = streamBuffer.slice(delimiterIndex + 2);
+
+                const dataPayload = frame
+                    .split(/\r?\n/)
+                    .map((line) => line.trim())
+                    .filter((line) => line.startsWith('data:'))
+                    .map((line) => line.slice(5).trim())
+                    .join('\n')
+                    .trim();
+
+                if (dataPayload.length === 0) {
+                    delimiterIndex = streamBuffer.indexOf('\n\n');
+                    continue;
+                }
+
+                if (dataPayload === '[DONE]') {
+                    doneSignalSeen = true;
+                    emitLifecycleSignal(attemptId, 'completed', lifecycleConversationId);
+                    delimiterIndex = streamBuffer.indexOf('\n\n');
+                    continue;
+                }
+
+                // Reconstruct adapter-compatible SSE so we can extract the latest assistant text snapshot robustly.
+                sseBufferForAdapter += `data: ${dataPayload}\n\n`;
+                if (sseBufferForAdapter.length > 400_000) {
+                    sseBufferForAdapter = sseBufferForAdapter.slice(-250_000);
+                }
+
+                const snapshot = extractAssistantTextSnapshotFromSseBuffer(sseBufferForAdapter);
+                if (snapshot && snapshot !== lastDelta) {
+                    lastDelta = snapshot;
+                    emitStreamDeltaSignal(attemptId, lifecycleConversationId, snapshot);
+                }
+
+                if (!snapshot) {
+                    const heuristics = extractLikelyTextFromSsePayload(dataPayload);
+                    for (const candidate of heuristics) {
+                        if (candidate === lastDelta) {
+                            continue;
+                        }
+                        lastDelta = candidate;
+                        emitStreamDeltaSignal(attemptId, lifecycleConversationId, candidate);
+                    }
+                }
+
+                if (sampledFrames < 3 && !snapshot) {
+                    sampledFrames += 1;
+                    log('info', 'stream frame sample', {
+                        conversationId: lifecycleConversationId ?? null,
+                        bytes: dataPayload.length,
+                        preview: dataPayload.slice(0, 220),
+                    });
+                }
+
+                delimiterIndex = streamBuffer.indexOf('\n\n');
+            }
+        }
+    } catch {
+        // Ignore stream read errors; fallback completion signals will handle final state.
+    } finally {
+        if (!doneSignalSeen && streamBuffer.includes('data: [DONE]')) {
+            emitLifecycleSignal(attemptId, 'completed', lifecycleConversationId);
+        }
+        reader.releaseLock();
+    }
 }
 
 function isConversationLike(candidate: any, conversationId: string): boolean {
@@ -509,93 +869,43 @@ function getRequestMethod(args: Parameters<typeof fetch>): string {
     return args[1]?.method || (args[0] instanceof Request ? args[0].method : 'GET');
 }
 
-function appendHeadersToRecord(target: Record<string, string>, headers: HeadersInit | undefined): void {
-    if (!headers) {
+function emitCapturePayload(url: string, data: string, platform: string, attemptId?: string): void {
+    if (isAttemptDisposed(attemptId)) {
         return;
     }
-
-    if (headers instanceof Headers) {
-        headers.forEach((value, key) => {
-            target[key.toLowerCase()] = value;
-        });
-        return;
-    }
-
-    if (Array.isArray(headers)) {
-        for (const [key, value] of headers) {
-            target[String(key).toLowerCase()] = String(value);
-        }
-        return;
-    }
-
-    for (const [key, value] of Object.entries(headers)) {
-        target[key.toLowerCase()] = String(value);
-    }
-}
-
-function collectFetchRequestHeaders(args: Parameters<typeof fetch>): Record<string, string> | undefined {
-    const headers: Record<string, string> = {};
-    if (args[0] instanceof Request) {
-        appendHeadersToRecord(headers, args[0].headers);
-    }
-    appendHeadersToRecord(headers, args[1]?.headers);
-    return Object.keys(headers).length > 0 ? headers : undefined;
-}
-
-function sanitizeHeaderValueForLog(name: string, value: string): string {
-    const normalized = name.toLowerCase();
-    const trimmed = value.trim();
-    if (
-        normalized === 'authorization' ||
-        normalized.includes('token') ||
-        normalized.includes('cookie') ||
-        normalized.includes('csrf') ||
-        normalized.includes('api-key')
-    ) {
-        return `<redacted:${trimmed.length}>`;
-    }
-
-    if (trimmed.length > 140) {
-        return `${trimmed.slice(0, 140)}...`;
-    }
-
-    return trimmed;
-}
-
-function sanitizeHeadersForLog(headers: Record<string, string> | undefined): Record<string, string> | undefined {
-    if (!headers) {
-        return undefined;
-    }
-
-    const sanitized: Record<string, string> = {};
-    for (const [name, value] of Object.entries(headers)) {
-        sanitized[name] = sanitizeHeaderValueForLog(name, value);
-    }
-    return sanitized;
-}
-
-function emitCapturePayload(url: string, data: string, platform: string): void {
     const payload: CapturePayload = {
         type: 'LLM_CAPTURE_DATA_INTERCEPTED',
         url,
         data,
         platform,
+        ...(attemptId ? { attemptId } : {}),
     };
     queueInterceptedMessage(payload);
     window.postMessage(payload, window.location.origin);
 }
 
 function handleApiMatchFromFetch(url: string, adapterName: string, response: Response): void {
-    log('info', `API match ${adapterName}`);
+    const path = safePathname(url);
+    if (shouldLogTransient(`api:match:${adapterName}:${path}`, 2500)) {
+        log('info', `API match ${adapterName}`);
+    }
     const clonedResponse = response.clone();
     clonedResponse
         .text()
         .then((text) => {
+            if (!shouldEmitCapturedPayload(adapterName, url, text)) {
+                return;
+            }
             log('info', `API ${text.length}b ${adapterName}`);
-            emitCapturePayload(url, text, adapterName);
+            const attemptId = resolveAttemptIdForConversation(extractConversationIdFromAnyUrl(url));
+            emitCapturePayload(url, text, adapterName, attemptId);
         })
         .catch(() => {
-            log('error', `API read err ${adapterName}`);
+            const path = safePathname(url);
+            if (adapterName === 'ChatGPT' && path.startsWith('/backend-api/f/conversation')) {
+                return;
+            }
+            log('warn', `API read err ${adapterName}`, { path });
         });
 }
 
@@ -603,8 +913,13 @@ function tryParseAndEmitConversation(adapter: LLMPlatform, url: string, text: st
     try {
         const parsed = adapter.parseInterceptedData(text, url);
         if (parsed?.conversation_id) {
+            const payload = JSON.stringify(parsed);
+            if (!shouldEmitCapturedPayload(adapter.name, url, payload)) {
+                return true;
+            }
             log('info', `${source} captured ${adapter.name} ${parsed.conversation_id}`);
-            emitCapturePayload(url, JSON.stringify(parsed), adapter.name);
+            const attemptId = resolveAttemptIdForConversation(parsed.conversation_id);
+            emitCapturePayload(url, payload, adapter.name, attemptId);
             return true;
         }
     } catch {
@@ -754,7 +1069,8 @@ function processXhrApiMatch(url: string, xhr: XMLHttpRequest, adapter: LLMPlatfo
 
     try {
         log('info', `XHR API ${adapter.name}`);
-        emitCapturePayload(url, xhr.responseText, adapter.name);
+        const attemptId = resolveAttemptIdForConversation(extractConversationIdFromAnyUrl(url));
+        emitCapturePayload(url, xhr.responseText, adapter.name, attemptId);
     } catch {
         log('error', 'XHR read err');
     }
@@ -838,8 +1154,10 @@ export default defineContentScript({
         }
 
         const originalFetch = window.fetch;
-        const inFlightFetches = new Map<string, Promise<void>>();
+        const inFlightFetches = new Map<string, Promise<boolean>>();
+        const proactiveSuccessAtByKey = new Map<string, number>();
         const proactiveHeadersByKey = new Map<string, HeaderRecord>();
+        const proactiveSuccessCooldownMs = 20_000;
         // ChatGPT can materialize the full conversation payload late; keep retries bounded but longer.
         const proactiveBackoffMs = [900, 1800, 3200, 5000, 7000, 9000, 12000, 15000];
 
@@ -848,31 +1166,30 @@ export default defineContentScript({
         const tryFetchConversation = async (
             adapter: LLMPlatform,
             conversationId: string,
+            attemptId: string,
             attempt: number,
             apiUrl: string,
             requestHeaders?: HeaderRecord,
         ) => {
+            if (isAttemptDisposed(attemptId)) {
+                return false;
+            }
             try {
-                log('info', `fetching ${conversationId}`, { attempt });
-                if (attempt === 1 && requestHeaders) {
-                    log('info', 'proactive fetch request headers', {
-                        conversationId,
-                        path: safePathname(apiUrl),
-                        headers: sanitizeHeadersForLog(requestHeaders),
-                    });
-                }
                 const response = await originalFetch(apiUrl, {
                     credentials: 'include',
                     headers: requestHeaders,
                 });
-                log('info', 'fetch response', {
-                    conversationId,
-                    ok: response.ok,
-                    status: response.status,
-                    attempt,
-                });
 
                 if (!response.ok) {
+                    const path = safePathname(apiUrl);
+                    if (shouldLogTransient(`fetch:status:${conversationId}:${path}:${response.status}`, 5000)) {
+                        log('info', 'fetch response', {
+                            conversationId,
+                            ok: false,
+                            status: response.status,
+                            attempt,
+                        });
+                    }
                     return false;
                 }
 
@@ -880,32 +1197,38 @@ export default defineContentScript({
                 const parsed = adapter.parseInterceptedData(text, apiUrl);
                 const isComplete = !!parsed?.conversation_id && isConversationReady(parsed);
                 if (!isComplete) {
-                    log('info', 'fetch payload incomplete', {
-                        conversationId,
-                        attempt,
-                        path: safePathname(apiUrl),
-                        bytes: text.length,
-                        parsedConversationId: parsed?.conversation_id ?? null,
-                    });
                     return false;
                 }
 
-                log('info', `fetched ${conversationId} ${text.length}b`, {
-                    path: safePathname(apiUrl),
-                });
-                emitCapturePayload(apiUrl, JSON.stringify(parsed), adapter.name);
+                const payload = JSON.stringify(parsed);
+                if (shouldEmitCapturedPayload(adapter.name, apiUrl, payload, 3000)) {
+                    log('info', `fetched ${conversationId} ${text.length}b`, {
+                        path: safePathname(apiUrl),
+                    });
+                    emitCapturePayload(apiUrl, payload, adapter.name, attemptId);
+                }
                 return true;
             } catch (error) {
-                log('error', `fetch err ${conversationId}`, {
-                    attempt,
-                    error: error instanceof Error ? error.message : String(error),
-                });
+                if (shouldLogTransient(`fetch:error:${conversationId}`, 5000)) {
+                    log('warn', `fetch err ${conversationId}`, {
+                        attempt,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
                 return false;
             }
         };
 
-        const runProactiveFetch = async (adapter: LLMPlatform, conversationId: string, key: string) => {
+        const runProactiveFetch = async (
+            adapter: LLMPlatform,
+            conversationId: string,
+            key: string,
+            attemptId: string,
+        ) => {
             for (let attempt = 0; attempt < proactiveBackoffMs.length; attempt++) {
+                if (isAttemptDisposed(attemptId)) {
+                    return false;
+                }
                 await delay(proactiveBackoffMs[attempt]);
                 const apiUrls = getApiUrlCandidates(adapter, conversationId);
                 const requestHeaders = proactiveHeadersByKey.get(key);
@@ -913,16 +1236,19 @@ export default defineContentScript({
                     const success = await tryFetchConversation(
                         adapter,
                         conversationId,
+                        attemptId,
                         attempt + 1,
                         apiUrl,
                         requestHeaders,
                     );
                     if (success) {
-                        return;
+                        proactiveSuccessAtByKey.set(key, Date.now());
+                        return true;
                     }
                 }
             }
             log('info', `fetch gave up ${conversationId}`);
+            return false;
         };
 
         const fetchFullConversationWithBackoff = async (
@@ -940,6 +1266,10 @@ export default defineContentScript({
             }
 
             const key = `${adapter.name}:${conversationId}`;
+            const lastSuccessAt = proactiveSuccessAtByKey.get(key) ?? 0;
+            if (Date.now() - lastSuccessAt < proactiveSuccessCooldownMs) {
+                return;
+            }
             const mergedHeaders = mergeHeaderRecords(proactiveHeadersByKey.get(key), requestHeaders);
             if (mergedHeaders) {
                 proactiveHeadersByKey.set(key, mergedHeaders);
@@ -951,7 +1281,8 @@ export default defineContentScript({
 
             log('info', `trigger ${adapter.name} ${conversationId}`);
 
-            const run = runProactiveFetch(adapter, conversationId, key);
+            const attemptId = resolveAttemptIdForConversation(conversationId);
+            const run = runProactiveFetch(adapter, conversationId, key, attemptId);
 
             inFlightFetches.set(key, run);
             run.finally(() => {
@@ -962,21 +1293,34 @@ export default defineContentScript({
 
         window.fetch = (async (...args: Parameters<typeof fetch>) => {
             const outgoingUrl = getRequestUrl(args[0]);
-            const outgoingMethod = getRequestMethod(args);
-            if (outgoingUrl.includes('/backend-api/')) {
-                const path = safePathname(outgoingUrl);
-                if (shouldLogTransient(`outgoing:fetch:${outgoingMethod}:${path}`, 2500)) {
-                    log('info', 'outgoing request', {
-                        channel: 'fetch',
-                        method: outgoingMethod,
-                        path,
-                        headers: sanitizeHeadersForLog(collectFetchRequestHeaders(args)),
-                    });
+            const outgoingMethod = getRequestMethod(args).toUpperCase();
+            const outgoingPath = safePathname(outgoingUrl);
+            const isChatGptPromptRequest =
+                outgoingMethod === 'POST' && /\/backend-api\/f\/conversation(?:\?.*)?$/i.test(outgoingPath);
+            const lifecycleConversationId = isChatGptPromptRequest ? resolveLifecycleConversationId(args) : undefined;
+            const lifecycleAttemptId = isChatGptPromptRequest ? createAttemptId('chatgpt') : undefined;
+            if (isChatGptPromptRequest) {
+                if (lifecycleAttemptId) {
+                    latestChatGptAttemptId = lifecycleAttemptId;
+                    disposedAttemptIds.delete(lifecycleAttemptId);
+                    bindAttemptToConversation(lifecycleAttemptId, lifecycleConversationId);
+                    if (lifecycleConversationId) {
+                        emitConversationIdResolvedSignal(lifecycleAttemptId, lifecycleConversationId);
+                    }
+                    emitLifecycleSignal(lifecycleAttemptId, 'prompt-sent', lifecycleConversationId);
                 }
             }
 
             const response = await originalFetch(...args);
             const url = outgoingUrl;
+            const contentType = response.headers.get('content-type') ?? '';
+            if (isChatGptPromptRequest && contentType.includes('text/event-stream')) {
+                void monitorChatGptSseLifecycle(
+                    response.clone(),
+                    lifecycleAttemptId ?? resolveAttemptIdForConversation(lifecycleConversationId),
+                    lifecycleConversationId,
+                );
+            }
             const completionAdapter = getPlatformAdapterByCompletionUrl(url);
             if (completionAdapter) {
                 const requestHeaders = extractForwardableHeadersFromFetchArgs(args);
@@ -1008,18 +1352,6 @@ export default defineContentScript({
 
         XHR.prototype.send = function (body?: any) {
             const method = (this as any)._method || 'GET';
-            const xhrUrl = (this as any)._url;
-            if (typeof xhrUrl === 'string' && xhrUrl.includes('/backend-api/')) {
-                const path = safePathname(xhrUrl);
-                if (shouldLogTransient(`outgoing:xhr:${method}:${path}`, 2500)) {
-                    log('info', 'outgoing request', {
-                        channel: 'xhr',
-                        method,
-                        path,
-                        headers: sanitizeHeadersForLog(toForwardableHeaderRecord((this as any)._headers)),
-                    });
-                }
-            }
             this.addEventListener('load', function () {
                 const xhr = this as XMLHttpRequest;
                 const completionAdapter = getPlatformAdapterByCompletionUrl((xhr as any)._url);
@@ -1099,7 +1431,25 @@ export default defineContentScript({
                 window.postMessage(response, window.location.origin);
             };
 
+            const handleAttemptDisposed = (event: MessageEvent) => {
+                if (event.source !== window || event.origin !== window.location.origin) {
+                    return;
+                }
+                const message = event.data as AttemptDisposedMessage;
+                if (message?.type !== 'BLACKIYA_ATTEMPT_DISPOSED' || typeof message.attemptId !== 'string') {
+                    return;
+                }
+
+                disposedAttemptIds.add(message.attemptId);
+                for (const [conversationId, attemptId] of attemptByConversationId.entries()) {
+                    if (attemptId === message.attemptId) {
+                        attemptByConversationId.delete(conversationId);
+                    }
+                }
+            };
+
             window.addEventListener('message', handlePageSnapshotRequest);
+            window.addEventListener('message', handleAttemptDisposed);
 
             (window as any).__blackiya = {
                 getJSON: () => requestJson('original'),

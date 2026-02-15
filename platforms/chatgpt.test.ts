@@ -266,6 +266,53 @@ describe('ChatGPT Platform Adapter', () => {
         });
     });
 
+    describe('evaluateReadiness', () => {
+        it('marks terminal-ready conversation snapshots correctly', () => {
+            const data = {
+                title: 'Ready',
+                create_time: 1,
+                update_time: 2,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant'] },
+                    assistant: {
+                        id: 'assistant',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'assistant',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1,
+                            update_time: 2,
+                            content: { content_type: 'text', parts: ['hello world'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+
+            const readiness = adapter.evaluateReadiness?.(data as any);
+            expect(readiness?.ready).toBe(true);
+            expect(readiness?.terminal).toBe(true);
+            expect(typeof readiness?.contentHash).toBe('string');
+            expect(readiness?.latestAssistantTextLength).toBeGreaterThan(0);
+        });
+    });
+
     describe('completion trigger flow', () => {
         it('should match stream_status completion endpoint', () => {
             const url =
@@ -298,6 +345,9 @@ describe('ChatGPT Platform Adapter', () => {
             const urls = adapter.buildApiUrls('696bc3d5-fa84-8328-b209-4d65cb229e59');
             expect(urls).toContain('https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59');
             expect(urls).toContain(
+                'https://chat.openai.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59',
+            );
+            expect(urls).not.toContain(
                 'https://chatgpt.com/backend-api/f/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59',
             );
         });

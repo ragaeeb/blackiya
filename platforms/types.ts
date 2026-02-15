@@ -9,6 +9,14 @@
 
 import type { ConversationData } from '../utils/types';
 
+export interface PlatformReadiness {
+    ready: boolean;
+    terminal: boolean;
+    reason: string;
+    contentHash: string | null;
+    latestAssistantTextLength: number;
+}
+
 /**
  * Interface that all LLM platform adapters must implement
  */
@@ -99,4 +107,16 @@ export interface LLMPlatform {
      * @returns The conversation ID or null if not found
      */
     extractConversationIdFromUrl?: (url: string) => string | null;
+
+    /**
+     * Optional generation ID extractor. Used by Signal Fusion Engine (SFE) to
+     * correlate platform-native generation IDs where available.
+     */
+    extractGenerationId?: (url: string, payload?: unknown) => string | null;
+
+    /**
+     * Optional platform-specific readiness evaluator used by SFE.
+     * If omitted, the runner falls back to generic readiness checks.
+     */
+    evaluateReadiness?: (data: ConversationData) => PlatformReadiness;
 }

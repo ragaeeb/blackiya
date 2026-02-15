@@ -77,4 +77,26 @@ describe('ButtonManager', () => {
         expect(calibrateBtn?.textContent).toContain('Captured');
         expect(calibrateBtn?.textContent).toContain('5m ago');
     });
+
+    it('shows lifecycle badge and updates phases', () => {
+        const manager = new ButtonManager(
+            async () => {},
+            async () => {},
+            async () => {},
+        );
+        manager.inject(document.body as any, '123');
+
+        const badge = document.getElementById('blackiya-lifecycle-badge') as HTMLElement | null;
+        expect(badge).not.toBeNull();
+        expect(badge?.textContent).toContain('Idle');
+
+        manager.setLifecycleState('prompt-sent');
+        expect(badge?.textContent).toContain('Prompt Sent');
+
+        manager.setLifecycleState('streaming');
+        expect(badge?.textContent).toContain('Streaming');
+
+        manager.setLifecycleState('completed');
+        expect(badge?.textContent).toContain('Completed');
+    });
 });

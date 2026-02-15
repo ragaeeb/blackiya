@@ -1,0 +1,359 @@
+interceptor.js:27 init
+{"0":"Content script running for ChatGPT"
+{"0":"Runner init","1":{"platform":"ChatGPT","url":"https://chatgpt.com/"}
+{"0":"NavigationManager started"
+{"0":"Save/Copy buttons injected for conversation: null"
+{"0":"No conversation ID yet; showing calibration only"
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/accounts/check/v4-2023-04-27","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/accounts/check/v4-2023-04-27","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/settings/user","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/settings/user","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/me","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/prepare","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/me","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/prepare","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/system_hints","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/aip/connectors/list_accessible","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","oai-product-sku":"SLURM"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/ca/v2/user/connection_status","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/aip/connectors/links/list_accessible","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/models","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/system_hints","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/aip/connectors/list_accessible","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","oai-product-sku":"SLURM"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/ca/v2/user/connection_status","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/aip/connectors/links/list_accessible","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/models","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/calpico/chatgpt/rooms/summary","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/gizmos/bootstrap","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/calpico/chatgpt/rooms/summary","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/gizmos/bootstrap","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/user_system_messages","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+2340486e-h114sxj33pi48cph.js:1 RecoverableError: Minified React error #418; visit https://react.dev/errors/418?args[]=HTML&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+    at div (<anonymous>)
+    at header (<anonymous>)
+    at 4813494d-il9ahiwx8ss4v3p0.js:2:558217
+    at ma (416006a5-olo8c86ymod2utr2.js:2:8996)
+    at Na (416006a5-olo8c86ymod2utr2.js:2:2378)
+    at s (1a7ebd5f-dh32fokp867qpwsv.js:2:125093)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at e (1a7ebd5f-dh32fokp867qpwsv.js:2:124640)
+    at JL (1a7ebd5f-dh32fokp867qpwsv.js:2:127673)
+    at Fl (1a7ebd5f-dh32fokp867qpwsv.js:2:125488)
+    at GXe (4813494d-il9ahiwx8ss4v3p0.js:2:935908)
+    at ir (37827fd8-jk9nnzcwv6bhvdad.js:2:13692)
+    at e (1a7ebd5f-dh32fokp867qpwsv.js:2:124640)
+    at JL (1a7ebd5f-dh32fokp867qpwsv.js:2:127673)
+    at Provider (4813494d-il9ahiwx8ss4v3p0.js:2:1604585)
+    at $it (4813494d-il9ahiwx8ss4v3p0.js:2:1610517)
+    at GXe (4813494d-il9ahiwx8ss4v3p0.js:2:935908)
+    at 1a7ebd5f-dh32fokp867qpwsv.js:2:355060
+    at qmt (1a7ebd5f-dh32fokp867qpwsv.js:2:1030551)
+    at Provider (4813494d-il9ahiwx8ss4v3p0.js:2:1604585)
+    at d4e (1a7ebd5f-dh32fokp867qpwsv.js:2:1094865)
+    at yst (4813494d-il9ahiwx8ss4v3p0.js:2:1551882)
+    at ls (ecba71b4-nu7vcem1h0lxlzbz.js:2:6048)
+    at lt (47edf3d1-e1hb0lxd7ekemkxv.js:1:1269)
+    at Et (47edf3d1-e1hb0lxd7ekemkxv.js:1:758)
+    at 966cd1fb-f3jo68m6ibtr8xtv.js:1:2200
+    at 2340486e-h114sxj33pi48cph.js:1:288140
+    at hI (2340486e-h114sxj33pi48cph.js:1:278247)
+    at u8 (2340486e-h114sxj33pi48cph.js:1:287143)
+    at Uqe (4813494d-il9ahiwx8ss4v3p0.js:2:1724092)
+    at c$e (4813494d-il9ahiwx8ss4v3p0.js:2:1603522)
+    at rqe (4813494d-il9ahiwx8ss4v3p0.js:2:1696136)
+    at Cqe (4813494d-il9ahiwx8ss4v3p0.js:2:1717419)
+    at jEe (4813494d-il9ahiwx8ss4v3p0.js:2:566499)
+    at n (2340486e-h114sxj33pi48cph.js:1:402185)
+    at Y9e (4813494d-il9ahiwx8ss4v3p0.js:2:1693560)
+    at K9e (4813494d-il9ahiwx8ss4v3p0.js:2:1693980)
+    at l (4813494d-il9ahiwx8ss4v3p0.js:2:484789)
+    at pV (4813494d-il9ahiwx8ss4v3p0.js:2:530242)
+    at Tqe (4813494d-il9ahiwx8ss4v3p0.js:2:1717549)
+    at A_ (4813494d-il9ahiwx8ss4v3p0.js:2:282347)
+    at nVe (4813494d-il9ahiwx8ss4v3p0.js:2:1730383)
+    at P8 (2340486e-h114sxj33pi48cph.js:1:664100)
+    at LVe (4813494d-il9ahiwx8ss4v3p0.js:2:1748507)
+    at AWe (4813494d-il9ahiwx8ss4v3p0.js:2:1665363)
+    at OWe (4813494d-il9ahiwx8ss4v3p0.js:2:1665240)
+    at Provider (4813494d-il9ahiwx8ss4v3p0.js:2:1604585)
+    at I$e (4813494d-il9ahiwx8ss4v3p0.js:2:1616913)
+    at body (<anonymous>)
+    at html (<anonymous>)
+    at PVe (4813494d-il9ahiwx8ss4v3p0.js:2:1742922)
+    at lne (4813494d-il9ahiwx8ss4v3p0.js:2:5755)
+    at 4813494d-il9ahiwx8ss4v3p0.js:2:1745300
+    at 2340486e-h114sxj33pi48cph.js:1:288140
+    at hI (2340486e-h114sxj33pi48cph.js:1:278247)
+    at dI (2340486e-h114sxj33pi48cph.js:1:277433)
+    at RI (2340486e-h114sxj33pi48cph.js:1:286473)
+    at OI (2340486e-h114sxj33pi48cph.js:1:287174)
+    at TI (2340486e-h114sxj33pi48cph.js:1:283193)
+    at n3 (<anonymous>)
+    at PU (2340486e-h114sxj33pi48cph.js:1:318399)
+    at v8 (2340486e-h114sxj33pi48cph.js:1:336844)Caused by: Error: Minified React error #418; visit https://react.dev/errors/418?args[]=HTML&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+    at bi (2340486e-h114sxj33pi48cph.js:1:58185)
+    at el (2340486e-h114sxj33pi48cph.js:1:59557)
+    at TD (2340486e-h114sxj33pi48cph.js:1:115050)
+    at Td (2340486e-h114sxj33pi48cph.js:1:155187)
+    at ME (2340486e-h114sxj33pi48cph.js:1:154435)
+    at DD (2340486e-h114sxj33pi48cph.js:1:154346)
+    at MD (2340486e-h114sxj33pi48cph.js:1:154199)
+    at RE (2340486e-h114sxj33pi48cph.js:1:149420)
+    at BE (2340486e-h114sxj33pi48cph.js:1:162313)
+    at MessagePort.he (2340486e-h114sxj33pi48cph.js:1:12473) undefined
+La.<computed> @ 2340486e-h114sxj33pi48cph.js:1
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/conversation/init","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversations","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/gizmos/snorlax/sidebar","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/pins","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/user_surveys/active","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/client/strings","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/connectors/check","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/settings/voices","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/images/bootstrap","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/beacons/home","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/amphora/notifications","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/user_system_messages","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/conversation/init","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversations","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/gizmos/snorlax/sidebar","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/pins","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/user_surveys/active","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/client/strings","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/connectors/check","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/settings/voices","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/images/bootstrap","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/beacons/home","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/celsius/ws/user","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/amphora/notifications","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/celsius/ws/user","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/finalize","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/finalize","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 API skip conversation URL {"host":"chatgpt.com","path":"/backend-api/conversation/init"}
+{"0":"[i] API skip conversation URL","1":{"host":"chatgpt.com","path":"/backend-api/conversation/init"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/feed/cocoon/entrypoint","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/subscriptions","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/memories","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/tasks","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/feed/cocoon/entrypoint","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/subscriptions","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/memories","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/tasks","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/checkout_pricing_config/countries","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/checkout_pricing_config/countries","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"Save/Copy buttons injected for conversation: null"
+{"0":"No conversation ID yet; showing calibration only"
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/checkout_pricing_config/configs/US","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/checkout_pricing_config/configs/US","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/f/conversation/prepare","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-conduit-token":"<redacted:8>","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/f/conversation/prepare","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-conduit-token":"<redacted:8>","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/f/conversation","headers":{"oai-language":"en-US","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-client-build-number":"4639135","authorization":"<redacted:2006>","content-type":"application/json","oai-echo-logs":"0,628,1,3112,0,6593,1,7811,0,10678,3,12049","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-turnstile-token":"<redacted:3868>","openai-sentinel-proof-token":"<redacted:689>","x-conduit-token":"<redacted:351>","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6","accept":"text/event-stream"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/settings/is_adult","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/prepare","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjAsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJzZXNzaW9uX29ic2VydmVyX2JhY2tncm91bmRfc3VibWl0Iiwic29fdG9rZW5fcHJlc2Vu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-so-token":"<redacted:564>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/f/conversation","headers":{"oai-language":"en-US","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-client-build-number":"4639135","authorization":"<redacted:2006>","content-type":"application/json","oai-echo-logs":"0,628,1,3112,0,6593,1,7811,0,10678,3,12049","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-turnstile-token":"<redacted:3868>","openai-sentinel-proof-token":"<redacted:689>","x-conduit-token":"<redacted:351>","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6","accept":"text/event-stream"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/settings/is_adult","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/prepare","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjAsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJzZXNzaW9uX29ic2VydmVyX2JhY2tncm91bmRfc3VibWl0Iiwic29fdG9rZW5fcHJlc2Vu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-so-token":"<redacted:564>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/finalize","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/chat-requirements/finalize","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversations","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/pins","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/conversation/init","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversations","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/pins","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/conversation/init","headers":{"authorization":"<redacted:2006>","content-type":"application/json","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 trigger ChatGPT 699024a7-3aac-8331-b85a-a7797e11e5e5
+interceptor.js:27 response finished hint {"platform":"ChatGPT","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+{"0":"[i] trigger ChatGPT 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+{"0":"Button state","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","hasData":false,"opacity":"0.6"}
+{"0":"Auto calibration deferred: response still generating","1":{"platform":"ChatGPT","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","reason":"response-finished"}
+{"0":"[i] response finished hint","1":{"platform":"ChatGPT","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+interceptor.js:27 aux response {"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","status":200,"size":25}
+interceptor.js:27 aux parse miss {"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+{"0":"[i] aux response","1":{"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","status":200,"size":25}
+{"0":"[i] aux parse miss","1":{"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+/backend-api/conversation/init:1  Failed to load resource: the server responded with a status of 404 ()
+interceptor.js:27 API skip conversation URL {"host":"chatgpt.com","path":"/backend-api/conversation/init"}
+{"0":"[i] API skip conversation URL","1":{"host":"chatgpt.com","path":"/backend-api/conversation/init"}
+{"0":"[NavigationManager] URL change detected:","1":"https://chatgpt.com/c/699024a7-3aac-8331-b85a-a7797e11e5e5"
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":1}
+interceptor.js:27 proactive fetch request headers {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":1}
+{"0":"[i] proactive fetch request headers","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":1}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":1}
+interceptor.js:27 fetch payload incomplete {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":1,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":27149,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":1}
+interceptor.js:27 proactive fetch request headers {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/f/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+{"0":"[i] fetch payload incomplete","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":1,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":27149,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":1}
+{"0":"[i] proactive fetch request headers","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/f/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US"}}
+/backend-api/f/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5:1  Failed to load resource: the server responded with a status of 404 ()
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":1}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":1}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":2}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":2}
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":2}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":2}
+interceptor.js:27 fetch payload incomplete {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":2,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":27149,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":2}
+{"0":"[i] fetch payload incomplete","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":2,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":27149,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":2}
+/backend-api/f/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5:1  Failed to load resource: the server responded with a status of 404 ()
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":2}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":2}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":3}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":3}
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":3}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":3}
+interceptor.js:27 fetch payload incomplete {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":3,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":27149,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":3}
+{"0":"[i] fetch payload incomplete","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":3,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":27149,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":3}
+/backend-api/f/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5:1  Failed to load resource: the server responded with a status of 404 ()
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":3}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":3}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":4}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":4}
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":4}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":4}
+interceptor.js:27 fetch payload incomplete {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":4,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":28269,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":4}
+{"0":"[i] fetch payload incomplete","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","attempt":4,"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","bytes":28269,"parsedConversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":4}
+/backend-api/f/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5:1  Failed to load resource: the server responded with a status of 404 ()
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":4}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":false,"status":404,"attempt":4}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjEsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJjb252ZXJzYXRpb25faGVhcnRiZWF0Iiwic29fdG9rZW5fcHJlc2VudCI6IjAiLCJ0dXJu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjEsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJjb252ZXJzYXRpb25faGVhcnRiZWF0Iiwic29fdG9rZW5fcHJlc2VudCI6IjAiLCJ0dXJu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":5}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":5}
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":5}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":5}
+interceptor.js:27 fetched 699024a7-3aac-8331-b85a-a7797e11e5e5 28975b {"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"[i] fetched 699024a7-3aac-8331-b85a-a7797e11e5e5 28975b","1":{"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":28664}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjIsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJjb252ZXJzYXRpb25faGVhcnRiZWF0Iiwic29fdG9rZW5fcHJlc2VudCI6IjAiLCJ0dXJu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjIsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJjb252ZXJzYXRpb25faGVhcnRiZWF0Iiwic29fdG9rZW5fcHJlc2VudCI6IjAiLCJ0dXJu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+/backend-api/f/conversation:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+2340486e-h114sxj33pi48cph.js:1 API read err ChatGPT
+La.<computed> @ 2340486e-h114sxj33pi48cph.js:1
+{"0":"[i] API read err ChatGPT"
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/f/conversation/resume","headers":{"oai-language":"en-US","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-client-build-number":"4639135","authorization":"<redacted:2006>","content-type":"application/json","oai-echo-logs":"0,628,1,3112,0,6593,1,7811,0,10678,3,12049,1,15913,0,54950,1,55715,0,63763","x-conduit-token":"<redacted:351>","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6","accept":"text/event-stream"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/f/conversation/resume","headers":{"oai-language":"en-US","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-client-build-number":"4639135","authorization":"<redacted:2006>","content-type":"application/json","oai-echo-logs":"0,628,1,3112,0,6593,1,7811,0,10678,3,12049,1,15913,0,54950,1,55715,0,63763","x-conduit-token":"<redacted:351>","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6","accept":"text/event-stream"}}
+/backend-api/f/conversation/resume:1  Failed to load resource: the server responded with a status of 404 ()
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 trigger ChatGPT 699024a7-3aac-8331-b85a-a7797e11e5e5
+interceptor.js:27 response finished hint {"platform":"ChatGPT","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+{"0":"[i] trigger ChatGPT 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+{"0":"[i] response finished hint","1":{"platform":"ChatGPT","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+interceptor.js:27 aux response {"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","status":200,"size":21}
+interceptor.js:27 aux parse miss {"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+{"0":"[i] aux response","1":{"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status","status":200,"size":21}
+{"0":"[i] aux parse miss","1":{"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5/stream_status"}
+interceptor.js:27 fetching 699024a7-3aac-8331-b85a-a7797e11e5e5 {"attempt":1}
+interceptor.js:27 proactive fetch request headers {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] fetching 699024a7-3aac-8331-b85a-a7797e11e5e5","1":{"attempt":1}
+{"0":"[i] proactive fetch request headers","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjMsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJjb252ZXJzYXRpb25faGVhcnRiZWF0Iiwic29fdG9rZW5fcHJlc2VudCI6IjAiLCJ0dXJu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"POST","path":"/backend-api/sentinel/ping","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","openai-sentinel-chat-requirements-prepare-token":"<redacted:3044>","openai-sentinel-chat-requirements-token":"<redacted:2404>","openai-sentinel-extra-data":"eyJ2IjoxLCJzZXF1ZW5jZV9udW1iZXIiOjMsInNpZ25hbHMiOnsicGluZ19zb3VyY2UiOiJjb252ZXJzYXRpb25faGVhcnRiZWF0Iiwic29fdG9rZW5fcHJlc2VudCI6IjAiLCJ0dXJu...","openai-sentinel-proof-token":"<redacted:689>","openai-sentinel-turnstile-token":"<redacted:3868>"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 35870b ChatGPT
+{"0":"[i] API 35870b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35870}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 fetch response {"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":1}
+{"0":"[i] fetch response","1":{"conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","ok":true,"status":200,"attempt":1}
+interceptor.js:27 fetched 699024a7-3aac-8331-b85a-a7797e11e5e5 35870b {"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"[i] fetched 699024a7-3aac-8331-b85a-a7797e11e5e5 35870b","1":{"path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5"}
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35559}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 35870b ChatGPT
+{"0":"[i] API 35870b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35870}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 35870b ChatGPT
+{"0":"[i] API 35870b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35870}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 35870b ChatGPT
+{"0":"[i] API 35870b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35870}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 35870b ChatGPT
+{"0":"[i] API 35870b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35870}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 35870b ChatGPT
+{"0":"[i] API 35870b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":35870}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 36666b ChatGPT
+{"0":"[i] API 36666b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":36666}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 36666b ChatGPT
+{"0":"[i] API 36666b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":36666}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}
+interceptor.js:27 outgoing request {"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+{"0":"[i] outgoing request","1":{"channel":"fetch","method":"GET","path":"/backend-api/conversation/699024a7-3aac-8331-b85a-a7797e11e5e5","headers":{"authorization":"<redacted:2006>","oai-client-build-number":"4639135","oai-client-version":"prod-5bb8a0d9498e6b641c9eaa83e3d4b86a7e7fb067","oai-device-id":"62784327-6192-41d0-873f-107d0389b32f","oai-language":"en-US","x-oai-turn-trace-id":"1659d1fe-6075-494b-835e-e797a4a0d6a6"}}
+interceptor.js:27 API match ChatGPT
+{"0":"[i] API match ChatGPT"
+interceptor.js:27 API 36666b ChatGPT
+{"0":"[i] API 36666b ChatGPT"
+{"0":"Intercepted payload received","1":{"platform":"ChatGPT","size":36666}
+{"0":"Successfully captured/cached data for conversation: 699024a7-3aac-8331-b85a-a7797e11e5e5"
+{"0":"Response finished signal","1":{"source":"network","conversationId":"699024a7-3aac-8331-b85a-a7797e11e5e5","calibrationState":"idle"}

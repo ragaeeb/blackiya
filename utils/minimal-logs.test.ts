@@ -287,4 +287,35 @@ describe('Minimal Debug Report', () => {
         expect(report).toContain('Calibration capture started');
         expect(report).toContain('Calibration capture failed after retries');
     });
+
+    it('should retain SFE lifecycle diagnostics', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: '[i] trigger ChatGPT 69902dd9-bfe4-832e-a81c-b1a386d07f67',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'SFE lifecycle phase update',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'Attempt disposed on navigation',
+                data: [],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+
+        expect(report).toContain('SFE lifecycle phase update');
+        expect(report).toContain('Attempt disposed on navigation');
+    });
 });

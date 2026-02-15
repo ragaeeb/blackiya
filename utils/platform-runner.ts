@@ -12,13 +12,28 @@
 import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import {
+    buildLegacyAttemptId,
+    isLegacyFinishedMessage,
+    isLegacyLifecycleMessage,
+    isLegacyStreamDeltaMessage,
+    type AttemptDisposedMessage,
+    type ConversationIdResolvedMessage,
+    type ResponseFinishedMessage,
+    type ResponseLifecycleMessage,
+    type StreamDeltaMessage,
+} from '@/utils/protocol/messages';
 import { buildCommonExport } from '@/utils/common-export';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
+import { loadCalibrationProfileV2, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
+import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
+import type { LifecyclePhase, PlatformReadiness } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 import { ButtonManager } from '@/utils/ui/button-manager';
 
@@ -29,14 +44,17 @@ interface SnapshotMessageCandidate {
 
 type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
 type CalibrationMode = 'manual' | 'auto';
+type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 
-interface CalibrationProfile {
+interface LegacyCalibrationProfile {
     preferredStep: CalibrationStep;
     updatedAt: string;
 }
 
-type CalibrationProfilesStore = Record<string, CalibrationProfile>;
+type LegacyCalibrationProfilesStore = Record<string, LegacyCalibrationProfile>;
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
+const SFE_ENABLED = false;
+const SFE_SHADOW_ENABLED = true;
 
 export function buildCalibrationOrderForMode(
     preferredStep: CalibrationStep | null,
@@ -70,6 +88,39 @@ export function shouldPersistCalibrationProfile(mode: CalibrationMode): boolean 
     return mode === 'manual';
 }
 
+function preferredStepFromStrategy(strategy: 'aggressive' | 'balanced' | 'conservative'): CalibrationStep {
+    if (strategy === 'aggressive') {
+        return 'passive-wait';
+    }
+    if (strategy === 'balanced') {
+        return 'endpoint-retry';
+    }
+    return 'queue-flush';
+}
+
+function strategyFromPreferredStep(step: CalibrationStep): 'aggressive' | 'balanced' | 'conservative' {
+    if (step === 'passive-wait') {
+        return 'aggressive';
+    }
+    if (step === 'endpoint-retry') {
+        return 'balanced';
+    }
+    return 'conservative';
+}
+
+function normalizeContentText(text: string): string {
+    return text.trim().normalize('NFC');
+}
+
+function hashText(value: string): string {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (hash << 5) - hash + value.charCodeAt(i);
+        hash |= 0;
+    }
+    return `${hash}`;
+}
+
 export function runPlatform(): void {
     let currentAdapter: LLMPlatform | null = null;
     let currentConversationId: string | null = null;
@@ -78,6 +129,9 @@ export function runPlatform(): void {
     let cleanupButtonHealthCheck: (() => void) | null = null;
     let lastButtonStateLog = '';
     let calibrationState: CalibrationUiState = 'idle';
+    let lifecycleState: LifecycleUiState = 'idle';
+    let lastStreamProbeKey = '';
+    const liveStreamPreviewByConversation = new Map<string, string>();
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
     let rememberedPreferredStep: CalibrationStep | null = null;
@@ -87,6 +141,10 @@ export function runPlatform(): void {
     const autoCaptureAttempts = new Map<string, number>();
     const autoCaptureRetryTimers = new Map<string, number>();
     const autoCaptureDeferredLogged = new Set<string>();
+    const sfe = new SignalFusionEngine();
+    const structuredLogger = new StructuredAttemptLogger();
+    const attemptByConversation = new Map<string, string>();
+    let activeAttemptId: string | null = null;
 
     // -- Manager Initialization --
 
@@ -94,8 +152,13 @@ export function runPlatform(): void {
     const buttonManager = new ButtonManager(handleSaveClick, handleCopyClick, handleCalibrationClick);
 
     // 2. Data Manager
-    const interceptionManager = new InterceptionManager((capturedId, data) => {
+    const interceptionManager = new InterceptionManager((capturedId, data, meta) => {
         currentConversationId = capturedId;
+        if (meta?.attemptId) {
+            activeAttemptId = meta.attemptId;
+            bindAttempt(capturedId, meta.attemptId);
+        }
+        ingestSfeCanonicalSample(data, meta?.attemptId);
         refreshButtonState(capturedId);
         if (isConversationReady(data)) {
             handleResponseFinished('network', capturedId);
@@ -123,12 +186,198 @@ export function runPlatform(): void {
         return DEFAULT_EXPORT_FORMAT;
     }
 
+    function resolveAttemptId(conversationId?: string): string {
+        if (conversationId) {
+            const mapped = attemptByConversation.get(conversationId);
+            if (mapped) {
+                return mapped;
+            }
+        }
+        if (activeAttemptId) {
+            return activeAttemptId;
+        }
+        const platformName = currentAdapter?.name ?? 'Unknown';
+        return buildLegacyAttemptId(platformName, conversationId);
+    }
+
+    function bindAttempt(conversationId: string | undefined, attemptId: string): void {
+        if (!conversationId) {
+            return;
+        }
+        const previous = attemptByConversation.get(conversationId);
+        if (previous && previous !== attemptId) {
+            sfe.getAttemptTracker().markSuperseded(previous, attemptId);
+            emitAttemptDisposed(previous, 'superseded');
+            structuredLogger.emit(
+                previous,
+                'info',
+                'attempt_superseded',
+                'Attempt superseded by newer prompt',
+                { conversationId, supersededBy: attemptId },
+                `supersede:${conversationId}:${attemptId}`,
+            );
+        }
+        attemptByConversation.set(conversationId, attemptId);
+    }
+
+    function evaluateReadinessForData(data: ConversationData): PlatformReadiness {
+        if (!data || !data.mapping || typeof data.mapping !== 'object') {
+            return {
+                ready: false,
+                terminal: false,
+                reason: 'invalid-conversation-shape',
+                contentHash: null,
+                latestAssistantTextLength: 0,
+            };
+        }
+
+        if (currentAdapter?.evaluateReadiness) {
+            return currentAdapter.evaluateReadiness(data);
+        }
+
+        const assistantMessages = Object.values(data.mapping)
+            .map((node) => node?.message)
+            .filter((message): message is NonNullable<(typeof data.mapping)[string]['message']> => !!message)
+            .filter((message) => message.author.role === 'assistant');
+
+        const latestAssistant = assistantMessages[assistantMessages.length - 1];
+        const text = normalizeContentText((latestAssistant?.content.parts ?? []).join(''));
+        const hasInProgress = assistantMessages.some((message) => message.status === 'in_progress');
+        const terminal = !hasInProgress;
+
+        return {
+            ready: isConversationReady(data),
+            terminal,
+            reason: terminal ? 'terminal-snapshot' : 'assistant-in-progress',
+            contentHash: text.length > 0 ? hashText(text) : null,
+            latestAssistantTextLength: text.length,
+        };
+    }
+
+    function ingestSfeLifecycle(phase: LifecyclePhase, attemptId: string, conversationId?: string | null): void {
+        if (!SFE_SHADOW_ENABLED) {
+            return;
+        }
+        const resolution = sfe.ingestSignal({
+            attemptId,
+            platform: currentAdapter?.name ?? 'Unknown',
+            source: phase === 'completed_hint' ? 'completion_endpoint' : 'network_stream',
+            phase,
+            conversationId,
+            timestampMs: Date.now(),
+        });
+        if (conversationId) {
+            bindAttempt(conversationId, attemptId);
+        }
+        if (phase === 'completed_hint') {
+            structuredLogger.emit(
+                attemptId,
+                'info',
+                'completed_hint_received',
+                'SFE completed hint received',
+                { conversationId: conversationId ?? null },
+                `completed:${conversationId ?? 'unknown'}`,
+            );
+        }
+        structuredLogger.emit(
+            attemptId,
+            'debug',
+            'sfe_phase_update',
+            'SFE lifecycle phase update',
+            { phase: resolution.phase, ready: resolution.ready, conversationId: conversationId ?? null },
+            `phase:${resolution.phase}:${conversationId ?? 'unknown'}`,
+        );
+    }
+
+    function ingestSfeCanonicalSample(data: ConversationData, attemptId?: string): void {
+        if (!SFE_SHADOW_ENABLED) {
+            return;
+        }
+        const conversationId = data.conversation_id;
+        const effectiveAttemptId = attemptId ?? resolveAttemptId(conversationId);
+        bindAttempt(conversationId, effectiveAttemptId);
+        const readiness = evaluateReadinessForData(data);
+        const resolution = sfe.applyCanonicalSample({
+            attemptId: effectiveAttemptId,
+            platform: currentAdapter?.name ?? 'Unknown',
+            conversationId,
+            data,
+            readiness,
+            timestampMs: Date.now(),
+        });
+
+        structuredLogger.emit(
+            effectiveAttemptId,
+            'debug',
+            readiness.contentHash ? 'canonical_probe_sample_changed' : 'canonical_probe_started',
+            'SFE canonical sample processed',
+            {
+                conversationId,
+                phase: resolution.phase,
+                ready: resolution.ready,
+                blockingConditions: resolution.blockingConditions,
+            },
+            `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
+        );
+    }
+
+    function resolveSfeReady(conversationId: string): boolean {
+        const resolution = sfe.resolveByConversation(conversationId);
+        return !!resolution?.ready;
+    }
+
+    function logSfeMismatchIfNeeded(conversationId: string, legacyReady: boolean): void {
+        if (!SFE_SHADOW_ENABLED) {
+            return;
+        }
+        const attemptId = resolveAttemptId(conversationId);
+        const sfeReady = resolveSfeReady(conversationId);
+        if (legacyReady === sfeReady) {
+            return;
+        }
+        structuredLogger.emit(
+            attemptId,
+            'info',
+            'legacy_sfe_mismatch',
+            'Legacy/SFE readiness mismatch',
+            { conversationId, legacyReady, sfeReady },
+            `mismatch:${conversationId}:${legacyReady}:${sfeReady}`,
+        );
+    }
+
+    function emitAttemptDisposed(attemptId: string, reason: AttemptDisposedMessage['reason']): void {
+        const payload: AttemptDisposedMessage = {
+            type: 'BLACKIYA_ATTEMPT_DISPOSED',
+            attemptId,
+            reason,
+        };
+        window.postMessage(payload, window.location.origin);
+    }
+
     async function loadCalibrationPreference(platformName: string): Promise<void> {
         try {
             const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
-            const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as CalibrationProfilesStore | undefined) ?? {};
-            rememberedPreferredStep = store[platformName]?.preferredStep ?? null;
-            rememberedCalibrationUpdatedAt = store[platformName]?.updatedAt ?? null;
+            const rawStore = result[STORAGE_KEYS.CALIBRATION_PROFILES] as
+                | (LegacyCalibrationProfilesStore & Record<string, unknown>)
+                | undefined;
+            const legacyStore = rawStore ?? {};
+            const legacyProfile = legacyStore[platformName];
+
+            if (legacyProfile?.preferredStep) {
+                rememberedPreferredStep = legacyProfile.preferredStep;
+                rememberedCalibrationUpdatedAt = legacyProfile.updatedAt ?? null;
+            } else {
+                const maybeV2 = rawStore?.[platformName];
+                if (maybeV2 && typeof maybeV2 === 'object') {
+                    const profileV2 = await loadCalibrationProfileV2(platformName);
+                    rememberedPreferredStep = preferredStepFromStrategy(profileV2.strategy);
+                    rememberedCalibrationUpdatedAt = profileV2.updatedAt;
+                } else {
+                    rememberedPreferredStep = null;
+                    rememberedCalibrationUpdatedAt = null;
+                }
+            }
+
             calibrationPreferenceLoaded = true;
             syncCalibrationButtonDisplay();
         } catch (error) {
@@ -156,7 +405,7 @@ export function runPlatform(): void {
     async function rememberCalibrationSuccess(platformName: string, step: CalibrationStep): Promise<void> {
         try {
             const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
-            const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as CalibrationProfilesStore | undefined) ?? {};
+            const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as LegacyCalibrationProfilesStore | undefined) ?? {};
             store[platformName] = {
                 preferredStep: step,
                 updatedAt: new Date().toISOString(),
@@ -166,6 +415,25 @@ export function runPlatform(): void {
             calibrationPreferenceLoaded = true;
             await browser.storage.local.set({
                 [STORAGE_KEYS.CALIBRATION_PROFILES]: store,
+            });
+
+            await saveCalibrationProfileV2({
+                schemaVersion: 2,
+                platform: platformName,
+                strategy: strategyFromPreferredStep(step),
+                disabledSources: ['dom_hint', 'snapshot_fallback'],
+                timingsMs: {
+                    passiveWait: step === 'passive-wait' ? 900 : step === 'endpoint-retry' ? 1400 : 2200,
+                    domQuietWindow: step === 'passive-wait' ? 500 : 800,
+                    maxStabilizationWait: step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 18_000 : 30_000,
+                },
+                retry: {
+                    maxAttempts: step === 'passive-wait' ? 3 : step === 'endpoint-retry' ? 4 : 6,
+                    backoffMs: step === 'passive-wait' ? [300, 800, 1300] : step === 'endpoint-retry' ? [400, 900, 1600, 2400] : [800, 1600, 2600, 3800, 5200, 7000],
+                    hardTimeoutMs: step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 20_000 : 30_000,
+                },
+                updatedAt: new Date().toISOString(),
+                lastModifiedBy: 'manual',
             });
         } catch (error) {
             logger.warn('Failed to save calibration profile', error);
@@ -224,6 +492,174 @@ export function runPlatform(): void {
         return parsed.toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',
+        });
+    }
+
+    function setLifecycleState(state: LifecycleUiState, conversationId?: string): void {
+        lifecycleState = state;
+        buttonManager.setLifecycleState(state);
+
+        if (!buttonManager.exists()) {
+            return;
+        }
+
+        if (state === 'completed') {
+            const targetConversationId = conversationId || currentConversationId || undefined;
+            if (targetConversationId) {
+                refreshButtonState(targetConversationId);
+                scheduleButtonRefresh(targetConversationId);
+            }
+            return;
+        }
+
+        // While prompt is in-flight/streaming, disable actions to avoid partial exports.
+        if (state === 'prompt-sent' || state === 'streaming') {
+            buttonManager.setActionButtonsEnabled(false);
+            buttonManager.setOpacity('0.6');
+        }
+    }
+
+    function ensureStreamProbePanel(): HTMLDivElement {
+        const existing = document.getElementById('blackiya-stream-probe') as HTMLDivElement | null;
+        if (existing) {
+            return existing;
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'blackiya-stream-probe';
+        panel.style.cssText = `
+            position: fixed;
+            left: 16px;
+            bottom: 16px;
+            width: min(560px, calc(100vw - 32px));
+            max-height: 42vh;
+            overflow: auto;
+            z-index: 2147483647;
+            background: rgba(15, 23, 42, 0.92);
+            color: #e2e8f0;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+            font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            padding: 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        `;
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    function setStreamProbePanel(status: string, body: string): void {
+        const panel = ensureStreamProbePanel();
+        const now = new Date().toLocaleTimeString();
+        panel.textContent = `[Blackiya Stream Probe] ${status} @ ${now}\n\n${body}`;
+    }
+
+    function appendLiveStreamProbeText(conversationId: string, text: string): void {
+        const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
+        let next = '';
+        if (text.startsWith(current)) {
+            next = text; // Snapshot-style update (preferred)
+        } else if (current.startsWith(text)) {
+            next = current; // Stale/shorter snapshot, ignore
+        } else {
+            next = `${current}${text}`; // Delta-style fallback
+        }
+        const capped = next.length > 16_000 ? `...${next.slice(-15_500)}` : next;
+        liveStreamPreviewByConversation.set(conversationId, capped);
+        setStreamProbePanel('stream: live mirror', capped);
+    }
+
+    function extractResponseTextForProbe(data: ConversationData): string {
+        try {
+            const common = buildCommonExport(data, currentAdapter?.name ?? 'Unknown') as {
+                response?: string | null;
+                prompt?: string | null;
+            };
+            const response = (common.response ?? '').trim();
+            const prompt = (common.prompt ?? '').trim();
+            if (response) {
+                return response;
+            }
+            if (prompt) {
+                return `(No assistant response found yet)\nPrompt: ${prompt}`;
+            }
+        } catch {
+            // Fall through to raw extraction.
+        }
+
+        const messages = Object.values(data.mapping)
+            .map((node) => node.message)
+            .filter((message): message is NonNullable<(typeof data.mapping)[string]['message']> => !!message);
+        const assistantTexts = messages
+            .filter((message) => message.author.role === 'assistant')
+            .flatMap((message) => message.content.parts ?? [])
+            .filter((part) => typeof part === 'string' && part.trim().length > 0);
+        return assistantTexts.join('\n\n').trim();
+    }
+
+    async function runStreamDoneProbe(conversationId: string): Promise<void> {
+        if (!currentAdapter) {
+            return;
+        }
+
+        const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
+        lastStreamProbeKey = probeKey;
+        setStreamProbePanel('stream-done: fetching conversation', `conversationId=${conversationId}`);
+        logger.info('Stream done probe start', {
+            platform: currentAdapter.name,
+            conversationId,
+        });
+
+        const apiUrls = getFetchUrlCandidates(currentAdapter, conversationId);
+        if (apiUrls.length === 0) {
+            setStreamProbePanel('stream-done: no api url candidates', `conversationId=${conversationId}`);
+            logger.warn('Stream done probe has no URL candidates', {
+                platform: currentAdapter.name,
+                conversationId,
+            });
+            return;
+        }
+
+        for (const apiUrl of apiUrls) {
+            try {
+                const response = await fetch(apiUrl, { credentials: 'include' });
+                if (!response.ok) {
+                    continue;
+                }
+                const text = await response.text();
+                const parsed = currentAdapter.parseInterceptedData(text, apiUrl);
+                if (!parsed?.conversation_id) {
+                    continue;
+                }
+                if (parsed.conversation_id !== conversationId) {
+                    continue;
+                }
+                const body = extractResponseTextForProbe(parsed);
+                const normalizedBody = body.length > 0 ? body : '(empty response text)';
+                if (lastStreamProbeKey === probeKey) {
+                    setStreamProbePanel('stream-done: fetched full text', normalizedBody);
+                }
+                logger.info('Stream done probe success', {
+                    platform: currentAdapter.name,
+                    conversationId,
+                    textLength: normalizedBody.length,
+                });
+                return;
+            } catch {
+                // try next candidate
+            }
+        }
+
+        if (lastStreamProbeKey === probeKey) {
+            setStreamProbePanel(
+                'stream-done: fetch failed',
+                `Could not parse conversation payload for ${conversationId}`,
+            );
+        }
+        logger.warn('Stream done probe failed', {
+            platform: currentAdapter.name,
+            conversationId,
         });
     }
 
@@ -1098,6 +1534,7 @@ export function runPlatform(): void {
         }
 
         buttonManager.inject(target, conversationId);
+        buttonManager.setLifecycleState(lifecycleState);
         const displayState = resolveDisplayedCalibrationState(conversationId);
         buttonManager.setCalibrationState(displayState, {
             timestampLabel:
@@ -1139,14 +1576,32 @@ export function runPlatform(): void {
         }
     }
 
+    function disposeInFlightAttemptsOnNavigation(): void {
+        const disposedAttemptIds = sfe.getAttemptTracker().disposeAllForRouteChange();
+        for (const attemptId of disposedAttemptIds) {
+            emitAttemptDisposed(attemptId, 'navigation');
+            structuredLogger.emit(
+                attemptId,
+                'info',
+                'attempt_disposed',
+                'Attempt disposed on navigation',
+                { reason: 'navigation' },
+                `dispose:navigation:${attemptId}`,
+            );
+        }
+    }
+
     function handleConversationSwitch(newId: string | null): void {
+        disposeInFlightAttemptsOnNavigation();
         if (!newId) {
             currentConversationId = null;
+            setLifecycleState('idle');
             setTimeout(injectSaveButton, 300);
             return;
         }
 
         buttonManager.remove();
+        currentConversationId = newId;
 
         // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
         const newAdapter = getPlatformAdapter(window.location.href);
@@ -1159,6 +1614,7 @@ export function runPlatform(): void {
         }
 
         setTimeout(injectSaveButton, 500);
+        setLifecycleState('idle', newId);
         setTimeout(() => {
             if (newId) {
                 maybeRunAutoCapture(newId, 'navigation');
@@ -1178,6 +1634,11 @@ export function runPlatform(): void {
         if (!conversationId) {
             return;
         }
+        const cached = interceptionManager.getConversation(conversationId);
+        if (cached) {
+            ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
+        }
+        buttonManager.setReadinessSource(SFE_ENABLED ? 'sfe' : 'legacy');
         const hasData = isConversationReadyForActions(conversationId);
         const opacity = hasData ? '1' : '0.6';
         buttonManager.setActionButtonsEnabled(hasData);
@@ -1304,16 +1765,17 @@ export function runPlatform(): void {
 
     function isConversationReadyForActions(conversationId: string): boolean {
         const data = interceptionManager.getConversation(conversationId);
-        if (!data) {
-            return false;
+        let legacyReady = false;
+        if (data && isConversationReady(data)) {
+            legacyReady = !(currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter));
         }
-        if (!isConversationReady(data)) {
-            return false;
+
+        logSfeMismatchIfNeeded(conversationId, legacyReady);
+
+        if (!SFE_ENABLED) {
+            return legacyReady;
         }
-        if (currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter)) {
-            return false;
-        }
-        return true;
+        return resolveSfeReady(conversationId);
     }
 
     function resolveActiveConversationId(hintedConversationId?: string): string | null {
@@ -1399,13 +1861,18 @@ export function runPlatform(): void {
         if (!shouldProcessFinishedSignal(conversationId)) {
             return;
         }
+        const attemptId = resolveAttemptId(conversationId ?? undefined);
+        activeAttemptId = attemptId;
+        ingestSfeLifecycle('completed_hint', attemptId, conversationId);
 
         if (conversationId) {
             currentConversationId = conversationId;
+            bindAttempt(conversationId, attemptId);
         }
 
         logger.info('Response finished signal', {
             source,
+            attemptId,
             conversationId,
             calibrationState,
         });
@@ -1460,11 +1927,167 @@ export function runPlatform(): void {
     }
 
     function handleResponseFinishedMessage(message: any): boolean {
-        if (message?.type !== 'BLACKIYA_RESPONSE_FINISHED') {
+        if (
+            !isLegacyFinishedMessage(message) &&
+            !(
+                (message as ResponseFinishedMessage | undefined)?.type === 'BLACKIYA_RESPONSE_FINISHED' &&
+                typeof (message as ResponseFinishedMessage).attemptId === 'string'
+            )
+        ) {
             return false;
         }
+        const typed = message as ResponseFinishedMessage;
         const hintedConversationId = typeof message.conversationId === 'string' ? message.conversationId : undefined;
+        const attemptId =
+            typeof typed.attemptId === 'string'
+                ? typed.attemptId
+                : buildLegacyAttemptId(typed.platform ?? currentAdapter?.name ?? 'Unknown', hintedConversationId);
+        activeAttemptId = attemptId;
+        if (hintedConversationId) {
+            bindAttempt(hintedConversationId, attemptId);
+        }
         handleResponseFinished('network', hintedConversationId);
+        return true;
+    }
+
+    function handleLifecycleMessage(message: any): boolean {
+        if (
+            !isLegacyLifecycleMessage(message) &&
+            !(
+                (message as ResponseLifecycleMessage | undefined)?.type === 'BLACKIYA_RESPONSE_LIFECYCLE' &&
+                typeof (message as ResponseLifecycleMessage).attemptId === 'string'
+            )
+        ) {
+            return false;
+        }
+
+        const typed = message as ResponseLifecycleMessage;
+        const phase = typed.phase;
+        const platform = typed.platform;
+        const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
+        const attemptId =
+            typeof typed.attemptId === 'string'
+                ? typed.attemptId
+                : buildLegacyAttemptId(platform ?? currentAdapter?.name ?? 'Unknown', conversationId);
+
+        if (conversationId) {
+            currentConversationId = conversationId;
+            bindAttempt(conversationId, attemptId);
+        }
+        activeAttemptId = attemptId;
+
+        if (phase !== 'prompt-sent' && phase !== 'streaming' && phase !== 'completed' && phase !== 'terminated') {
+            return true;
+        }
+
+        logger.info('Lifecycle phase', {
+            platform,
+            phase,
+            attemptId,
+            conversationId: conversationId ?? null,
+        });
+
+        if (phase === 'prompt-sent') {
+            ingestSfeLifecycle('prompt_sent', attemptId, conversationId ?? null);
+        } else if (phase === 'streaming') {
+            ingestSfeLifecycle('streaming', attemptId, conversationId ?? null);
+        } else if (phase === 'completed') {
+            ingestSfeLifecycle('completed_hint', attemptId, conversationId ?? null);
+        } else if (phase === 'terminated') {
+            ingestSfeLifecycle('terminated_partial', attemptId, conversationId ?? null);
+        }
+
+        if ((phase === 'prompt-sent' || phase === 'streaming') && conversationId) {
+            if (!liveStreamPreviewByConversation.has(conversationId)) {
+                liveStreamPreviewByConversation.set(conversationId, '');
+                setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
+            }
+        }
+
+        if (phase === 'completed') {
+            setLifecycleState('completed', conversationId);
+            if (conversationId) {
+                void runStreamDoneProbe(conversationId);
+            }
+        } else if (phase === 'prompt-sent' || phase === 'streaming') {
+            setLifecycleState(phase, conversationId);
+        }
+
+        return true;
+    }
+
+    function handleStreamDeltaMessage(message: any): boolean {
+        if (
+            !isLegacyStreamDeltaMessage(message) &&
+            !(
+                (message as StreamDeltaMessage | undefined)?.type === 'BLACKIYA_STREAM_DELTA' &&
+                typeof (message as StreamDeltaMessage).attemptId === 'string'
+            )
+        ) {
+            return false;
+        }
+        if ((message as StreamDeltaMessage).platform !== 'ChatGPT') {
+            return false;
+        }
+
+        const text = typeof message.text === 'string' ? message.text : '';
+        if (text.length === 0) {
+            return true;
+        }
+
+        const conversationId =
+            typeof message.conversationId === 'string' && message.conversationId.length > 0
+                ? message.conversationId
+                : currentConversationId;
+
+        if (!conversationId) {
+            return true;
+        }
+
+        const typed = message as StreamDeltaMessage;
+        const attemptId =
+            typeof typed.attemptId === 'string'
+                ? typed.attemptId
+                : buildLegacyAttemptId(typed.platform ?? currentAdapter?.name ?? 'Unknown', conversationId);
+        activeAttemptId = attemptId;
+        bindAttempt(conversationId, attemptId);
+        appendLiveStreamProbeText(conversationId, text);
+        return true;
+    }
+
+    function handleConversationIdResolvedMessage(message: any): boolean {
+        if ((message as ConversationIdResolvedMessage | undefined)?.type !== 'BLACKIYA_CONVERSATION_ID_RESOLVED') {
+            return false;
+        }
+
+        const typed = message as ConversationIdResolvedMessage;
+        if (typeof typed.attemptId !== 'string' || typeof typed.conversationId !== 'string') {
+            return false;
+        }
+
+        activeAttemptId = typed.attemptId;
+        bindAttempt(typed.conversationId, typed.attemptId);
+        sfe.getAttemptTracker().updateConversationId(typed.attemptId, typed.conversationId);
+        return true;
+    }
+
+    function handleAttemptDisposedMessage(message: any): boolean {
+        if ((message as AttemptDisposedMessage | undefined)?.type !== 'BLACKIYA_ATTEMPT_DISPOSED') {
+            return false;
+        }
+        const typed = message as AttemptDisposedMessage;
+        if (typeof typed.attemptId !== 'string') {
+            return false;
+        }
+        sfe.dispose(typed.attemptId);
+        for (const [conversationId, attemptId] of attemptByConversation.entries()) {
+            if (attemptId === typed.attemptId) {
+                attemptByConversation.delete(conversationId);
+            }
+        }
+        if (activeAttemptId === typed.attemptId) {
+            activeAttemptId = null;
+        }
         return true;
     }
 
@@ -1518,6 +2141,18 @@ export function runPlatform(): void {
             }
 
             const message = event.data;
+            if (handleAttemptDisposedMessage(message)) {
+                return;
+            }
+            if (handleConversationIdResolvedMessage(message)) {
+                return;
+            }
+            if (handleStreamDeltaMessage(message)) {
+                return;
+            }
+            if (handleLifecycleMessage(message)) {
+                return;
+            }
             if (handleResponseFinishedMessage(message)) {
                 return;
             }
@@ -1628,6 +2263,10 @@ export function runPlatform(): void {
     // Cleanup on unload
     window.addEventListener('beforeunload', () => {
         try {
+            const disposed = sfe.disposeAll();
+            for (const attemptId of disposed) {
+                emitAttemptDisposed(attemptId, 'teardown');
+            }
             interceptionManager.stop();
             navigationManager.stop();
             buttonManager.remove();

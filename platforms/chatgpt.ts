@@ -8,6 +8,7 @@
  */
 
 import type { LLMPlatform } from '@/platforms/types';
+import { isConversationReady } from '@/utils/conversation-readiness';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import type { ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
@@ -30,6 +31,15 @@ function normalizeText(value: unknown): string | null {
     }
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
+}
+
+function hashText(value: string): string {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (hash << 5) - hash + value.charCodeAt(i);
+        hash |= 0;
+    }
+    return `${hash}`;
 }
 
 function normalizeNumber(value: unknown): number | null {
@@ -578,10 +588,7 @@ export const createChatGPTAdapter = (): LLMPlatform => {
         },
 
         buildApiUrls(conversationId: string): string[] {
-            const paths = [
-                `/backend-api/conversation/${conversationId}`,
-                `/backend-api/f/conversation/${conversationId}`,
-            ];
+            const paths = [`/backend-api/conversation/${conversationId}`];
             return HOST_CANDIDATES.flatMap((host) => paths.map((path) => `${host}${path}`));
         },
 
@@ -663,6 +670,25 @@ export const createChatGPTAdapter = (): LLMPlatform => {
                 }
             }
             return null;
+        },
+
+        evaluateReadiness(data: ConversationData) {
+            const assistantMessages = Object.values(data.mapping)
+                .map((node) => node.message)
+                .filter(
+                    (message): message is NonNullable<(typeof data.mapping)[string]['message']> =>
+                        !!message && message.author.role === 'assistant',
+                );
+            const terminal = !assistantMessages.some((message) => message.status === 'in_progress');
+            const latest = assistantMessages[assistantMessages.length - 1];
+            const latestText = (latest?.content.parts ?? []).join('').trim().normalize('NFC');
+            return {
+                ready: isConversationReady(data),
+                terminal,
+                reason: terminal ? 'terminal' : 'assistant-in-progress',
+                contentHash: latestText.length > 0 ? hashText(latestText) : null,
+                latestAssistantTextLength: latestText.length,
+            };
         },
     };
 };

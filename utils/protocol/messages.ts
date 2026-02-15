@@ -1,0 +1,135 @@
+export type LifecyclePhaseWire = 'prompt-sent' | 'streaming' | 'completed' | 'terminated';
+
+export type LogLevelWire = 'debug' | 'info' | 'warn' | 'error';
+
+export interface ResponseLifecycleMessage {
+    type: 'BLACKIYA_RESPONSE_LIFECYCLE';
+    platform: string;
+    attemptId: string;
+    phase: LifecyclePhaseWire;
+    conversationId?: string;
+}
+
+export interface ResponseFinishedMessage {
+    type: 'BLACKIYA_RESPONSE_FINISHED';
+    platform: string;
+    attemptId: string;
+    conversationId?: string;
+}
+
+export interface StreamDeltaMessage {
+    type: 'BLACKIYA_STREAM_DELTA';
+    platform: string;
+    attemptId: string;
+    conversationId?: string;
+    text: string;
+}
+
+export interface ConversationIdResolvedMessage {
+    type: 'BLACKIYA_CONVERSATION_ID_RESOLVED';
+    platform: string;
+    attemptId: string;
+    conversationId: string;
+}
+
+export interface AttemptDisposedMessage {
+    type: 'BLACKIYA_ATTEMPT_DISPOSED';
+    attemptId: string;
+    reason: 'navigation' | 'superseded' | 'timeout' | 'teardown';
+}
+
+export interface CaptureInterceptedMessage {
+    type: 'LLM_CAPTURE_DATA_INTERCEPTED';
+    platform: string;
+    url: string;
+    data: string;
+    attemptId?: string;
+}
+
+export interface LogEntryMessage {
+    type: 'LLM_LOG_ENTRY';
+    payload: {
+        level: LogLevelWire;
+        message: string;
+        data?: unknown[];
+        context?: string;
+    };
+}
+
+export type BlackiyaMessage =
+    | ResponseLifecycleMessage
+    | ResponseFinishedMessage
+    | StreamDeltaMessage
+    | ConversationIdResolvedMessage
+    | AttemptDisposedMessage
+    | CaptureInterceptedMessage
+    | LogEntryMessage;
+
+export type LegacyLifecycleMessage = Omit<ResponseLifecycleMessage, 'attemptId'>;
+export type LegacyFinishedMessage = Omit<ResponseFinishedMessage, 'attemptId'>;
+export type LegacyStreamDeltaMessage = Omit<StreamDeltaMessage, 'attemptId'>;
+
+function hasString(value: unknown): value is string {
+    return typeof value === 'string' && value.length > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
+    if (!isRecord(value) || !hasString(value.type)) {
+        return false;
+    }
+
+    switch (value.type) {
+        case 'BLACKIYA_RESPONSE_LIFECYCLE':
+            return hasString(value.platform) && hasString(value.attemptId) && hasString(value.phase);
+        case 'BLACKIYA_RESPONSE_FINISHED':
+            return hasString(value.platform) && hasString(value.attemptId);
+        case 'BLACKIYA_STREAM_DELTA':
+            return hasString(value.platform) && hasString(value.attemptId) && typeof value.text === 'string';
+        case 'BLACKIYA_CONVERSATION_ID_RESOLVED':
+            return hasString(value.platform) && hasString(value.attemptId) && hasString(value.conversationId);
+        case 'BLACKIYA_ATTEMPT_DISPOSED':
+            return hasString(value.attemptId) && hasString(value.reason);
+        case 'LLM_CAPTURE_DATA_INTERCEPTED':
+            return hasString(value.platform) && hasString(value.url) && typeof value.data === 'string';
+        case 'LLM_LOG_ENTRY':
+            return isRecord(value.payload) && hasString(value.payload.level) && hasString(value.payload.message);
+        default:
+            return false;
+    }
+}
+
+export function isLegacyLifecycleMessage(value: unknown): value is LegacyLifecycleMessage {
+    if (!isRecord(value) || value.type !== 'BLACKIYA_RESPONSE_LIFECYCLE') {
+        return false;
+    }
+    return hasString(value.platform) && hasString(value.phase) && !hasString(value.attemptId);
+}
+
+export function isLegacyFinishedMessage(value: unknown): value is LegacyFinishedMessage {
+    if (!isRecord(value) || value.type !== 'BLACKIYA_RESPONSE_FINISHED') {
+        return false;
+    }
+    return hasString(value.platform) && !hasString(value.attemptId);
+}
+
+export function isLegacyStreamDeltaMessage(value: unknown): value is LegacyStreamDeltaMessage {
+    if (!isRecord(value) || value.type !== 'BLACKIYA_STREAM_DELTA') {
+        return false;
+    }
+    return hasString(value.platform) && typeof value.text === 'string' && !hasString(value.attemptId);
+}
+
+export function createAttemptId(prefix = 'attempt'): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        return `${prefix}:${crypto.randomUUID()}`;
+    }
+    return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function buildLegacyAttemptId(platform: string, conversationId?: string): string {
+    return `legacy:${platform}:${conversationId ?? 'unknown'}`;
+}

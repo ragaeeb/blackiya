@@ -18,10 +18,18 @@ export class InterceptionManager {
     private readonly globalRef: typeof globalThis;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
-    private onDataCaptured: (conversationId: string, data: ConversationData) => void;
+    private onDataCaptured: (
+        conversationId: string,
+        data: ConversationData,
+        meta?: { attemptId?: string; source?: string },
+    ) => void;
 
     constructor(
-        onDataCaptured: (conversationId: string, data: ConversationData) => void,
+        onDataCaptured: (
+            conversationId: string,
+            data: ConversationData,
+            meta?: { attemptId?: string; source?: string },
+        ) => void,
         options: { window?: Window; global?: typeof globalThis } = {},
     ) {
         this.conversationCache = new LRUCache<string, ConversationData>(10);
@@ -76,7 +84,7 @@ export class InterceptionManager {
             source,
             directIngest: true,
         });
-        this.onDataCaptured(conversationId, data);
+        this.onDataCaptured(conversationId, data, { source });
     }
 
     private handleMessage = (event: MessageEvent): void => {
@@ -147,7 +155,10 @@ export class InterceptionManager {
                 logger.info(`Successfully captured/cached data for conversation: ${conversationId}`);
 
                 // Notify runner to update UI if this matches current view
-                this.onDataCaptured(conversationId, data);
+                this.onDataCaptured(conversationId, data, {
+                    source: 'network',
+                    attemptId: typeof message?.attemptId === 'string' ? message.attemptId : undefined,
+                });
             } else {
                 const level = this.getParseMissLevel(message.url);
                 const payload = {
