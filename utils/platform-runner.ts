@@ -33,6 +33,7 @@ import {
     type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import { shouldIngestAsCanonicalSample, shouldUseCachedConversationForWarmFetch } from '@/utils/sfe/capture-fidelity';
 import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
@@ -248,6 +249,9 @@ export function runPlatform(): void {
                 { conversationId: capturedId, source },
                 `snapshot-degraded:${capturedId}:${source}`,
             );
+            if (lifecycleState === 'completed') {
+                scheduleCanonicalStabilizationRetry(capturedId, resolveAttemptId(capturedId));
+            }
         } else {
             setBoundedMapValue(
                 captureMetaByConversation,
@@ -345,6 +349,70 @@ export function runPlatform(): void {
         return phase === 'disposed' || phase === 'superseded';
     }
 
+    function emitAliasResolutionLog(
+        canonicalAttemptId: string,
+        signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
+        originalAttemptId: string,
+        conversationId?: string,
+    ): void {
+        structuredLogger.emit(
+            canonicalAttemptId,
+            'debug',
+            'attempt_alias_forwarded',
+            'Resolved stale attempt alias before processing signal',
+            {
+                signalType,
+                originalAttemptId,
+                canonicalAttemptId,
+                conversationId: conversationId ?? null,
+            },
+            `attempt-alias-resolve:${signalType}:${originalAttemptId}:${canonicalAttemptId}`,
+        );
+    }
+
+    function emitLateSignalDrop(
+        canonicalAttemptId: string,
+        signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
+        conversationId?: string,
+    ): void {
+        structuredLogger.emit(
+            canonicalAttemptId,
+            'debug',
+            'late_signal_dropped_after_dispose',
+            'Dropped late signal for disposed or superseded attempt',
+            { signalType, reason: 'disposed_or_superseded', conversationId: conversationId ?? null },
+            `stale:${signalType}:${conversationId ?? 'unknown'}:disposed`,
+        );
+    }
+
+    function getConversationAttemptMismatch(canonicalAttemptId: string, conversationId?: string): string | null {
+        if (!conversationId) {
+            return null;
+        }
+        const mapped = attemptByConversation.get(conversationId);
+        const canonicalMapped = mapped ? resolveAliasedAttemptId(mapped) : null;
+        if (!canonicalMapped || canonicalMapped === canonicalAttemptId) {
+            return null;
+        }
+        return canonicalMapped;
+    }
+
+    function emitConversationMismatchDrop(
+        canonicalAttemptId: string,
+        signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
+        conversationId: string,
+        activeAttemptId: string,
+    ): void {
+        structuredLogger.emit(
+            canonicalAttemptId,
+            'debug',
+            'stale_signal_ignored',
+            'Ignored stale attempt signal',
+            { signalType, reason: 'conversation_mismatch', conversationId, activeAttemptId },
+            `stale:${signalType}:${conversationId}:${activeAttemptId}`,
+        );
+    }
+
     function isStaleAttemptMessage(
         attemptId: string,
         conversationId: string | undefined,
@@ -353,47 +421,18 @@ export function runPlatform(): void {
         const canonicalAttemptId = resolveAliasedAttemptId(attemptId);
 
         if (canonicalAttemptId !== attemptId) {
-            structuredLogger.emit(
-                canonicalAttemptId,
-                'debug',
-                'attempt_alias_forwarded',
-                'Resolved stale attempt alias before processing signal',
-                {
-                    signalType,
-                    originalAttemptId: attemptId,
-                    canonicalAttemptId,
-                    conversationId: conversationId ?? null,
-                },
-                `attempt-alias-resolve:${signalType}:${attemptId}:${canonicalAttemptId}`,
-            );
+            emitAliasResolutionLog(canonicalAttemptId, signalType, attemptId, conversationId);
         }
 
         if (isAttemptDisposedOrSuperseded(canonicalAttemptId)) {
-            structuredLogger.emit(
-                canonicalAttemptId,
-                'debug',
-                'late_signal_dropped_after_dispose',
-                'Dropped late signal for disposed or superseded attempt',
-                { signalType, reason: 'disposed_or_superseded', conversationId: conversationId ?? null },
-                `stale:${signalType}:${conversationId ?? 'unknown'}:disposed`,
-            );
+            emitLateSignalDrop(canonicalAttemptId, signalType, conversationId);
             return true;
         }
 
-        if (conversationId) {
-            const mapped = attemptByConversation.get(conversationId);
-            const canonicalMapped = mapped ? resolveAliasedAttemptId(mapped) : null;
-            if (canonicalMapped && canonicalMapped !== canonicalAttemptId) {
-                structuredLogger.emit(
-                    canonicalAttemptId,
-                    'debug',
-                    'stale_signal_ignored',
-                    'Ignored stale attempt signal',
-                    { signalType, reason: 'conversation_mismatch', conversationId, activeAttemptId: canonicalMapped },
-                    `stale:${signalType}:${conversationId}:${canonicalMapped}`,
-                );
-                return true;
-            }
+        const mismatchedAttemptId = getConversationAttemptMismatch(canonicalAttemptId, conversationId);
+        if (conversationId && mismatchedAttemptId) {
+            emitConversationMismatchDrop(canonicalAttemptId, signalType, conversationId, mismatchedAttemptId);
+            return true;
         }
 
         return false;
@@ -491,6 +530,42 @@ export function runPlatform(): void {
         canonicalStabilizationStartedAt.delete(attemptId);
     }
 
+    async function processCanonicalStabilizationRetryTick(
+        conversationId: string,
+        attemptId: string,
+        retries: number,
+    ): Promise<void> {
+        canonicalStabilizationRetryTimers.delete(attemptId);
+        canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
+
+        if (isAttemptDisposedOrSuperseded(attemptId)) {
+            return;
+        }
+
+        const mappedAttempt = attemptByConversation.get(conversationId);
+        if (mappedAttempt && mappedAttempt !== attemptId) {
+            return;
+        }
+
+        await warmFetchConversationSnapshot(conversationId, 'stabilization-retry');
+
+        const cached = interceptionManager.getConversation(conversationId);
+        if (!cached) {
+            scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+            return;
+        }
+
+        const captureMeta = getCaptureMeta(conversationId);
+        if (!shouldIngestAsCanonicalSample(captureMeta)) {
+            scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+            refreshButtonState(conversationId);
+            return;
+        }
+
+        ingestSfeCanonicalSample(cached, attemptId);
+        refreshButtonState(conversationId);
+    }
+
     function scheduleCanonicalStabilizationRetry(conversationId: string, attemptId: string): void {
         if (canonicalStabilizationRetryTimers.has(attemptId)) {
             return;
@@ -516,29 +591,7 @@ export function runPlatform(): void {
         }
 
         const timerId = window.setTimeout(() => {
-            void (async () => {
-                canonicalStabilizationRetryTimers.delete(attemptId);
-                canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
-
-                if (isAttemptDisposedOrSuperseded(attemptId)) {
-                    return;
-                }
-
-                const mappedAttempt = attemptByConversation.get(conversationId);
-                if (mappedAttempt && mappedAttempt !== attemptId) {
-                    return;
-                }
-
-                await warmFetchConversationSnapshot(conversationId, 'stabilization-retry');
-
-                const cached = interceptionManager.getConversation(conversationId);
-                if (!cached) {
-                    return;
-                }
-
-                ingestSfeCanonicalSample(cached, attemptId);
-                refreshButtonState(conversationId);
-            })();
+            void processCanonicalStabilizationRetryTick(conversationId, attemptId, retries);
         }, CANONICAL_STABILIZATION_RETRY_DELAY_MS);
 
         canonicalStabilizationRetryTimers.set(attemptId, timerId);
@@ -613,6 +666,74 @@ export function runPlatform(): void {
         );
     }
 
+    function emitCanonicalSampleProcessed(
+        attemptId: string,
+        conversationId: string,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+        readiness: PlatformReadiness,
+    ): void {
+        structuredLogger.emit(
+            attemptId,
+            'debug',
+            readiness.contentHash ? 'canonical_probe_sample_changed' : 'canonical_probe_started',
+            'SFE canonical sample processed',
+            {
+                conversationId,
+                phase: resolution.phase,
+                ready: resolution.ready,
+                blockingConditions: resolution.blockingConditions,
+            },
+            `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
+        );
+    }
+
+    function shouldScheduleCanonicalRetry(
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+        activeLifecycleState: LifecycleUiState,
+    ): boolean {
+        const hitStabilizationTimeout = resolution.blockingConditions.includes('stabilization_timeout');
+        return (
+            !resolution.ready &&
+            !hitStabilizationTimeout &&
+            activeLifecycleState === 'completed' &&
+            (resolution.reason === 'awaiting_stabilization' || resolution.reason === 'captured_not_ready')
+        );
+    }
+
+    function emitAwaitingCanonicalLog(
+        attemptId: string,
+        conversationId: string,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+        contentHash: string | null,
+    ): void {
+        const isStabilizationWait = resolution.reason === 'awaiting_stabilization';
+        structuredLogger.emit(
+            attemptId,
+            'info',
+            isStabilizationWait ? 'awaiting_stabilization' : 'awaiting_canonical_capture',
+            isStabilizationWait
+                ? 'Awaiting canonical stabilization before ready'
+                : 'Completed stream but canonical sample not terminal yet; scheduling retries',
+            { conversationId, phase: resolution.phase },
+            `${isStabilizationWait ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${contentHash ?? 'none'}`,
+        );
+    }
+
+    function emitCapturedReadyLog(
+        attemptId: string,
+        conversationId: string,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+    ): void {
+        structuredLogger.emit(
+            attemptId,
+            'info',
+            'captured_ready',
+            'Capture reached ready state',
+            { conversationId, phase: resolution.phase },
+            `captured-ready:${conversationId}`,
+        );
+    }
+
     function ingestSfeCanonicalSample(data: ConversationData, attemptId?: string): void {
         if (!sfeEnabled) {
             return;
@@ -629,65 +750,19 @@ export function runPlatform(): void {
             readiness,
             timestampMs: Date.now(),
         });
+        emitCanonicalSampleProcessed(effectiveAttemptId, conversationId, resolution, readiness);
 
-        structuredLogger.emit(
-            effectiveAttemptId,
-            'debug',
-            readiness.contentHash ? 'canonical_probe_sample_changed' : 'canonical_probe_started',
-            'SFE canonical sample processed',
-            {
-                conversationId,
-                phase: resolution.phase,
-                ready: resolution.ready,
-                blockingConditions: resolution.blockingConditions,
-            },
-            `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
-        );
-
-        const hitStabilizationTimeout = resolution.blockingConditions.includes('stabilization_timeout');
-        const activeLifecycleState = lifecycleState;
-        const shouldRetryCanonicalCapture =
-            !resolution.ready &&
-            !hitStabilizationTimeout &&
-            activeLifecycleState === 'completed' &&
-            (resolution.reason === 'awaiting_stabilization' || resolution.reason === 'captured_not_ready');
-
-        if (shouldRetryCanonicalCapture) {
+        if (shouldScheduleCanonicalRetry(resolution, lifecycleState)) {
             scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
-            if (resolution.reason === 'awaiting_stabilization') {
-                structuredLogger.emit(
-                    effectiveAttemptId,
-                    'info',
-                    'awaiting_stabilization',
-                    'Awaiting canonical stabilization before ready',
-                    { conversationId, phase: resolution.phase },
-                    `awaiting-stabilization:${conversationId}:${readiness.contentHash ?? 'none'}`,
-                );
-            } else {
-                structuredLogger.emit(
-                    effectiveAttemptId,
-                    'info',
-                    'awaiting_canonical_capture',
-                    'Completed stream but canonical sample not terminal yet; scheduling retries',
-                    { conversationId, phase: resolution.phase },
-                    `awaiting-canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
-                );
-            }
+            emitAwaitingCanonicalLog(effectiveAttemptId, conversationId, resolution, readiness.contentHash ?? null);
         }
-        if (hitStabilizationTimeout) {
+        if (resolution.blockingConditions.includes('stabilization_timeout')) {
             clearCanonicalStabilizationRetry(effectiveAttemptId);
         }
         if (resolution.ready) {
             clearCanonicalStabilizationRetry(effectiveAttemptId);
             syncStreamProbePanelFromCanonical(conversationId, data);
-            structuredLogger.emit(
-                effectiveAttemptId,
-                'info',
-                'captured_ready',
-                'Capture reached ready state',
-                { conversationId, phase: resolution.phase },
-                `captured-ready:${conversationId}`,
-            );
+            emitCapturedReadyLog(effectiveAttemptId, conversationId, resolution);
         }
     }
 
@@ -1428,7 +1503,8 @@ export function runPlatform(): void {
         }
 
         const cached = interceptionManager.getConversation(conversationId);
-        if (cached && evaluateReadinessForData(cached).ready) {
+        const captureMeta = captureMetaByConversation.get(conversationId);
+        if (cached && shouldUseCachedConversationForWarmFetch(evaluateReadinessForData(cached), captureMeta)) {
             return true;
         }
 
@@ -2369,7 +2445,8 @@ export function runPlatform(): void {
             return;
         }
         const cached = interceptionManager.getConversation(conversationId);
-        if (cached) {
+        const captureMeta = getCaptureMeta(conversationId);
+        if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
             ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
         }
         const decision = resolveReadinessDecision(conversationId);
@@ -2828,10 +2905,11 @@ export function runPlatform(): void {
             if (conversationId) {
                 if (sfeEnabled) {
                     const resolution = sfe.resolve(attemptId);
+                    const captureMeta = getCaptureMeta(conversationId);
                     const shouldRetryAfterCompletion =
-                        resolution.phase === 'canonical_probing' &&
+                        !resolution.blockingConditions.includes('stabilization_timeout') &&
                         !resolution.ready &&
-                        !resolution.blockingConditions.includes('stabilization_timeout');
+                        (resolution.phase === 'canonical_probing' || !shouldIngestAsCanonicalSample(captureMeta));
                     if (shouldRetryAfterCompletion) {
                         scheduleCanonicalStabilizationRetry(conversationId, attemptId);
                     }
