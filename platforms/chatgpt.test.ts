@@ -260,6 +260,52 @@ describe('ChatGPT Platform Adapter', () => {
             expect(filename).not.toContain('conversation_696bc3d5');
         });
 
+        it('should use first user message as fallback when title is placeholder "New chat"', () => {
+            const data = {
+                title: 'New chat',
+                create_time: 1768670166.492617,
+                update_time: 1768671022.523312,
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['u1'] },
+                    u1: {
+                        id: 'u1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'u1',
+                            author: { role: 'user', name: null, metadata: {} },
+                            create_time: 1768670166.492617,
+                            update_time: 1768670166.492617,
+                            content: {
+                                content_type: 'text',
+                                parts: ['Digital Eye Strain Relief tips and habits'],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'u1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-4',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+
+            const filename = adapter.formatFilename(data);
+            expect(filename).toContain('Digital_Eye_Strain_Relief_tips_and_habits');
+            expect(filename).not.toContain('New_chat');
+        });
+
         it('should truncate very long titles', () => {
             const longTitle = 'A'.repeat(200);
             const data = {

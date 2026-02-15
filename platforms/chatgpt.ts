@@ -20,6 +20,7 @@ import type { ConversationData, Message, MessageContent, MessageNode } from '@/u
  */
 const CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const HOST_CANDIDATES = ['https://chatgpt.com', 'https://chat.openai.com'];
+const PLACEHOLDER_TITLE_PATTERNS = [/^new chat$/i, /^new conversation$/i, /^untitled$/i];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -516,6 +517,14 @@ function deriveTitleFromFirstUserMessage(mapping: Record<string, MessageNode>): 
     return `${raw.slice(0, maxLength - 3).trim()}...`;
 }
 
+function isPlaceholderTitle(title: string): boolean {
+    const normalized = title.trim();
+    if (normalized.length === 0) {
+        return true;
+    }
+    return PLACEHOLDER_TITLE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 /**
  * Create a ChatGPT Platform Adapter instance.
  *
@@ -660,7 +669,7 @@ export const createChatGPTAdapter = (): LLMPlatform => {
         formatFilename(data: ConversationData): string {
             let title = data.title || '';
 
-            if (!title.trim()) {
+            if (isPlaceholderTitle(title)) {
                 title = deriveTitleFromFirstUserMessage(data.mapping);
             }
 

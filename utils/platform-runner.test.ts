@@ -320,6 +320,72 @@ describe('Platform Runner', () => {
         expect(panelText).toContain('How Do Scholars Prove');
     });
 
+    it('should not inject artificial spaces inside lowercase word continuations', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-word-join-lower',
+                conversationId: '123',
+                text: 'When Glass',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-word-join-lower',
+                conversationId: '123',
+                text: 'es Are Actually Helpful',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('When Glasses Are Actually Helpful');
+        expect(panelText.includes('When Glass es')).toBe(false);
+    });
+
+    it('should not split single-letter prefix plus lowercase continuation', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-single-prefix',
+                conversationId: '123',
+                text: 'W',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-single-prefix',
+                conversationId: '123',
+                text: 'earing the correct prescription:',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('Wearing the correct prescription:');
+        expect(panelText.includes('W earing')).toBe(false);
+    });
+
     it('should default to SFE readiness source', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -513,6 +579,62 @@ describe('Platform Runner', () => {
         } finally {
             (globalThis as any).fetch = originalFetch;
         }
+    });
+
+    it('should preserve pre-final live mirror snapshot when probe switches to stream-done state', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:preserve-live',
+                conversationId: '123',
+                text: 'Live chunk one. ',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:preserve-live',
+                conversationId: '123',
+                text: 'Live chunk two.',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panelBeforeDone = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelBeforeDone).toContain('Live chunk one. Live chunk two.');
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            buildApiUrls: () => ['https://test.com/backend-api/conversation/123'],
+            parseInterceptedData: () => null,
+        };
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:preserve-live',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        const panelAfterDone = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelAfterDone).toContain('stream-done: no api url candidates');
+        expect(panelAfterDone).toContain('Preserved live mirror snapshot (pre-final)');
+        expect(panelAfterDone).toContain('Live chunk one. Live chunk two.');
     });
 
     it('should ignore disposed attempt lifecycle messages', async () => {

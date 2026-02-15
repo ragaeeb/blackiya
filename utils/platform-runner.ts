@@ -126,6 +126,7 @@ export function runPlatform(): void {
     let lastStreamProbeKey = '';
     let lastStreamProbeConversationId: string | null = null;
     const liveStreamPreviewByConversation = new Map<string, string>();
+    const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
     let lastResponseFinishedAt = 0;
@@ -657,6 +658,27 @@ export function runPlatform(): void {
         panel.textContent = `[Blackiya Stream Probe] ${status} @ ${now}\n\n${body}`;
     }
 
+    function withPreservedLiveMirrorSnapshot(conversationId: string, status: string, primaryBody: string): string {
+        if (!status.startsWith('stream-done:')) {
+            return primaryBody;
+        }
+
+        const liveSnapshot = liveStreamPreviewByConversation.get(conversationId) ?? '';
+        if (liveSnapshot.length === 0) {
+            return primaryBody;
+        }
+
+        preservedLiveStreamSnapshotByConversation.set(conversationId, liveSnapshot);
+        const normalizedPrimary = primaryBody.trim();
+        const normalizedLive = liveSnapshot.trim();
+        if (normalizedPrimary.length > 0 && normalizedPrimary === normalizedLive) {
+            return primaryBody;
+        }
+
+        const boundedSnapshot = normalizedLive.length > 4000 ? `...${normalizedLive.slice(-3800)}` : normalizedLive;
+        return `${primaryBody}\n\n--- Preserved live mirror snapshot (pre-final) ---\n${boundedSnapshot}`;
+    }
+
     function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData): void {
         const panel = document.getElementById('blackiya-stream-probe');
         if (!panel) {
@@ -672,7 +694,10 @@ export function runPlatform(): void {
 
         const cachedText = extractResponseTextForProbe(data);
         const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
-        setStreamProbePanel('stream-done: canonical capture ready', body);
+        setStreamProbePanel(
+            'stream-done: canonical capture ready',
+            withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: canonical capture ready', body),
+        );
     }
 
     function appendLiveStreamProbeText(conversationId: string, text: string): void {
@@ -683,7 +708,9 @@ export function runPlatform(): void {
         } else if (current.startsWith(text)) {
             next = current; // Stale/shorter snapshot, ignore
         } else {
-            // Delta-style fallback with boundary guard so words do not collapse (e.g. "ScholarsProve").
+            // Delta-style fallback with conservative boundary guard.
+            // Only inject a space when next chunk begins with uppercase (word boundary signal),
+            // to avoid corrupting lowercase continuations like "Glass" + "es" or "W" + "earing".
             const needsSpaceJoin =
                 current.length > 0 &&
                 text.length > 0 &&
@@ -692,7 +719,7 @@ export function runPlatform(): void {
                 !text.startsWith(' ') &&
                 !text.startsWith('\n') &&
                 /[A-Za-z0-9]$/.test(current) &&
-                /^[A-Za-z0-9]/.test(text);
+                /^[A-Z]/.test(text);
             next = needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
         }
         const capped = next.length > 16_000 ? `...${next.slice(-15_500)}` : next;
@@ -752,7 +779,14 @@ export function runPlatform(): void {
 
         const apiUrls = getFetchUrlCandidates(currentAdapter, conversationId);
         if (apiUrls.length === 0) {
-            setStreamProbePanel('stream-done: no api url candidates', `conversationId=${conversationId}`);
+            setStreamProbePanel(
+                'stream-done: no api url candidates',
+                withPreservedLiveMirrorSnapshot(
+                    conversationId,
+                    'stream-done: no api url candidates',
+                    `conversationId=${conversationId}`,
+                ),
+            );
             logger.warn('Stream done probe has no URL candidates', {
                 platform: currentAdapter.name,
                 conversationId,
@@ -781,7 +815,14 @@ export function runPlatform(): void {
                 const body = extractResponseTextForProbe(parsed);
                 const normalizedBody = body.length > 0 ? body : '(empty response text)';
                 if (lastStreamProbeKey === probeKey) {
-                    setStreamProbePanel('stream-done: fetched full text', normalizedBody);
+                    setStreamProbePanel(
+                        'stream-done: fetched full text',
+                        withPreservedLiveMirrorSnapshot(
+                            conversationId,
+                            'stream-done: fetched full text',
+                            normalizedBody,
+                        ),
+                    );
                 }
                 logger.info('Stream done probe success', {
                     platform: currentAdapter.name,
@@ -800,11 +841,18 @@ export function runPlatform(): void {
             if (cached && isConversationReady(cached)) {
                 const cachedText = extractResponseTextForProbe(cached);
                 const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
-                setStreamProbePanel('stream-done: using captured cache', body);
+                setStreamProbePanel(
+                    'stream-done: using captured cache',
+                    withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: using captured cache', body),
+                );
             } else {
                 setStreamProbePanel(
                     'stream-done: awaiting canonical capture',
-                    `Conversation stream completed for ${conversationId}. Waiting for canonical capture.`,
+                    withPreservedLiveMirrorSnapshot(
+                        conversationId,
+                        'stream-done: awaiting canonical capture',
+                        `Conversation stream completed for ${conversationId}. Waiting for canonical capture.`,
+                    ),
                 );
             }
         }
