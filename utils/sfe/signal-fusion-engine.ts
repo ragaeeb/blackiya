@@ -239,7 +239,16 @@ export class SignalFusionEngine {
                 updatedAtMs: this.now(),
             };
         }
-        return this.ensureResolution(descriptor, []);
+
+        const existingResolution = this.resolutions.get(attemptId);
+        if (
+            existingResolution &&
+            existingResolution.phase === descriptor.phase &&
+            existingResolution.updatedAtMs >= descriptor.updatedAtMs
+        ) {
+            return existingResolution;
+        }
+        return this.ensureResolution(descriptor, existingResolution?.blockingConditions ?? []);
     }
 
     public resolveByConversation(conversationId: string): CaptureResolution | null {
@@ -247,7 +256,17 @@ export class SignalFusionEngine {
         if (active.length === 0) {
             return null;
         }
-        return this.ensureResolution(active[0], []);
+        const descriptor = active[0];
+        const attemptId = descriptor.attemptId;
+        const existingResolution = this.resolutions.get(attemptId);
+        if (
+            existingResolution &&
+            existingResolution.phase === descriptor.phase &&
+            existingResolution.updatedAtMs >= descriptor.updatedAtMs
+        ) {
+            return existingResolution;
+        }
+        return this.ensureResolution(descriptor, existingResolution?.blockingConditions ?? []);
     }
 
     public dispose(attemptId: string): CaptureResolution {

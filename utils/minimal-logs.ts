@@ -95,6 +95,11 @@ function isCriticalLine(line: string): boolean {
         line.includes('Attempt binding created') ||
         line.includes('Attempt superseded by newer prompt') ||
         line.includes('Capture reached ready state') ||
+        line.includes('readiness_timeout_manual_only') ||
+        line.includes('snapshot_degraded_mode_used') ||
+        line.includes('attempt_alias_forwarded') ||
+        line.includes('late_signal_dropped_after_dispose') ||
+        line.includes('force_save_degraded_export') ||
         line.includes('Awaiting canonical stabilization before ready') ||
         line.includes('Stream done probe canceled') ||
         line.includes('response finished hint') ||

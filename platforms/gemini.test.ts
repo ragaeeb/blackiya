@@ -179,4 +179,115 @@ describe('Gemini Platform Adapter', () => {
             expect(convResult?.title).toBe(expectedTitle);
         });
     });
+
+    describe('evaluateReadiness', () => {
+        it('returns not-ready for thoughts-only assistant payloads', () => {
+            const readiness = geminiAdapter.evaluateReadiness?.({
+                title: 'Gemini Conversation',
+                create_time: 1,
+                update_time: 2,
+                conversation_id: 'abc123',
+                current_node: 'assistant-1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gemini-pro',
+                safe_urls: [],
+                blocked_urls: [],
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: 'Gemini', metadata: {} },
+                            create_time: 1,
+                            update_time: 2,
+                            content: {
+                                content_type: 'thoughts',
+                                thoughts: [{ summary: 'Thinking', content: 'Draft', chunks: [], finished: true }],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+            });
+
+            expect(readiness?.ready).toBe(false);
+            expect(readiness?.reason).toBe('assistant-text-missing');
+        });
+
+        it('returns ready for terminal assistant text payloads', () => {
+            const readiness = geminiAdapter.evaluateReadiness?.({
+                title: 'Gemini Conversation',
+                create_time: 1,
+                update_time: 3,
+                conversation_id: 'abc123',
+                current_node: 'assistant-2',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gemini-pro',
+                safe_urls: [],
+                blocked_urls: [],
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: ['assistant-2'],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: 'Gemini', metadata: {} },
+                            create_time: 1,
+                            update_time: 2,
+                            content: {
+                                content_type: 'thoughts',
+                                thoughts: [{ summary: 'Thinking', content: 'Draft', chunks: [], finished: true }],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                    'assistant-2': {
+                        id: 'assistant-2',
+                        parent: 'assistant-1',
+                        children: [],
+                        message: {
+                            id: 'assistant-2',
+                            author: { role: 'assistant', name: 'Gemini', metadata: {} },
+                            create_time: 2,
+                            update_time: 3,
+                            content: { content_type: 'text', parts: ['Final answer'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+            });
+
+            expect(readiness?.ready).toBe(true);
+            expect(readiness?.terminal).toBe(true);
+            expect(readiness?.contentHash).not.toBeNull();
+        });
+    });
 });

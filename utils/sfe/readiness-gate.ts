@@ -7,6 +7,7 @@ interface ReadinessGateOptions {
 
 interface SampleState {
     firstSeenAtMs: number;
+    stabilizationStartedAtMs: number;
     lastSeenAtMs: number;
     contentHash: string;
     terminal: boolean;
@@ -49,6 +50,7 @@ export class ReadinessGate {
         if (!existing) {
             this.samples.set(attemptId, {
                 firstSeenAtMs: timestampMs,
+                stabilizationStartedAtMs: timestampMs,
                 lastSeenAtMs: timestampMs,
                 contentHash: readiness.contentHash,
                 terminal: readiness.terminal,
@@ -61,12 +63,17 @@ export class ReadinessGate {
         if (existing.contentHash !== readiness.contentHash) {
             this.samples.set(attemptId, {
                 firstSeenAtMs: timestampMs,
+                stabilizationStartedAtMs: existing.stabilizationStartedAtMs,
                 lastSeenAtMs: timestampMs,
                 contentHash: readiness.contentHash,
                 terminal: readiness.terminal,
                 textLength: readiness.latestAssistantTextLength,
             });
             blocking.push('content_hash_changed');
+            if (timestampMs - existing.stabilizationStartedAtMs > this.maxStabilizationWaitMs) {
+                blocking.push('stabilization_timeout');
+                return { ready: false, blockingConditions: blocking };
+            }
             blocking.push('awaiting_second_sample');
             return { ready: false, blockingConditions: blocking };
         }
@@ -76,12 +83,12 @@ export class ReadinessGate {
         existing.textLength = readiness.latestAssistantTextLength;
 
         const stableMs = timestampMs - existing.firstSeenAtMs;
+        const totalWaitMs = timestampMs - existing.stabilizationStartedAtMs;
         if (stableMs < this.minStableMs) {
-            blocking.push('stability_window_not_elapsed');
-            return { ready: false, blockingConditions: blocking };
-        }
-
-        if (stableMs > this.maxStabilizationWaitMs) {
+            if (totalWaitMs > this.maxStabilizationWaitMs) {
+                blocking.push('stabilization_timeout');
+                return { ready: false, blockingConditions: blocking };
+            }
             blocking.push('stability_window_not_elapsed');
             return { ready: false, blockingConditions: blocking };
         }

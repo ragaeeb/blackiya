@@ -17,14 +17,15 @@ import { buildCommonExport } from '@/utils/common-export';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { downloadAsJSON } from '@/utils/download';
+import { hashText } from '@/utils/hash';
 import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
 import {
     type AttemptDisposedMessage,
-    buildLegacyAttemptId,
     type ConversationIdResolvedMessage,
+    createAttemptId,
     type ResponseFinishedMessage,
     type ResponseLifecycleMessage,
     type StreamDeltaMessage,
@@ -32,8 +33,9 @@ import {
     type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
-import type { LifecyclePhase, PlatformReadiness } from '@/utils/sfe/types';
+import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 import { ButtonManager } from '@/utils/ui/button-manager';
 
@@ -46,10 +48,12 @@ type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page
 type CalibrationMode = 'manual' | 'auto';
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
-const SFE_SHADOW_ENABLED = true;
 const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
 const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
-const CANONICAL_STABILIZATION_LEGACY_FALLBACK_MS = 3200;
+const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
+const MAX_CONVERSATION_ATTEMPTS = 250;
+const MAX_STREAM_PREVIEWS = 150;
+const MAX_AUTOCAPTURE_KEYS = 400;
 
 export function buildCalibrationOrderForMode(
     preferredStep: CalibrationStep | null,
@@ -107,15 +111,6 @@ function normalizeContentText(text: string): string {
     return text.trim().normalize('NFC');
 }
 
-function hashText(value: string): string {
-    let hash = 0;
-    for (let i = 0; i < value.length; i++) {
-        hash = (hash << 5) - hash + value.charCodeAt(i);
-        hash |= 0;
-    }
-    return `${hash}`;
-}
-
 export function runPlatform(): void {
     let currentAdapter: LLMPlatform | null = null;
     let currentConversationId: string | null = null;
@@ -141,14 +136,79 @@ export function runPlatform(): void {
     let rememberedCalibrationUpdatedAt: string | null = null;
     let calibrationPreferenceLoaded = false;
     let calibrationPreferenceLoading: Promise<void> | null = null;
+    let sfeEnabled = true;
+    let probeLeaseEnabled = false;
     const autoCaptureAttempts = new Map<string, number>();
     const autoCaptureRetryTimers = new Map<string, number>();
     const autoCaptureDeferredLogged = new Set<string>();
     const warmFetchInFlight = new Map<string, Promise<boolean>>();
-    const sfe = new SignalFusionEngine();
+    const sfe = new SignalFusionEngine({
+        readinessGate: new ReadinessGate({
+            maxStabilizationWaitMs: SFE_STABILIZATION_MAX_WAIT_MS,
+        }),
+    });
     const structuredLogger = new StructuredAttemptLogger();
     const attemptByConversation = new Map<string, string>();
+    const attemptAliasForward = new Map<string, string>();
+    const captureMetaByConversation = new Map<string, ExportMeta>();
     let activeAttemptId: string | null = null;
+
+    function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number): void {
+        if (map.has(key)) {
+            map.delete(key);
+        }
+        map.set(key, value);
+        while (map.size > maxEntries) {
+            const oldest = map.keys().next().value as K | undefined;
+            if (oldest === undefined) {
+                break;
+            }
+            map.delete(oldest);
+        }
+    }
+
+    function addBoundedSetValue<T>(set: Set<T>, value: T, maxEntries: number): void {
+        if (set.has(value)) {
+            return;
+        }
+        set.add(value);
+        while (set.size > maxEntries) {
+            const oldest = set.values().next().value as T | undefined;
+            if (oldest === undefined) {
+                break;
+            }
+            set.delete(oldest);
+        }
+    }
+
+    function resolveAliasedAttemptId(attemptId: string): string {
+        let resolved = attemptId;
+        const visited = new Set<string>();
+        while (attemptAliasForward.has(resolved) && !visited.has(resolved)) {
+            visited.add(resolved);
+            const next = attemptAliasForward.get(resolved);
+            if (!next) {
+                break;
+            }
+            resolved = next;
+        }
+        return resolved;
+    }
+
+    function forwardAttemptAlias(fromAttemptId: string, toAttemptId: string, reason: 'superseded' | 'rebound'): void {
+        if (fromAttemptId === toAttemptId) {
+            return;
+        }
+        setBoundedMapValue(attemptAliasForward, fromAttemptId, toAttemptId, MAX_CONVERSATION_ATTEMPTS * 2);
+        structuredLogger.emit(
+            toAttemptId,
+            'info',
+            'attempt_alias_forwarded',
+            'Forwarded stale attempt alias to active attempt',
+            { fromAttemptId, toAttemptId, reason },
+            `attempt-alias:${fromAttemptId}:${toAttemptId}:${reason}`,
+        );
+    }
 
     // -- Manager Initialization --
 
@@ -162,7 +222,40 @@ export function runPlatform(): void {
             activeAttemptId = meta.attemptId;
             bindAttempt(capturedId, meta.attemptId);
         }
-        ingestSfeCanonicalSample(data, meta?.attemptId);
+        const source = meta?.source ?? 'network';
+        const isSnapshotSource = source.includes('snapshot') || source.includes('dom');
+        if (isSnapshotSource) {
+            setBoundedMapValue(
+                captureMetaByConversation,
+                capturedId,
+                {
+                    captureSource: 'dom_snapshot_degraded',
+                    fidelity: 'degraded',
+                    completeness: 'partial',
+                },
+                MAX_CONVERSATION_ATTEMPTS,
+            );
+            structuredLogger.emit(
+                resolveAttemptId(capturedId),
+                'info',
+                'snapshot_degraded_mode_used',
+                'Snapshot-based capture marked as degraded/manual-only',
+                { conversationId: capturedId, source },
+                `snapshot-degraded:${capturedId}:${source}`,
+            );
+        } else {
+            setBoundedMapValue(
+                captureMetaByConversation,
+                capturedId,
+                {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                MAX_CONVERSATION_ATTEMPTS,
+            );
+            ingestSfeCanonicalSample(data, meta?.attemptId);
+        }
         refreshButtonState(capturedId);
         if (evaluateReadinessForData(data).ready) {
             handleResponseFinished('network', capturedId);
@@ -194,14 +287,16 @@ export function runPlatform(): void {
         if (conversationId) {
             const mapped = attemptByConversation.get(conversationId);
             if (mapped) {
-                return mapped;
+                return resolveAliasedAttemptId(mapped);
             }
         }
         if (activeAttemptId) {
-            return activeAttemptId;
+            return resolveAliasedAttemptId(activeAttemptId);
         }
-        const platformName = currentAdapter?.name ?? 'Unknown';
-        return buildLegacyAttemptId(platformName, conversationId);
+        const prefix = (currentAdapter?.name ?? 'attempt').toLowerCase().replace(/\s+/g, '-');
+        const created = createAttemptId(prefix);
+        activeAttemptId = created;
+        return created;
     }
 
     function bindAttempt(conversationId: string | undefined, attemptId: string): void {
@@ -211,12 +306,14 @@ export function runPlatform(): void {
         const isNewBinding = !attemptByConversation.has(conversationId);
         const previous = attemptByConversation.get(conversationId);
         if (previous && previous !== attemptId) {
-            sfe.getAttemptTracker().markSuperseded(previous, attemptId);
-            cancelStreamDoneProbe(previous, 'superseded');
-            clearCanonicalStabilizationRetry(previous);
-            emitAttemptDisposed(previous, 'superseded');
+            const canonicalPrevious = resolveAliasedAttemptId(previous);
+            sfe.getAttemptTracker().markSuperseded(canonicalPrevious, attemptId);
+            cancelStreamDoneProbe(canonicalPrevious, 'superseded');
+            clearCanonicalStabilizationRetry(canonicalPrevious);
+            emitAttemptDisposed(canonicalPrevious, 'superseded');
+            forwardAttemptAlias(previous, attemptId, 'superseded');
             structuredLogger.emit(
-                previous,
+                canonicalPrevious,
                 'info',
                 'attempt_superseded',
                 'Attempt superseded by newer prompt',
@@ -224,7 +321,7 @@ export function runPlatform(): void {
                 `supersede:${conversationId}:${attemptId}`,
             );
         }
-        attemptByConversation.set(conversationId, attemptId);
+        setBoundedMapValue(attemptByConversation, conversationId, attemptId, MAX_CONVERSATION_ATTEMPTS);
         if (isNewBinding || previous !== attemptId) {
             structuredLogger.emit(
                 attemptId,
@@ -247,12 +344,25 @@ export function runPlatform(): void {
         conversationId: string | undefined,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
     ): boolean {
-        if (isAttemptDisposedOrSuperseded(attemptId)) {
+        const canonicalAttemptId = resolveAliasedAttemptId(attemptId);
+
+        if (canonicalAttemptId !== attemptId) {
             structuredLogger.emit(
-                attemptId,
+                canonicalAttemptId,
                 'debug',
-                'stale_signal_ignored',
-                'Ignored stale attempt signal',
+                'attempt_alias_forwarded',
+                'Resolved stale attempt alias before processing signal',
+                { signalType, originalAttemptId: attemptId, canonicalAttemptId, conversationId: conversationId ?? null },
+                `attempt-alias-resolve:${signalType}:${attemptId}:${canonicalAttemptId}`,
+            );
+        }
+
+        if (isAttemptDisposedOrSuperseded(canonicalAttemptId)) {
+            structuredLogger.emit(
+                canonicalAttemptId,
+                'debug',
+                'late_signal_dropped_after_dispose',
+                'Dropped late signal for disposed or superseded attempt',
                 { signalType, reason: 'disposed_or_superseded', conversationId: conversationId ?? null },
                 `stale:${signalType}:${conversationId ?? 'unknown'}:disposed`,
             );
@@ -261,14 +371,15 @@ export function runPlatform(): void {
 
         if (conversationId) {
             const mapped = attemptByConversation.get(conversationId);
-            if (mapped && mapped !== attemptId) {
+            const canonicalMapped = mapped ? resolveAliasedAttemptId(mapped) : null;
+            if (canonicalMapped && canonicalMapped !== canonicalAttemptId) {
                 structuredLogger.emit(
-                    attemptId,
+                    canonicalAttemptId,
                     'debug',
                     'stale_signal_ignored',
                     'Ignored stale attempt signal',
-                    { signalType, reason: 'conversation_mismatch', conversationId, activeAttemptId: mapped },
-                    `stale:${signalType}:${conversationId}:${mapped}`,
+                    { signalType, reason: 'conversation_mismatch', conversationId, activeAttemptId: canonicalMapped },
+                    `stale:${signalType}:${conversationId}:${canonicalMapped}`,
                 );
                 return true;
             }
@@ -391,7 +502,7 @@ export function runPlatform(): void {
     }
 
     function ingestSfeLifecycle(phase: LifecyclePhase, attemptId: string, conversationId?: string | null): void {
-        if (!SFE_SHADOW_ENABLED) {
+        if (!sfeEnabled) {
             return;
         }
         const resolution = sfe.ingestSignal({
@@ -426,7 +537,7 @@ export function runPlatform(): void {
     }
 
     function ingestSfeCanonicalSample(data: ConversationData, attemptId?: string): void {
-        if (!SFE_SHADOW_ENABLED) {
+        if (!sfeEnabled) {
             return;
         }
         const conversationId = data.conversation_id;
@@ -456,7 +567,8 @@ export function runPlatform(): void {
             `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
         );
 
-        if (!resolution.ready && resolution.reason === 'awaiting_stabilization') {
+        const hitStabilizationTimeout = resolution.blockingConditions.includes('stabilization_timeout');
+        if (!resolution.ready && resolution.reason === 'awaiting_stabilization' && !hitStabilizationTimeout) {
             scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
             structuredLogger.emit(
                 effectiveAttemptId,
@@ -466,6 +578,9 @@ export function runPlatform(): void {
                 { conversationId, phase: resolution.phase },
                 `awaiting-stabilization:${conversationId}:${readiness.contentHash ?? 'none'}`,
             );
+        }
+        if (hitStabilizationTimeout) {
+            clearCanonicalStabilizationRetry(effectiveAttemptId);
         }
         if (resolution.ready) {
             clearCanonicalStabilizationRetry(effectiveAttemptId);
@@ -487,7 +602,7 @@ export function runPlatform(): void {
     }
 
     function logSfeMismatchIfNeeded(conversationId: string, legacyReady: boolean): void {
-        if (!SFE_SHADOW_ENABLED) {
+        if (!sfeEnabled) {
             return;
         }
         const attemptId = resolveAttemptId(conversationId);
@@ -539,6 +654,22 @@ export function runPlatform(): void {
             streamDumpEnabled = false;
         }
         emitStreamDumpConfig();
+    }
+
+    async function loadSfeSettings(): Promise<void> {
+        try {
+            const result = await browser.storage.local.get([STORAGE_KEYS.SFE_ENABLED, STORAGE_KEYS.PROBE_LEASE_ENABLED]);
+            sfeEnabled = result[STORAGE_KEYS.SFE_ENABLED] !== false;
+            probeLeaseEnabled = result[STORAGE_KEYS.PROBE_LEASE_ENABLED] === true;
+            logger.info('SFE settings loaded', {
+                sfeEnabled,
+                probeLeaseEnabled,
+            });
+        } catch (error) {
+            logger.warn('Failed to load SFE settings. Falling back to defaults.', error);
+            sfeEnabled = true;
+            probeLeaseEnabled = false;
+        }
     }
 
     async function loadCalibrationPreference(platformName: string): Promise<void> {
@@ -736,7 +867,12 @@ export function runPlatform(): void {
             return primaryBody;
         }
 
-        preservedLiveStreamSnapshotByConversation.set(conversationId, liveSnapshot);
+        setBoundedMapValue(
+            preservedLiveStreamSnapshotByConversation,
+            conversationId,
+            liveSnapshot,
+            MAX_STREAM_PREVIEWS,
+        );
         const normalizedPrimary = primaryBody.trim();
         const normalizedLive = liveSnapshot.trim();
         if (normalizedPrimary.length > 0 && normalizedPrimary === normalizedLive) {
@@ -791,7 +927,7 @@ export function runPlatform(): void {
             next = needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
         }
         const capped = next.length > 16_000 ? `...${next.slice(-15_500)}` : next;
-        liveStreamPreviewByConversation.set(conversationId, capped);
+        setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
         setStreamProbePanel('stream: live mirror', capped);
     }
 
@@ -907,8 +1043,12 @@ export function runPlatform(): void {
                 const cachedText = cached ? extractResponseTextForProbe(cached) : '';
                 const body = cachedText.length > 0 ? cachedText : '(captured via snapshot fallback)';
                 setStreamProbePanel(
-                    'stream-done: canonical capture ready',
-                    withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: canonical capture ready', body),
+                    'stream-done: degraded snapshot captured',
+                    withPreservedLiveMirrorSnapshot(
+                        conversationId,
+                        'stream-done: degraded snapshot captured',
+                        `${body}\n\nManual Force Save required (potentially incomplete).`,
+                    ),
                 );
                 streamProbeControllers.delete(attemptId);
                 return;
@@ -986,11 +1126,11 @@ export function runPlatform(): void {
                     const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
                     const snapshotBody = snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
                     setStreamProbePanel(
-                        'stream-done: canonical capture ready',
+                        'stream-done: degraded snapshot captured',
                         withPreservedLiveMirrorSnapshot(
                             conversationId,
-                            'stream-done: canonical capture ready',
-                            snapshotBody,
+                            'stream-done: degraded snapshot captured',
+                            `${snapshotBody}\n\nManual Force Save required (potentially incomplete).`,
                         ),
                     );
                     streamProbeControllers.delete(attemptId);
@@ -1026,20 +1166,53 @@ export function runPlatform(): void {
         }
     }
 
-    async function buildExportPayload(data: ConversationData): Promise<unknown> {
+    function attachExportMeta(payload: unknown, meta: ExportMeta): unknown {
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return payload;
+        }
+        const payloadRecord = payload as Record<string, unknown>;
+        const existingMeta =
+            payloadRecord.__blackiya && typeof payloadRecord.__blackiya === 'object'
+                ? (payloadRecord.__blackiya as Record<string, unknown>)
+                : {};
+        return {
+            ...payloadRecord,
+            __blackiya: {
+                ...existingMeta,
+                exportMeta: meta,
+            },
+        };
+    }
+
+    async function buildExportPayload(data: ConversationData, meta: ExportMeta): Promise<unknown> {
         const format = await getExportFormat();
-        return buildExportPayloadForFormat(data, format);
+        const payload = buildExportPayloadForFormat(data, format);
+        return attachExportMeta(payload, meta);
     }
 
     async function handleSaveClick(): Promise<void> {
         if (!currentAdapter) {
             return;
         }
-        const data = await getConversationData();
+        const conversationId = currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+        const decision = conversationId ? resolveReadinessDecision(conversationId) : null;
+        const allowDegraded = decision?.mode === 'degraded_manual_only';
+
+        if (allowDegraded) {
+            const confirmed =
+                typeof window.confirm === 'function'
+                    ? window.confirm('Force Save may export partial data because canonical capture timed out. Continue?')
+                    : true;
+            if (!confirmed) {
+                return;
+            }
+        }
+
+        const data = await getConversationData({ allowDegraded });
         if (!data) {
             return;
         }
-        await saveConversation(data);
+        await saveConversation(data, { allowDegraded });
     }
 
     async function handleCopyClick(): Promise<void> {
@@ -1052,7 +1225,7 @@ export function runPlatform(): void {
         }
 
         try {
-            const exportPayload = await buildExportPayload(data);
+            const exportPayload = await buildExportPayload(data, getCaptureMeta(data.conversation_id));
             await navigator.clipboard.writeText(JSON.stringify(exportPayload, null, 2));
             logger.info('Copied conversation to clipboard');
             buttonManager.setSuccess('copy');
@@ -1858,7 +2031,7 @@ export function runPlatform(): void {
         logger.warn('Calibration capture failed after retries', { conversationId });
     }
 
-    async function getConversationData(options: { silent?: boolean } = {}) {
+    async function getConversationData(options: { silent?: boolean; allowDegraded?: boolean } = {}) {
         if (!currentAdapter) {
             return null;
         }
@@ -1884,15 +2057,21 @@ export function runPlatform(): void {
         }
 
         const shouldBlockForGeneration = currentAdapter.name === 'ChatGPT';
-        const readiness = evaluateReadinessForData(data);
-        if (!readiness.ready || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
+        const decision = resolveReadinessDecision(conversationId);
+        const allowDegraded = options.allowDegraded === true;
+        const canExportNow = decision.mode === 'canonical_ready' || (allowDegraded && decision.mode === 'degraded_manual_only');
+        if (!canExportNow || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
             logger.warn('Conversation is still generating; export blocked until completion.', {
                 conversationId,
                 platform: currentAdapter.name,
-                reason: readiness.reason,
+                reason: decision.reason,
             });
             if (!options.silent) {
-                alert('Response is still generating. Please wait for completion, then try again.');
+                alert(
+                    decision.mode === 'degraded_manual_only'
+                        ? 'Canonical capture timed out. Use Force Save to export potentially incomplete data.'
+                        : 'Response is still generating. Please wait for completion, then try again.',
+                );
             }
             return null;
         }
@@ -1906,7 +2085,7 @@ export function runPlatform(): void {
         }
     }
 
-    async function saveConversation(data: ConversationData): Promise<boolean> {
+    async function saveConversation(data: ConversationData, options: { allowDegraded?: boolean } = {}): Promise<boolean> {
         if (!currentAdapter) {
             return false;
         }
@@ -1917,9 +2096,28 @@ export function runPlatform(): void {
 
         try {
             const filename = currentAdapter.formatFilename(data);
-            const exportPayload = await buildExportPayload(data);
+            const exportMeta: ExportMeta =
+                options.allowDegraded === true
+                    ? {
+                          captureSource: 'dom_snapshot_degraded',
+                          fidelity: 'degraded',
+                          completeness: 'partial',
+                      }
+                    : getCaptureMeta(data.conversation_id);
+            const exportPayload = await buildExportPayload(data, exportMeta);
             downloadAsJSON(exportPayload, filename);
             logger.info(`Saved conversation: ${filename}.json`);
+            if (options.allowDegraded === true) {
+                const attemptId = resolveAttemptId(data.conversation_id);
+                structuredLogger.emit(
+                    attemptId,
+                    'warn',
+                    'force_save_degraded_export',
+                    'Degraded manual export forced by user',
+                    { conversationId: data.conversation_id },
+                    `force-save-degraded:${data.conversation_id}`,
+                );
+            }
             if (buttonManager.exists()) {
                 buttonManager.setSuccess('save');
             }
@@ -2044,16 +2242,26 @@ export function runPlatform(): void {
         if (cached) {
             ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
         }
-        buttonManager.setReadinessSource('sfe');
-        const hasData = isConversationReadyForActions(conversationId);
+        const decision = resolveReadinessDecision(conversationId);
+        buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
+        const isCanonicalReady = decision.mode === 'canonical_ready';
+        const isDegraded = decision.mode === 'degraded_manual_only';
+        const hasData = isCanonicalReady || isDegraded;
+
+        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
+        if (isDegraded) {
+            buttonManager.setButtonEnabled('save', true);
+            buttonManager.setButtonEnabled('copy', false);
+        } else {
+            buttonManager.setActionButtonsEnabled(isCanonicalReady);
+        }
         const opacity = hasData ? '1' : '0.6';
-        buttonManager.setActionButtonsEnabled(hasData);
         buttonManager.setOpacity(opacity);
         logButtonStateIfChanged(conversationId, hasData, opacity);
-        if (hasData && calibrationState !== 'capturing') {
+        if (isCanonicalReady && calibrationState !== 'capturing') {
             calibrationState = 'success';
             syncCalibrationButtonDisplay();
-        } else if (!hasData && calibrationState === 'success') {
+        } else if (!isCanonicalReady && calibrationState === 'success') {
             calibrationState = 'idle';
             syncCalibrationButtonDisplay();
         }
@@ -2069,13 +2277,12 @@ export function runPlatform(): void {
             if (!buttonManager.exists()) {
                 return;
             }
-            const hasData = isConversationReadyForActions(conversationId);
-            if (hasData) {
-                buttonManager.setActionButtonsEnabled(true);
-                buttonManager.setOpacity('1');
-                logButtonStateIfChanged(conversationId, true, '1');
+            const decision = resolveReadinessDecision(conversationId);
+            if (decision.mode === 'canonical_ready' || decision.mode === 'degraded_manual_only') {
+                refreshButtonState(conversationId);
                 return;
             }
+            buttonManager.setSaveButtonMode('default');
             buttonManager.setActionButtonsEnabled(false);
             if (attempts < maxAttempts) {
                 setTimeout(tick, intervalMs);
@@ -2169,48 +2376,73 @@ export function runPlatform(): void {
         return false;
     }
 
-    function isConversationReadyForActions(conversationId: string): boolean {
+    function resolveReadinessDecision(conversationId: string): ReadinessDecision {
         const data = interceptionManager.getConversation(conversationId);
-        let legacyReady = false;
-        if (data && evaluateReadinessForData(data).ready) {
-            legacyReady = !(currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter));
+        if (!data) {
+            return {
+                ready: false,
+                mode: 'awaiting_stabilization',
+                reason: 'no_canonical_data',
+            };
         }
 
-        logSfeMismatchIfNeeded(conversationId, legacyReady);
+        const readiness = evaluateReadinessForData(data);
+        const generating = currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter);
+        const captureMeta = getCaptureMeta(conversationId);
 
-        const sfeReady = resolveSfeReady(conversationId);
-        if (sfeReady) {
+        if (!sfeEnabled) {
+            const ready = readiness.ready && !generating;
+            return {
+                ready,
+                mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
+                reason: ready ? 'legacy_ready' : readiness.reason,
+            };
+        }
+
+        const sfeResolution = sfe.resolveByConversation(conversationId);
+        const sfeReady = !!sfeResolution?.ready;
+        logSfeMismatchIfNeeded(conversationId, readiness.ready && !generating);
+        if (sfeReady && readiness.ready && !generating && captureMeta.fidelity === 'high') {
+            return {
+                ready: true,
+                mode: 'canonical_ready',
+                reason: 'canonical_ready',
+            };
+        }
+
+        const hasTimeout = sfeResolution?.blockingConditions.includes('stabilization_timeout') === true;
+        if (captureMeta.fidelity === 'degraded' || hasTimeout) {
+            const attemptId = resolveAttemptId(conversationId);
+            if (hasTimeout) {
+                structuredLogger.emit(
+                    attemptId,
+                    'warn',
+                    'readiness_timeout_manual_only',
+                    'Stabilization timed out; manual force save required',
+                    { conversationId },
+                    `readiness-timeout:${conversationId}`,
+                );
+            }
+            return {
+                ready: false,
+                mode: 'degraded_manual_only',
+                reason: hasTimeout ? 'stabilization_timeout' : 'snapshot_degraded_capture',
+            };
+        }
+
+        return {
+            ready: false,
+            mode: 'awaiting_stabilization',
+            reason: sfeResolution?.reason ?? readiness.reason,
+        };
+    }
+
+    function isConversationReadyForActions(conversationId: string, options: { includeDegraded?: boolean } = {}): boolean {
+        const decision = resolveReadinessDecision(conversationId);
+        if (decision.mode === 'canonical_ready') {
             return true;
         }
-
-        if (!legacyReady) {
-            return false;
-        }
-
-        const attemptId = attemptByConversation.get(conversationId);
-        if (!attemptId) {
-            return legacyReady;
-        }
-
-        const startedAt = canonicalStabilizationStartedAt.get(attemptId);
-        if (!startedAt) {
-            return false;
-        }
-
-        const elapsedMs = Date.now() - startedAt;
-        if (elapsedMs < CANONICAL_STABILIZATION_LEGACY_FALLBACK_MS) {
-            return false;
-        }
-
-        structuredLogger.emit(
-            attemptId,
-            'warn',
-            'canonical_stabilization_fallback_ready',
-            'Using legacy-ready fallback after stabilization timeout',
-            { conversationId, elapsedMs },
-            `canonical-fallback:${conversationId}:${Math.floor(elapsedMs / 1000)}`,
-        );
-        return true;
+        return options.includeDegraded === true && decision.mode === 'degraded_manual_only';
     }
 
     function resolveActiveConversationId(hintedConversationId?: string): string | null {
@@ -2221,6 +2453,18 @@ export function runPlatform(): void {
             return currentConversationId;
         }
         return currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+    }
+
+    function getCaptureMeta(conversationId: string): ExportMeta {
+        const stored = captureMetaByConversation.get(conversationId);
+        if (stored) {
+            return stored;
+        }
+        return {
+            captureSource: 'canonical_api',
+            fidelity: 'high',
+            completeness: 'complete',
+        };
     }
 
     function shouldProcessFinishedSignal(conversationId: string | null): boolean {
@@ -2235,11 +2479,15 @@ export function runPlatform(): void {
     }
 
     function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation'): void {
-        if (!currentAdapter || calibrationState !== 'idle' || isConversationReadyForActions(conversationId)) {
+        if (
+            !currentAdapter ||
+            calibrationState !== 'idle' ||
+            isConversationReadyForActions(conversationId, { includeDegraded: true })
+        ) {
             return;
         }
 
-        const attemptKey = `${currentAdapter.name}:${conversationId}`;
+        const attemptKey = resolveAttemptId(conversationId);
         const shouldDeferWhileGenerating = currentAdapter.name === 'ChatGPT';
         if (shouldDeferWhileGenerating && isPlatformGenerating(currentAdapter)) {
             if (!autoCaptureRetryTimers.has(attemptKey)) {
@@ -2249,7 +2497,7 @@ export function runPlatform(): void {
                         conversationId,
                         reason,
                     });
-                    autoCaptureDeferredLogged.add(attemptKey);
+                    addBoundedSetValue(autoCaptureDeferredLogged, attemptKey, MAX_AUTOCAPTURE_KEYS);
                 }
                 const timerId = window.setTimeout(() => {
                     autoCaptureRetryTimers.delete(attemptKey);
@@ -2266,10 +2514,14 @@ export function runPlatform(): void {
         if (now - lastAttempt < 12000) {
             return;
         }
-        autoCaptureAttempts.set(attemptKey, now);
+        setBoundedMapValue(autoCaptureAttempts, attemptKey, now, MAX_AUTOCAPTURE_KEYS);
 
         const run = () => {
-            if (!currentAdapter || calibrationState !== 'idle' || isConversationReadyForActions(conversationId)) {
+            if (
+                !currentAdapter ||
+                calibrationState !== 'idle' ||
+                isConversationReadyForActions(conversationId, { includeDegraded: true })
+            ) {
                 return;
             }
             if (!rememberedPreferredStep) {
@@ -2370,7 +2622,7 @@ export function runPlatform(): void {
         }
         const typed = message as ResponseFinishedMessage;
         const hintedConversationId = typeof message.conversationId === 'string' ? message.conversationId : undefined;
-        const attemptId = typed.attemptId;
+        const attemptId = resolveAliasedAttemptId(typed.attemptId);
         if (isStaleAttemptMessage(attemptId, hintedConversationId, 'finished')) {
             return true;
         }
@@ -2394,7 +2646,7 @@ export function runPlatform(): void {
         const phase = typed.phase;
         const platform = typed.platform;
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
-        const attemptId = typed.attemptId;
+        const attemptId = resolveAliasedAttemptId(typed.attemptId);
         if (isStaleAttemptMessage(attemptId, conversationId, 'lifecycle')) {
             return true;
         }
@@ -2428,7 +2680,7 @@ export function runPlatform(): void {
 
         if ((phase === 'prompt-sent' || phase === 'streaming') && conversationId) {
             if (!liveStreamPreviewByConversation.has(conversationId)) {
-                liveStreamPreviewByConversation.set(conversationId, '');
+                setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
                 setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
             }
         }
@@ -2466,7 +2718,7 @@ export function runPlatform(): void {
                 ? message.conversationId
                 : currentConversationId;
         const typed = message as StreamDeltaMessage;
-        const attemptId = typed.attemptId;
+        const attemptId = resolveAliasedAttemptId(typed.attemptId);
         if (isStaleAttemptMessage(attemptId, conversationId ?? undefined, 'delta')) {
             return true;
         }
@@ -2527,13 +2779,17 @@ export function runPlatform(): void {
         if (typeof typed.attemptId !== 'string' || typeof typed.conversationId !== 'string') {
             return false;
         }
-        if (isStaleAttemptMessage(typed.attemptId, typed.conversationId, 'conversation-resolved')) {
+        const canonicalAttemptId = resolveAliasedAttemptId(typed.attemptId);
+        if (canonicalAttemptId !== typed.attemptId) {
+            forwardAttemptAlias(typed.attemptId, canonicalAttemptId, 'rebound');
+        }
+        if (isStaleAttemptMessage(canonicalAttemptId, typed.conversationId, 'conversation-resolved')) {
             return true;
         }
 
-        activeAttemptId = typed.attemptId;
-        bindAttempt(typed.conversationId, typed.attemptId);
-        sfe.getAttemptTracker().updateConversationId(typed.attemptId, typed.conversationId);
+        activeAttemptId = canonicalAttemptId;
+        bindAttempt(typed.conversationId, canonicalAttemptId);
+        sfe.getAttemptTracker().updateConversationId(canonicalAttemptId, typed.conversationId);
         return true;
     }
 
@@ -2545,15 +2801,16 @@ export function runPlatform(): void {
         if (typeof typed.attemptId !== 'string') {
             return false;
         }
-        cancelStreamDoneProbe(typed.attemptId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
-        clearCanonicalStabilizationRetry(typed.attemptId);
-        sfe.dispose(typed.attemptId);
+        const attemptId = resolveAliasedAttemptId(typed.attemptId);
+        cancelStreamDoneProbe(attemptId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
+        clearCanonicalStabilizationRetry(attemptId);
+        sfe.dispose(attemptId);
         for (const [conversationId, attemptId] of attemptByConversation.entries()) {
-            if (attemptId === typed.attemptId) {
+            if (attemptId === typed.attemptId || attemptId === resolveAliasedAttemptId(typed.attemptId)) {
                 attemptByConversation.delete(conversationId);
             }
         }
-        if (activeAttemptId === typed.attemptId) {
+        if (activeAttemptId === attemptId || activeAttemptId === typed.attemptId) {
             activeAttemptId = null;
         }
         return true;
@@ -2689,6 +2946,7 @@ export function runPlatform(): void {
     // Update managers with initial adapter
     updateManagers();
     void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    void loadSfeSettings();
     void loadStreamDumpSetting();
 
     const storageChangeListener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
@@ -2698,6 +2956,13 @@ export function runPlatform(): void {
         if (changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
             streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
             emitStreamDumpConfig();
+        }
+        if (changes[STORAGE_KEYS.SFE_ENABLED]) {
+            sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
+            refreshButtonState(currentConversationId ?? undefined);
+        }
+        if (changes[STORAGE_KEYS.PROBE_LEASE_ENABLED]) {
+            probeLeaseEnabled = changes[STORAGE_KEYS.PROBE_LEASE_ENABLED]?.newValue === true;
         }
         if (changes[STORAGE_KEYS.CALIBRATION_PROFILES] && currentAdapter) {
             calibrationPreferenceLoaded = false;

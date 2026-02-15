@@ -34,6 +34,15 @@ mock.module('@/utils/download', () => ({
     downloadAsJSON: () => {},
 }));
 
+mock.module('@/utils/logger', () => ({
+    logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+    },
+}));
+
 // Mock wxt/browser explicitly for this test file to prevent logger errors
 const browserMock = {
     storage: {
@@ -75,6 +84,7 @@ describe('Platform Runner', () => {
         delete (window as any).location;
         (window as any).location = locationMock;
         (global as any).alert = () => {};
+        (global as any).confirm = () => true;
     });
 
     afterEach(() => {
@@ -667,7 +677,7 @@ describe('Platform Runner', () => {
         expect(saveAfter?.disabled).toBe(false);
     });
 
-    it('should enable Save via legacy fallback when canonical hash never stabilizes', async () => {
+    it('should enter degraded manual-only mode when canonical hash never stabilizes', async () => {
         let readinessCounter = 0;
         currentAdapterMock = {
             ...createMockAdapter(),
@@ -755,9 +765,12 @@ describe('Platform Runner', () => {
         const saveEarly = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveEarly?.disabled).toBe(true);
 
-        await new Promise((resolve) => setTimeout(resolve, 3600));
+        await new Promise((resolve) => setTimeout(resolve, 4300));
         const saveFallback = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        const copyFallback = document.getElementById('blackiya-copy-btn') as HTMLButtonElement | null;
         expect(saveFallback?.disabled).toBe(false);
+        expect(saveFallback?.textContent).toContain('Force Save');
+        expect(copyFallback?.disabled).toBe(true);
     });
 
     it('should keep Save disabled for ChatGPT thoughts-only captures even after fallback window', async () => {
@@ -1019,12 +1032,13 @@ describe('Platform Runner', () => {
                 window.location.origin,
             );
 
-            await new Promise((resolve) => setTimeout(resolve, 1600));
+            await new Promise((resolve) => setTimeout(resolve, 1700));
             const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(saveButton?.disabled).toBe(false);
+            expect(saveButton?.textContent).toContain('Force Save');
 
             const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-            expect(panelText).toContain('stream-done: canonical capture ready');
+            expect(panelText).toContain('stream-done: degraded snapshot captured');
             expect(panelText).toContain('Final answer from snapshot');
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as EventListener);
@@ -1180,6 +1194,9 @@ describe('Platform Runner', () => {
             source: window,
         });
         window.dispatchEvent(message);
+        await new Promise((resolve) => setTimeout(resolve, 950));
+        window.dispatchEvent(message);
+        await new Promise((resolve) => setTimeout(resolve, 40));
 
         const responsePromise = new Promise<any>((resolve) => {
             const handler = (event: any) => {
@@ -1305,6 +1322,9 @@ describe('Platform Runner', () => {
             source: window,
         });
         window.dispatchEvent(message);
+        await new Promise((resolve) => setTimeout(resolve, 950));
+        window.dispatchEvent(message);
+        await new Promise((resolve) => setTimeout(resolve, 40));
 
         const responsePromise = new Promise<any>((resolve) => {
             const handler = (event: any) => {

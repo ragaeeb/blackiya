@@ -37,4 +37,19 @@ describe('AttemptTracker', () => {
         expect(disposed).toContain('a1');
         expect(disposed).not.toContain('a2');
     });
+
+    it('evicts completed attempts after TTL', () => {
+        let now = 1000;
+        const tracker = new AttemptTracker({
+            completedAttemptTtlMs: 200,
+            now: () => now,
+        });
+
+        tracker.create({ attemptId: 'a1', platform: 'ChatGPT', phase: 'captured_ready', timestampMs: now });
+        expect(tracker.get('a1')).toBeDefined();
+
+        now = 1301;
+        tracker.create({ attemptId: 'a2', platform: 'ChatGPT', phase: 'prompt_sent', timestampMs: now });
+        expect(tracker.get('a1')).toBeUndefined();
+    });
 });

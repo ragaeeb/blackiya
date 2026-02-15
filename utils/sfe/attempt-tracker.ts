@@ -10,14 +10,28 @@ interface CreateAttemptInput {
     timestampMs?: number;
 }
 
+interface AttemptTrackerOptions {
+    maxEntries?: number;
+    completedAttemptTtlMs?: number;
+    now?: () => number;
+}
+
 export class AttemptTracker {
     private attempts = new Map<string, AttemptDescriptor>();
     private activeByConversation = new Map<string, string>();
+    private readonly maxEntries: number;
+    private readonly completedAttemptTtlMs: number;
+    private readonly now: () => number;
 
-    constructor(private readonly maxEntries = 500) {}
+    constructor(options: AttemptTrackerOptions = {}) {
+        this.maxEntries = options.maxEntries ?? 500;
+        this.completedAttemptTtlMs = options.completedAttemptTtlMs ?? 10 * 60 * 1000;
+        this.now = options.now ?? (() => Date.now());
+    }
 
     public create(input: CreateAttemptInput): AttemptDescriptor {
-        const now = input.timestampMs ?? Date.now();
+        const now = input.timestampMs ?? this.now();
+        this.cleanup(now);
         const attemptId = input.attemptId ?? createAttemptId(input.platform.toLowerCase());
         const existing = this.attempts.get(attemptId);
         if (existing) {
@@ -162,6 +176,44 @@ export class AttemptTracker {
         return [...this.attempts.values()];
     }
 
+    private isCompletedPhase(phase: LifecyclePhase): boolean {
+        return (
+            phase === 'captured_ready' ||
+            phase === 'error' ||
+            phase === 'terminated_partial' ||
+            phase === 'superseded' ||
+            phase === 'disposed'
+        );
+    }
+
+    private removeAttempt(attempt: AttemptDescriptor): void {
+        this.attempts.delete(attempt.attemptId);
+        if (attempt.conversationId && this.activeByConversation.get(attempt.conversationId) === attempt.attemptId) {
+            this.activeByConversation.delete(attempt.conversationId);
+        }
+    }
+
+    private cleanup(nowMs: number): void {
+        if (this.completedAttemptTtlMs <= 0) {
+            return;
+        }
+
+        const expired: AttemptDescriptor[] = [];
+        for (const attempt of this.attempts.values()) {
+            if (!this.isCompletedPhase(attempt.phase)) {
+                continue;
+            }
+            if (nowMs - attempt.updatedAtMs <= this.completedAttemptTtlMs) {
+                continue;
+            }
+            expired.push(attempt);
+        }
+
+        for (const attempt of expired) {
+            this.removeAttempt(attempt);
+        }
+    }
+
     private trim(): void {
         if (this.attempts.size <= this.maxEntries) {
             return;
@@ -169,22 +221,25 @@ export class AttemptTracker {
 
         const evictable = [...this.attempts.values()]
             .sort((a, b) => a.updatedAtMs - b.updatedAtMs)
-            .filter(
-                (attempt) =>
-                    attempt.disposed ||
-                    attempt.phase === 'superseded' ||
-                    attempt.phase === 'error' ||
-                    attempt.phase === 'terminated_partial',
-            );
+            .filter((attempt) => this.isCompletedPhase(attempt.phase));
 
         for (const attempt of evictable) {
             if (this.attempts.size <= this.maxEntries) {
                 return;
             }
-            this.attempts.delete(attempt.attemptId);
-            if (attempt.conversationId && this.activeByConversation.get(attempt.conversationId) === attempt.attemptId) {
-                this.activeByConversation.delete(attempt.conversationId);
+            this.removeAttempt(attempt);
+        }
+
+        if (this.attempts.size <= this.maxEntries) {
+            return;
+        }
+
+        const fallbackEviction = [...this.attempts.values()].sort((a, b) => a.updatedAtMs - b.updatedAtMs);
+        for (const attempt of fallbackEviction) {
+            if (this.attempts.size <= this.maxEntries) {
+                return;
             }
+            this.removeAttempt(attempt);
         }
     }
 }

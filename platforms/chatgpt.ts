@@ -9,6 +9,7 @@
 
 import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { hashText } from '@/utils/hash';
 import { logger } from '@/utils/logger';
 import type { ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
 
@@ -31,15 +32,6 @@ function normalizeText(value: unknown): string | null {
     }
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
-}
-
-function hashText(value: string): string {
-    let hash = 0;
-    for (let i = 0; i < value.length; i++) {
-        hash = (hash << 5) - hash + value.charCodeAt(i);
-        hash |= 0;
-    }
-    return `${hash}`;
 }
 
 function normalizeNumber(value: unknown): number | null {
@@ -606,11 +598,11 @@ function evaluateChatGPTReadiness(data: ConversationData): PlatformReadiness {
         };
     }
 
-    if (!finishedTextMessages.some((message) => message.end_turn === true)) {
+    if (latestFinishedText.end_turn !== true) {
         return {
             ready: false,
             terminal: true,
-            reason: 'assistant-text-not-terminal-turn',
+            reason: 'assistant-latest-text-not-terminal-turn',
             contentHash: null,
             latestAssistantTextLength: extractAssistantText(latestFinishedText).length,
         };

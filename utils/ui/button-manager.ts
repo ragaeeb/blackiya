@@ -11,6 +11,7 @@ export class ButtonManager {
     private saveStartButton: HTMLButtonElement | null = null;
     private copyButton: HTMLButtonElement | null = null;
     private calibrateButton: HTMLButtonElement | null = null;
+    private saveButtonMode: 'default' | 'force-degraded' = 'default';
     private isFixedPosition = false;
     private onSaveClick: () => Promise<void>;
     private onCopyClick: () => Promise<void>;
@@ -101,12 +102,7 @@ export class ButtonManager {
             activeBtn.appendChild(textSpan);
             activeBtn.style.opacity = '0.8';
         } else {
-            const icon = this.createIconSVG(action);
-            const textSpan = document.createElement('span');
-            textSpan.textContent = action === 'save' ? 'Save JSON' : 'Copy';
-            activeBtn.appendChild(icon);
-            activeBtn.appendChild(textSpan);
-            activeBtn.style.opacity = '1';
+            this.renderDefaultButton(action);
         }
     }
 
@@ -126,6 +122,19 @@ export class ButtonManager {
         if (this.copyButton) {
             this.copyButton.disabled = !enabled;
         }
+    }
+
+    public setButtonEnabled(action: 'save' | 'copy', enabled: boolean): void {
+        const target = action === 'save' ? this.saveStartButton : this.copyButton;
+        if (!target) {
+            return;
+        }
+        target.disabled = !enabled;
+    }
+
+    public setSaveButtonMode(mode: 'default' | 'force-degraded'): void {
+        this.saveButtonMode = mode;
+        this.renderDefaultButton('save');
     }
 
     public setCalibrationState(
@@ -354,16 +363,38 @@ export class ButtonManager {
             if (activeBtn && otherBtn) {
                 activeBtn.disabled = false;
                 otherBtn.disabled = false;
-
-                activeBtn.replaceChildren();
-                const defaultIcon = this.createIconSVG(action);
-                const defaultText = document.createElement('span');
-                defaultText.textContent = action === 'save' ? 'Save JSON' : 'Copy';
-
-                activeBtn.appendChild(defaultIcon);
-                activeBtn.appendChild(defaultText);
+                this.renderDefaultButton(action);
+                this.renderDefaultButton(action === 'save' ? 'copy' : 'save');
             }
         }, 2000);
+    }
+
+    private getDefaultLabel(action: 'save' | 'copy'): string {
+        if (action === 'copy') {
+            return 'Copy';
+        }
+        return this.saveButtonMode === 'force-degraded' ? 'Force Save' : 'Save JSON';
+    }
+
+    private renderDefaultButton(action: 'save' | 'copy'): void {
+        const button = action === 'save' ? this.saveStartButton : this.copyButton;
+        if (!button) {
+            return;
+        }
+
+        button.replaceChildren();
+        const icon = this.createIconSVG(action);
+        const text = document.createElement('span');
+        text.textContent = this.getDefaultLabel(action);
+        button.appendChild(icon);
+        button.appendChild(text);
+        button.style.opacity = '1';
+        if (action === 'save') {
+            button.style.background =
+                this.saveButtonMode === 'force-degraded'
+                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                    : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+        }
     }
 
     private createIconSVG(iconType: 'save' | 'copy' | 'calibrate' | 'loading' | 'check'): SVGSVGElement {

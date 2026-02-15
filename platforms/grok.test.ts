@@ -650,3 +650,97 @@ describe('Grok Platform Adapter - ID Synchronization', () => {
         expect(result?.conversation_id.length).toBeGreaterThan(0);
     });
 });
+
+describe('Grok Platform Adapter - evaluateReadiness', () => {
+    let grokAdapter: any;
+
+    beforeAll(async () => {
+        const mod = await import('@/platforms/grok');
+        grokAdapter = mod.grokAdapter;
+    });
+
+    it('returns not-ready for partial assistant payloads', () => {
+        const readiness = grokAdapter.evaluateReadiness?.({
+            title: 'Grok Conversation',
+            create_time: 1,
+            update_time: 2,
+            conversation_id: '2013295304527827227',
+            current_node: 'assistant-1',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'grok-4',
+            safe_urls: [],
+            blocked_urls: [],
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                'assistant-1': {
+                    id: 'assistant-1',
+                    parent: 'root',
+                    children: [],
+                    message: {
+                        id: 'assistant-1',
+                        author: { role: 'assistant', name: 'Grok', metadata: {} },
+                        create_time: 1,
+                        update_time: 2,
+                        content: { content_type: 'text', parts: ['Partial text'] },
+                        status: 'in_progress',
+                        end_turn: false,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+            },
+        });
+
+        expect(readiness?.ready).toBe(false);
+        expect(readiness?.terminal).toBe(false);
+    });
+
+    it('returns ready for finished terminal assistant response', () => {
+        const readiness = grokAdapter.evaluateReadiness?.({
+            title: 'Grok Conversation',
+            create_time: 1,
+            update_time: 3,
+            conversation_id: '2013295304527827227',
+            current_node: 'assistant-2',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'grok-4',
+            safe_urls: [],
+            blocked_urls: [],
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['assistant-2'] },
+                'assistant-2': {
+                    id: 'assistant-2',
+                    parent: 'root',
+                    children: [],
+                    message: {
+                        id: 'assistant-2',
+                        author: { role: 'assistant', name: 'Grok', metadata: {} },
+                        create_time: 2,
+                        update_time: 3,
+                        content: { content_type: 'text', parts: ['Final answer'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+            },
+        });
+
+        expect(readiness?.ready).toBe(true);
+        expect(readiness?.terminal).toBe(true);
+        expect(readiness?.contentHash).not.toBeNull();
+    });
+});

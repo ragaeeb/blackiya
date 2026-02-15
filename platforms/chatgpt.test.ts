@@ -308,6 +308,67 @@ describe('ChatGPT Platform Adapter', () => {
             expect(readiness.reason).toBe('terminal');
             expect(readiness.contentHash).not.toBeNull();
         });
+
+        it('should require the latest assistant text turn to be terminal', () => {
+            const data = {
+                title: 'Test',
+                create_time: 1735689600,
+                update_time: 1735689603,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant-2',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: ['assistant-2'],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1735689601,
+                            update_time: 1735689601,
+                            content: { content_type: 'text', parts: ['Older complete turn'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                    'assistant-2': {
+                        id: 'assistant-2',
+                        parent: 'assistant-1',
+                        children: [],
+                        message: {
+                            id: 'assistant-2',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1735689603,
+                            update_time: 1735689603,
+                            content: { content_type: 'text', parts: ['Latest still not terminal'] },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+
+            const readiness = adapter.evaluateReadiness(data);
+            expect(readiness.ready).toBe(false);
+            expect(readiness.reason).toBe('assistant-latest-text-not-terminal-turn');
+        });
     });
 
     describe('formatFilename', () => {

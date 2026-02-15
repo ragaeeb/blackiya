@@ -1,4 +1,5 @@
 import type { ConversationData } from '@/utils/types';
+import type { PlatformReadiness } from '@/platforms/types';
 
 export type LifecyclePhase =
     | 'idle'
@@ -18,14 +19,7 @@ export type SignalSource =
     | 'canonical_fetch'
     | 'dom_hint'
     | 'snapshot_fallback';
-
-export interface PlatformReadiness {
-    ready: boolean;
-    terminal: boolean;
-    reason: string;
-    contentHash: string | null;
-    latestAssistantTextLength: number;
-}
+export type { PlatformReadiness } from '@/platforms/types';
 
 export interface FusionSignal {
     attemptId: string;
@@ -47,7 +41,8 @@ export interface FusionSignal {
             | 'canonical_not_terminal'
             | 'probe_timeout'
             | 'probe_canceled'
-            | 'legacy_message_path';
+            | 'legacy_message_path'
+            | 'stabilization_timeout';
     };
 }
 
@@ -56,10 +51,23 @@ export type BlockingCondition =
     | 'canonical_not_terminal'
     | 'awaiting_second_sample'
     | 'stability_window_not_elapsed'
+    | 'stabilization_timeout'
     | 'content_hash_changed'
     | 'generation_superseded'
     | 'disposed'
     | 'platform_generating';
+
+export interface ReadinessDecision {
+    ready: boolean;
+    mode: 'canonical_ready' | 'awaiting_stabilization' | 'degraded_manual_only';
+    reason: string;
+}
+
+export interface ExportMeta {
+    captureSource: 'canonical_api' | 'dom_snapshot_degraded';
+    fidelity: 'high' | 'degraded';
+    completeness: 'complete' | 'partial';
+}
 
 export interface CaptureResolution {
     attemptId: string;

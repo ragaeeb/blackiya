@@ -42,4 +42,17 @@ describe('ReadinessGate', () => {
         expect(changed.ready).toBe(false);
         expect(changed.blockingConditions).toContain('content_hash_changed');
     });
+
+    it('returns stabilization_timeout after max wait is exceeded', () => {
+        const gate = new ReadinessGate({ minStableMs: 1000, maxStabilizationWaitMs: 250 });
+        gate.evaluate('a1', READY_SAMPLE, 1000);
+        const changed = gate.evaluate('a1', { ...READY_SAMPLE, contentHash: 'hash-2' }, 1150);
+        expect(changed.ready).toBe(false);
+        expect(changed.blockingConditions).toContain('content_hash_changed');
+
+        const timedOut = gate.evaluate('a1', { ...READY_SAMPLE, contentHash: 'hash-3' }, 1301);
+        expect(timedOut.ready).toBe(false);
+        expect(timedOut.blockingConditions).toContain('stabilization_timeout');
+        expect(timedOut.blockingConditions).not.toContain('stability_window_not_elapsed');
+    });
 });
