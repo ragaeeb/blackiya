@@ -14,9 +14,6 @@ import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import {
     buildLegacyAttemptId,
-    isLegacyFinishedMessage,
-    isLegacyLifecycleMessage,
-    isLegacyStreamDeltaMessage,
     type AttemptDisposedMessage,
     type ConversationIdResolvedMessage,
     type ResponseFinishedMessage,
@@ -53,7 +50,6 @@ interface LegacyCalibrationProfile {
 
 type LegacyCalibrationProfilesStore = Record<string, LegacyCalibrationProfile>;
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
-const SFE_ENABLED = false;
 const SFE_SHADOW_ENABLED = true;
 
 export function buildCalibrationOrderForMode(
@@ -127,6 +123,7 @@ export function runPlatform(): void {
     let cleanupWindowBridge: (() => void) | null = null;
     let cleanupCompletionWatcher: (() => void) | null = null;
     let cleanupButtonHealthCheck: (() => void) | null = null;
+    const retryTimeoutIds: number[] = [];
     let lastButtonStateLog = '';
     let calibrationState: CalibrationUiState = 'idle';
     let lifecycleState: LifecycleUiState = 'idle';
@@ -1638,7 +1635,7 @@ export function runPlatform(): void {
         if (cached) {
             ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
         }
-        buttonManager.setReadinessSource(SFE_ENABLED ? 'sfe' : 'legacy');
+        buttonManager.setReadinessSource('sfe');
         const hasData = isConversationReadyForActions(conversationId);
         const opacity = hasData ? '1' : '0.6';
         buttonManager.setActionButtonsEnabled(hasData);
@@ -1772,9 +1769,6 @@ export function runPlatform(): void {
 
         logSfeMismatchIfNeeded(conversationId, legacyReady);
 
-        if (!SFE_ENABLED) {
-            return legacyReady;
-        }
         return resolveSfeReady(conversationId);
     }
 
@@ -1928,20 +1922,14 @@ export function runPlatform(): void {
 
     function handleResponseFinishedMessage(message: any): boolean {
         if (
-            !isLegacyFinishedMessage(message) &&
-            !(
-                (message as ResponseFinishedMessage | undefined)?.type === 'BLACKIYA_RESPONSE_FINISHED' &&
-                typeof (message as ResponseFinishedMessage).attemptId === 'string'
-            )
+            (message as ResponseFinishedMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_FINISHED' ||
+            typeof (message as ResponseFinishedMessage).attemptId !== 'string'
         ) {
             return false;
         }
         const typed = message as ResponseFinishedMessage;
         const hintedConversationId = typeof message.conversationId === 'string' ? message.conversationId : undefined;
-        const attemptId =
-            typeof typed.attemptId === 'string'
-                ? typed.attemptId
-                : buildLegacyAttemptId(typed.platform ?? currentAdapter?.name ?? 'Unknown', hintedConversationId);
+        const attemptId = typed.attemptId;
         activeAttemptId = attemptId;
         if (hintedConversationId) {
             bindAttempt(hintedConversationId, attemptId);
@@ -1952,11 +1940,8 @@ export function runPlatform(): void {
 
     function handleLifecycleMessage(message: any): boolean {
         if (
-            !isLegacyLifecycleMessage(message) &&
-            !(
-                (message as ResponseLifecycleMessage | undefined)?.type === 'BLACKIYA_RESPONSE_LIFECYCLE' &&
-                typeof (message as ResponseLifecycleMessage).attemptId === 'string'
-            )
+            (message as ResponseLifecycleMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_LIFECYCLE' ||
+            typeof (message as ResponseLifecycleMessage).attemptId !== 'string'
         ) {
             return false;
         }
@@ -1965,10 +1950,7 @@ export function runPlatform(): void {
         const phase = typed.phase;
         const platform = typed.platform;
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
-        const attemptId =
-            typeof typed.attemptId === 'string'
-                ? typed.attemptId
-                : buildLegacyAttemptId(platform ?? currentAdapter?.name ?? 'Unknown', conversationId);
+        const attemptId = typed.attemptId;
 
         if (conversationId) {
             currentConversationId = conversationId;
@@ -2018,11 +2000,8 @@ export function runPlatform(): void {
 
     function handleStreamDeltaMessage(message: any): boolean {
         if (
-            !isLegacyStreamDeltaMessage(message) &&
-            !(
-                (message as StreamDeltaMessage | undefined)?.type === 'BLACKIYA_STREAM_DELTA' &&
-                typeof (message as StreamDeltaMessage).attemptId === 'string'
-            )
+            (message as StreamDeltaMessage | undefined)?.type !== 'BLACKIYA_STREAM_DELTA' ||
+            typeof (message as StreamDeltaMessage).attemptId !== 'string'
         ) {
             return false;
         }
@@ -2045,10 +2024,7 @@ export function runPlatform(): void {
         }
 
         const typed = message as StreamDeltaMessage;
-        const attemptId =
-            typeof typed.attemptId === 'string'
-                ? typed.attemptId
-                : buildLegacyAttemptId(typed.platform ?? currentAdapter?.name ?? 'Unknown', conversationId);
+        const attemptId = typed.attemptId;
         activeAttemptId = attemptId;
         bindAttempt(conversationId, attemptId);
         appendLiveStreamProbeText(conversationId, text);
@@ -2253,11 +2229,12 @@ export function runPlatform(): void {
     // Retry logic for initial load (sometimes SPA takes time to render header)
     const retryIntervals = [1000, 2000, 5000];
     for (const delay of retryIntervals) {
-        setTimeout(() => {
+        const timeoutId = window.setTimeout(() => {
             if (!buttonManager.exists()) {
                 injectSaveButton();
             }
         }, delay);
+        retryTimeoutIds.push(timeoutId);
     }
 
     // Cleanup on unload
@@ -2278,6 +2255,10 @@ export function runPlatform(): void {
                 clearTimeout(timerId);
             }
             autoCaptureRetryTimers.clear();
+            for (const timeoutId of retryTimeoutIds) {
+                clearTimeout(timeoutId);
+            }
+            retryTimeoutIds.length = 0;
             autoCaptureDeferredLogged.clear();
         } catch (error) {
             logger.debug('Error during cleanup:', error);

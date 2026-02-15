@@ -176,8 +176,8 @@ describe('Platform Runner', () => {
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
+                attemptId: 'attempt:test-1',
                 phase: 'prompt-sent',
-                source: 'network',
                 conversationId: '123',
             },
             window.location.origin,
@@ -189,8 +189,8 @@ describe('Platform Runner', () => {
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
+                attemptId: 'attempt:test-1',
                 phase: 'streaming',
-                source: 'network',
                 conversationId: '123',
             },
             window.location.origin,
@@ -202,8 +202,8 @@ describe('Platform Runner', () => {
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
+                attemptId: 'attempt:test-1',
                 phase: 'completed',
-                source: 'network',
                 conversationId: '123',
             },
             window.location.origin,
@@ -221,6 +221,7 @@ describe('Platform Runner', () => {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
                 source: 'network',
+                attemptId: 'attempt:test-2',
                 conversationId: '123',
                 text: 'Hello ',
             },
@@ -231,6 +232,7 @@ describe('Platform Runner', () => {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
                 source: 'network',
+                attemptId: 'attempt:test-2',
                 conversationId: '123',
                 text: 'world',
             },
@@ -242,6 +244,22 @@ describe('Platform Runner', () => {
         expect(panel).not.toBeNull();
         expect(panel?.textContent).toContain('stream: live mirror');
         expect(panel?.textContent).toContain('Hello world');
+    });
+
+    it('should default to SFE readiness source', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const container = document.getElementById('blackiya-button-container');
+        expect(container?.getAttribute('data-readiness-source')).toBe('sfe');
+    });
+
+    it('should keep SFE readiness source enabled', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const container = document.getElementById('blackiya-button-container');
+        expect(container?.getAttribute('data-readiness-source')).toBe('sfe');
     });
 
     it('should process typed lifecycle messages that include attemptId', async () => {
@@ -270,7 +288,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
 
         const saveBtn = document.getElementById('blackiya-save-btn');
-        expect(saveBtn).toBeNull();
+        expect(saveBtn === null).toBe(true);
     });
 
     it('should respond with cached conversation JSON for window bridge request', async () => {
