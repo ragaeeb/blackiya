@@ -18,6 +18,21 @@ describe('protocol/messages', () => {
                 phase: 'prompt-sent',
             }),
         ).toBe(true);
+        expect(
+            isBlackiyaMessage({
+                type: 'BLACKIYA_STREAM_DUMP_CONFIG',
+                enabled: true,
+            }),
+        ).toBe(true);
+        expect(
+            isBlackiyaMessage({
+                type: 'BLACKIYA_STREAM_DUMP_FRAME',
+                platform: 'ChatGPT',
+                attemptId: 'a-1',
+                kind: 'snapshot',
+                text: 'hello',
+            }),
+        ).toBe(true);
     });
 
     it('recognizes legacy lifecycle messages', () => {

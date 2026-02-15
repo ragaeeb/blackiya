@@ -50,7 +50,10 @@ function normalizeSignalSources(value: unknown): SignalSource[] {
     if (!Array.isArray(value)) {
         return ['dom_hint', 'snapshot_fallback'];
     }
-    const normalized = value.filter((source): source is SignalSource => typeof source === 'string' && ALLOWED_SOURCE_SET.has(source as SignalSource));
+    const normalized = value.filter(
+        (source): source is SignalSource =>
+            typeof source === 'string' && ALLOWED_SOURCE_SET.has(source as SignalSource),
+    );
     return Array.from(new Set(normalized));
 }
 
@@ -117,7 +120,10 @@ function strategyDefaults(strategy: CalibrationStrategy): CalibrationProfileV2 {
     };
 }
 
-export function buildDefaultCalibrationProfile(platform: string, strategy: CalibrationStrategy = 'conservative'): CalibrationProfileV2 {
+export function buildDefaultCalibrationProfile(
+    platform: string,
+    strategy: CalibrationStrategy = 'conservative',
+): CalibrationProfileV2 {
     const defaults = strategyDefaults(strategy);
     return {
         ...defaults,
@@ -131,9 +137,10 @@ export function validateCalibrationProfileV2(input: unknown, platform: string): 
         return buildDefaultCalibrationProfile(platform, 'conservative');
     }
 
-    const strategy = typeof input.strategy === 'string' && ALLOWED_STRATEGY_SET.has(input.strategy as CalibrationStrategy)
-        ? (input.strategy as CalibrationStrategy)
-        : 'conservative';
+    const strategy =
+        typeof input.strategy === 'string' && ALLOWED_STRATEGY_SET.has(input.strategy as CalibrationStrategy)
+            ? (input.strategy as CalibrationStrategy)
+            : 'conservative';
 
     const defaults = buildDefaultCalibrationProfile(platform, strategy);
 

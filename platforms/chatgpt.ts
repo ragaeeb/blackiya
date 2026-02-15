@@ -491,6 +491,31 @@ function buildConversationFromSsePayload(payloads: unknown[]): ConversationData 
     };
 }
 
+function deriveTitleFromFirstUserMessage(mapping: Record<string, MessageNode>): string {
+    const userMessage = Object.values(mapping)
+        .map((node) => node.message)
+        .find((message) => !!message && message.author.role === 'user');
+    if (!userMessage) {
+        return '';
+    }
+
+    const parts = userMessage.content.parts ?? [];
+    const raw = parts
+        .filter((part) => typeof part === 'string')
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!raw) {
+        return '';
+    }
+
+    const maxLength = 80;
+    if (raw.length <= maxLength) {
+        return raw;
+    }
+    return `${raw.slice(0, maxLength - 3).trim()}...`;
+}
+
 /**
  * Create a ChatGPT Platform Adapter instance.
  *
@@ -635,7 +660,11 @@ export const createChatGPTAdapter = (): LLMPlatform => {
         formatFilename(data: ConversationData): string {
             let title = data.title || '';
 
-            // If no title, use a default with part of conversation ID
+            if (!title.trim()) {
+                title = deriveTitleFromFirstUserMessage(data.mapping);
+            }
+
+            // If still no title, use a default with part of conversation ID
             if (!title.trim()) {
                 title = `conversation_${data.conversation_id.slice(0, 8)}`;
             }

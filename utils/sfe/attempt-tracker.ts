@@ -64,7 +64,11 @@ export class AttemptTracker {
         return [attempt];
     }
 
-    public updateConversationId(attemptId: string, conversationId: string, timestampMs = Date.now()): AttemptDescriptor | null {
+    public updateConversationId(
+        attemptId: string,
+        conversationId: string,
+        timestampMs = Date.now(),
+    ): AttemptDescriptor | null {
         const descriptor = this.attempts.get(attemptId);
         if (!descriptor || descriptor.disposed) {
             return null;
@@ -91,7 +95,11 @@ export class AttemptTracker {
         return descriptor;
     }
 
-    public markSuperseded(attemptId: string, supersededByAttemptId: string, timestampMs = Date.now()): AttemptDescriptor | null {
+    public markSuperseded(
+        attemptId: string,
+        supersededByAttemptId: string,
+        timestampMs = Date.now(),
+    ): AttemptDescriptor | null {
         const descriptor = this.attempts.get(attemptId);
         if (!descriptor || descriptor.disposed) {
             return null;
@@ -161,11 +169,12 @@ export class AttemptTracker {
 
         const evictable = [...this.attempts.values()]
             .sort((a, b) => a.updatedAtMs - b.updatedAtMs)
-            .filter((attempt) =>
-                attempt.disposed ||
-                attempt.phase === 'superseded' ||
-                attempt.phase === 'error' ||
-                attempt.phase === 'terminated_partial',
+            .filter(
+                (attempt) =>
+                    attempt.disposed ||
+                    attempt.phase === 'superseded' ||
+                    attempt.phase === 'error' ||
+                    attempt.phase === 'terminated_partial',
             );
 
         for (const attempt of evictable) {

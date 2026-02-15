@@ -288,6 +288,38 @@ describe('Platform Runner', () => {
         expect(panel?.textContent).toContain('Hello world');
     });
 
+    it('should preserve word boundaries when concatenating stream deltas', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-spacing',
+                conversationId: '123',
+                text: 'How Do Scholars',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-spacing',
+                conversationId: '123',
+                text: 'Prove',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('How Do Scholars Prove');
+    });
+
     it('should default to SFE readiness source', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -321,6 +353,166 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should not show parse-failure toast when stream probe cannot parse payload', async () => {
+        const originalFetch = (globalThis as any).fetch;
+        try {
+            (globalThis as any).fetch = async () => ({
+                ok: true,
+                text: async () => '{"not":"conversation"}',
+            });
+
+            currentAdapterMock = {
+                ...createMockAdapter(),
+                name: 'ChatGPT',
+                buildApiUrls: () => ['https://test.com/backend-api/conversation/123'],
+                parseInterceptedData: () => null,
+            };
+
+            runPlatform();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:probe-fail',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 40));
+
+            const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+            expect(panelText.includes('Could not parse conversation payload')).toBe(false);
+        } finally {
+            (globalThis as any).fetch = originalFetch;
+        }
+    });
+
+    it('should replace awaiting canonical probe toast once canonical capture becomes ready', async () => {
+        const originalFetch = (globalThis as any).fetch;
+        try {
+            (globalThis as any).fetch = async () => ({
+                ok: true,
+                text: async () => '{"not":"conversation"}',
+            });
+
+            currentAdapterMock = {
+                ...createMockAdapter(),
+                name: 'ChatGPT',
+                buildApiUrls: () => ['https://test.com/backend-api/conversation/123'],
+                parseInterceptedData: () => null,
+            };
+
+            runPlatform();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:probe-await',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 40));
+
+            const panelBeforeCanonical = document.getElementById('blackiya-stream-probe');
+            expect(panelBeforeCanonical).not.toBeNull();
+            if (panelBeforeCanonical) {
+                panelBeforeCanonical.textContent =
+                    '[Blackiya Stream Probe] stream-done: awaiting canonical capture @ 1:23:45 AM\n\nConversation stream completed for 123. Waiting for canonical capture.';
+            }
+
+            currentAdapterMock.parseInterceptedData = () => ({
+                title: 'Probe Conversation',
+                create_time: 1_700_000_000,
+                update_time: 1_700_000_100,
+                conversation_id: '123',
+                current_node: 'node-2',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt',
+                safe_urls: [],
+                blocked_urls: [],
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['node-1'] },
+                    'node-1': {
+                        id: 'node-1',
+                        message: {
+                            id: 'node-1',
+                            author: { role: 'user', name: 'User', metadata: {} },
+                            create_time: 1_700_000_010,
+                            update_time: 1_700_000_010,
+                            content: { content_type: 'text', parts: ['Prompt'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'root',
+                        children: ['node-2'],
+                    },
+                    'node-2': {
+                        id: 'node-2',
+                        message: {
+                            id: 'node-2',
+                            author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                            create_time: 1_700_000_020,
+                            update_time: 1_700_000_020,
+                            content: { content_type: 'text', parts: ['Final answer from cache'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'node-1',
+                        children: [],
+                    },
+                },
+            });
+
+            window.postMessage(
+                {
+                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                    url: 'https://test.com/backend-api/conversation/123',
+                    data: '{"ok":true}',
+                    attemptId: 'attempt:probe-await',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 950));
+
+            window.postMessage(
+                {
+                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                    url: 'https://test.com/backend-api/conversation/123',
+                    data: '{"ok":true}',
+                    attemptId: 'attempt:probe-await',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 40));
+
+            const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+            expect(panelText).toContain('stream-done: canonical capture ready');
+            expect(panelText).toContain('Final answer from cache');
+            expect(panelText.includes('stream-done: awaiting canonical capture')).toBe(false);
+        } finally {
+            (globalThis as any).fetch = originalFetch;
+        }
     });
 
     it('should ignore disposed attempt lifecycle messages', async () => {

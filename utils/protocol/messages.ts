@@ -38,6 +38,23 @@ export interface AttemptDisposedMessage {
     reason: 'navigation' | 'superseded' | 'timeout' | 'teardown';
 }
 
+export interface StreamDumpConfigMessage {
+    type: 'BLACKIYA_STREAM_DUMP_CONFIG';
+    enabled: boolean;
+}
+
+export interface StreamDumpFrameMessage {
+    type: 'BLACKIYA_STREAM_DUMP_FRAME';
+    platform: string;
+    attemptId: string;
+    conversationId?: string;
+    kind: 'snapshot' | 'heuristic' | 'delta' | 'lifecycle';
+    text: string;
+    chunkBytes?: number;
+    frameIndex?: number;
+    timestampMs?: number;
+}
+
 export interface CaptureInterceptedMessage {
     type: 'LLM_CAPTURE_DATA_INTERCEPTED';
     platform: string;
@@ -62,6 +79,8 @@ export type BlackiyaMessage =
     | StreamDeltaMessage
     | ConversationIdResolvedMessage
     | AttemptDisposedMessage
+    | StreamDumpConfigMessage
+    | StreamDumpFrameMessage
     | CaptureInterceptedMessage
     | LogEntryMessage;
 
@@ -93,6 +112,15 @@ export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
             return hasString(value.platform) && hasString(value.attemptId) && hasString(value.conversationId);
         case 'BLACKIYA_ATTEMPT_DISPOSED':
             return hasString(value.attemptId) && hasString(value.reason);
+        case 'BLACKIYA_STREAM_DUMP_CONFIG':
+            return typeof value.enabled === 'boolean';
+        case 'BLACKIYA_STREAM_DUMP_FRAME':
+            return (
+                hasString(value.platform) &&
+                hasString(value.attemptId) &&
+                hasString(value.kind) &&
+                typeof value.text === 'string'
+            );
         case 'LLM_CAPTURE_DATA_INTERCEPTED':
             return hasString(value.platform) && hasString(value.url) && typeof value.data === 'string';
         case 'LLM_LOG_ENTRY':

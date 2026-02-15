@@ -1,4 +1,4 @@
-import { logger, type LogLevel } from '@/utils/logger';
+import { type LogLevel, logger } from '@/utils/logger';
 
 interface AttemptBudgetState {
     debug: number;

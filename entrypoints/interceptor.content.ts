@@ -2,16 +2,6 @@ import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
-import {
-    createAttemptId,
-    type AttemptDisposedMessage,
-    type CaptureInterceptedMessage as CapturePayload,
-    type ConversationIdResolvedMessage,
-    type LogEntryMessage as InterceptorLogPayload,
-    type ResponseFinishedMessage as ResponseFinishedSignal,
-    type ResponseLifecycleMessage as ResponseLifecycleSignal,
-    type StreamDeltaMessage as ResponseStreamDeltaSignal,
-} from '@/utils/protocol/messages';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import {
     extractForwardableHeadersFromFetchArgs,
@@ -19,6 +9,18 @@ import {
     mergeHeaderRecords,
     toForwardableHeaderRecord,
 } from '@/utils/proactive-fetch-headers';
+import {
+    type AttemptDisposedMessage,
+    type CaptureInterceptedMessage as CapturePayload,
+    type ConversationIdResolvedMessage,
+    createAttemptId,
+    type LogEntryMessage as InterceptorLogPayload,
+    type ResponseFinishedMessage as ResponseFinishedSignal,
+    type ResponseLifecycleMessage as ResponseLifecycleSignal,
+    type StreamDeltaMessage as ResponseStreamDeltaSignal,
+    type StreamDumpConfigMessage,
+    type StreamDumpFrameMessage,
+} from '@/utils/protocol/messages';
 
 interface RawCaptureSnapshot {
     __blackiyaSnapshotType: 'raw-capture';
@@ -27,7 +29,6 @@ interface RawCaptureSnapshot {
     platform: string;
     conversationId?: string;
 }
-
 
 interface PageSnapshotRequest {
     type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST';
@@ -50,7 +51,10 @@ const lifecycleSignalCache = new Map<string, number>();
 const attemptByConversationId = new Map<string, string>();
 const conversationResolvedSignalCache = new Map<string, number>();
 const disposedAttemptIds = new Set<string>();
+const streamDumpFrameCountByAttempt = new Map<string, number>();
+const streamDumpLastTextByAttempt = new Map<string, string>();
 let latestChatGptAttemptId: string | null = null;
+let streamDumpEnabled = false;
 
 function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
     // Keep page-console output for warnings/errors while avoiding info-level floods.
@@ -196,9 +200,17 @@ function resolveAttemptIdForConversation(conversationId?: string): string {
         }
     }
     if (latestChatGptAttemptId) {
+        if (conversationId) {
+            bindAttemptToConversation(latestChatGptAttemptId, conversationId);
+        }
         return latestChatGptAttemptId;
     }
-    return createAttemptId('chatgpt');
+    const created = createAttemptId('chatgpt');
+    latestChatGptAttemptId = created;
+    if (conversationId) {
+        bindAttemptToConversation(created, conversationId);
+    }
+    return created;
 }
 
 function emitConversationIdResolvedSignal(attemptId: string, conversationId: string): void {
@@ -297,7 +309,11 @@ function shouldEmitLifecycleSignal(phase: ResponseLifecycleSignal['phase'], conv
     return true;
 }
 
-function emitLifecycleSignal(attemptId: string, phase: ResponseLifecycleSignal['phase'], conversationId?: string): void {
+function emitLifecycleSignal(
+    attemptId: string,
+    phase: ResponseLifecycleSignal['phase'],
+    conversationId?: string,
+): void {
     if (!shouldEmitLifecycleSignal(phase, conversationId)) {
         return;
     }
@@ -323,7 +339,8 @@ function emitLifecycleSignal(attemptId: string, phase: ResponseLifecycleSignal['
 }
 
 function emitStreamDeltaSignal(attemptId: string, conversationId: string | undefined, text: string): void {
-    const trimmed = text.trim();
+    const normalized = text.replace(/\r\n/g, '\n');
+    const trimmed = normalized.trim();
     if (trimmed.length === 0 || /^v\d+$/i.test(trimmed)) {
         return;
     }
@@ -336,8 +353,49 @@ function emitStreamDeltaSignal(attemptId: string, conversationId: string | undef
         platform: chatGPTAdapter.name,
         attemptId,
         conversationId,
-        text: trimmed,
+        text: normalized,
     };
+    window.postMessage(payload, window.location.origin);
+}
+
+function emitStreamDumpFrame(
+    attemptId: string,
+    conversationId: string | undefined,
+    kind: StreamDumpFrameMessage['kind'],
+    text: string,
+    chunkBytes?: number,
+): void {
+    if (!streamDumpEnabled || isAttemptDisposed(attemptId)) {
+        return;
+    }
+
+    const normalized = text.replace(/\r\n/g, '\n');
+    const trimmed = normalized.trim();
+    if (trimmed.length === 0 || /^v\d+$/i.test(trimmed)) {
+        return;
+    }
+
+    const lastText = streamDumpLastTextByAttempt.get(attemptId);
+    if (lastText === normalized) {
+        return;
+    }
+    streamDumpLastTextByAttempt.set(attemptId, normalized);
+
+    const frameIndex = (streamDumpFrameCountByAttempt.get(attemptId) ?? 0) + 1;
+    streamDumpFrameCountByAttempt.set(attemptId, frameIndex);
+
+    const payload: StreamDumpFrameMessage = {
+        type: 'BLACKIYA_STREAM_DUMP_FRAME',
+        platform: chatGPTAdapter.name,
+        attemptId,
+        conversationId,
+        kind,
+        text: normalized,
+        frameIndex,
+        timestampMs: Date.now(),
+        ...(typeof chunkBytes === 'number' ? { chunkBytes } : {}),
+    };
+
     window.postMessage(payload, window.location.origin);
 }
 
@@ -444,7 +502,11 @@ function extractLikelyTextFromSsePayload(payload: string): string[] {
     }
 }
 
-async function monitorChatGptSseLifecycle(response: Response, attemptId: string, conversationId?: string): Promise<void> {
+async function monitorChatGptSseLifecycle(
+    response: Response,
+    attemptId: string,
+    conversationId?: string,
+): Promise<void> {
     if (!response.body) {
         return;
     }
@@ -525,6 +587,7 @@ async function monitorChatGptSseLifecycle(response: Response, attemptId: string,
                 if (snapshot && snapshot !== lastDelta) {
                     lastDelta = snapshot;
                     emitStreamDeltaSignal(attemptId, lifecycleConversationId, snapshot);
+                    emitStreamDumpFrame(attemptId, lifecycleConversationId, 'snapshot', snapshot, dataPayload.length);
                 }
 
                 if (!snapshot) {
@@ -535,6 +598,13 @@ async function monitorChatGptSseLifecycle(response: Response, attemptId: string,
                         }
                         lastDelta = candidate;
                         emitStreamDeltaSignal(attemptId, lifecycleConversationId, candidate);
+                        emitStreamDumpFrame(
+                            attemptId,
+                            lifecycleConversationId,
+                            'heuristic',
+                            candidate,
+                            dataPayload.length,
+                        );
                     }
                 }
 
@@ -1441,6 +1511,8 @@ export default defineContentScript({
                 }
 
                 disposedAttemptIds.add(message.attemptId);
+                streamDumpFrameCountByAttempt.delete(message.attemptId);
+                streamDumpLastTextByAttempt.delete(message.attemptId);
                 for (const [conversationId, attemptId] of attemptByConversationId.entries()) {
                     if (attemptId === message.attemptId) {
                         attemptByConversationId.delete(conversationId);
@@ -1448,8 +1520,25 @@ export default defineContentScript({
                 }
             };
 
+            const handleStreamDumpConfig = (event: MessageEvent) => {
+                if (event.source !== window || event.origin !== window.location.origin) {
+                    return;
+                }
+                const message = event.data as StreamDumpConfigMessage;
+                if (message?.type !== 'BLACKIYA_STREAM_DUMP_CONFIG' || typeof message.enabled !== 'boolean') {
+                    return;
+                }
+
+                streamDumpEnabled = message.enabled;
+                if (!streamDumpEnabled) {
+                    streamDumpFrameCountByAttempt.clear();
+                    streamDumpLastTextByAttempt.clear();
+                }
+            };
+
             window.addEventListener('message', handlePageSnapshotRequest);
             window.addEventListener('message', handleAttemptDisposed);
+            window.addEventListener('message', handleStreamDumpConfig);
 
             (window as any).__blackiya = {
                 getJSON: () => requestJson('original'),

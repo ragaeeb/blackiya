@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
+import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
@@ -12,21 +13,25 @@ function App() {
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
+    const [streamDumpEnabled, setStreamDumpEnabled] = useState<boolean>(false);
 
     useEffect(() => {
         // Load settings
-        browser.storage.local.get([STORAGE_KEYS.LOG_LEVEL, STORAGE_KEYS.EXPORT_FORMAT]).then((result) => {
-            const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
-            if (level) {
-                setLogLevel(level);
-                logger.setLevel(level);
-            }
+        browser.storage.local
+            .get([STORAGE_KEYS.LOG_LEVEL, STORAGE_KEYS.EXPORT_FORMAT, STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED])
+            .then((result) => {
+                const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
+                if (level) {
+                    setLogLevel(level);
+                    logger.setLevel(level);
+                }
 
-            const savedFormat = result[STORAGE_KEYS.EXPORT_FORMAT] as ExportFormat | undefined;
-            if (savedFormat === 'common' || savedFormat === 'original') {
-                setExportFormat(savedFormat);
-            }
-        });
+                const savedFormat = result[STORAGE_KEYS.EXPORT_FORMAT] as ExportFormat | undefined;
+                if (savedFormat === 'common' || savedFormat === 'original') {
+                    setExportFormat(savedFormat);
+                }
+                setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
+            });
 
         // Load log stats
         logsStorage.getLogs().then((logs) => {
@@ -50,6 +55,14 @@ function App() {
         setExportFormat(normalizedFormat);
         browser.storage.local.set({ [STORAGE_KEYS.EXPORT_FORMAT]: normalizedFormat });
         logger.info(`Export format changed to ${normalizedFormat}`);
+    };
+
+    const handleStreamDumpEnabledChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
+        const target = e.currentTarget as HTMLInputElement | null;
+        const enabled = target?.checked === true;
+        setStreamDumpEnabled(enabled);
+        browser.storage.local.set({ [STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]: enabled });
+        logger.info(`Stream dump diagnostics ${enabled ? 'enabled' : 'disabled'}`);
     };
 
     const handleExport = async () => {
@@ -95,6 +108,30 @@ function App() {
         }
     };
 
+    const handleExportStreamDump = async () => {
+        try {
+            const dump = await streamDumpStorage.getStore();
+            if (dump.sessions.length === 0) {
+                alert('No stream dump data to export.');
+                return;
+            }
+            const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+            downloadAsJSON(dump, `blackiya-stream-dump-${timestamp}`);
+            logger.info('Stream dump exported by user');
+        } catch (error) {
+            console.error('Failed to export stream dump', error);
+            logger.error('Failed to export stream dump', error);
+        }
+    };
+
+    const handleClearStreamDump = async () => {
+        if (!confirm('Clear saved stream dump diagnostics?')) {
+            return;
+        }
+        await streamDumpStorage.clearStore();
+        logger.info('Stream dump diagnostics cleared by user');
+    };
+
     return (
         <div>
             <div className="title">
@@ -130,6 +167,30 @@ function App() {
 
             <button type="button" className="primary" onClick={handleDebugExport}>
                 Export Debug Report (TXT)
+            </button>
+
+            <div className="section">
+                <label htmlFor="streamDumpEnabled">Diagnostics Stream Dump</label>
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                    Opt-in bounded capture of streaming frame text for forensic debugging.
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                    <input
+                        id="streamDumpEnabled"
+                        type="checkbox"
+                        checked={streamDumpEnabled}
+                        onChange={handleStreamDumpEnabledChange}
+                    />
+                    Enable stream dump capture
+                </label>
+            </div>
+
+            <button type="button" className="primary" onClick={handleExportStreamDump}>
+                Export Stream Dump (JSON)
+            </button>
+
+            <button type="button" className="secondary" onClick={handleClearStreamDump}>
+                Clear Stream Dump
             </button>
 
             <button type="button" className="secondary" onClick={handleClear}>

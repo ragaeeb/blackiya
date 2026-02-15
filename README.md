@@ -359,8 +359,14 @@ The JSON file contains:
 
 1. Click the extension icon to open the Popup UI.
 2. View current log count and adjust the **Log Level** (Debug/Info/Warn/Error).
-3. Click "Export Debug Logs" to download a JSON file containing internal extension logs.
-4. Useful for bug reporting and troubleshooting.
+3. Click **Export Full Logs (JSON)** to download the raw extension log buffer.
+4. Click **Export Debug Report (TXT)** for a token-lean troubleshooting summary.
+5. Optional forensic mode: enable **Diagnostics Stream Dump**, reproduce the issue, then click **Export Stream Dump (JSON)**.
+6. Stream dump capture is bounded and redacted, and is disabled by default.
+
+Debugging references:
+- `/Users/rhaq/workspace/blackiya/docs/debug-logs-guide.md`
+- `/Users/rhaq/workspace/blackiya/docs/discovery-mode.md`
 
 ## 🐛 Troubleshooting
 

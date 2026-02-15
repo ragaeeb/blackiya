@@ -2,11 +2,11 @@ import { AttemptTracker } from '@/utils/sfe/attempt-tracker';
 import { InMemoryProbeScheduler, type ProbeScheduler } from '@/utils/sfe/probe-scheduler';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import type {
+    AttemptDescriptor,
     CanonicalSample,
     CaptureResolution,
     FusionSignal,
     LifecyclePhase,
-    AttemptDescriptor,
 } from '@/utils/sfe/types';
 
 const TRANSITIONS: Record<LifecyclePhase, Partial<Record<LifecyclePhase, LifecyclePhase>>> = {
@@ -284,7 +284,10 @@ export class SignalFusionEngine {
         return this.tracker;
     }
 
-    private ensureResolution(descriptor: AttemptDescriptor, blocking: CaptureResolution['blockingConditions']): CaptureResolution {
+    private ensureResolution(
+        descriptor: AttemptDescriptor,
+        blocking: CaptureResolution['blockingConditions'],
+    ): CaptureResolution {
         const existing = this.resolutions.get(descriptor.attemptId) ?? buildDefaultResolution(descriptor);
         const next = resolutionFromPhase(descriptor, existing, blocking);
         this.resolutions.set(descriptor.attemptId, next);

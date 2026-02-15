@@ -542,6 +542,8 @@ The project uses **Semantic Release** via GitHub Actions.
 - `chrome://extensions/` → Inspect views → background page
 - `console.log()` in content scripts → Page console
 - `console.log()` in background → Service worker console
+- `/Users/rhaq/workspace/blackiya/docs/debug-logs-guide.md` (high-signal logging and export guidance)
+- `/Users/rhaq/workspace/blackiya/docs/discovery-mode.md` (endpoint drift/discovery workflow)
 
 ## 🧪 Testing Guidelines
 

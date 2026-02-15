@@ -10,6 +10,8 @@ export const STORAGE_KEYS = {
     LOG_LEVEL: 'userSettings.logLevel',
     EXPORT_FORMAT: 'userSettings.exportFormat',
     CALIBRATION_PROFILES: 'userSettings.calibrationProfiles',
+    DIAGNOSTICS_STREAM_DUMP_ENABLED: 'userSettings.diagnostics.streamDumpEnabled',
+    DIAGNOSTICS_STREAM_DUMP_STORE: 'diagnostics.streamDumpStore',
 } as const;
 
 export type ExportFormat = 'original' | 'common';

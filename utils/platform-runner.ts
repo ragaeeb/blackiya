@@ -12,22 +12,25 @@
 import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import { loadCalibrationProfileV2IfPresent, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
+import { buildCommonExport } from '@/utils/common-export';
+import { isConversationReady } from '@/utils/conversation-readiness';
+import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
+import { downloadAsJSON } from '@/utils/download';
+import { logger } from '@/utils/logger';
+import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
+import { InterceptionManager } from '@/utils/managers/interception-manager';
+import { NavigationManager } from '@/utils/managers/navigation-manager';
 import {
-    buildLegacyAttemptId,
     type AttemptDisposedMessage,
+    buildLegacyAttemptId,
     type ConversationIdResolvedMessage,
     type ResponseFinishedMessage,
     type ResponseLifecycleMessage,
     type StreamDeltaMessage,
+    type StreamDumpConfigMessage,
+    type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
-import { buildCommonExport } from '@/utils/common-export';
-import { isConversationReady } from '@/utils/conversation-readiness';
-import { downloadAsJSON } from '@/utils/download';
-import { logger } from '@/utils/logger';
-import { loadCalibrationProfileV2IfPresent, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
-import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
-import { InterceptionManager } from '@/utils/managers/interception-manager';
-import { NavigationManager } from '@/utils/managers/navigation-manager';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 import type { LifecyclePhase, PlatformReadiness } from '@/utils/sfe/types';
@@ -121,7 +124,9 @@ export function runPlatform(): void {
     let calibrationState: CalibrationUiState = 'idle';
     let lifecycleState: LifecycleUiState = 'idle';
     let lastStreamProbeKey = '';
+    let lastStreamProbeConversationId: string | null = null;
     const liveStreamPreviewByConversation = new Map<string, string>();
+    let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
@@ -132,6 +137,7 @@ export function runPlatform(): void {
     const autoCaptureAttempts = new Map<string, number>();
     const autoCaptureRetryTimers = new Map<string, number>();
     const autoCaptureDeferredLogged = new Set<string>();
+    const warmFetchInFlight = new Map<string, Promise<boolean>>();
     const sfe = new SignalFusionEngine();
     const structuredLogger = new StructuredAttemptLogger();
     const attemptByConversation = new Map<string, string>();
@@ -263,7 +269,10 @@ export function runPlatform(): void {
         return false;
     }
 
-    function cancelStreamDoneProbe(attemptId: string, reason: 'superseded' | 'disposed' | 'navigation' | 'teardown'): void {
+    function cancelStreamDoneProbe(
+        attemptId: string,
+        reason: 'superseded' | 'disposed' | 'navigation' | 'teardown',
+    ): void {
         const controller = streamProbeControllers.get(attemptId);
         if (!controller) {
             return;
@@ -391,6 +400,7 @@ export function runPlatform(): void {
             );
         }
         if (resolution.ready) {
+            syncStreamProbePanelFromCanonical(conversationId, data);
             structuredLogger.emit(
                 effectiveAttemptId,
                 'info',
@@ -443,6 +453,25 @@ export function runPlatform(): void {
         window.postMessage(payload, window.location.origin);
     }
 
+    function emitStreamDumpConfig(): void {
+        const payload: StreamDumpConfigMessage = {
+            type: 'BLACKIYA_STREAM_DUMP_CONFIG',
+            enabled: streamDumpEnabled,
+        };
+        window.postMessage(payload, window.location.origin);
+    }
+
+    async function loadStreamDumpSetting(): Promise<void> {
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED);
+            streamDumpEnabled = result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true;
+        } catch (error) {
+            logger.warn('Failed to load stream dump diagnostics setting', error);
+            streamDumpEnabled = false;
+        }
+        emitStreamDumpConfig();
+    }
+
     async function loadCalibrationPreference(platformName: string): Promise<void> {
         try {
             const profileV2 = await loadCalibrationProfileV2IfPresent(platformName);
@@ -492,11 +521,17 @@ export function runPlatform(): void {
                 timingsMs: {
                     passiveWait: step === 'passive-wait' ? 900 : step === 'endpoint-retry' ? 1400 : 2200,
                     domQuietWindow: step === 'passive-wait' ? 500 : 800,
-                    maxStabilizationWait: step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 18_000 : 30_000,
+                    maxStabilizationWait:
+                        step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 18_000 : 30_000,
                 },
                 retry: {
                     maxAttempts: step === 'passive-wait' ? 3 : step === 'endpoint-retry' ? 4 : 6,
-                    backoffMs: step === 'passive-wait' ? [300, 800, 1300] : step === 'endpoint-retry' ? [400, 900, 1600, 2400] : [800, 1600, 2600, 3800, 5200, 7000],
+                    backoffMs:
+                        step === 'passive-wait'
+                            ? [300, 800, 1300]
+                            : step === 'endpoint-retry'
+                              ? [400, 900, 1600, 2400]
+                              : [800, 1600, 2600, 3800, 5200, 7000],
                     hardTimeoutMs: step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 20_000 : 30_000,
                 },
                 updatedAt: new Date().toISOString(),
@@ -622,6 +657,24 @@ export function runPlatform(): void {
         panel.textContent = `[Blackiya Stream Probe] ${status} @ ${now}\n\n${body}`;
     }
 
+    function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData): void {
+        const panel = document.getElementById('blackiya-stream-probe');
+        if (!panel) {
+            return;
+        }
+        if (lastStreamProbeConversationId !== conversationId) {
+            return;
+        }
+        const panelText = panel.textContent ?? '';
+        if (!panelText.includes('stream-done: awaiting canonical capture')) {
+            return;
+        }
+
+        const cachedText = extractResponseTextForProbe(data);
+        const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
+        setStreamProbePanel('stream-done: canonical capture ready', body);
+    }
+
     function appendLiveStreamProbeText(conversationId: string, text: string): void {
         const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
         let next = '';
@@ -630,7 +683,17 @@ export function runPlatform(): void {
         } else if (current.startsWith(text)) {
             next = current; // Stale/shorter snapshot, ignore
         } else {
-            next = `${current}${text}`; // Delta-style fallback
+            // Delta-style fallback with boundary guard so words do not collapse (e.g. "ScholarsProve").
+            const needsSpaceJoin =
+                current.length > 0 &&
+                text.length > 0 &&
+                !current.endsWith(' ') &&
+                !current.endsWith('\n') &&
+                !text.startsWith(' ') &&
+                !text.startsWith('\n') &&
+                /[A-Za-z0-9]$/.test(current) &&
+                /^[A-Za-z0-9]/.test(text);
+            next = needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
         }
         const capped = next.length > 16_000 ? `...${next.slice(-15_500)}` : next;
         liveStreamPreviewByConversation.set(conversationId, capped);
@@ -680,6 +743,7 @@ export function runPlatform(): void {
 
         const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
         lastStreamProbeKey = probeKey;
+        lastStreamProbeConversationId = conversationId;
         setStreamProbePanel('stream-done: fetching conversation', `conversationId=${conversationId}`);
         logger.info('Stream done probe start', {
             platform: currentAdapter.name,
@@ -732,10 +796,17 @@ export function runPlatform(): void {
         }
 
         if (lastStreamProbeKey === probeKey) {
-            setStreamProbePanel(
-                'stream-done: fetch failed',
-                `Could not parse conversation payload for ${conversationId}`,
-            );
+            const cached = interceptionManager.getConversation(conversationId);
+            if (cached && isConversationReady(cached)) {
+                const cachedText = extractResponseTextForProbe(cached);
+                const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
+                setStreamProbePanel('stream-done: using captured cache', body);
+            } else {
+                setStreamProbePanel(
+                    'stream-done: awaiting canonical capture',
+                    `Conversation stream completed for ${conversationId}. Waiting for canonical capture.`,
+                );
+            }
         }
         logger.warn('Stream done probe failed', {
             platform: currentAdapter.name,
@@ -861,6 +932,65 @@ export function runPlatform(): void {
         });
 
         return [];
+    }
+
+    async function warmFetchConversationSnapshot(
+        conversationId: string,
+        reason: 'initial-load' | 'conversation-switch',
+    ): Promise<boolean> {
+        if (!currentAdapter) {
+            return false;
+        }
+
+        if (interceptionManager.getConversation(conversationId)) {
+            return true;
+        }
+
+        const key = `${currentAdapter.name}:${conversationId}`;
+        const existing = warmFetchInFlight.get(key);
+        if (existing) {
+            return existing;
+        }
+
+        const run = (async () => {
+            const candidates = getFetchUrlCandidates(currentAdapter as LLMPlatform, conversationId);
+            if (candidates.length === 0) {
+                return false;
+            }
+
+            const prioritized = candidates.slice(0, 2);
+            for (const apiUrl of prioritized) {
+                try {
+                    const response = await fetch(apiUrl, { credentials: 'include' });
+                    if (!response.ok) {
+                        continue;
+                    }
+                    const text = await response.text();
+                    interceptionManager.ingestInterceptedData({
+                        url: apiUrl,
+                        data: text,
+                        platform: currentAdapter?.name ?? 'Unknown',
+                    });
+                    if (interceptionManager.getConversation(conversationId)) {
+                        logger.info('Warm fetch captured conversation', {
+                            conversationId,
+                            platform: currentAdapter?.name ?? 'Unknown',
+                            reason,
+                            path: new URL(apiUrl, window.location.origin).pathname,
+                        });
+                        return true;
+                    }
+                } catch {
+                    // Continue with next candidate.
+                }
+            }
+            return false;
+        })().finally(() => {
+            warmFetchInFlight.delete(key);
+        });
+
+        warmFetchInFlight.set(key, run);
+        return run;
     }
 
     async function tryCalibrationFetch(
@@ -1689,6 +1819,7 @@ export function runPlatform(): void {
 
         setTimeout(injectSaveButton, 500);
         setLifecycleState('idle', newId);
+        void warmFetchConversationSnapshot(newId, 'conversation-switch');
         setTimeout(() => {
             if (newId) {
                 maybeRunAutoCapture(newId, 'navigation');
@@ -2117,6 +2248,43 @@ export function runPlatform(): void {
         return true;
     }
 
+    function handleStreamDumpFrameMessage(message: any): boolean {
+        if ((message as StreamDumpFrameMessage | undefined)?.type !== 'BLACKIYA_STREAM_DUMP_FRAME') {
+            return false;
+        }
+
+        const typed = message as StreamDumpFrameMessage;
+        if (
+            typeof typed.attemptId !== 'string' ||
+            typeof typed.platform !== 'string' ||
+            typeof typed.text !== 'string' ||
+            typeof typed.kind !== 'string'
+        ) {
+            return true;
+        }
+
+        if (!streamDumpEnabled) {
+            return true;
+        }
+
+        if (isStaleAttemptMessage(typed.attemptId, typed.conversationId, 'delta')) {
+            return true;
+        }
+
+        void streamDumpStorage.saveFrame({
+            platform: typed.platform,
+            attemptId: typed.attemptId,
+            conversationId: typed.conversationId,
+            kind: typed.kind,
+            text: typed.text,
+            chunkBytes: typed.chunkBytes,
+            frameIndex: typed.frameIndex,
+            timestampMs: typed.timestampMs,
+        });
+
+        return true;
+    }
+
     function handleConversationIdResolvedMessage(message: any): boolean {
         if ((message as ConversationIdResolvedMessage | undefined)?.type !== 'BLACKIYA_CONVERSATION_ID_RESOLVED') {
             return false;
@@ -2216,6 +2384,9 @@ export function runPlatform(): void {
             if (handleStreamDeltaMessage(message)) {
                 return;
             }
+            if (handleStreamDumpFrameMessage(message)) {
+                return;
+            }
             if (handleLifecycleMessage(message)) {
                 return;
             }
@@ -2284,24 +2455,27 @@ export function runPlatform(): void {
     // Update managers with initial adapter
     updateManagers();
     void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    void loadStreamDumpSetting();
 
     const storageChangeListener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
         if (areaName !== 'local') {
             return;
         }
-        if (!changes[STORAGE_KEYS.CALIBRATION_PROFILES] || !currentAdapter) {
-            return;
+        if (changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
+            streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
+            emitStreamDumpConfig();
         }
-
-        calibrationPreferenceLoaded = false;
-        calibrationPreferenceLoading = null;
-        autoCaptureAttempts.clear();
-        autoCaptureDeferredLogged.clear();
-        for (const timerId of autoCaptureRetryTimers.values()) {
-            clearTimeout(timerId);
+        if (changes[STORAGE_KEYS.CALIBRATION_PROFILES] && currentAdapter) {
+            calibrationPreferenceLoaded = false;
+            calibrationPreferenceLoading = null;
+            autoCaptureAttempts.clear();
+            autoCaptureDeferredLogged.clear();
+            for (const timerId of autoCaptureRetryTimers.values()) {
+                clearTimeout(timerId);
+            }
+            autoCaptureRetryTimers.clear();
+            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
         }
-        autoCaptureRetryTimers.clear();
-        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
     };
     browser.storage.onChanged.addListener(storageChangeListener);
 
@@ -2315,6 +2489,9 @@ export function runPlatform(): void {
     // Initial injection
     currentConversationId = currentAdapter.extractConversationId(url);
     injectSaveButton();
+    if (currentConversationId) {
+        void warmFetchConversationSnapshot(currentConversationId, 'initial-load');
+    }
 
     // Retry logic for initial load (sometimes SPA takes time to render header)
     const retryIntervals = [1000, 2000, 5000];
