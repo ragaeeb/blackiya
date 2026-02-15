@@ -894,13 +894,13 @@ describe('Platform Runner', () => {
         const saveEarly = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveEarly?.disabled).toBe(true);
 
-        await new Promise((resolve) => setTimeout(resolve, 4300));
+        await new Promise((resolve) => setTimeout(resolve, 7600));
         const saveFallback = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         const copyFallback = document.getElementById('blackiya-copy-btn') as HTMLButtonElement | null;
         expect(saveFallback?.disabled).toBe(false);
         expect(saveFallback?.textContent).toContain('Force Save');
         expect(copyFallback?.disabled).toBe(true);
-    });
+    }, 15_000);
 
     it('should keep Save disabled for ChatGPT thoughts-only captures even after fallback window', async () => {
         currentAdapterMock = {
@@ -1069,7 +1069,7 @@ describe('Platform Runner', () => {
         expect(panelAfterDone).toContain('Live chunk one. Live chunk two.');
     });
 
-    it('should enable Save from stream-done snapshot fallback when api candidates are unavailable', async () => {
+    it('should defer Force Save while degraded snapshot recovery window is still active', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),
             name: 'ChatGPT',
@@ -1155,6 +1155,18 @@ describe('Platform Runner', () => {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
                     attemptId: 'attempt:snapshot-fallback',
+                    phase: 'prompt-sent',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:snapshot-fallback',
                     phase: 'completed',
                     conversationId: '123',
                 },
@@ -1163,16 +1175,21 @@ describe('Platform Runner', () => {
 
             await new Promise((resolve) => setTimeout(resolve, 1700));
             const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(saveButton?.disabled).toBe(false);
-            expect(saveButton?.textContent).toContain('Force Save');
+            expect(saveButton?.disabled).toBe(true);
+            expect(saveButton?.textContent?.includes('Force Save')).toBe(false);
 
             const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
             expect(panelText).toContain('stream-done: degraded snapshot captured');
             expect(panelText).toContain('Final answer from snapshot');
+
+            await new Promise((resolve) => setTimeout(resolve, 6000));
+            const forceSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(forceSaveButton?.disabled).toBe(false);
+            expect(forceSaveButton?.textContent).toContain('Force Save');
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
-    });
+    }, 15_000);
 
     it('should upgrade from degraded snapshot mode to canonical-ready when API capture arrives', async () => {
         const canonicalConversation = buildConversation('123', 'Canonical answer from API', {
@@ -1244,7 +1261,8 @@ describe('Platform Runner', () => {
 
             await new Promise((resolve) => setTimeout(resolve, 700));
             const degradedSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(degradedSaveButton?.textContent).toContain('Force Save');
+            expect(degradedSaveButton?.disabled).toBe(true);
+            expect(degradedSaveButton?.textContent?.includes('Force Save')).toBe(false);
 
             window.postMessage(
                 {

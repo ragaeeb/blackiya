@@ -52,6 +52,7 @@ type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
 const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
 const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
+const CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS = 400;
 const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
 const PROBE_LEASE_TTL_MS = 5000;
 const PROBE_LEASE_RETRY_GRACE_MS = 500;
@@ -528,6 +529,28 @@ export function runPlatform(): void {
         }
         canonicalStabilizationRetryCounts.delete(attemptId);
         canonicalStabilizationStartedAt.delete(attemptId);
+    }
+
+    function hasCanonicalStabilizationTimedOut(attemptId: string): boolean {
+        const retries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
+        const hasPendingTimer = canonicalStabilizationRetryTimers.has(attemptId);
+        if (retries >= CANONICAL_STABILIZATION_MAX_RETRIES && !hasPendingTimer) {
+            return true;
+        }
+
+        if (hasPendingTimer) {
+            return false;
+        }
+
+        const startedAt = canonicalStabilizationStartedAt.get(attemptId);
+        if (!startedAt) {
+            return false;
+        }
+
+        const timeoutMs =
+            CANONICAL_STABILIZATION_RETRY_DELAY_MS * CANONICAL_STABILIZATION_MAX_RETRIES +
+            CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS;
+        return Date.now() - startedAt >= timeoutMs;
     }
 
     async function processCanonicalStabilizationRetryTick(
@@ -1224,7 +1247,7 @@ export function runPlatform(): void {
                         withPreservedLiveMirrorSnapshot(
                             conversationId,
                             'stream-done: degraded snapshot captured',
-                            `${body}\n\nManual Force Save required (potentially incomplete).`,
+                            `${body}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
                         ),
                     );
                     return;
@@ -1306,7 +1329,7 @@ export function runPlatform(): void {
                             withPreservedLiveMirrorSnapshot(
                                 conversationId,
                                 'stream-done: degraded snapshot captured',
-                                `${snapshotBody}\n\nManual Force Save required (potentially incomplete).`,
+                                `${snapshotBody}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
                             ),
                         );
                         return;
@@ -2617,23 +2640,31 @@ export function runPlatform(): void {
             };
         }
 
-        const hasTimeout = sfeResolution?.blockingConditions.includes('stabilization_timeout') === true;
-        if (captureMeta.fidelity === 'degraded' || hasTimeout) {
-            const attemptId = resolveAttemptId(conversationId);
-            if (hasTimeout) {
-                structuredLogger.emit(
-                    attemptId,
-                    'warn',
-                    'readiness_timeout_manual_only',
-                    'Stabilization timed out; manual force save required',
-                    { conversationId },
-                    `readiness-timeout:${conversationId}`,
-                );
-            }
+        const attemptId = resolveAttemptId(conversationId);
+        const hasTimeout =
+            sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
+            (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
+        if (hasTimeout) {
+            structuredLogger.emit(
+                attemptId,
+                'warn',
+                'readiness_timeout_manual_only',
+                'Stabilization timed out; manual force save required',
+                { conversationId },
+                `readiness-timeout:${conversationId}`,
+            );
             return {
                 ready: false,
                 mode: 'degraded_manual_only',
-                reason: hasTimeout ? 'stabilization_timeout' : 'snapshot_degraded_capture',
+                reason: 'stabilization_timeout',
+            };
+        }
+
+        if (captureMeta.fidelity === 'degraded') {
+            return {
+                ready: false,
+                mode: 'awaiting_stabilization',
+                reason: 'snapshot_degraded_capture',
             };
         }
 
