@@ -36,7 +36,6 @@ const activeConversations = new LRUCache<string, ConversationData>(50);
 /**
  * Parse the MaZiqc response to extract conversation titles
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex parsing logic required for platform
 function parseTitlesResponse(data: string, url: string): Map<string, string> | null {
     try {
         logger.info('[Blackiya/Gemini/Titles] Attempting to parse titles from:', url);
@@ -150,7 +149,6 @@ function findConversationRpc(
 /**
  * Parses the conversation payload into Blackiya's standardized ConversationData
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Helper function logic is complex but necessary
 function parseConversationPayload(
     payload: any,
     titlesCache: LRUCache<string, string>,

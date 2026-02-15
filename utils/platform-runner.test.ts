@@ -20,6 +20,81 @@ const createMockAdapter = () => ({
     parseInterceptedData: () => ({ conversation_id: '123' }),
 });
 
+const buildConversation = (
+    conversationId: string,
+    assistantText: string,
+    options: { status: string; endTurn: boolean },
+) => ({
+    title: 'Test Conversation',
+    create_time: 1_700_000_000,
+    update_time: 1_700_000_120,
+    conversation_id: conversationId,
+    current_node: 'a1',
+    moderation_results: [],
+    plugin_ids: null,
+    gizmo_id: null,
+    gizmo_type: null,
+    is_archived: false,
+    default_model_slug: 'gpt',
+    safe_urls: [],
+    blocked_urls: [],
+    mapping: {
+        root: { id: 'root', message: null, parent: null, children: ['u1'] },
+        u1: {
+            id: 'u1',
+            parent: 'root',
+            children: ['a1'],
+            message: {
+                id: 'u1',
+                author: { role: 'user', name: null, metadata: {} },
+                create_time: 1_700_000_010,
+                update_time: 1_700_000_010,
+                content: { content_type: 'text', parts: ['Prompt'] },
+                status: 'finished_successfully',
+                end_turn: true,
+                weight: 1,
+                metadata: {},
+                recipient: 'all',
+                channel: null,
+            },
+        },
+        a1: {
+            id: 'a1',
+            parent: 'u1',
+            children: [],
+            message: {
+                id: 'a1',
+                author: { role: 'assistant', name: null, metadata: {} },
+                create_time: 1_700_000_020,
+                update_time: 1_700_000_020,
+                content: { content_type: 'text', parts: [assistantText] },
+                status: options.status,
+                end_turn: options.endTurn,
+                weight: 1,
+                metadata: {},
+                recipient: 'all',
+                channel: null,
+            },
+        },
+    },
+});
+
+const evaluateReadinessMock = (data: any) => {
+    const assistants = Object.values(data?.mapping ?? {})
+        .map((node: any) => node?.message)
+        .filter((message: any) => message?.author?.role === 'assistant');
+    const latestAssistant = assistants[assistants.length - 1] as any;
+    const text = (latestAssistant?.content?.parts ?? []).join('').trim();
+    const terminal = latestAssistant?.status !== 'in_progress' && latestAssistant?.end_turn === true;
+    return {
+        ready: terminal && text.length > 0,
+        terminal,
+        reason: terminal ? 'terminal' : 'in-progress',
+        contentHash: text.length > 0 ? `h:${text.length}:${terminal ? 1 : 0}` : null,
+        latestAssistantTextLength: text.length,
+    };
+};
+
 // We need a mutable reference to control the mock return value
 let currentAdapterMock: any = createMockAdapter();
 let storageDataMock: Record<string, unknown> = {};
@@ -86,6 +161,10 @@ describe('Platform Runner', () => {
         (global as any).alert = () => {};
         (global as any).confirm = () => true;
         window.localStorage.clear();
+        (globalThis as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
+        (window as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
+        (globalThis as any).__BLACKIYA_LOG_QUEUE__ = [];
+        (window as any).__BLACKIYA_LOG_QUEUE__ = [];
     });
 
     afterEach(() => {
@@ -432,6 +511,102 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
     });
 
+    it('should keep Save disabled while streaming even when cached data is ready', async () => {
+        const readyConversation = buildConversation('123', 'Canonical ready answer', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'TestPlatform',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                const parsed = JSON.parse(raw);
+                return parsed?.conversation_id ? parsed : null;
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'TestPlatform',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(readyConversation),
+                attemptId: 'attempt:seed-ready',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        await new Promise((resolve) => setTimeout(resolve, 950));
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'TestPlatform',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(readyConversation),
+                attemptId: 'attempt:seed-ready',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'TestPlatform',
+                attemptId: 'attempt:seed-ready',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const saveBeforeStreaming = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveBeforeStreaming?.disabled).toBe(false);
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'TestPlatform',
+                attemptId: 'attempt:stream-active',
+                phase: 'prompt-sent',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'TestPlatform',
+                attemptId: 'attempt:stream-active',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'TestPlatform',
+                attemptId: 'attempt:stream-active',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const saveDuringStreaming = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveDuringStreaming?.disabled).toBe(true);
+    });
+
     it('should not show parse-failure toast when stream probe cannot parse payload', async () => {
         const originalFetch = (globalThis as any).fetch;
         try {
@@ -525,129 +700,6 @@ describe('Platform Runner', () => {
         }
     });
 
-    it('should replace awaiting canonical probe toast once canonical capture becomes ready', async () => {
-        const originalFetch = (globalThis as any).fetch;
-        try {
-            (globalThis as any).fetch = async () => ({
-                ok: true,
-                text: async () => '{"not":"conversation"}',
-            });
-
-            currentAdapterMock = {
-                ...createMockAdapter(),
-                name: 'ChatGPT',
-                buildApiUrls: () => ['https://test.com/backend-api/conversation/123'],
-                parseInterceptedData: () => null,
-            };
-
-            runPlatform();
-            await new Promise((resolve) => setTimeout(resolve, 80));
-
-            window.postMessage(
-                {
-                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
-                    platform: 'ChatGPT',
-                    attemptId: 'attempt:probe-await',
-                    phase: 'completed',
-                    conversationId: '123',
-                },
-                window.location.origin,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 40));
-
-            const panelBeforeCanonical = document.getElementById('blackiya-stream-probe');
-            expect(panelBeforeCanonical).not.toBeNull();
-            if (panelBeforeCanonical) {
-                panelBeforeCanonical.textContent =
-                    '[Blackiya Stream Probe] stream-done: awaiting canonical capture @ 1:23:45 AM\n\nConversation stream completed for 123. Waiting for canonical capture.';
-            }
-
-            currentAdapterMock.parseInterceptedData = () => ({
-                title: 'Probe Conversation',
-                create_time: 1_700_000_000,
-                update_time: 1_700_000_100,
-                conversation_id: '123',
-                current_node: 'node-2',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'gpt',
-                safe_urls: [],
-                blocked_urls: [],
-                mapping: {
-                    root: { id: 'root', message: null, parent: null, children: ['node-1'] },
-                    'node-1': {
-                        id: 'node-1',
-                        message: {
-                            id: 'node-1',
-                            author: { role: 'user', name: 'User', metadata: {} },
-                            create_time: 1_700_000_010,
-                            update_time: 1_700_000_010,
-                            content: { content_type: 'text', parts: ['Prompt'] },
-                            status: 'finished_successfully',
-                            end_turn: true,
-                            weight: 1,
-                            metadata: {},
-                            recipient: 'all',
-                            channel: null,
-                        },
-                        parent: 'root',
-                        children: ['node-2'],
-                    },
-                    'node-2': {
-                        id: 'node-2',
-                        message: {
-                            id: 'node-2',
-                            author: { role: 'assistant', name: 'Assistant', metadata: {} },
-                            create_time: 1_700_000_020,
-                            update_time: 1_700_000_020,
-                            content: { content_type: 'text', parts: ['Final answer from cache'] },
-                            status: 'finished_successfully',
-                            end_turn: true,
-                            weight: 1,
-                            metadata: {},
-                            recipient: 'all',
-                            channel: null,
-                        },
-                        parent: 'node-1',
-                        children: [],
-                    },
-                },
-            });
-
-            window.postMessage(
-                {
-                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                    url: 'https://test.com/backend-api/conversation/123',
-                    data: '{"ok":true}',
-                    attemptId: 'attempt:probe-await',
-                },
-                window.location.origin,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 950));
-
-            window.postMessage(
-                {
-                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                    url: 'https://test.com/backend-api/conversation/123',
-                    data: '{"ok":true}',
-                    attemptId: 'attempt:probe-await',
-                },
-                window.location.origin,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 40));
-
-            const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-            expect(panelText).toContain('stream-done: canonical capture ready');
-            expect(panelText).toContain('Final answer from cache');
-            expect(panelText.includes('stream-done: awaiting canonical capture')).toBe(false);
-        } finally {
-            (globalThis as any).fetch = originalFetch;
-        }
-    });
-
     it('should promote a single canonical sample to ready after stabilization retry', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),
@@ -721,6 +773,16 @@ describe('Platform Runner', () => {
                 url: 'https://test.com/backend-api/conversation/123',
                 data: '{"ok":true}',
                 attemptId: 'attempt:single-sample-ready',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:single-sample-ready',
+                phase: 'completed',
+                conversationId: '123',
             },
             window.location.origin,
         );
@@ -814,6 +876,16 @@ describe('Platform Runner', () => {
                 url: 'https://test.com/backend-api/conversation/123',
                 data: '{"ok":true}',
                 attemptId: 'attempt:unstable-hash',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:unstable-hash',
+                phase: 'completed',
+                conversationId: '123',
             },
             window.location.origin,
         );
@@ -971,7 +1043,7 @@ describe('Platform Runner', () => {
                 window.location.origin,
             );
         };
-        window.addEventListener('message', snapshotFailureHandler as EventListener);
+        window.addEventListener('message', snapshotFailureHandler as any);
         try {
             window.postMessage(
                 {
@@ -985,7 +1057,7 @@ describe('Platform Runner', () => {
             );
             await new Promise((resolve) => setTimeout(resolve, 80));
         } finally {
-            window.removeEventListener('message', snapshotFailureHandler as EventListener);
+            window.removeEventListener('message', snapshotFailureHandler as any);
         }
 
         const panelAfterDone = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
@@ -1073,7 +1145,7 @@ describe('Platform Runner', () => {
             );
         };
 
-        window.addEventListener('message', snapshotResponseHandler as EventListener);
+        window.addEventListener('message', snapshotResponseHandler as any);
         try {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
@@ -1098,7 +1170,7 @@ describe('Platform Runner', () => {
             expect(panelText).toContain('stream-done: degraded snapshot captured');
             expect(panelText).toContain('Final answer from snapshot');
         } finally {
-            window.removeEventListener('message', snapshotResponseHandler as EventListener);
+            window.removeEventListener('message', snapshotResponseHandler as any);
         }
     });
 

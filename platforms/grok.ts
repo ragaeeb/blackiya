@@ -875,7 +875,6 @@ export const grokAdapter: LLMPlatform = {
      * @param data - Raw text or parsed object
      * @param url - The API endpoint URL
      */
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Centralized logic for parsing Grok data
     parseInterceptedData(data: string | any, url: string) {
         // Check if this is a titles endpoint
         if (isTitlesEndpoint(url)) {

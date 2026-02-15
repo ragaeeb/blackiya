@@ -516,25 +516,29 @@ export function runPlatform(): void {
         }
 
         const timerId = window.setTimeout(() => {
-            canonicalStabilizationRetryTimers.delete(attemptId);
-            canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
+            void (async () => {
+                canonicalStabilizationRetryTimers.delete(attemptId);
+                canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
 
-            if (isAttemptDisposedOrSuperseded(attemptId)) {
-                return;
-            }
+                if (isAttemptDisposedOrSuperseded(attemptId)) {
+                    return;
+                }
 
-            const mappedAttempt = attemptByConversation.get(conversationId);
-            if (mappedAttempt && mappedAttempt !== attemptId) {
-                return;
-            }
+                const mappedAttempt = attemptByConversation.get(conversationId);
+                if (mappedAttempt && mappedAttempt !== attemptId) {
+                    return;
+                }
 
-            const cached = interceptionManager.getConversation(conversationId);
-            if (!cached) {
-                return;
-            }
+                await warmFetchConversationSnapshot(conversationId, 'stabilization-retry');
 
-            ingestSfeCanonicalSample(cached, attemptId);
-            refreshButtonState(conversationId);
+                const cached = interceptionManager.getConversation(conversationId);
+                if (!cached) {
+                    return;
+                }
+
+                ingestSfeCanonicalSample(cached, attemptId);
+                refreshButtonState(conversationId);
+            })();
         }, CANONICAL_STABILIZATION_RETRY_DELAY_MS);
 
         canonicalStabilizationRetryTimers.set(attemptId, timerId);
@@ -641,16 +645,34 @@ export function runPlatform(): void {
         );
 
         const hitStabilizationTimeout = resolution.blockingConditions.includes('stabilization_timeout');
-        if (!resolution.ready && resolution.reason === 'awaiting_stabilization' && !hitStabilizationTimeout) {
+        const activeLifecycleState = lifecycleState;
+        const shouldRetryCanonicalCapture =
+            !resolution.ready &&
+            !hitStabilizationTimeout &&
+            activeLifecycleState === 'completed' &&
+            (resolution.reason === 'awaiting_stabilization' || resolution.reason === 'captured_not_ready');
+
+        if (shouldRetryCanonicalCapture) {
             scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
-            structuredLogger.emit(
-                effectiveAttemptId,
-                'info',
-                'awaiting_stabilization',
-                'Awaiting canonical stabilization before ready',
-                { conversationId, phase: resolution.phase },
-                `awaiting-stabilization:${conversationId}:${readiness.contentHash ?? 'none'}`,
-            );
+            if (resolution.reason === 'awaiting_stabilization') {
+                structuredLogger.emit(
+                    effectiveAttemptId,
+                    'info',
+                    'awaiting_stabilization',
+                    'Awaiting canonical stabilization before ready',
+                    { conversationId, phase: resolution.phase },
+                    `awaiting-stabilization:${conversationId}:${readiness.contentHash ?? 'none'}`,
+                );
+            } else {
+                structuredLogger.emit(
+                    effectiveAttemptId,
+                    'info',
+                    'awaiting_canonical_capture',
+                    'Completed stream but canonical sample not terminal yet; scheduling retries',
+                    { conversationId, phase: resolution.phase },
+                    `awaiting-canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
+                );
+            }
         }
         if (hitStabilizationTimeout) {
             clearCanonicalStabilizationRetry(effectiveAttemptId);
@@ -818,7 +840,7 @@ export function runPlatform(): void {
         }
     }
 
-    function resolveDisplayedCalibrationState(conversationId: string | null): CalibrationUiState {
+    function resolveDisplayedCalibrationState(_conversationId: string | null): CalibrationUiState {
         if (calibrationState === 'idle' && !!rememberedPreferredStep) {
             return 'success';
         }
@@ -1278,8 +1300,8 @@ export function runPlatform(): void {
             return;
         }
         const conversationId = currentAdapter.extractConversationId(window.location.href) || currentConversationId;
-        const decision = conversationId ? resolveReadinessDecision(conversationId) : null;
-        const allowDegraded = decision?.mode === 'degraded_manual_only';
+        let decision = conversationId ? resolveReadinessDecision(conversationId) : null;
+        let allowDegraded = decision?.mode === 'degraded_manual_only';
 
         if (allowDegraded) {
             const confirmed =
@@ -1290,6 +1312,13 @@ export function runPlatform(): void {
                     : true;
             if (!confirmed) {
                 return;
+            }
+
+            if (conversationId) {
+                await warmFetchConversationSnapshot(conversationId, 'force-save');
+                refreshButtonState(conversationId);
+                decision = resolveReadinessDecision(conversationId);
+                allowDegraded = decision.mode === 'degraded_manual_only';
             }
         }
 
@@ -1392,13 +1421,14 @@ export function runPlatform(): void {
 
     async function warmFetchConversationSnapshot(
         conversationId: string,
-        reason: 'initial-load' | 'conversation-switch',
+        reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
     ): Promise<boolean> {
         if (!currentAdapter) {
             return false;
         }
 
-        if (interceptionManager.getConversation(conversationId)) {
+        const cached = interceptionManager.getConversation(conversationId);
+        if (cached && evaluateReadinessForData(cached).ready) {
             return true;
         }
 
@@ -2328,6 +2358,16 @@ export function runPlatform(): void {
         if (!conversationId) {
             return;
         }
+        if (
+            (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') &&
+            (!currentConversationId || conversationId === currentConversationId)
+        ) {
+            buttonManager.setSaveButtonMode('default');
+            buttonManager.setActionButtonsEnabled(false);
+            buttonManager.setOpacity('0.6');
+            logButtonStateIfChanged(conversationId, false, '0.6');
+            return;
+        }
         const cached = interceptionManager.getConversation(conversationId);
         if (cached) {
             ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
@@ -2740,6 +2780,11 @@ export function runPlatform(): void {
         const platform = typed.platform;
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
+
+        if (phase === 'prompt-sent' && conversationId) {
+            bindAttempt(conversationId, attemptId);
+        }
+
         if (isStaleAttemptMessage(attemptId, conversationId, 'lifecycle')) {
             return true;
         }
@@ -2781,6 +2826,16 @@ export function runPlatform(): void {
         if (phase === 'completed') {
             setLifecycleState('completed', conversationId);
             if (conversationId) {
+                if (sfeEnabled) {
+                    const resolution = sfe.resolve(attemptId);
+                    const shouldRetryAfterCompletion =
+                        resolution.phase === 'canonical_probing' &&
+                        !resolution.ready &&
+                        !resolution.blockingConditions.includes('stabilization_timeout');
+                    if (shouldRetryAfterCompletion) {
+                        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+                    }
+                }
                 void runStreamDoneProbe(conversationId, attemptId);
             }
         } else if (phase === 'prompt-sent' || phase === 'streaming') {
