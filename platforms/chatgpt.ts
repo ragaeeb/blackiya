@@ -7,8 +7,7 @@
  * @module platforms/chatgpt
  */
 
-import type { LLMPlatform } from '@/platforms/types';
-import { isConversationReady } from '@/utils/conversation-readiness';
+import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import type { ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
@@ -167,9 +166,10 @@ function normalizeConversationCandidate(candidate: unknown): ConversationData | 
     const currentNodeCandidate = normalizeText(candidate.current_node);
     const currentNode =
         currentNodeCandidate && mapping[currentNodeCandidate] ? currentNodeCandidate : deriveCurrentNode(mapping);
+    const normalizedTitle = normalizeConversationTitle(candidate.title, mapping);
 
     return {
-        title: normalizeText(candidate.title) ?? '',
+        title: normalizedTitle,
         create_time: normalizeNumber(candidate.create_time) ?? times.create,
         update_time: normalizeNumber(candidate.update_time) ?? times.update,
         mapping,
@@ -475,7 +475,7 @@ function buildConversationFromSsePayload(payloads: unknown[]): ConversationData 
     const normalizedUpdate = timing.update > 0 ? timing.update : normalizedCreate;
 
     return {
-        title,
+        title: normalizeConversationTitle(title, mapping),
         create_time: normalizedCreate,
         update_time: normalizedUpdate,
         mapping,
@@ -523,6 +523,107 @@ function isPlaceholderTitle(title: string): boolean {
         return true;
     }
     return PLACEHOLDER_TITLE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function normalizeConversationTitle(title: unknown, mapping: Record<string, MessageNode>): string {
+    const normalized = normalizeText(title) ?? '';
+    if (!isPlaceholderTitle(normalized)) {
+        return normalized;
+    }
+    const derived = deriveTitleFromFirstUserMessage(mapping);
+    return derived || normalized;
+}
+
+function getMessageTimestamp(message: Message): number {
+    return normalizeNumber(message.update_time) ?? normalizeNumber(message.create_time) ?? 0;
+}
+
+function collectAssistantMessages(mapping: Record<string, MessageNode>): Message[] {
+    const assistantMessages = Object.values(mapping)
+        .map((node) => node.message)
+        .filter(
+            (message): message is NonNullable<(typeof mapping)[string]['message']> =>
+                !!message && message.author.role === 'assistant',
+        );
+    assistantMessages.sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
+    return assistantMessages;
+}
+
+function extractAssistantText(message: Message): string {
+    const partsText = Array.isArray(message.content.parts)
+        ? message.content.parts.filter((part): part is string => typeof part === 'string').join('')
+        : '';
+    const contentText = normalizeText(message.content.content) ?? '';
+    return [partsText, contentText]
+        .filter((value) => value.length > 0)
+        .join('\n')
+        .trim()
+        .normalize('NFC');
+}
+
+function hasFinishedAssistantText(message: Message): boolean {
+    if (message.status !== 'finished_successfully') {
+        return false;
+    }
+    if (message.content.content_type !== 'text') {
+        return false;
+    }
+    return extractAssistantText(message).length > 0;
+}
+
+function evaluateChatGPTReadiness(data: ConversationData): PlatformReadiness {
+    const assistantMessages = collectAssistantMessages(data.mapping);
+    if (assistantMessages.length === 0) {
+        return {
+            ready: false,
+            terminal: false,
+            reason: 'assistant-missing',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
+
+    const terminal = !assistantMessages.some((message) => message.status === 'in_progress');
+    if (!terminal) {
+        return {
+            ready: false,
+            terminal: false,
+            reason: 'assistant-in-progress',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
+
+    const finishedTextMessages = assistantMessages.filter(hasFinishedAssistantText);
+    const latestFinishedText = finishedTextMessages[finishedTextMessages.length - 1];
+    if (!latestFinishedText) {
+        return {
+            ready: false,
+            terminal: true,
+            reason: 'assistant-text-missing',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
+
+    if (!finishedTextMessages.some((message) => message.end_turn === true)) {
+        return {
+            ready: false,
+            terminal: true,
+            reason: 'assistant-text-not-terminal-turn',
+            contentHash: null,
+            latestAssistantTextLength: extractAssistantText(latestFinishedText).length,
+        };
+    }
+
+    const latestText = extractAssistantText(latestFinishedText);
+    return {
+        ready: true,
+        terminal: true,
+        reason: 'terminal',
+        contentHash: latestText.length > 0 ? hashText(latestText) : null,
+        latestAssistantTextLength: latestText.length,
+    };
 }
 
 /**
@@ -711,22 +812,7 @@ export const createChatGPTAdapter = (): LLMPlatform => {
         },
 
         evaluateReadiness(data: ConversationData) {
-            const assistantMessages = Object.values(data.mapping)
-                .map((node) => node.message)
-                .filter(
-                    (message): message is NonNullable<(typeof data.mapping)[string]['message']> =>
-                        !!message && message.author.role === 'assistant',
-                );
-            const terminal = !assistantMessages.some((message) => message.status === 'in_progress');
-            const latest = assistantMessages[assistantMessages.length - 1];
-            const latestText = (latest?.content.parts ?? []).join('').trim().normalize('NFC');
-            return {
-                ready: isConversationReady(data),
-                terminal,
-                reason: terminal ? 'terminal' : 'assistant-in-progress',
-                contentHash: latestText.length > 0 ? hashText(latestText) : null,
-                latestAssistantTextLength: latestText.length,
-            };
+            return evaluateChatGPTReadiness(data);
         },
     };
 };

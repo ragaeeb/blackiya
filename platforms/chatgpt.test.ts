@@ -137,8 +137,176 @@ describe('ChatGPT Platform Adapter', () => {
             const result = adapter.parseInterceptedData(ssePayload, 'https://chatgpt.com/backend-api/f/conversation');
             expect(result).not.toBeNull();
             expect(result?.conversation_id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+            expect(result?.title).toBe('What is calibration?');
             expect(Object.keys(result?.mapping ?? {}).length).toBeGreaterThan(2);
             expect(result?.default_model_slug).toBe('gpt-5-t-mini');
+        });
+
+        it('should derive title from first user message when payload title is a placeholder', () => {
+            const mockData = {
+                title: 'New chat',
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant-1',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+                    'user-1': {
+                        id: 'user-1',
+                        parent: 'root',
+                        children: ['assistant-1'],
+                        message: {
+                            id: 'user-1',
+                            author: { role: 'user', name: null, metadata: {} },
+                            create_time: 1735689600,
+                            update_time: 1735689600,
+                            content: { content_type: 'text', parts: ['Digital Eye Strain Relief'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'user-1',
+                        children: [],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1735689601,
+                            update_time: 1735689601,
+                            content: {
+                                content_type: 'thoughts',
+                                thoughts: [{ summary: 'Drafting', content: '', chunks: [] }],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+            };
+
+            const result = adapter.parseInterceptedData(JSON.stringify(mockData), 'url');
+            expect(result).not.toBeNull();
+            expect(result?.title).toBe('Digital Eye Strain Relief');
+        });
+    });
+
+    describe('evaluateReadiness', () => {
+        it('should return not-ready for thoughts-only assistant payloads', () => {
+            const data = {
+                title: 'New chat',
+                create_time: 1735689600,
+                update_time: 1735689601,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant-1',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1735689601,
+                            update_time: 1735689601,
+                            content: {
+                                content_type: 'thoughts',
+                                thoughts: [{ summary: 'Thinking', content: 'Draft', chunks: [], finished: true }],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+
+            const readiness = adapter.evaluateReadiness(data);
+            expect(readiness.ready).toBe(false);
+            expect(readiness.reason).toBe('assistant-text-missing');
+        });
+
+        it('should return ready for finished terminal assistant text payloads', () => {
+            const data = {
+                title: 'Test',
+                create_time: 1735689600,
+                update_time: 1735689602,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant-2',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: ['assistant-2'],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1735689601,
+                            update_time: 1735689601,
+                            content: {
+                                content_type: 'thoughts',
+                                thoughts: [{ summary: 'Thinking', content: 'Draft', chunks: [], finished: true }],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                    'assistant-2': {
+                        id: 'assistant-2',
+                        parent: 'assistant-1',
+                        children: [],
+                        message: {
+                            id: 'assistant-2',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 1735689602,
+                            update_time: 1735689602,
+                            content: { content_type: 'text', parts: ['Final answer'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+
+            const readiness = adapter.evaluateReadiness(data);
+            expect(readiness.ready).toBe(true);
+            expect(readiness.reason).toBe('terminal');
+            expect(readiness.contentHash).not.toBeNull();
         });
     });
 

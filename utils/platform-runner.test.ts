@@ -760,6 +760,94 @@ describe('Platform Runner', () => {
         expect(saveFallback?.disabled).toBe(false);
     });
 
+    it('should keep Save disabled for ChatGPT thoughts-only captures even after fallback window', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: () => ({
+                ready: false,
+                terminal: true,
+                reason: 'assistant-text-missing',
+                contentHash: null,
+                latestAssistantTextLength: 0,
+            }),
+            parseInterceptedData: () => ({
+                title: 'New chat',
+                create_time: 1_700_000_000,
+                update_time: 1_700_000_020,
+                conversation_id: '123',
+                current_node: 'node-2',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt',
+                safe_urls: [],
+                blocked_urls: [],
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['node-1'] },
+                    'node-1': {
+                        id: 'node-1',
+                        message: {
+                            id: 'node-1',
+                            author: { role: 'user', name: 'User', metadata: {} },
+                            create_time: 1_700_000_010,
+                            update_time: 1_700_000_010,
+                            content: { content_type: 'text', parts: ['Prompt'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'root',
+                        children: ['node-2'],
+                    },
+                    'node-2': {
+                        id: 'node-2',
+                        message: {
+                            id: 'node-2',
+                            author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                            create_time: 1_700_000_020,
+                            update_time: 1_700_000_020,
+                            content: {
+                                content_type: 'thoughts',
+                                thoughts: [{ summary: 'Thinking', content: 'Draft', chunks: [], finished: true }],
+                            },
+                            status: 'finished_successfully',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'node-1',
+                        children: [],
+                    },
+                },
+            }),
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://test.com/backend-api/conversation/123',
+                data: '{"ok":true}',
+                attemptId: 'attempt:thoughts-only',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 3800));
+        const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveButton?.disabled).toBe(true);
+    });
+
     it('should preserve pre-final live mirror snapshot when probe switches to stream-done state', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -798,22 +886,149 @@ describe('Platform Runner', () => {
             parseInterceptedData: () => null,
         };
 
-        window.postMessage(
-            {
-                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
-                platform: 'ChatGPT',
-                attemptId: 'attempt:preserve-live',
-                phase: 'completed',
-                conversationId: '123',
-            },
-            window.location.origin,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        const snapshotFailureHandler = (event: MessageEvent) => {
+            const msg = (event as any).data;
+            if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
+                return;
+            }
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                    requestId: msg.requestId,
+                    success: false,
+                    error: 'NOT_FOUND',
+                },
+                window.location.origin,
+            );
+        };
+        window.addEventListener('message', snapshotFailureHandler as EventListener);
+        try {
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:preserve-live',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 80));
+        } finally {
+            window.removeEventListener('message', snapshotFailureHandler as EventListener);
+        }
 
         const panelAfterDone = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-        expect(panelAfterDone).toContain('stream-done: no api url candidates');
+        expect(
+            panelAfterDone.includes('stream-done: no api url candidates') ||
+                panelAfterDone.includes('stream-done: awaiting canonical capture'),
+        ).toBe(true);
         expect(panelAfterDone).toContain('Preserved live mirror snapshot (pre-final)');
         expect(panelAfterDone).toContain('Live chunk one. Live chunk two.');
+    });
+
+    it('should enable Save from stream-done snapshot fallback when api candidates are unavailable', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+        };
+
+        const snapshotResponseHandler = (event: MessageEvent) => {
+            const msg = (event as any).data;
+            if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
+                return;
+            }
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                    requestId: msg.requestId,
+                    success: true,
+                    data: {
+                        title: 'Snapshot Title',
+                        create_time: 1_700_000_000,
+                        update_time: 1_700_000_120,
+                        conversation_id: '123',
+                        current_node: 'a1',
+                        moderation_results: [],
+                        plugin_ids: null,
+                        gizmo_id: null,
+                        gizmo_type: null,
+                        is_archived: false,
+                        default_model_slug: 'gpt',
+                        safe_urls: [],
+                        blocked_urls: [],
+                        mapping: {
+                            root: { id: 'root', message: null, parent: null, children: ['u1'] },
+                            u1: {
+                                id: 'u1',
+                                parent: 'root',
+                                children: ['a1'],
+                                message: {
+                                    id: 'u1',
+                                    author: { role: 'user', name: null, metadata: {} },
+                                    create_time: 1_700_000_010,
+                                    update_time: 1_700_000_010,
+                                    content: { content_type: 'text', parts: ['Prompt'] },
+                                    status: 'finished_successfully',
+                                    end_turn: true,
+                                    weight: 1,
+                                    metadata: {},
+                                    recipient: 'all',
+                                    channel: null,
+                                },
+                            },
+                            a1: {
+                                id: 'a1',
+                                parent: 'u1',
+                                children: [],
+                                message: {
+                                    id: 'a1',
+                                    author: { role: 'assistant', name: null, metadata: {} },
+                                    create_time: 1_700_000_020,
+                                    update_time: 1_700_000_020,
+                                    content: { content_type: 'text', parts: ['Final answer from snapshot'] },
+                                    status: 'finished_successfully',
+                                    end_turn: true,
+                                    weight: 1,
+                                    metadata: {},
+                                    recipient: 'all',
+                                    channel: null,
+                                },
+                            },
+                        },
+                    },
+                },
+                window.location.origin,
+            );
+        };
+
+        window.addEventListener('message', snapshotResponseHandler as EventListener);
+        try {
+            runPlatform();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:snapshot-fallback',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, 1600));
+            const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(saveButton?.disabled).toBe(false);
+
+            const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+            expect(panelText).toContain('stream-done: canonical capture ready');
+            expect(panelText).toContain('Final answer from snapshot');
+        } finally {
+            window.removeEventListener('message', snapshotResponseHandler as EventListener);
+        }
     });
 
     it('should ignore disposed attempt lifecycle messages', async () => {

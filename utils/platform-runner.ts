@@ -164,7 +164,7 @@ export function runPlatform(): void {
         }
         ingestSfeCanonicalSample(data, meta?.attemptId);
         refreshButtonState(capturedId);
-        if (isConversationReady(data)) {
+        if (evaluateReadinessForData(data).ready) {
             handleResponseFinished('network', capturedId);
         }
     });
@@ -823,6 +823,60 @@ export function runPlatform(): void {
         return assistantTexts.join('\n\n').trim();
     }
 
+    async function tryStreamDoneSnapshotCapture(conversationId: string, attemptId: string): Promise<boolean> {
+        if (!currentAdapter || isAttemptDisposedOrSuperseded(attemptId)) {
+            return false;
+        }
+
+        logger.info('Stream done snapshot fallback requested', {
+            platform: currentAdapter.name,
+            conversationId,
+        });
+
+        const snapshot = await requestPageSnapshot(conversationId);
+        const fallbackSnapshot = snapshot ?? buildIsolatedDomSnapshot(currentAdapter, conversationId);
+        if (!fallbackSnapshot) {
+            return false;
+        }
+
+        try {
+            if (isConversationDataLike(fallbackSnapshot)) {
+                interceptionManager.ingestConversationData(fallbackSnapshot, 'stream-done-snapshot');
+            } else if (isRawCaptureSnapshot(fallbackSnapshot)) {
+                const replayUrls = getRawSnapshotReplayUrls(currentAdapter, conversationId, fallbackSnapshot);
+                for (const replayUrl of replayUrls) {
+                    interceptionManager.ingestInterceptedData({
+                        url: replayUrl,
+                        data: fallbackSnapshot.data,
+                        platform: fallbackSnapshot.platform ?? currentAdapter.name,
+                    });
+                    const cachedReplay = interceptionManager.getConversation(conversationId);
+                    if (cachedReplay && evaluateReadinessForData(cachedReplay).ready) {
+                        break;
+                    }
+                }
+            } else {
+                interceptionManager.ingestInterceptedData({
+                    url: `stream-snapshot://${currentAdapter.name}/${conversationId}`,
+                    data: JSON.stringify(fallbackSnapshot),
+                    platform: currentAdapter.name,
+                });
+            }
+        } catch {
+            return false;
+        }
+
+        const cached = interceptionManager.getConversation(conversationId);
+        const captured = !!cached && evaluateReadinessForData(cached).ready;
+        if (captured) {
+            logger.info('Stream done snapshot fallback captured', {
+                platform: currentAdapter.name,
+                conversationId,
+            });
+        }
+        return captured;
+    }
+
     async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
         if (!currentAdapter) {
             return;
@@ -847,6 +901,18 @@ export function runPlatform(): void {
 
         const apiUrls = getFetchUrlCandidates(currentAdapter, conversationId);
         if (apiUrls.length === 0) {
+            const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
+            if (capturedFromSnapshot) {
+                const cached = interceptionManager.getConversation(conversationId);
+                const cachedText = cached ? extractResponseTextForProbe(cached) : '';
+                const body = cachedText.length > 0 ? cachedText : '(captured via snapshot fallback)';
+                setStreamProbePanel(
+                    'stream-done: canonical capture ready',
+                    withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: canonical capture ready', body),
+                );
+                streamProbeControllers.delete(attemptId);
+                return;
+            }
             setStreamProbePanel(
                 'stream-done: no api url candidates',
                 withPreservedLiveMirrorSnapshot(
@@ -906,7 +972,7 @@ export function runPlatform(): void {
 
         if (lastStreamProbeKey === probeKey) {
             const cached = interceptionManager.getConversation(conversationId);
-            if (cached && isConversationReady(cached)) {
+            if (cached && evaluateReadinessForData(cached).ready) {
                 const cachedText = extractResponseTextForProbe(cached);
                 const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
                 setStreamProbePanel(
@@ -914,6 +980,22 @@ export function runPlatform(): void {
                     withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: using captured cache', body),
                 );
             } else {
+                const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
+                if (capturedFromSnapshot) {
+                    const snapshotCached = interceptionManager.getConversation(conversationId);
+                    const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
+                    const snapshotBody = snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
+                    setStreamProbePanel(
+                        'stream-done: canonical capture ready',
+                        withPreservedLiveMirrorSnapshot(
+                            conversationId,
+                            'stream-done: canonical capture ready',
+                            snapshotBody,
+                        ),
+                    );
+                    streamProbeControllers.delete(attemptId);
+                    return;
+                }
                 setStreamProbePanel(
                     'stream-done: awaiting canonical capture',
                     withPreservedLiveMirrorSnapshot(
@@ -1802,10 +1884,12 @@ export function runPlatform(): void {
         }
 
         const shouldBlockForGeneration = currentAdapter.name === 'ChatGPT';
-        if (!isConversationReady(data) || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
+        const readiness = evaluateReadinessForData(data);
+        if (!readiness.ready || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
             logger.warn('Conversation is still generating; export blocked until completion.', {
                 conversationId,
                 platform: currentAdapter.name,
+                reason: readiness.reason,
             });
             if (!options.silent) {
                 alert('Response is still generating. Please wait for completion, then try again.');
@@ -2088,7 +2172,7 @@ export function runPlatform(): void {
     function isConversationReadyForActions(conversationId: string): boolean {
         const data = interceptionManager.getConversation(conversationId);
         let legacyReady = false;
-        if (data && isConversationReady(data)) {
+        if (data && evaluateReadinessForData(data).ready) {
             legacyReady = !(currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter));
         }
 

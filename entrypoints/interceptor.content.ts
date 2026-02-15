@@ -1201,6 +1201,17 @@ function getApiUrlCandidates(adapter: LLMPlatform, conversationId: string): stri
     return filtered.length > 0 ? filtered : [];
 }
 
+function isCapturedConversationReady(adapter: LLMPlatform, parsed: unknown): boolean {
+    if (!parsed || typeof parsed !== 'object' || !('conversation_id' in parsed)) {
+        return false;
+    }
+    const conversation = parsed as Parameters<NonNullable<LLMPlatform['evaluateReadiness']>>[0];
+    if (adapter.evaluateReadiness) {
+        return adapter.evaluateReadiness(conversation).ready;
+    }
+    return isConversationReady(conversation);
+}
+
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
     world: 'MAIN',
@@ -1265,7 +1276,7 @@ export default defineContentScript({
 
                 const text = await response.text();
                 const parsed = adapter.parseInterceptedData(text, apiUrl);
-                const isComplete = !!parsed?.conversation_id && isConversationReady(parsed);
+                const isComplete = isCapturedConversationReady(adapter, parsed);
                 if (!isComplete) {
                     return false;
                 }
