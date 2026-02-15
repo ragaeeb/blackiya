@@ -47,6 +47,9 @@ type CalibrationMode = 'manual' | 'auto';
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
 const SFE_SHADOW_ENABLED = true;
+const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
+const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
+const CANONICAL_STABILIZATION_LEGACY_FALLBACK_MS = 3200;
 
 export function buildCalibrationOrderForMode(
     preferredStep: CalibrationStep | null,
@@ -129,6 +132,9 @@ export function runPlatform(): void {
     const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
+    const canonicalStabilizationRetryTimers = new Map<string, number>();
+    const canonicalStabilizationRetryCounts = new Map<string, number>();
+    const canonicalStabilizationStartedAt = new Map<string, number>();
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
     let rememberedPreferredStep: CalibrationStep | null = null;
@@ -207,6 +213,7 @@ export function runPlatform(): void {
         if (previous && previous !== attemptId) {
             sfe.getAttemptTracker().markSuperseded(previous, attemptId);
             cancelStreamDoneProbe(previous, 'superseded');
+            clearCanonicalStabilizationRetry(previous);
             emitAttemptDisposed(previous, 'superseded');
             structuredLogger.emit(
                 previous,
@@ -288,6 +295,65 @@ export function runPlatform(): void {
             { reason },
             `probe-cancel:${reason}`,
         );
+    }
+
+    function clearCanonicalStabilizationRetry(attemptId: string): void {
+        const timerId = canonicalStabilizationRetryTimers.get(attemptId);
+        if (timerId !== undefined) {
+            clearTimeout(timerId);
+            canonicalStabilizationRetryTimers.delete(attemptId);
+        }
+        canonicalStabilizationRetryCounts.delete(attemptId);
+        canonicalStabilizationStartedAt.delete(attemptId);
+    }
+
+    function scheduleCanonicalStabilizationRetry(conversationId: string, attemptId: string): void {
+        if (canonicalStabilizationRetryTimers.has(attemptId)) {
+            return;
+        }
+        if (isAttemptDisposedOrSuperseded(attemptId)) {
+            return;
+        }
+
+        const retries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
+        if (retries >= CANONICAL_STABILIZATION_MAX_RETRIES) {
+            structuredLogger.emit(
+                attemptId,
+                'warn',
+                'canonical_stabilization_retry_exhausted',
+                'Canonical stabilization retries exhausted',
+                { conversationId, retries },
+                `canonical-stability-exhausted:${conversationId}:${retries}`,
+            );
+            return;
+        }
+        if (!canonicalStabilizationStartedAt.has(attemptId)) {
+            canonicalStabilizationStartedAt.set(attemptId, Date.now());
+        }
+
+        const timerId = window.setTimeout(() => {
+            canonicalStabilizationRetryTimers.delete(attemptId);
+            canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
+
+            if (isAttemptDisposedOrSuperseded(attemptId)) {
+                return;
+            }
+
+            const mappedAttempt = attemptByConversation.get(conversationId);
+            if (mappedAttempt && mappedAttempt !== attemptId) {
+                return;
+            }
+
+            const cached = interceptionManager.getConversation(conversationId);
+            if (!cached) {
+                return;
+            }
+
+            ingestSfeCanonicalSample(cached, attemptId);
+            refreshButtonState(conversationId);
+        }, CANONICAL_STABILIZATION_RETRY_DELAY_MS);
+
+        canonicalStabilizationRetryTimers.set(attemptId, timerId);
     }
 
     function evaluateReadinessForData(data: ConversationData): PlatformReadiness {
@@ -391,6 +457,7 @@ export function runPlatform(): void {
         );
 
         if (!resolution.ready && resolution.reason === 'awaiting_stabilization') {
+            scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
             structuredLogger.emit(
                 effectiveAttemptId,
                 'info',
@@ -401,6 +468,7 @@ export function runPlatform(): void {
             );
         }
         if (resolution.ready) {
+            clearCanonicalStabilizationRetry(effectiveAttemptId);
             syncStreamProbePanelFromCanonical(conversationId, data);
             structuredLogger.emit(
                 effectiveAttemptId,
@@ -1839,6 +1907,7 @@ export function runPlatform(): void {
         const disposedAttemptIds = sfe.getAttemptTracker().disposeAllForRouteChange();
         for (const attemptId of disposedAttemptIds) {
             cancelStreamDoneProbe(attemptId, 'navigation');
+            clearCanonicalStabilizationRetry(attemptId);
             emitAttemptDisposed(attemptId, 'navigation');
         }
     }
@@ -2025,7 +2094,39 @@ export function runPlatform(): void {
 
         logSfeMismatchIfNeeded(conversationId, legacyReady);
 
-        return resolveSfeReady(conversationId);
+        const sfeReady = resolveSfeReady(conversationId);
+        if (sfeReady) {
+            return true;
+        }
+
+        if (!legacyReady) {
+            return false;
+        }
+
+        const attemptId = attemptByConversation.get(conversationId);
+        if (!attemptId) {
+            return legacyReady;
+        }
+
+        const startedAt = canonicalStabilizationStartedAt.get(attemptId);
+        if (!startedAt) {
+            return false;
+        }
+
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs < CANONICAL_STABILIZATION_LEGACY_FALLBACK_MS) {
+            return false;
+        }
+
+        structuredLogger.emit(
+            attemptId,
+            'warn',
+            'canonical_stabilization_fallback_ready',
+            'Using legacy-ready fallback after stabilization timeout',
+            { conversationId, elapsedMs },
+            `canonical-fallback:${conversationId}:${Math.floor(elapsedMs / 1000)}`,
+        );
+        return true;
     }
 
     function resolveActiveConversationId(hintedConversationId?: string): string | null {
@@ -2361,6 +2462,7 @@ export function runPlatform(): void {
             return false;
         }
         cancelStreamDoneProbe(typed.attemptId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
+        clearCanonicalStabilizationRetry(typed.attemptId);
         sfe.dispose(typed.attemptId);
         for (const [conversationId, attemptId] of attemptByConversation.entries()) {
             if (attemptId === typed.attemptId) {
@@ -2558,6 +2660,7 @@ export function runPlatform(): void {
             const disposed = sfe.disposeAll();
             for (const attemptId of disposed) {
                 cancelStreamDoneProbe(attemptId, 'teardown');
+                clearCanonicalStabilizationRetry(attemptId);
                 emitAttemptDisposed(attemptId, 'teardown');
             }
             interceptionManager.stop();
@@ -2571,6 +2674,11 @@ export function runPlatform(): void {
                 clearTimeout(timerId);
             }
             autoCaptureRetryTimers.clear();
+            for (const timerId of canonicalStabilizationRetryTimers.values()) {
+                clearTimeout(timerId);
+            }
+            canonicalStabilizationRetryTimers.clear();
+            canonicalStabilizationRetryCounts.clear();
             for (const timeoutId of retryTimeoutIds) {
                 clearTimeout(timeoutId);
             }

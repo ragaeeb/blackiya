@@ -581,6 +581,185 @@ describe('Platform Runner', () => {
         }
     });
 
+    it('should promote a single canonical sample to ready after stabilization retry', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            parseInterceptedData: () => ({
+                title: 'Probe Conversation',
+                create_time: 1_700_000_000,
+                update_time: 1_700_000_100,
+                conversation_id: '123',
+                current_node: 'node-2',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt',
+                safe_urls: [],
+                blocked_urls: [],
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['node-1'] },
+                    'node-1': {
+                        id: 'node-1',
+                        message: {
+                            id: 'node-1',
+                            author: { role: 'user', name: 'User', metadata: {} },
+                            create_time: 1_700_000_010,
+                            update_time: 1_700_000_010,
+                            content: { content_type: 'text', parts: ['Prompt'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'root',
+                        children: ['node-2'],
+                    },
+                    'node-2': {
+                        id: 'node-2',
+                        message: {
+                            id: 'node-2',
+                            author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                            create_time: 1_700_000_020,
+                            update_time: 1_700_000_020,
+                            content: { content_type: 'text', parts: ['Final answer from cache'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'node-1',
+                        children: [],
+                    },
+                },
+            }),
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const saveBefore = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveBefore).not.toBeNull();
+        expect(saveBefore?.disabled).toBe(true);
+
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://test.com/backend-api/conversation/123',
+                data: '{"ok":true}',
+                attemptId: 'attempt:single-sample-ready',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        const saveDuring = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveDuring?.disabled).toBe(true);
+
+        await new Promise((resolve) => setTimeout(resolve, 1300));
+        const saveAfter = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveAfter?.disabled).toBe(false);
+    });
+
+    it('should enable Save via legacy fallback when canonical hash never stabilizes', async () => {
+        let readinessCounter = 0;
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: () => {
+                readinessCounter += 1;
+                return {
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: `unstable-${readinessCounter}`,
+                    latestAssistantTextLength: 24,
+                };
+            },
+            parseInterceptedData: () => ({
+                title: 'Unstable Hash Conversation',
+                create_time: 1_700_000_000,
+                update_time: 1_700_000_100,
+                conversation_id: '123',
+                current_node: 'node-2',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt',
+                safe_urls: [],
+                blocked_urls: [],
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['node-1'] },
+                    'node-1': {
+                        id: 'node-1',
+                        message: {
+                            id: 'node-1',
+                            author: { role: 'user', name: 'User', metadata: {} },
+                            create_time: 1_700_000_010,
+                            update_time: 1_700_000_010,
+                            content: { content_type: 'text', parts: ['Prompt'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'root',
+                        children: ['node-2'],
+                    },
+                    'node-2': {
+                        id: 'node-2',
+                        message: {
+                            id: 'node-2',
+                            author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                            create_time: 1_700_000_020,
+                            update_time: 1_700_000_020,
+                            content: { content_type: 'text', parts: ['Final answer with meaningful content'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: 'node-1',
+                        children: [],
+                    },
+                },
+            }),
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://test.com/backend-api/conversation/123',
+                data: '{"ok":true}',
+                attemptId: 'attempt:unstable-hash',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const saveEarly = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveEarly?.disabled).toBe(true);
+
+        await new Promise((resolve) => setTimeout(resolve, 3600));
+        const saveFallback = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveFallback?.disabled).toBe(false);
+    });
+
     it('should preserve pre-final live mirror snapshot when probe switches to stream-done state', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
