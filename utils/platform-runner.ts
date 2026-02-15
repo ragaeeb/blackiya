@@ -188,6 +188,31 @@ export function runPlatform(): void {
         }
     }
 
+    function setCaptureMetaForConversation(conversationId: string, meta: ExportMeta): void {
+        setBoundedMapValue(captureMetaByConversation, conversationId, meta, MAX_CONVERSATION_ATTEMPTS);
+    }
+
+    function preserveDegradedMetaDuringCanonicalStabilization(conversationId: string): boolean {
+        const existingMeta = captureMetaByConversation.get(conversationId);
+        return existingMeta?.fidelity === 'degraded';
+    }
+
+    function markSnapshotCaptureMeta(conversationId: string): void {
+        setCaptureMetaForConversation(conversationId, {
+            captureSource: 'dom_snapshot_degraded',
+            fidelity: 'degraded',
+            completeness: 'partial',
+        });
+    }
+
+    function markCanonicalCaptureMeta(conversationId: string): void {
+        setCaptureMetaForConversation(conversationId, {
+            captureSource: 'canonical_api',
+            fidelity: 'high',
+            completeness: 'complete',
+        });
+    }
+
     function resolveAliasedAttemptId(attemptId: string): string {
         let resolved = attemptId;
         const visited = new Set<string>();
@@ -232,16 +257,12 @@ export function runPlatform(): void {
         const source = meta?.source ?? 'network';
         const isSnapshotSource = source.includes('snapshot') || source.includes('dom');
         if (isSnapshotSource) {
-            setBoundedMapValue(
-                captureMetaByConversation,
-                capturedId,
-                {
-                    captureSource: 'dom_snapshot_degraded',
-                    fidelity: 'degraded',
-                    completeness: 'partial',
-                },
-                MAX_CONVERSATION_ATTEMPTS,
-            );
+            const existingDecision = resolveReadinessDecision(capturedId);
+            if (existingDecision.mode === 'canonical_ready') {
+                markCanonicalCaptureMeta(capturedId);
+            } else {
+                markSnapshotCaptureMeta(capturedId);
+            }
             structuredLogger.emit(
                 resolveAttemptId(capturedId),
                 'info',
@@ -254,17 +275,11 @@ export function runPlatform(): void {
                 scheduleCanonicalStabilizationRetry(capturedId, resolveAttemptId(capturedId));
             }
         } else {
-            setBoundedMapValue(
-                captureMetaByConversation,
-                capturedId,
-                {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                MAX_CONVERSATION_ATTEMPTS,
-            );
-            ingestSfeCanonicalSample(data, meta?.attemptId);
+            const preserveDegraded = preserveDegradedMetaDuringCanonicalStabilization(capturedId);
+            const resolution = ingestSfeCanonicalSample(data, meta?.attemptId);
+            if (resolution?.ready || !preserveDegraded) {
+                markCanonicalCaptureMeta(capturedId);
+            }
         }
         refreshButtonState(capturedId);
         if (evaluateReadinessForData(data).ready) {
@@ -757,9 +772,12 @@ export function runPlatform(): void {
         );
     }
 
-    function ingestSfeCanonicalSample(data: ConversationData, attemptId?: string): void {
+    function ingestSfeCanonicalSample(
+        data: ConversationData,
+        attemptId?: string,
+    ): ReturnType<SignalFusionEngine['applyCanonicalSample']> | null {
         if (!sfeEnabled) {
-            return;
+            return null;
         }
         const conversationId = data.conversation_id;
         const effectiveAttemptId = attemptId ?? resolveAttemptId(conversationId);
@@ -787,6 +805,7 @@ export function runPlatform(): void {
             syncStreamProbePanelFromCanonical(conversationId, data);
             emitCapturedReadyLog(effectiveAttemptId, conversationId, resolution);
         }
+        return resolution;
     }
 
     function resolveSfeReady(conversationId: string): boolean {
@@ -2270,12 +2289,11 @@ export function runPlatform(): void {
             return null;
         }
 
-        const shouldBlockForGeneration = currentAdapter.name === 'ChatGPT';
         const decision = resolveReadinessDecision(conversationId);
         const allowDegraded = options.allowDegraded === true;
         const canExportNow =
             decision.mode === 'canonical_ready' || (allowDegraded && decision.mode === 'degraded_manual_only');
-        if (!canExportNow || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
+        if (!canExportNow || shouldBlockActionsForGeneration(conversationId)) {
             logger.warn('Conversation is still generating; export blocked until completion.', {
                 conversationId,
                 platform: currentAdapter.name,
@@ -2606,6 +2624,27 @@ export function runPlatform(): void {
         return false;
     }
 
+    function isLifecycleGenerationPhase(conversationId: string): boolean {
+        if (lifecycleState !== 'prompt-sent' && lifecycleState !== 'streaming') {
+            return false;
+        }
+        if (!currentConversationId) {
+            return true;
+        }
+        return currentConversationId === conversationId;
+    }
+
+    function shouldBlockActionsForGeneration(conversationId: string): boolean {
+        if (isLifecycleGenerationPhase(conversationId)) {
+            return true;
+        }
+        if (currentAdapter?.name !== 'ChatGPT') {
+            return false;
+        }
+        // Fallback path when lifecycle events are missing.
+        return isPlatformGenerating(currentAdapter);
+    }
+
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
         const data = interceptionManager.getConversation(conversationId);
         if (!data) {
@@ -2617,11 +2656,10 @@ export function runPlatform(): void {
         }
 
         const readiness = evaluateReadinessForData(data);
-        const generating = currentAdapter?.name === 'ChatGPT' && isPlatformGenerating(currentAdapter);
         const captureMeta = getCaptureMeta(conversationId);
 
         if (!sfeEnabled) {
-            const ready = readiness.ready && !generating;
+            const ready = readiness.ready;
             return {
                 ready,
                 mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
@@ -2631,8 +2669,8 @@ export function runPlatform(): void {
 
         const sfeResolution = sfe.resolveByConversation(conversationId);
         const sfeReady = !!sfeResolution?.ready;
-        logSfeMismatchIfNeeded(conversationId, readiness.ready && !generating);
-        if (sfeReady && readiness.ready && !generating && captureMeta.fidelity === 'high') {
+        logSfeMismatchIfNeeded(conversationId, readiness.ready);
+        if (sfeReady && readiness.ready && captureMeta.fidelity === 'high') {
             return {
                 ready: true,
                 mode: 'canonical_ready',

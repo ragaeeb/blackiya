@@ -7,6 +7,7 @@
  */
 
 import type { LLMPlatform } from '@/platforms/types';
+import { isConversationReady } from '@/utils/conversation-readiness';
 import { logger } from '@/utils/logger';
 import { LRUCache } from '@/utils/lru-cache';
 import type { ConversationData } from '@/utils/types';
@@ -79,12 +80,33 @@ export class InterceptionManager {
         }
 
         const conversationId = data.conversation_id;
+        const existing = this.conversationCache.get(conversationId);
+        const isSnapshotSource = source.includes('snapshot') || source.includes('dom');
+        if (existing && isSnapshotSource) {
+            const existingReady = this.isConversationReady(existing);
+            const incomingReady = this.isConversationReady(data);
+            if (existingReady && !incomingReady) {
+                logger.info('Ignoring degraded snapshot overwrite for ready conversation', {
+                    conversationId,
+                    source,
+                });
+                this.onDataCaptured(conversationId, existing, { source: 'canonical-preserved' });
+                return;
+            }
+        }
         this.conversationCache.set(conversationId, data);
         logger.info(`Successfully captured/cached data for conversation: ${conversationId}`, {
             source,
             directIngest: true,
         });
         this.onDataCaptured(conversationId, data, { source });
+    }
+
+    private isConversationReady(data: ConversationData): boolean {
+        if (this.currentAdapter?.evaluateReadiness) {
+            return this.currentAdapter.evaluateReadiness(data).ready;
+        }
+        return isConversationReady(data);
     }
 
     private handleMessage = (event: MessageEvent): void => {
