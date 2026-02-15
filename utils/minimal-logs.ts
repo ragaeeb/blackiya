@@ -91,8 +91,12 @@ function isCriticalLine(line: string): boolean {
         line.includes('SFE lifecycle phase update') ||
         line.includes('SFE canonical sample processed') ||
         line.includes('Legacy/SFE readiness mismatch') ||
-        line.includes('Attempt disposed on navigation') ||
+        line.includes('Attempt disposed') ||
+        line.includes('Attempt binding created') ||
         line.includes('Attempt superseded by newer prompt') ||
+        line.includes('Capture reached ready state') ||
+        line.includes('Awaiting canonical stabilization before ready') ||
+        line.includes('Stream done probe canceled') ||
         line.includes('response finished hint') ||
         line.includes('Response finished signal') ||
         line.includes('Calibration ') ||

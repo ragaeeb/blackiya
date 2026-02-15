@@ -308,7 +308,7 @@ describe('Minimal Debug Report', () => {
                 timestamp: '',
                 level: 'info',
                 context: 'content',
-                message: 'Attempt disposed on navigation',
+                message: 'Attempt disposed',
                 data: [],
             },
         ];
@@ -316,6 +316,6 @@ describe('Minimal Debug Report', () => {
         const report = generateMinimalDebugReport(logs);
 
         expect(report).toContain('SFE lifecycle phase update');
-        expect(report).toContain('Attempt disposed on navigation');
+        expect(report).toContain('Attempt disposed');
     });
 });

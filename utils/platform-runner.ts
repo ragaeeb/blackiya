@@ -195,6 +195,7 @@ export function runPlatform(): void {
         if (!conversationId) {
             return;
         }
+        const isNewBinding = !attemptByConversation.has(conversationId);
         const previous = attemptByConversation.get(conversationId);
         if (previous && previous !== attemptId) {
             sfe.getAttemptTracker().markSuperseded(previous, attemptId);
@@ -210,6 +211,16 @@ export function runPlatform(): void {
             );
         }
         attemptByConversation.set(conversationId, attemptId);
+        if (isNewBinding || previous !== attemptId) {
+            structuredLogger.emit(
+                attemptId,
+                'debug',
+                'attempt_created',
+                'Attempt binding created',
+                { conversationId },
+                `attempt-created:${conversationId}:${attemptId}`,
+            );
+        }
     }
 
     function isAttemptDisposedOrSuperseded(attemptId: string): boolean {
@@ -262,7 +273,7 @@ export function runPlatform(): void {
         structuredLogger.emit(
             attemptId,
             'debug',
-            'probe_canceled',
+            'probe_cancelled',
             'Stream done probe canceled',
             { reason },
             `probe-cancel:${reason}`,
@@ -368,6 +379,27 @@ export function runPlatform(): void {
             },
             `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
         );
+
+        if (!resolution.ready && resolution.reason === 'awaiting_stabilization') {
+            structuredLogger.emit(
+                effectiveAttemptId,
+                'info',
+                'awaiting_stabilization',
+                'Awaiting canonical stabilization before ready',
+                { conversationId, phase: resolution.phase },
+                `awaiting-stabilization:${conversationId}:${readiness.contentHash ?? 'none'}`,
+            );
+        }
+        if (resolution.ready) {
+            structuredLogger.emit(
+                effectiveAttemptId,
+                'info',
+                'captured_ready',
+                'Capture reached ready state',
+                { conversationId, phase: resolution.phase },
+                `captured-ready:${conversationId}`,
+            );
+        }
     }
 
     function resolveSfeReady(conversationId: string): boolean {
@@ -395,6 +427,14 @@ export function runPlatform(): void {
     }
 
     function emitAttemptDisposed(attemptId: string, reason: AttemptDisposedMessage['reason']): void {
+        structuredLogger.emit(
+            attemptId,
+            'info',
+            'attempt_disposed',
+            'Attempt disposed',
+            { reason },
+            `attempt-disposed:${reason}`,
+        );
         const payload: AttemptDisposedMessage = {
             type: 'BLACKIYA_ATTEMPT_DISPOSED',
             attemptId,
@@ -1622,14 +1662,6 @@ export function runPlatform(): void {
         for (const attemptId of disposedAttemptIds) {
             cancelStreamDoneProbe(attemptId, 'navigation');
             emitAttemptDisposed(attemptId, 'navigation');
-            structuredLogger.emit(
-                attemptId,
-                'info',
-                'attempt_disposed',
-                'Attempt disposed on navigation',
-                { reason: 'navigation' },
-                `dispose:navigation:${attemptId}`,
-            );
         }
     }
 
