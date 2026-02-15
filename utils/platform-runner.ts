@@ -33,6 +33,7 @@ import {
     type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
@@ -51,6 +52,8 @@ type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error'
 const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
 const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
 const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
+const PROBE_LEASE_TTL_MS = 5000;
+const PROBE_LEASE_RETRY_GRACE_MS = 500;
 const MAX_CONVERSATION_ATTEMPTS = 250;
 const MAX_STREAM_PREVIEWS = 150;
 const MAX_AUTOCAPTURE_KEYS = 400;
@@ -127,6 +130,7 @@ export function runPlatform(): void {
     const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
+    const probeLeaseRetryTimers = new Map<string, number>();
     const canonicalStabilizationRetryTimers = new Map<string, number>();
     const canonicalStabilizationRetryCounts = new Map<string, number>();
     const canonicalStabilizationStartedAt = new Map<string, number>();
@@ -151,6 +155,7 @@ export function runPlatform(): void {
     const attemptByConversation = new Map<string, string>();
     const attemptAliasForward = new Map<string, string>();
     const captureMetaByConversation = new Map<string, ExportMeta>();
+    const probeLease = new CrossTabProbeLease();
     let activeAttemptId: string | null = null;
 
     function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number): void {
@@ -310,6 +315,7 @@ export function runPlatform(): void {
             sfe.getAttemptTracker().markSuperseded(canonicalPrevious, attemptId);
             cancelStreamDoneProbe(canonicalPrevious, 'superseded');
             clearCanonicalStabilizationRetry(canonicalPrevious);
+            clearProbeLeaseRetry(canonicalPrevious);
             emitAttemptDisposed(canonicalPrevious, 'superseded');
             forwardAttemptAlias(previous, attemptId, 'superseded');
             structuredLogger.emit(
@@ -352,7 +358,12 @@ export function runPlatform(): void {
                 'debug',
                 'attempt_alias_forwarded',
                 'Resolved stale attempt alias before processing signal',
-                { signalType, originalAttemptId: attemptId, canonicalAttemptId, conversationId: conversationId ?? null },
+                {
+                    signalType,
+                    originalAttemptId: attemptId,
+                    canonicalAttemptId,
+                    conversationId: conversationId ?? null,
+                },
                 `attempt-alias-resolve:${signalType}:${attemptId}:${canonicalAttemptId}`,
             );
         }
@@ -406,6 +417,68 @@ export function runPlatform(): void {
             { reason },
             `probe-cancel:${reason}`,
         );
+    }
+
+    function clearProbeLeaseRetry(attemptId: string): void {
+        const timerId = probeLeaseRetryTimers.get(attemptId);
+        if (timerId !== undefined) {
+            clearTimeout(timerId);
+            probeLeaseRetryTimers.delete(attemptId);
+        }
+    }
+
+    function tryAcquireProbeLease(conversationId: string, attemptId: string): boolean {
+        if (!probeLeaseEnabled) {
+            return true;
+        }
+
+        const claim = probeLease.claim(conversationId, attemptId, PROBE_LEASE_TTL_MS);
+        if (claim.acquired) {
+            clearProbeLeaseRetry(attemptId);
+            return true;
+        }
+
+        structuredLogger.emit(
+            attemptId,
+            'debug',
+            'probe_lease_blocked',
+            'Probe lease held by another tab',
+            {
+                conversationId,
+                ownerAttemptId: claim.ownerAttemptId,
+                expiresAtMs: claim.expiresAtMs,
+            },
+            `probe-lease-blocked:${conversationId}:${claim.ownerAttemptId ?? 'unknown'}`,
+        );
+
+        if (!probeLeaseRetryTimers.has(attemptId) && !isAttemptDisposedOrSuperseded(attemptId)) {
+            const now = Date.now();
+            const expiresAtMs = claim.expiresAtMs ?? now + PROBE_LEASE_RETRY_GRACE_MS;
+            const delayMs = Math.max(expiresAtMs - now + PROBE_LEASE_RETRY_GRACE_MS, PROBE_LEASE_RETRY_GRACE_MS);
+
+            const timerId = window.setTimeout(() => {
+                probeLeaseRetryTimers.delete(attemptId);
+                if (isAttemptDisposedOrSuperseded(attemptId)) {
+                    return;
+                }
+                const mappedAttempt = attemptByConversation.get(conversationId);
+                if (mappedAttempt && resolveAliasedAttemptId(mappedAttempt) !== attemptId) {
+                    return;
+                }
+                void runStreamDoneProbe(conversationId, attemptId);
+            }, delayMs);
+            probeLeaseRetryTimers.set(attemptId, timerId);
+        }
+
+        setStreamProbePanel(
+            'stream-done: lease held by another tab',
+            withPreservedLiveMirrorSnapshot(
+                conversationId,
+                'stream-done: lease held by another tab',
+                `Another tab is probing canonical capture for ${conversationId}. Retrying shortly.`,
+            ),
+        );
+        return false;
     }
 
     function clearCanonicalStabilizationRetry(attemptId: string): void {
@@ -658,7 +731,10 @@ export function runPlatform(): void {
 
     async function loadSfeSettings(): Promise<void> {
         try {
-            const result = await browser.storage.local.get([STORAGE_KEYS.SFE_ENABLED, STORAGE_KEYS.PROBE_LEASE_ENABLED]);
+            const result = await browser.storage.local.get([
+                STORAGE_KEYS.SFE_ENABLED,
+                STORAGE_KEYS.PROBE_LEASE_ENABLED,
+            ]);
             sfeEnabled = result[STORAGE_KEYS.SFE_ENABLED] !== false;
             probeLeaseEnabled = result[STORAGE_KEYS.PROBE_LEASE_ENABLED] === true;
             logger.info('SFE settings loaded', {
@@ -1022,135 +1098,142 @@ export function runPlatform(): void {
         if (isAttemptDisposedOrSuperseded(attemptId)) {
             return;
         }
+        if (!tryAcquireProbeLease(conversationId, attemptId)) {
+            return;
+        }
         cancelStreamDoneProbe(attemptId, 'superseded');
         const controller = new AbortController();
         streamProbeControllers.set(attemptId, controller);
 
-        const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
-        lastStreamProbeKey = probeKey;
-        lastStreamProbeConversationId = conversationId;
-        setStreamProbePanel('stream-done: fetching conversation', `conversationId=${conversationId}`);
-        logger.info('Stream done probe start', {
-            platform: currentAdapter.name,
-            conversationId,
-        });
-
-        const apiUrls = getFetchUrlCandidates(currentAdapter, conversationId);
-        if (apiUrls.length === 0) {
-            const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
-            if (capturedFromSnapshot) {
-                const cached = interceptionManager.getConversation(conversationId);
-                const cachedText = cached ? extractResponseTextForProbe(cached) : '';
-                const body = cachedText.length > 0 ? cachedText : '(captured via snapshot fallback)';
-                setStreamProbePanel(
-                    'stream-done: degraded snapshot captured',
-                    withPreservedLiveMirrorSnapshot(
-                        conversationId,
-                        'stream-done: degraded snapshot captured',
-                        `${body}\n\nManual Force Save required (potentially incomplete).`,
-                    ),
-                );
-                streamProbeControllers.delete(attemptId);
-                return;
-            }
-            setStreamProbePanel(
-                'stream-done: no api url candidates',
-                withPreservedLiveMirrorSnapshot(
-                    conversationId,
-                    'stream-done: no api url candidates',
-                    `conversationId=${conversationId}`,
-                ),
-            );
-            logger.warn('Stream done probe has no URL candidates', {
+        try {
+            const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
+            lastStreamProbeKey = probeKey;
+            lastStreamProbeConversationId = conversationId;
+            setStreamProbePanel('stream-done: fetching conversation', `conversationId=${conversationId}`);
+            logger.info('Stream done probe start', {
                 platform: currentAdapter.name,
                 conversationId,
             });
-            return;
-        }
 
-        for (const apiUrl of apiUrls) {
-            if (controller.signal.aborted || isAttemptDisposedOrSuperseded(attemptId)) {
-                streamProbeControllers.delete(attemptId);
-                return;
-            }
-            try {
-                const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
-                if (!response.ok) {
-                    continue;
-                }
-                const text = await response.text();
-                const parsed = currentAdapter.parseInterceptedData(text, apiUrl);
-                if (!parsed?.conversation_id) {
-                    continue;
-                }
-                if (parsed.conversation_id !== conversationId) {
-                    continue;
-                }
-                const body = extractResponseTextForProbe(parsed);
-                const normalizedBody = body.length > 0 ? body : '(empty response text)';
-                if (lastStreamProbeKey === probeKey) {
-                    setStreamProbePanel(
-                        'stream-done: fetched full text',
-                        withPreservedLiveMirrorSnapshot(
-                            conversationId,
-                            'stream-done: fetched full text',
-                            normalizedBody,
-                        ),
-                    );
-                }
-                logger.info('Stream done probe success', {
-                    platform: currentAdapter.name,
-                    conversationId,
-                    textLength: normalizedBody.length,
-                });
-                streamProbeControllers.delete(attemptId);
-                return;
-            } catch {
-                // try next candidate
-            }
-        }
-
-        if (lastStreamProbeKey === probeKey) {
-            const cached = interceptionManager.getConversation(conversationId);
-            if (cached && evaluateReadinessForData(cached).ready) {
-                const cachedText = extractResponseTextForProbe(cached);
-                const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
-                setStreamProbePanel(
-                    'stream-done: using captured cache',
-                    withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: using captured cache', body),
-                );
-            } else {
+            const apiUrls = getFetchUrlCandidates(currentAdapter, conversationId);
+            if (apiUrls.length === 0) {
                 const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
                 if (capturedFromSnapshot) {
-                    const snapshotCached = interceptionManager.getConversation(conversationId);
-                    const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
-                    const snapshotBody = snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
+                    const cached = interceptionManager.getConversation(conversationId);
+                    const cachedText = cached ? extractResponseTextForProbe(cached) : '';
+                    const body = cachedText.length > 0 ? cachedText : '(captured via snapshot fallback)';
                     setStreamProbePanel(
                         'stream-done: degraded snapshot captured',
                         withPreservedLiveMirrorSnapshot(
                             conversationId,
                             'stream-done: degraded snapshot captured',
-                            `${snapshotBody}\n\nManual Force Save required (potentially incomplete).`,
+                            `${body}\n\nManual Force Save required (potentially incomplete).`,
                         ),
                     );
-                    streamProbeControllers.delete(attemptId);
                     return;
                 }
                 setStreamProbePanel(
-                    'stream-done: awaiting canonical capture',
+                    'stream-done: no api url candidates',
                     withPreservedLiveMirrorSnapshot(
                         conversationId,
-                        'stream-done: awaiting canonical capture',
-                        `Conversation stream completed for ${conversationId}. Waiting for canonical capture.`,
+                        'stream-done: no api url candidates',
+                        `conversationId=${conversationId}`,
                     ),
                 );
+                logger.warn('Stream done probe has no URL candidates', {
+                    platform: currentAdapter.name,
+                    conversationId,
+                });
+                return;
+            }
+
+            for (const apiUrl of apiUrls) {
+                if (controller.signal.aborted || isAttemptDisposedOrSuperseded(attemptId)) {
+                    return;
+                }
+                try {
+                    const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
+                    if (!response.ok) {
+                        continue;
+                    }
+                    const text = await response.text();
+                    const parsed = currentAdapter.parseInterceptedData(text, apiUrl);
+                    if (!parsed?.conversation_id) {
+                        continue;
+                    }
+                    if (parsed.conversation_id !== conversationId) {
+                        continue;
+                    }
+                    const body = extractResponseTextForProbe(parsed);
+                    const normalizedBody = body.length > 0 ? body : '(empty response text)';
+                    if (lastStreamProbeKey === probeKey) {
+                        setStreamProbePanel(
+                            'stream-done: fetched full text',
+                            withPreservedLiveMirrorSnapshot(
+                                conversationId,
+                                'stream-done: fetched full text',
+                                normalizedBody,
+                            ),
+                        );
+                    }
+                    logger.info('Stream done probe success', {
+                        platform: currentAdapter.name,
+                        conversationId,
+                        textLength: normalizedBody.length,
+                    });
+                    return;
+                } catch {
+                    // try next candidate
+                }
+            }
+
+            if (lastStreamProbeKey === probeKey) {
+                const cached = interceptionManager.getConversation(conversationId);
+                if (cached && evaluateReadinessForData(cached).ready) {
+                    const cachedText = extractResponseTextForProbe(cached);
+                    const body =
+                        cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
+                    setStreamProbePanel(
+                        'stream-done: using captured cache',
+                        withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: using captured cache', body),
+                    );
+                } else {
+                    const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
+                    if (capturedFromSnapshot) {
+                        const snapshotCached = interceptionManager.getConversation(conversationId);
+                        const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
+                        const snapshotBody =
+                            snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
+                        setStreamProbePanel(
+                            'stream-done: degraded snapshot captured',
+                            withPreservedLiveMirrorSnapshot(
+                                conversationId,
+                                'stream-done: degraded snapshot captured',
+                                `${snapshotBody}\n\nManual Force Save required (potentially incomplete).`,
+                            ),
+                        );
+                        return;
+                    }
+                    setStreamProbePanel(
+                        'stream-done: awaiting canonical capture',
+                        withPreservedLiveMirrorSnapshot(
+                            conversationId,
+                            'stream-done: awaiting canonical capture',
+                            `Conversation stream completed for ${conversationId}. Waiting for canonical capture.`,
+                        ),
+                    );
+                }
+            }
+            logger.warn('Stream done probe failed', {
+                platform: currentAdapter.name,
+                conversationId,
+            });
+        } finally {
+            streamProbeControllers.delete(attemptId);
+            if (probeLeaseEnabled) {
+                probeLease.release(conversationId, attemptId);
             }
         }
-        logger.warn('Stream done probe failed', {
-            platform: currentAdapter.name,
-            conversationId,
-        });
-        streamProbeControllers.delete(attemptId);
     }
 
     function buildExportPayloadForFormat(data: ConversationData, format: ExportFormat): unknown {
@@ -1201,7 +1284,9 @@ export function runPlatform(): void {
         if (allowDegraded) {
             const confirmed =
                 typeof window.confirm === 'function'
-                    ? window.confirm('Force Save may export partial data because canonical capture timed out. Continue?')
+                    ? window.confirm(
+                          'Force Save may export partial data because canonical capture timed out. Continue?',
+                      )
                     : true;
             if (!confirmed) {
                 return;
@@ -2059,7 +2144,8 @@ export function runPlatform(): void {
         const shouldBlockForGeneration = currentAdapter.name === 'ChatGPT';
         const decision = resolveReadinessDecision(conversationId);
         const allowDegraded = options.allowDegraded === true;
-        const canExportNow = decision.mode === 'canonical_ready' || (allowDegraded && decision.mode === 'degraded_manual_only');
+        const canExportNow =
+            decision.mode === 'canonical_ready' || (allowDegraded && decision.mode === 'degraded_manual_only');
         if (!canExportNow || (shouldBlockForGeneration && isPlatformGenerating(currentAdapter))) {
             logger.warn('Conversation is still generating; export blocked until completion.', {
                 conversationId,
@@ -2085,7 +2171,10 @@ export function runPlatform(): void {
         }
     }
 
-    async function saveConversation(data: ConversationData, options: { allowDegraded?: boolean } = {}): Promise<boolean> {
+    async function saveConversation(
+        data: ConversationData,
+        options: { allowDegraded?: boolean } = {},
+    ): Promise<boolean> {
         if (!currentAdapter) {
             return false;
         }
@@ -2190,6 +2279,7 @@ export function runPlatform(): void {
         for (const attemptId of disposedAttemptIds) {
             cancelStreamDoneProbe(attemptId, 'navigation');
             clearCanonicalStabilizationRetry(attemptId);
+            clearProbeLeaseRetry(attemptId);
             emitAttemptDisposed(attemptId, 'navigation');
         }
     }
@@ -2437,7 +2527,10 @@ export function runPlatform(): void {
         };
     }
 
-    function isConversationReadyForActions(conversationId: string, options: { includeDegraded?: boolean } = {}): boolean {
+    function isConversationReadyForActions(
+        conversationId: string,
+        options: { includeDegraded?: boolean } = {},
+    ): boolean {
         const decision = resolveReadinessDecision(conversationId);
         if (decision.mode === 'canonical_ready') {
             return true;
@@ -3010,6 +3103,7 @@ export function runPlatform(): void {
             for (const attemptId of disposed) {
                 cancelStreamDoneProbe(attemptId, 'teardown');
                 clearCanonicalStabilizationRetry(attemptId);
+                clearProbeLeaseRetry(attemptId);
                 emitAttemptDisposed(attemptId, 'teardown');
             }
             interceptionManager.stop();
@@ -3028,6 +3122,11 @@ export function runPlatform(): void {
             }
             canonicalStabilizationRetryTimers.clear();
             canonicalStabilizationRetryCounts.clear();
+            for (const timerId of probeLeaseRetryTimers.values()) {
+                clearTimeout(timerId);
+            }
+            probeLeaseRetryTimers.clear();
+            probeLease.dispose();
             for (const timeoutId of retryTimeoutIds) {
                 clearTimeout(timeoutId);
             }

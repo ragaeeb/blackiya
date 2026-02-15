@@ -699,7 +699,10 @@ const parseGrokResponse = (data: any, conversationIdOverride?: string) => {
 const evaluateGrokReadiness = (data: ConversationData): PlatformReadiness => {
     const messages = Object.values(data.mapping)
         .map((node) => node.message)
-        .filter((message): message is NonNullable<MessageNode['message']> => !!message && message.author.role === 'assistant')
+        .filter(
+            (message): message is NonNullable<MessageNode['message']> =>
+                !!message && message.author.role === 'assistant',
+        )
         .sort((left, right) => {
             const leftTs = left.update_time ?? left.create_time ?? 0;
             const rightTs = right.update_time ?? right.create_time ?? 0;

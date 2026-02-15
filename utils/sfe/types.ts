@@ -1,5 +1,5 @@
-import type { ConversationData } from '@/utils/types';
 import type { PlatformReadiness } from '@/platforms/types';
+import type { ConversationData } from '@/utils/types';
 
 export type LifecyclePhase =
     | 'idle'

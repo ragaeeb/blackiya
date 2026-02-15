@@ -85,6 +85,7 @@ describe('Platform Runner', () => {
         (window as any).location = locationMock;
         (global as any).alert = () => {};
         (global as any).confirm = () => true;
+        window.localStorage.clear();
     });
 
     afterEach(() => {
@@ -463,6 +464,62 @@ describe('Platform Runner', () => {
 
             const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
             expect(panelText.includes('Could not parse conversation payload')).toBe(false);
+        } finally {
+            (globalThis as any).fetch = originalFetch;
+        }
+    });
+
+    it('should skip stream probe when probe lease is held by another tab', async () => {
+        const originalFetch = (globalThis as any).fetch;
+        let fetchCalls = 0;
+        try {
+            (globalThis as any).fetch = async () => {
+                fetchCalls += 1;
+                return {
+                    ok: true,
+                    text: async () => '{}',
+                };
+            };
+
+            const now = Date.now();
+            window.localStorage.setItem(
+                'blackiya:probe-lease:123',
+                JSON.stringify({
+                    attemptId: 'attempt:owner',
+                    expiresAtMs: now + 10_000,
+                    updatedAtMs: now,
+                }),
+            );
+
+            storageDataMock = {
+                'userSettings.sfe.probeLeaseEnabled': true,
+            };
+
+            currentAdapterMock = {
+                ...createMockAdapter(),
+                name: 'ChatGPT',
+                buildApiUrls: () => ['https://test.com/backend-api/conversation/123'],
+                parseInterceptedData: () => null,
+            };
+
+            runPlatform();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:lease-contender',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+            expect(panelText).toContain('stream-done: lease held by another tab');
+            expect(fetchCalls).toBe(0);
         } finally {
             (globalThis as any).fetch = originalFetch;
         }
