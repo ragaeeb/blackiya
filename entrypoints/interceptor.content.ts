@@ -338,6 +338,37 @@ function emitLifecycleSignal(
     });
 }
 
+function emitTitleResolvedSignal(attemptId: string, conversationId: string, title: string): void {
+    if (isAttemptDisposed(attemptId)) {
+        return;
+    }
+    const payload = {
+        type: 'BLACKIYA_TITLE_RESOLVED' as const,
+        platform: chatGPTAdapter.name,
+        attemptId,
+        conversationId,
+        title,
+    };
+    window.postMessage(payload, window.location.origin);
+    log('info', 'title resolved from stream', { conversationId, title });
+}
+
+function extractTitleFromSsePayload(dataPayload: string): string | null {
+    try {
+        const parsed = JSON.parse(dataPayload);
+        if (
+            parsed?.type === 'title_generation' &&
+            typeof parsed?.title === 'string' &&
+            parsed.title.trim().length > 0
+        ) {
+            return parsed.title.trim();
+        }
+    } catch {
+        // Not JSON or not a title frame
+    }
+    return null;
+}
+
 function emitStreamDeltaSignal(attemptId: string, conversationId: string | undefined, text: string): void {
     const normalized = text.replace(/\r\n/g, '\n');
     const trimmed = normalized.trim();
@@ -575,6 +606,12 @@ async function monitorChatGptSseLifecycle(
                     emitLifecycleSignal(attemptId, 'completed', lifecycleConversationId);
                     delimiterIndex = streamBuffer.indexOf('\n\n');
                     continue;
+                }
+
+                // Extract title_generation events from the SSE stream
+                const resolvedTitle = extractTitleFromSsePayload(dataPayload);
+                if (resolvedTitle && lifecycleConversationId) {
+                    emitTitleResolvedSignal(attemptId, lifecycleConversationId, resolvedTitle);
                 }
 
                 // Reconstruct adapter-compatible SSE so we can extract the latest assistant text snapshot robustly.

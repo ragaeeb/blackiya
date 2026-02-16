@@ -31,6 +31,7 @@ import {
     type StreamDeltaMessage,
     type StreamDumpConfigMessage,
     type StreamDumpFrameMessage,
+    type TitleResolvedMessage,
 } from '@/utils/protocol/messages';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import { shouldIngestAsCanonicalSample, shouldUseCachedConversationForWarmFetch } from '@/utils/sfe/capture-fidelity';
@@ -159,6 +160,7 @@ export function runPlatform(): void {
     const attemptAliasForward = new Map<string, string>();
     const captureMetaByConversation = new Map<string, ExportMeta>();
     const probeLease = new CrossTabProbeLease();
+    const streamResolvedTitles = new Map<string, string>();
     let activeAttemptId: string | null = null;
 
     function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number): void {
@@ -191,11 +193,6 @@ export function runPlatform(): void {
 
     function setCaptureMetaForConversation(conversationId: string, meta: ExportMeta): void {
         setBoundedMapValue(captureMetaByConversation, conversationId, meta, MAX_CONVERSATION_ATTEMPTS);
-    }
-
-    function preserveDegradedMetaDuringCanonicalStabilization(conversationId: string): boolean {
-        const existingMeta = captureMetaByConversation.get(conversationId);
-        return existingMeta?.fidelity === 'degraded';
     }
 
     function markSnapshotCaptureMeta(conversationId: string): void {
@@ -250,6 +247,12 @@ export function runPlatform(): void {
 
     // 2. Data Manager
     const interceptionManager = new InterceptionManager((capturedId, data, meta) => {
+        // Apply stream-resolved title if the cached data has a stale/placeholder title
+        const streamTitle = streamResolvedTitles.get(capturedId);
+        if (streamTitle && data.title !== streamTitle) {
+            data.title = streamTitle;
+        }
+
         currentConversationId = capturedId;
         if (meta?.attemptId) {
             activeAttemptId = meta.attemptId;
@@ -272,17 +275,27 @@ export function runPlatform(): void {
                 { conversationId: capturedId, source },
                 `snapshot-degraded:${capturedId}:${source}`,
             );
+            const retryAttemptIdResolved = resolveAttemptId(capturedId);
+            // #region agent log
+            logger.info('Snapshot retry decision', {
+                conversationId: capturedId,
+                lifecycleState,
+                willSchedule: lifecycleState === 'completed',
+                attemptId: retryAttemptIdResolved,
+            });
+            // #endregion
             if (lifecycleState === 'completed') {
-                scheduleCanonicalStabilizationRetry(capturedId, resolveAttemptId(capturedId));
+                scheduleCanonicalStabilizationRetry(capturedId, retryAttemptIdResolved);
             }
         } else {
             const effectiveAttemptId = resolveAliasedAttemptId(meta?.attemptId ?? resolveAttemptId(capturedId));
             maybeRestartCanonicalRecoveryAfterTimeout(capturedId, effectiveAttemptId);
-            const preserveDegraded = preserveDegradedMetaDuringCanonicalStabilization(capturedId);
-            const resolution = ingestSfeCanonicalSample(data, effectiveAttemptId);
-            if (resolution?.ready || !preserveDegraded) {
-                markCanonicalCaptureMeta(capturedId);
-            }
+            // Canonical API data is high-fidelity by definition. Promote fidelity
+            // immediately so that stabilization retry can ingest second samples via
+            // shouldIngestAsCanonicalSample. Without this, a prior degraded snapshot
+            // capture blocks the retry loop and the SFE never reaches captured_ready.
+            markCanonicalCaptureMeta(capturedId);
+            ingestSfeCanonicalSample(data, effectiveAttemptId);
         }
         refreshButtonState(capturedId);
         if (evaluateReadinessForData(data).ready) {
@@ -542,6 +555,7 @@ export function runPlatform(): void {
     function clearCanonicalStabilizationRetry(attemptId: string): void {
         const timerId = canonicalStabilizationRetryTimers.get(attemptId);
         if (timerId !== undefined) {
+            logger.info('Stabilization retry cleared', { attemptId });
             clearTimeout(timerId);
             canonicalStabilizationRetryTimers.delete(attemptId);
         }
@@ -616,16 +630,26 @@ export function runPlatform(): void {
         canonicalStabilizationRetryTimers.delete(attemptId);
         canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
 
-        if (isAttemptDisposedOrSuperseded(attemptId)) {
-            return;
-        }
-
+        const disposed = isAttemptDisposedOrSuperseded(attemptId);
         const mappedAttempt = attemptByConversation.get(conversationId);
-        if (mappedAttempt && mappedAttempt !== attemptId) {
+        const mappedMismatch = !!mappedAttempt && mappedAttempt !== attemptId;
+        logger.info('Stabilization retry tick', {
+            conversationId,
+            attemptId,
+            retries,
+            disposed,
+            mappedMismatch,
+            sfePhase: sfe.resolve(attemptId).phase,
+        });
+        if (disposed) {
             return;
         }
 
-        await warmFetchConversationSnapshot(conversationId, 'stabilization-retry');
+        if (mappedMismatch) {
+            return;
+        }
+
+        const fetchSucceeded = await warmFetchConversationSnapshot(conversationId, 'stabilization-retry');
 
         const cached = interceptionManager.getConversation(conversationId);
         if (!cached) {
@@ -635,6 +659,35 @@ export function runPlatform(): void {
 
         const captureMeta = getCaptureMeta(conversationId);
         if (!shouldIngestAsCanonicalSample(captureMeta)) {
+            // The cached data is degraded (from a DOM snapshot) and the warm
+            // fetch failed — typically because the ChatGPT API returns 404 for
+            // requests made from the ISOLATED content script world (missing
+            // Authorization header). If the cached snapshot already passes
+            // readiness, promote it to canonical so the SFE can stabilize.
+            const readinessResult = evaluateReadinessForData(cached);
+            if (!fetchSucceeded && readinessResult.ready) {
+                // #region agent log
+                logger.info('Promoting ready snapshot to canonical (API unreachable)', {
+                    conversationId,
+                    retries: retries + 1,
+                });
+                // #endregion
+                markCanonicalCaptureMeta(conversationId);
+                ingestSfeCanonicalSample(cached, attemptId);
+                scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+                refreshButtonState(conversationId);
+                return;
+            }
+            // #region agent log
+            if (!fetchSucceeded && !readinessResult.ready) {
+                logger.info('Snapshot promotion skipped: readiness check failed', {
+                    conversationId,
+                    retries: retries + 1,
+                    reason: readinessResult.reason,
+                    terminal: readinessResult.terminal,
+                });
+            }
+            // #endregion
             scheduleCanonicalStabilizationRetry(conversationId, attemptId);
             refreshButtonState(conversationId);
             return;
@@ -646,9 +699,15 @@ export function runPlatform(): void {
 
     function scheduleCanonicalStabilizationRetry(conversationId: string, attemptId: string): void {
         if (canonicalStabilizationRetryTimers.has(attemptId)) {
+            // #region agent log
+            logger.info('Stabilization retry already scheduled (skip)', { conversationId, attemptId });
+            // #endregion
             return;
         }
         if (isAttemptDisposedOrSuperseded(attemptId)) {
+            // #region agent log
+            logger.info('Stabilization retry skip: attempt disposed/superseded', { conversationId, attemptId });
+            // #endregion
             return;
         }
 
@@ -673,6 +732,14 @@ export function runPlatform(): void {
         }, CANONICAL_STABILIZATION_RETRY_DELAY_MS);
 
         canonicalStabilizationRetryTimers.set(attemptId, timerId);
+        // #region agent log
+        logger.info('Stabilization retry scheduled', {
+            conversationId,
+            attemptId,
+            retryNumber: retries + 1,
+            delayMs: CANONICAL_STABILIZATION_RETRY_DELAY_MS,
+        });
+        // #endregion
     }
 
     function evaluateReadinessForData(data: ConversationData): PlatformReadiness {
@@ -833,7 +900,16 @@ export function runPlatform(): void {
         });
         emitCanonicalSampleProcessed(effectiveAttemptId, conversationId, resolution, readiness);
 
-        if (shouldScheduleCanonicalRetry(resolution, lifecycleState)) {
+        const shouldRetry = shouldScheduleCanonicalRetry(resolution, lifecycleState);
+        if (!shouldRetry && !resolution.ready) {
+            logger.info('Canonical retry skipped', {
+                conversationId,
+                lifecycleState,
+                reason: resolution.reason,
+                blocking: resolution.blockingConditions,
+            });
+        }
+        if (shouldRetry) {
             scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
             emitAwaitingCanonicalLog(effectiveAttemptId, conversationId, resolution, readiness.contentHash ?? null);
         }
@@ -1362,7 +1438,7 @@ export function runPlatform(): void {
                     });
                     return;
                 } catch {
-                    // try next candidate
+                    // probe fetch failed; continue to next candidate
                 }
             }
 
@@ -1587,12 +1663,18 @@ export function runPlatform(): void {
         const cached = interceptionManager.getConversation(conversationId);
         const captureMeta = captureMetaByConversation.get(conversationId);
         if (cached && shouldUseCachedConversationForWarmFetch(evaluateReadinessForData(cached), captureMeta)) {
+            // #region agent log
+            logger.info('Warm fetch skipped: cache is ready+canonical', { conversationId, reason });
+            // #endregion
             return true;
         }
 
         const key = `${currentAdapter.name}:${conversationId}`;
         const existing = warmFetchInFlight.get(key);
         if (existing) {
+            // #region agent log
+            logger.info('Warm fetch dedup hit (shared in-flight promise)', { conversationId, reason });
+            // #endregion
             return existing;
         }
 
@@ -1607,6 +1689,14 @@ export function runPlatform(): void {
                 try {
                     const response = await fetch(apiUrl, { credentials: 'include' });
                     if (!response.ok) {
+                        // #region agent log
+                        logger.info('Warm fetch HTTP error', {
+                            conversationId,
+                            reason,
+                            status: response.status,
+                            path: new URL(apiUrl, window.location.origin).pathname,
+                        });
+                        // #endregion
                         continue;
                     }
                     const text = await response.text();
@@ -1624,10 +1714,19 @@ export function runPlatform(): void {
                         });
                         return true;
                     }
-                } catch {
-                    // Continue with next candidate.
+                } catch (err) {
+                    // #region agent log
+                    logger.info('Warm fetch network error', {
+                        conversationId,
+                        reason,
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                    // #endregion
                 }
             }
+            // #region agent log
+            logger.info('Warm fetch all candidates failed', { conversationId, reason });
+            // #endregion
             return false;
         })().finally(() => {
             warmFetchInFlight.delete(key);
@@ -2463,6 +2562,12 @@ export function runPlatform(): void {
 
     function disposeInFlightAttemptsOnNavigation(): void {
         const disposedAttemptIds = sfe.getAttemptTracker().disposeAllForRouteChange();
+        if (disposedAttemptIds.length > 0) {
+            logger.info('Navigation disposing attempts', {
+                count: disposedAttemptIds.length,
+                attemptIds: disposedAttemptIds,
+            });
+        }
         for (const attemptId of disposedAttemptIds) {
             cancelStreamDoneProbe(attemptId, 'navigation');
             clearCanonicalStabilizationRetry(attemptId);
@@ -2494,6 +2599,10 @@ export function runPlatform(): void {
         }
 
         setTimeout(injectSaveButton, 500);
+        logger.info('Conversation switch → idle', {
+            newId,
+            previousState: lifecycleState,
+        });
         setLifecycleState('idle', newId);
         void warmFetchConversationSnapshot(newId, 'conversation-switch');
         setTimeout(() => {
@@ -2792,12 +2901,19 @@ export function runPlatform(): void {
 
     function shouldProcessFinishedSignal(conversationId: string | null, source: 'network' | 'dom'): boolean {
         if (source === 'network' && conversationId && shouldBlockActionsForGeneration(conversationId)) {
+            logger.info('Finished signal blocked by generation guard', { conversationId, source });
             return false;
         }
         const now = Date.now();
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
         const minIntervalMs = source === 'network' ? 4500 : 1500;
         if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
+            logger.info('Finished signal debounced', {
+                conversationId,
+                source,
+                elapsed: now - lastResponseFinishedAt,
+                minIntervalMs,
+            });
             return false;
         }
         lastResponseFinishedAt = now;
@@ -2896,6 +3012,15 @@ export function runPlatform(): void {
         }
 
         if (conversationId) {
+            // When the SSE stream didn't deliver a "completed" lifecycle phase
+            // (e.g. tab was backgrounded and stream reader stalled), the DOM
+            // completion watcher is the only signal. In that case there may be
+            // no cached data yet. Trigger a stream-done probe to capture it.
+            const cached = interceptionManager.getConversation(conversationId);
+            if (!cached || !evaluateReadinessForData(cached).ready) {
+                setLifecycleState('completed', conversationId);
+                void runStreamDoneProbe(conversationId, attemptId);
+            }
             refreshButtonState(conversationId);
             scheduleButtonRefresh(conversationId);
             maybeRunAutoCapture(conversationId, 'response-finished');
@@ -2940,6 +3065,35 @@ export function runPlatform(): void {
         return event.source === window && event.origin === window.location.origin;
     }
 
+    function handleTitleResolvedMessage(message: any): boolean {
+        if (
+            (message as TitleResolvedMessage | undefined)?.type !== 'BLACKIYA_TITLE_RESOLVED' ||
+            typeof (message as TitleResolvedMessage).conversationId !== 'string' ||
+            typeof (message as TitleResolvedMessage).title !== 'string'
+        ) {
+            return false;
+        }
+        const typed = message as TitleResolvedMessage;
+        const conversationId = typed.conversationId;
+        const title = typed.title.trim();
+
+        if (title.length === 0) {
+            return true;
+        }
+
+        // Store the latest stream-derived title for this conversation
+        streamResolvedTitles.set(conversationId, title);
+
+        // Also update any already-cached conversation data in-place
+        const cached = interceptionManager.getConversation(conversationId);
+        if (cached) {
+            cached.title = title;
+        }
+
+        logger.info('Title resolved from stream', { conversationId, title });
+        return true;
+    }
+
     function handleResponseFinishedMessage(message: any): boolean {
         if (
             (message as ResponseFinishedMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_FINISHED' ||
@@ -2956,6 +3110,12 @@ export function runPlatform(): void {
         activeAttemptId = attemptId;
         if (hintedConversationId) {
             bindAttempt(hintedConversationId, attemptId);
+        }
+        // BLACKIYA_RESPONSE_FINISHED is an authoritative completion signal.
+        // Clear generation-phase lifecycle state so the generation guard in
+        // handleResponseFinished does not block processing.
+        if (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') {
+            lifecycleState = 'completed';
         }
         handleResponseFinished('network', hintedConversationId);
         return true;
@@ -3219,6 +3379,9 @@ export function runPlatform(): void {
                 return;
             }
             if (handleStreamDumpFrameMessage(message)) {
+                return;
+            }
+            if (handleTitleResolvedMessage(message)) {
                 return;
             }
             if (handleLifecycleMessage(message)) {

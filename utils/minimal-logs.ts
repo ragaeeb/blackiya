@@ -112,7 +112,20 @@ function isCriticalLine(line: string): boolean {
         line.includes('Failed to parse') ||
         line.includes('Button state') ||
         line.includes('Button target missing') ||
-        line.includes('Button skipped')
+        line.includes('Button skipped') ||
+        line.includes('Stabilization retry') ||
+        line.includes('stabilization retry') ||
+        line.includes('Warm fetch') ||
+        line.includes('warm fetch') ||
+        line.includes('Snapshot retry') ||
+        line.includes('Promoting ready snapshot') ||
+        line.includes('Snapshot promotion skipped') ||
+        line.includes('lifecycle signal') ||
+        line.includes('canonical_stabilization') ||
+        line.includes('disposeInFlight') ||
+        line.includes('shouldProcessFinished') ||
+        line.includes('handleConversationSwitch') ||
+        line.includes('clearCanonicalStabilization')
     );
 }
 

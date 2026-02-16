@@ -43,6 +43,14 @@ export interface StreamDumpConfigMessage {
     enabled: boolean;
 }
 
+export interface TitleResolvedMessage {
+    type: 'BLACKIYA_TITLE_RESOLVED';
+    platform: string;
+    attemptId: string;
+    conversationId: string;
+    title: string;
+}
+
 export interface StreamDumpFrameMessage {
     type: 'BLACKIYA_STREAM_DUMP_FRAME';
     platform: string;
@@ -79,6 +87,7 @@ export type BlackiyaMessage =
     | StreamDeltaMessage
     | ConversationIdResolvedMessage
     | AttemptDisposedMessage
+    | TitleResolvedMessage
     | StreamDumpConfigMessage
     | StreamDumpFrameMessage
     | CaptureInterceptedMessage
@@ -112,6 +121,13 @@ export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
             return hasString(value.platform) && hasString(value.attemptId) && hasString(value.conversationId);
         case 'BLACKIYA_ATTEMPT_DISPOSED':
             return hasString(value.attemptId) && hasString(value.reason);
+        case 'BLACKIYA_TITLE_RESOLVED':
+            return (
+                hasString(value.platform) &&
+                hasString(value.attemptId) &&
+                hasString(value.conversationId) &&
+                hasString(value.title)
+            );
         case 'BLACKIYA_STREAM_DUMP_CONFIG':
             return typeof value.enabled === 'boolean';
         case 'BLACKIYA_STREAM_DUMP_FRAME':

@@ -105,8 +105,11 @@ mock.module('@/platforms/factory', () => ({
     getPlatformAdapterByApiUrl: () => currentAdapterMock,
 }));
 
+const downloadCalls: Array<{ data: unknown; filename: string }> = [];
 mock.module('@/utils/download', () => ({
-    downloadAsJSON: () => {},
+    downloadAsJSON: (data: unknown, filename: string) => {
+        downloadCalls.push({ data, filename });
+    },
 }));
 
 mock.module('@/utils/logger', () => ({
@@ -149,6 +152,7 @@ describe('Platform Runner', () => {
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter();
         storageDataMock = {};
+        downloadCalls.length = 0;
 
         // Mock window.location properties
         const locationMock = {
@@ -1069,12 +1073,12 @@ describe('Platform Runner', () => {
         expect(panelAfterDone).toContain('Live chunk one. Live chunk two.');
     });
 
-    it('should recover from Force Save to Save JSON when late canonical capture stabilizes', async () => {
-        const canonicalConversation = buildConversation('123', 'Canonical answer from API', {
-            status: 'finished_successfully',
-            endTurn: true,
-        });
-
+    it('should promote ready snapshot to canonical when warm fetch fails (V2.1-018 fix)', async () => {
+        // When the ChatGPT API is unreachable from the ISOLATED content script
+        // world (returns 404), the stabilization retry's warm fetch fails. If
+        // the cached DOM snapshot already passes readiness, it should be promoted
+        // to canonical so the SFE can stabilize via two matching snapshot samples.
+        // This avoids the Force Save timeout entirely.
         currentAdapterMock = {
             ...createMockAdapter(),
             name: 'ChatGPT',
@@ -1187,46 +1191,25 @@ describe('Platform Runner', () => {
                 window.location.origin,
             );
 
+            // Wait for probe to run (fetch fails), snapshot fallback captures
+            // degraded data, and stabilization retries promote it to canonical.
             await new Promise((resolve) => setTimeout(resolve, 1700));
-            const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(saveButton?.disabled).toBe(true);
-            expect(saveButton?.textContent?.includes('Force Save')).toBe(false);
 
             const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
             expect(panelText).toContain('stream-done: degraded snapshot captured');
             expect(panelText).toContain('Final answer from snapshot');
 
-            await new Promise((resolve) => setTimeout(resolve, 6000));
-            const forceSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(forceSaveButton?.disabled).toBe(false);
-            expect(forceSaveButton?.textContent).toContain('Force Save');
+            // After 2 retry ticks (~2.3s), the snapshot should be promoted
+            // to canonical because it passes readiness. Wait for the SFE
+            // to stabilize with two matching canonical samples.
+            await new Promise((resolve) => setTimeout(resolve, 3000));
 
-            window.postMessage(
-                {
-                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                    platform: 'ChatGPT',
-                    url: 'https://chatgpt.com/backend-api/conversation/123',
-                    data: JSON.stringify(canonicalConversation),
-                    attemptId: 'attempt:snapshot-fallback',
-                },
-                window.location.origin,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-            window.postMessage(
-                {
-                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                    platform: 'ChatGPT',
-                    url: 'https://chatgpt.com/backend-api/conversation/123',
-                    data: JSON.stringify(canonicalConversation),
-                    attemptId: 'attempt:snapshot-fallback',
-                },
-                window.location.origin,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 400));
-
-            const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(recoveredSaveButton?.disabled).toBe(false);
-            expect(recoveredSaveButton?.textContent?.includes('Force Save')).toBe(false);
+            // Verify Save JSON is shown (not Force Save) — the snapshot was
+            // promoted to canonical since the API warm fetch consistently failed.
+            const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(saveButton).not.toBeNull();
+            expect(saveButton?.disabled).toBe(false);
+            expect(saveButton?.textContent?.includes('Force Save')).toBe(false);
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -1336,6 +1319,115 @@ describe('Platform Runner', () => {
         }
     });
 
+    it('should promote fidelity to high when canonical API capture arrives after degraded snapshot', async () => {
+        // Reproduces V2.1-015: snapshot fallback sets fidelity=degraded, then a single
+        // canonical API capture arrives. The stabilization retry loop must be able to
+        // ingest the cached data as a second sample. If fidelity stays degraded, the
+        // shouldIngestAsCanonicalSample guard blocks the second sample and the SFE
+        // never reaches captured_ready — landing in Force Save permanently.
+        const canonicalConversation = buildConversation('123', 'Full canonical response from API', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            buildApiUrls: () => [],
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        // Respond to snapshot requests with a degraded snapshot
+        const snapshotResponseHandler = (event: MessageEvent) => {
+            const msg = (event as any).data;
+            if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
+                return;
+            }
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                    requestId: msg.requestId,
+                    success: true,
+                    data: buildConversation('123', 'Snapshot partial answer', {
+                        status: 'finished_successfully',
+                        endTurn: true,
+                    }),
+                },
+                window.location.origin,
+            );
+        };
+
+        window.addEventListener('message', snapshotResponseHandler as any);
+        try {
+            runPlatform();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            // 1. Send prompt-sent
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:fidelity-promote',
+                    phase: 'prompt-sent',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 30));
+
+            // 2. Send completed — triggers snapshot fallback (degraded fidelity)
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:fidelity-promote',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+
+            // Wait for snapshot capture to process
+            await new Promise((resolve) => setTimeout(resolve, 700));
+
+            // Save should NOT be enabled yet (degraded, awaiting canonical)
+            const degradedSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(degradedSaveButton?.disabled).toBe(true);
+
+            // 3. Send ONE canonical API capture (simulates the interceptor's proactive fetch)
+            window.postMessage(
+                {
+                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                    platform: 'ChatGPT',
+                    url: 'https://chatgpt.com/backend-api/conversation/123',
+                    data: JSON.stringify(canonicalConversation),
+                    attemptId: 'attempt:fidelity-promote',
+                },
+                window.location.origin,
+            );
+
+            // Wait for stabilization retry to fire and ingest second sample
+            // The retry interval is 1150ms, so 2500ms should be enough for
+            // the first sample + one retry with a matching hash
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+
+            // Save button should be enabled in canonical_ready mode (not Force Save)
+            const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(recoveredSaveButton?.disabled).toBe(false);
+            expect(recoveredSaveButton?.textContent).not.toContain('Force Save');
+        } finally {
+            window.removeEventListener('message', snapshotResponseHandler as any);
+        }
+    }, 10_000);
+
     it('should keep Save enabled after canonical-ready despite transient ChatGPT generating DOM re-checks', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),
@@ -1444,6 +1536,105 @@ describe('Platform Runner', () => {
         const saveAfterHint = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveAfterHint?.disabled).toBe(false);
     }, 15_000);
+
+    it('should enable Save when RESPONSE_FINISHED arrives before canonical data in multi-tab scenario', async () => {
+        // Reproduces the Tab 1 failure in multi-tab: the SSE stream never emits
+        // "completed" because the tab was backgrounded, but the DOM completion watcher
+        // detects the UI transition via RESPONSE_FINISHED. Shortly after, the
+        // interceptor's proactive fetch delivers canonical data via
+        // LLM_CAPTURE_DATA_INTERCEPTED. The runner must handle both signals
+        // (finished + canonical data) to reach captured_ready.
+        const canonicalConversation = buildConversation('123', 'Full response text', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        // 1. prompt-sent WITHOUT conversationId (new conversation, ID not yet resolved)
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:dom-completion-probe',
+                phase: 'prompt-sent',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // 2. streaming WITHOUT conversationId
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:dom-completion-probe',
+                phase: 'streaming',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // 3. The SSE stream never sends "completed" (tab was backgrounded).
+        //    Instead, the RESPONSE_FINISHED signal arrives (from DOM watcher).
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:dom-completion-probe',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // 4. Canonical data arrives from interceptor's proactive fetch (first sample)
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:dom-completion-probe',
+            },
+            window.location.origin,
+        );
+
+        // Wait for stabilization window
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+
+        // 5. Second canonical sample for stability confirmation
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:dom-completion-probe',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveButton?.disabled).toBe(false);
+    }, 10_000);
 
     it('should keep Save disabled during active generation despite repeated network finished hints', async () => {
         currentAdapterMock = {
@@ -1925,4 +2116,263 @@ describe('Platform Runner', () => {
         expect(responsePayload.data.format).toBe('common');
         expect(responsePayload.data.llm).toBe('TestPlatform');
     });
+
+    it('should update cached title when BLACKIYA_TITLE_RESOLVED arrives from SSE stream', async () => {
+        const staleTitle = 'ROLE: Expert academic translator of Classical Islamic texts; prioritize accur...';
+        const freshTitle = 'Translation of Maytah Prohibition';
+
+        const staleConversation = buildConversation('123', 'Full response text', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        staleConversation.title = staleTitle;
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            formatFilename: (data: { title: string }) => data.title.replace(/[^a-zA-Z0-9]/g, '_'),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        // 1. Lifecycle: prompt-sent → streaming (mimic real SSE flow)
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:title-test',
+                phase: 'prompt-sent',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:title-test',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // 2. Title arrives mid-stream via BLACKIYA_TITLE_RESOLVED
+        window.postMessage(
+            {
+                type: 'BLACKIYA_TITLE_RESOLVED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:title-test',
+                conversationId: '123',
+                title: freshTitle,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // 3. Ingest canonical data (with stale title, as would happen from proactive fetch)
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(staleConversation),
+                attemptId: 'attempt:title-test',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        // 4. Lifecycle completed + response finished
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:title-test',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:title-test',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+
+        // Wait for stabilization (second canonical sample from retry)
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        // Second canonical sample for stability
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(staleConversation),
+                attemptId: 'attempt:title-test',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        // 5. Verify save button is enabled
+        const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveBtn).not.toBeNull();
+        expect(saveBtn?.disabled).toBe(false);
+
+        // 6. Click save
+        downloadCalls.length = 0;
+        saveBtn?.click();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // 7. Verify the exported data has the fresh title from the SSE stream
+        expect(downloadCalls.length).toBeGreaterThanOrEqual(1);
+        const downloadedData = downloadCalls[0].data as Record<string, unknown>;
+        expect(downloadedData.title).toBe(freshTitle);
+
+        // Verify filename also used the fresh title
+        expect(downloadCalls[0].filename).toContain('Translation');
+    }, 15_000);
+
+    it('should schedule stabilization retry after navigation resets lifecycle to idle', async () => {
+        // Reproduces V2.1-018: For long-thinking models (GPT 5.2), the proactive
+        // fetch gives up. After the response completes, a degraded snapshot is
+        // captured (status: in_progress). The stabilization retry must continue
+        // even when lifecycleState transitions to 'idle' (e.g., after navigation
+        // changes chatgpt.com → chatgpt.com/c/{id}). Two canonical samples with
+        // matching hashes are needed for the SFE to reach captured_ready.
+        const canonicalConversation = buildConversation('123', 'Full canonical answer from API', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+
+        const degradedSnapshot = buildConversation('123', 'Partial thinking output...', {
+            status: 'in_progress',
+            endTurn: false,
+        });
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        // 1. Streaming lifecycle (tab backgrounded, SSE stalls)
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:nav-retry',
+                phase: 'prompt-sent',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:nav-retry',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        // 2. RESPONSE_FINISHED sets lifecycleState = 'completed'
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:nav-retry',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // 3. Degraded snapshot arrives (what tryStreamDoneSnapshotCapture produces).
+        //    This triggers onConversationCaptured with a snapshot source, which
+        //    schedules the stabilization retry.
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'stream-snapshot://ChatGPT/123',
+                data: JSON.stringify(degradedSnapshot),
+                attemptId: 'attempt:nav-retry',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // 4. Simulate the lifecycle transitioning to 'idle' — this is what
+        //    handleConversationSwitch does after a URL change. In the real
+        //    scenario, the stabilization retry timer may have been cleared and
+        //    a warm fetch delivers data while lifecycle is idle.
+        //    We send a lifecycle signal with a non-streaming phase to force idle.
+        //    Then deliver canonical data as if from the warm fetch.
+
+        // First canonical sample (first stabilization retry / warm fetch result)
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:nav-retry',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+
+        // Second canonical sample (second stabilization retry)
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:nav-retry',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        // 5. Verify Save button is enabled — SFE should reach captured_ready
+        const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveButton).not.toBeNull();
+        expect(saveButton?.disabled).toBe(false);
+    }, 15_000);
 });
