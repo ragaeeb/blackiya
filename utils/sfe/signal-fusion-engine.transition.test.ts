@@ -144,4 +144,148 @@ describe('SignalFusionEngine transitions', () => {
         const resolved = sfe.resolveByConversation('c1');
         expect(resolved?.blockingConditions).toContain('stabilization_timeout');
     });
+
+    it('can restart canonical recovery after timeout and eventually promote to ready', () => {
+        const sfe = new SignalFusionEngine({
+            readinessGate: new ReadinessGate({ minStableMs: 900, maxStabilizationWaitMs: 200 }),
+        });
+        sfe.ingestSignal({
+            attemptId: 'late-recover',
+            platform: 'ChatGPT',
+            source: 'network_stream',
+            phase: 'completed_hint',
+            timestampMs: 1000,
+            conversationId: 'c2',
+        });
+
+        const timedOut = sfe.applyCanonicalSample({
+            attemptId: 'late-recover',
+            platform: 'ChatGPT',
+            conversationId: 'c2',
+            timestampMs: 1000,
+            data: {
+                title: 'x',
+                create_time: 1,
+                update_time: 2,
+                mapping: {},
+                conversation_id: 'c2',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'x',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            readiness: {
+                ready: true,
+                terminal: true,
+                reason: 'ok',
+                contentHash: 'h-seed',
+                latestAssistantTextLength: 8,
+            },
+        });
+        expect(timedOut.blockingConditions).toContain('awaiting_second_sample');
+
+        const timedOutChanged = sfe.applyCanonicalSample({
+            attemptId: 'late-recover',
+            platform: 'ChatGPT',
+            conversationId: 'c2',
+            timestampMs: 1250,
+            data: {
+                title: 'x',
+                create_time: 1,
+                update_time: 2,
+                mapping: {},
+                conversation_id: 'c2',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'x',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            readiness: {
+                ready: true,
+                terminal: true,
+                reason: 'ok',
+                contentHash: 'h-timeout',
+                latestAssistantTextLength: 8,
+            },
+        });
+        expect(timedOutChanged.blockingConditions).toContain('stabilization_timeout');
+
+        const restarted = sfe.restartCanonicalRecovery('late-recover', 1300);
+        expect(restarted).not.toBeNull();
+
+        const first = sfe.applyCanonicalSample({
+            attemptId: 'late-recover',
+            platform: 'ChatGPT',
+            conversationId: 'c2',
+            timestampMs: 1300,
+            data: {
+                title: 'x',
+                create_time: 1,
+                update_time: 2,
+                mapping: {},
+                conversation_id: 'c2',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'x',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            readiness: {
+                ready: true,
+                terminal: true,
+                reason: 'ok',
+                contentHash: 'h-recovered',
+                latestAssistantTextLength: 8,
+            },
+        });
+        expect(first.ready).toBe(false);
+        expect(first.blockingConditions).toContain('awaiting_second_sample');
+        expect(first.blockingConditions).not.toContain('stabilization_timeout');
+
+        const second = sfe.applyCanonicalSample({
+            attemptId: 'late-recover',
+            platform: 'ChatGPT',
+            conversationId: 'c2',
+            timestampMs: 2301,
+            data: {
+                title: 'x',
+                create_time: 1,
+                update_time: 2,
+                mapping: {},
+                conversation_id: 'c2',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'x',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            readiness: {
+                ready: true,
+                terminal: true,
+                reason: 'ok',
+                contentHash: 'h-recovered',
+                latestAssistantTextLength: 8,
+            },
+        });
+        expect(second.ready).toBe(true);
+        expect(second.phase).toBe('captured_ready');
+    });
 });
