@@ -269,6 +269,26 @@ export class SignalFusionEngine {
         return this.ensureResolution(descriptor, existingResolution?.blockingConditions ?? []);
     }
 
+    public restartCanonicalRecovery(attemptId: string, timestampMs = this.now()): CaptureResolution | null {
+        const descriptor = this.tracker.get(attemptId);
+        if (
+            !descriptor ||
+            descriptor.disposed ||
+            descriptor.phase === 'superseded' ||
+            descriptor.phase === 'disposed'
+        ) {
+            return null;
+        }
+        if (descriptor.phase === 'captured_ready') {
+            return this.ensureResolution(descriptor, []);
+        }
+
+        this.readinessGate.reset(attemptId);
+        this.tracker.updatePhase(attemptId, 'canonical_probing', timestampMs);
+        const updated = this.tracker.get(attemptId) ?? descriptor;
+        return this.ensureResolution(updated, ['awaiting_second_sample']);
+    }
+
     public dispose(attemptId: string): CaptureResolution {
         this.probeScheduler.cancel(attemptId);
         this.readinessGate.reset(attemptId);

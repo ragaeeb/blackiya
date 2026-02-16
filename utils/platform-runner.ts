@@ -136,6 +136,7 @@ export function runPlatform(): void {
     const canonicalStabilizationRetryTimers = new Map<string, number>();
     const canonicalStabilizationRetryCounts = new Map<string, number>();
     const canonicalStabilizationStartedAt = new Map<string, number>();
+    const timeoutWarningByAttempt = new Set<string>();
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
     let rememberedPreferredStep: CalibrationStep | null = null;
@@ -275,8 +276,10 @@ export function runPlatform(): void {
                 scheduleCanonicalStabilizationRetry(capturedId, resolveAttemptId(capturedId));
             }
         } else {
+            const effectiveAttemptId = resolveAliasedAttemptId(meta?.attemptId ?? resolveAttemptId(capturedId));
+            maybeRestartCanonicalRecoveryAfterTimeout(capturedId, effectiveAttemptId);
             const preserveDegraded = preserveDegradedMetaDuringCanonicalStabilization(capturedId);
-            const resolution = ingestSfeCanonicalSample(data, meta?.attemptId);
+            const resolution = ingestSfeCanonicalSample(data, effectiveAttemptId);
             if (resolution?.ready || !preserveDegraded) {
                 markCanonicalCaptureMeta(capturedId);
             }
@@ -544,6 +547,43 @@ export function runPlatform(): void {
         }
         canonicalStabilizationRetryCounts.delete(attemptId);
         canonicalStabilizationStartedAt.delete(attemptId);
+        timeoutWarningByAttempt.delete(attemptId);
+    }
+
+    function emitTimeoutWarningOnce(attemptId: string, conversationId: string): void {
+        if (timeoutWarningByAttempt.has(attemptId)) {
+            return;
+        }
+        addBoundedSetValue(timeoutWarningByAttempt, attemptId, MAX_AUTOCAPTURE_KEYS);
+        structuredLogger.emit(
+            attemptId,
+            'warn',
+            'readiness_timeout_manual_only',
+            'Stabilization timed out; manual force save required',
+            { conversationId },
+            `readiness-timeout:${conversationId}`,
+        );
+    }
+
+    function maybeRestartCanonicalRecoveryAfterTimeout(conversationId: string, attemptId: string): void {
+        if (!hasCanonicalStabilizationTimedOut(attemptId)) {
+            return;
+        }
+
+        clearCanonicalStabilizationRetry(attemptId);
+        const restarted = sfe.restartCanonicalRecovery(attemptId, Date.now());
+        if (!restarted) {
+            return;
+        }
+
+        structuredLogger.emit(
+            attemptId,
+            'info',
+            'canonical_recovery_rearmed',
+            'Re-armed canonical stabilization after timeout due to late canonical capture',
+            { conversationId },
+            `canonical-recovery-rearmed:${conversationId}`,
+        );
     }
 
     function hasCanonicalStabilizationTimedOut(attemptId: string): boolean {
@@ -2485,6 +2525,15 @@ export function runPlatform(): void {
             logButtonStateIfChanged(conversationId, false, '0.6');
             return;
         }
+
+        if (lifecycleState !== 'completed' && shouldBlockActionsForGeneration(conversationId)) {
+            buttonManager.setSaveButtonMode('default');
+            buttonManager.setActionButtonsEnabled(false);
+            buttonManager.setOpacity('0.6');
+            logButtonStateIfChanged(conversationId, false, '0.6');
+            return;
+        }
+
         const cached = interceptionManager.getConversation(conversationId);
         const captureMeta = getCaptureMeta(conversationId);
         if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
@@ -2683,20 +2732,15 @@ export function runPlatform(): void {
             sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
             (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
         if (hasTimeout) {
-            structuredLogger.emit(
-                attemptId,
-                'warn',
-                'readiness_timeout_manual_only',
-                'Stabilization timed out; manual force save required',
-                { conversationId },
-                `readiness-timeout:${conversationId}`,
-            );
+            emitTimeoutWarningOnce(attemptId, conversationId);
             return {
                 ready: false,
                 mode: 'degraded_manual_only',
                 reason: 'stabilization_timeout',
             };
         }
+
+        timeoutWarningByAttempt.delete(attemptId);
 
         if (captureMeta.fidelity === 'degraded') {
             return {
@@ -2746,10 +2790,14 @@ export function runPlatform(): void {
         };
     }
 
-    function shouldProcessFinishedSignal(conversationId: string | null): boolean {
+    function shouldProcessFinishedSignal(conversationId: string | null, source: 'network' | 'dom'): boolean {
+        if (source === 'network' && conversationId && shouldBlockActionsForGeneration(conversationId)) {
+            return false;
+        }
         const now = Date.now();
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
-        if (isSameConversation && now - lastResponseFinishedAt < 1500) {
+        const minIntervalMs = source === 'network' ? 4500 : 1500;
+        if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
             return false;
         }
         lastResponseFinishedAt = now;
@@ -2824,7 +2872,7 @@ export function runPlatform(): void {
 
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
         const conversationId = resolveActiveConversationId(hintedConversationId);
-        if (!shouldProcessFinishedSignal(conversationId)) {
+        if (!shouldProcessFinishedSignal(conversationId, source)) {
             return;
         }
         const attemptId = resolveAttemptId(conversationId ?? undefined);

@@ -1069,7 +1069,7 @@ describe('Platform Runner', () => {
         expect(panelAfterDone).toContain('Live chunk one. Live chunk two.');
     });
 
-    it('should defer Force Save while degraded snapshot recovery window is still active', async () => {
+    it('should recover from Force Save to Save JSON when late canonical capture stabilizes', async () => {
         const canonicalConversation = buildConversation('123', 'Canonical answer from API', {
             status: 'finished_successfully',
             endTurn: true,
@@ -1078,6 +1078,15 @@ describe('Platform Runner', () => {
         currentAdapterMock = {
             ...createMockAdapter(),
             name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
         };
 
         const snapshotResponseHandler = (event: MessageEvent) => {
@@ -1203,12 +1212,21 @@ describe('Platform Runner', () => {
                 window.location.origin,
             );
             await new Promise((resolve) => setTimeout(resolve, 1200));
+            window.postMessage(
+                {
+                    type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                    platform: 'ChatGPT',
+                    url: 'https://chatgpt.com/backend-api/conversation/123',
+                    data: JSON.stringify(canonicalConversation),
+                    attemptId: 'attempt:snapshot-fallback',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 400));
 
-            const forceSaveDuringStabilization = document.getElementById(
-                'blackiya-save-btn',
-            ) as HTMLButtonElement | null;
-            expect(forceSaveDuringStabilization?.disabled).toBe(false);
-            expect(forceSaveDuringStabilization?.textContent).toContain('Force Save');
+            const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(recoveredSaveButton?.disabled).toBe(false);
+            expect(recoveredSaveButton?.textContent?.includes('Force Save')).toBe(false);
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -1425,6 +1443,78 @@ describe('Platform Runner', () => {
 
         const saveAfterHint = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveAfterHint?.disabled).toBe(false);
+    }, 15_000);
+
+    it('should keep Save disabled during active generation despite repeated network finished hints', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        const canonicalConversation = buildConversation('123', 'Ready canonical answer', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:generation-guard',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1050));
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:generation-guard',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        const saveBeforeGeneration = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveBeforeGeneration?.disabled).toBe(false);
+
+        const stopButton = document.createElement('button');
+        stopButton.setAttribute('data-testid', 'stop-button');
+        stopButton.disabled = false;
+        document.body.appendChild(stopButton);
+
+        for (let i = 0; i < 5; i += 1) {
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_FINISHED',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:generation-guard',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const saveDuringGeneration = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveDuringGeneration?.disabled).toBe(true);
     }, 15_000);
 
     it('should keep Save enabled when late degraded snapshot arrives after canonical-ready', async () => {
