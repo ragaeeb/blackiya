@@ -130,11 +130,9 @@ function isCriticalLine(line: string): boolean {
         line.includes('shouldProcessFinished') ||
         line.includes('handleConversationSwitch') ||
         line.includes('clearCanonicalStabilization') ||
-        line.includes('Readiness decision:') ||
-        line.includes('Button readiness transition') ||
         line.includes('Network source: marking canonical') ||
-        line.includes('Timeout: max retries') ||
-        line.includes('Timeout: elapsed exceeded')
+        line.includes('Conversation switch') ||
+        line.includes('Tab became visible')
     );
 }
 

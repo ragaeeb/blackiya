@@ -876,6 +876,36 @@ export const grokAdapter: LLMPlatform = {
      * @param url - The API endpoint URL
      */
     parseInterceptedData(data: string | any, url: string) {
+        // #region agent log — H26-A/H27-B: log parse entry with URL routing
+        const _dbgDataLen = typeof data === 'string' ? data.length : JSON.stringify(data).length;
+        const _dbgPath = (() => {
+            try {
+                return new URL(url).pathname;
+            } catch {
+                return url.slice(0, 120);
+            }
+        })();
+        fetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                location: 'grok.ts:parseInterceptedData',
+                message: 'Grok parseInterceptedData called',
+                data: {
+                    path: _dbgPath,
+                    dataLen: _dbgDataLen,
+                    isGrokComMeta: isGrokComMetaEndpoint(url),
+                    isResponseNodes: isGrokComResponseNodesEndpoint(url),
+                    isLoadResponses: isGrokComLoadResponsesEndpoint(url),
+                    isXGraphql: isXGraphqlEndpoint(url),
+                    preview: typeof data === 'string' ? data.slice(0, 200) : '[object]',
+                },
+                timestamp: Date.now(),
+                hypothesisId: 'H26-A_H27-B',
+            }),
+        }).catch(() => {});
+        // #endregion
+
         // Check if this is a titles endpoint
         if (isTitlesEndpoint(url)) {
             const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
@@ -967,6 +997,27 @@ export const grokAdapter: LLMPlatform = {
 
             return parseGrokResponse(parsed, conversationIdFromUrl);
         } catch (e) {
+            // #region agent log — H26-A/H26-C: log JSON parse failure in generic fallback
+            fetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    location: 'grok.ts:parseInterceptedData:catch',
+                    message: 'Grok generic JSON.parse FAILED',
+                    data: {
+                        path: _dbgPath,
+                        dataLen: _dbgDataLen,
+                        error: String(e),
+                        isNdjson: typeof data === 'string' && data.includes('\n'),
+                        lineCount:
+                            typeof data === 'string' ? data.split('\n').filter((l: string) => l.trim()).length : 0,
+                        preview: typeof data === 'string' ? data.slice(0, 300) : '[object]',
+                    },
+                    timestamp: Date.now(),
+                    hypothesisId: 'H26-AC',
+                }),
+            }).catch(() => {});
+            // #endregion
             logger.error('[Blackiya/Grok] Failed to parse data:', e);
             return null;
         }
