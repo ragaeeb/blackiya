@@ -294,6 +294,14 @@ export function runPlatform(): void {
             // immediately so that stabilization retry can ingest second samples via
             // shouldIngestAsCanonicalSample. Without this, a prior degraded snapshot
             // capture blocks the retry loop and the SFE never reaches captured_ready.
+            // #region agent log
+            logger.info('Network source: marking canonical fidelity', {
+                conversationId: capturedId,
+                source,
+                effectiveAttemptId,
+                readinessReady: evaluateReadinessForData(data).ready,
+            });
+            // #endregion
             markCanonicalCaptureMeta(capturedId);
             ingestSfeCanonicalSample(data, effectiveAttemptId);
         }
@@ -604,6 +612,14 @@ export function runPlatform(): void {
         const retries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
         const hasPendingTimer = canonicalStabilizationRetryTimers.has(attemptId);
         if (retries >= CANONICAL_STABILIZATION_MAX_RETRIES && !hasPendingTimer) {
+            // #region agent log
+            logger.info('Timeout: max retries exhausted with no pending timer', {
+                attemptId,
+                retries,
+                hasPendingTimer,
+                maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
+            });
+            // #endregion
             return true;
         }
 
@@ -619,7 +635,18 @@ export function runPlatform(): void {
         const timeoutMs =
             CANONICAL_STABILIZATION_RETRY_DELAY_MS * CANONICAL_STABILIZATION_MAX_RETRIES +
             CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS;
-        return Date.now() - startedAt >= timeoutMs;
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= timeoutMs) {
+            // #region agent log
+            logger.info('Timeout: elapsed exceeded max wait', {
+                attemptId,
+                retries,
+                elapsed,
+                timeoutMs,
+            });
+            // #endregion
+        }
+        return elapsed >= timeoutMs;
     }
 
     async function processCanonicalStabilizationRetryTick(
@@ -678,16 +705,46 @@ export function runPlatform(): void {
                 refreshButtonState(conversationId);
                 return;
             }
-            // #region agent log
+            // The cached snapshot is stale (e.g., assistant-missing for thinking
+            // models where the DOM hadn't rendered the response at initial capture
+            // time). Re-request a fresh DOM snapshot — the DOM has likely finished
+            // rendering by now.
             if (!fetchSucceeded && !readinessResult.ready) {
-                logger.info('Snapshot promotion skipped: readiness check failed', {
+                logger.info('Snapshot promotion skipped: readiness check failed, re-requesting snapshot', {
                     conversationId,
                     retries: retries + 1,
                     reason: readinessResult.reason,
                     terminal: readinessResult.terminal,
                 });
+                const freshSnapshot = await requestPageSnapshot(conversationId);
+                const freshData =
+                    freshSnapshot ?? (currentAdapter ? buildIsolatedDomSnapshot(currentAdapter, conversationId) : null);
+                if (freshData) {
+                    if (isConversationDataLike(freshData)) {
+                        interceptionManager.ingestConversationData(freshData, 'stabilization-retry-snapshot');
+                    } else {
+                        interceptionManager.ingestInterceptedData({
+                            url: `stabilization-retry-snapshot://${currentAdapter?.name ?? 'unknown'}/${conversationId}`,
+                            data: JSON.stringify(freshData),
+                            platform: currentAdapter?.name ?? 'unknown',
+                        });
+                    }
+
+                    const recheckCached = interceptionManager.getConversation(conversationId);
+                    const recheckReadiness = recheckCached ? evaluateReadinessForData(recheckCached) : null;
+                    if (recheckReadiness?.ready) {
+                        logger.info('Fresh snapshot promoted to canonical after re-request', {
+                            conversationId,
+                            retries: retries + 1,
+                        });
+                        markCanonicalCaptureMeta(conversationId);
+                        ingestSfeCanonicalSample(recheckCached!, attemptId);
+                        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+                        refreshButtonState(conversationId);
+                        return;
+                    }
+                }
             }
-            // #endregion
             scheduleCanonicalStabilizationRetry(conversationId, attemptId);
             refreshButtonState(conversationId);
             return;
@@ -2663,6 +2720,24 @@ export function runPlatform(): void {
         }
         const opacity = hasData ? '1' : '0.6';
         buttonManager.setOpacity(opacity);
+        // #region agent log
+        const prevKey = lastButtonStateLog;
+        const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
+        if (prevKey !== newKey && hasData) {
+            const retries = canonicalStabilizationRetryCounts.get(resolveAttemptId(conversationId)) ?? 0;
+            const hasPendingTimer = canonicalStabilizationRetryTimers.has(resolveAttemptId(conversationId));
+            logger.info('Button readiness transition to hasData=true', {
+                conversationId,
+                decisionMode: decision.mode,
+                decisionReason: decision.reason,
+                fidelity: captureMeta.fidelity,
+                sfeEnabled,
+                lifecycleState,
+                retries,
+                hasPendingTimer,
+            });
+        }
+        // #endregion
         logButtonStateIfChanged(conversationId, hasData, opacity);
         if (isCanonicalReady && calibrationState !== 'capturing') {
             calibrationState = 'success';
@@ -2818,6 +2893,15 @@ export function runPlatform(): void {
 
         if (!sfeEnabled) {
             const ready = readiness.ready;
+            // #region agent log
+            if (ready) {
+                logger.info('Readiness decision: SFE disabled, legacy ready', {
+                    conversationId,
+                    fidelity: captureMeta.fidelity,
+                    readinessReason: readiness.reason,
+                });
+            }
+            // #endregion
             return {
                 ready,
                 mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
@@ -2829,6 +2913,14 @@ export function runPlatform(): void {
         const sfeReady = !!sfeResolution?.ready;
         logSfeMismatchIfNeeded(conversationId, readiness.ready);
         if (sfeReady && readiness.ready && captureMeta.fidelity === 'high') {
+            // #region agent log
+            logger.info('Readiness decision: canonical_ready', {
+                conversationId,
+                fidelity: captureMeta.fidelity,
+                sfeReady,
+                legacyReady: readiness.ready,
+            });
+            // #endregion
             return {
                 ready: true,
                 mode: 'canonical_ready',
@@ -2841,6 +2933,22 @@ export function runPlatform(): void {
             sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
             (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
         if (hasTimeout) {
+            // #region agent log
+            const timeoutRetries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
+            const timeoutHasPendingTimer = canonicalStabilizationRetryTimers.has(attemptId);
+            const timeoutStartedAt = canonicalStabilizationStartedAt.get(attemptId);
+            logger.info('Readiness decision: degraded_manual_only (timeout)', {
+                conversationId,
+                attemptId,
+                fidelity: captureMeta.fidelity,
+                sfeTimeout: sfeResolution?.blockingConditions.includes('stabilization_timeout'),
+                localRetries: timeoutRetries,
+                hasPendingTimer: timeoutHasPendingTimer,
+                startedAt: timeoutStartedAt,
+                elapsed: timeoutStartedAt ? Date.now() - timeoutStartedAt : null,
+                maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
+            });
+            // #endregion
             emitTimeoutWarningOnce(attemptId, conversationId);
             return {
                 ready: false,
@@ -3111,10 +3219,30 @@ export function runPlatform(): void {
         if (hintedConversationId) {
             bindAttempt(hintedConversationId, attemptId);
         }
-        // BLACKIYA_RESPONSE_FINISHED is an authoritative completion signal.
-        // Clear generation-phase lifecycle state so the generation guard in
-        // handleResponseFinished does not block processing.
+        // BLACKIYA_RESPONSE_FINISHED is an authoritative completion signal, but
+        // during thinking/reasoning phases the interceptor emits these for every
+        // stream_status poll. If the platform DOM still shows a generation
+        // indicator (e.g. stop button), the signal is spurious — promoting
+        // lifecycleState to 'completed' would corrupt the streaming guard and
+        // cause the save button to flicker.
         if (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') {
+            if (currentAdapter && isPlatformGenerating(currentAdapter)) {
+                // #region agent log
+                logger.info('RESPONSE_FINISHED rejected: platform still generating', {
+                    conversationId: hintedConversationId ?? null,
+                    attemptId,
+                    lifecycleState,
+                });
+                // #endregion
+                return true;
+            }
+            // #region agent log
+            logger.info('RESPONSE_FINISHED promoted lifecycle to completed', {
+                conversationId: hintedConversationId ?? null,
+                attemptId,
+                previousLifecycle: lifecycleState,
+            });
+            // #endregion
             lifecycleState = 'completed';
         }
         handleResponseFinished('network', hintedConversationId);

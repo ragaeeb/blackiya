@@ -2375,4 +2375,268 @@ describe('Platform Runner', () => {
         expect(saveButton).not.toBeNull();
         expect(saveButton?.disabled).toBe(false);
     }, 15_000);
+
+    it('should re-request fresh DOM snapshot when cached snapshot has assistant-missing (V2.1-019 fix)', async () => {
+        // When a thinking model's DOM is not fully rendered at snapshot time,
+        // the initial snapshot may contain only the user message (no assistant).
+        // evaluateReadiness returns { ready: false, reason: 'assistant-missing' }.
+        // The stabilization retries re-check the same stale cached snapshot,
+        // which never changes — all retries are doomed.
+        //
+        // Fix: when !fetchSucceeded && !readinessResult.ready, re-request a
+        // fresh DOM snapshot via requestPageSnapshot. If the fresh snapshot is
+        // now ready (DOM has rendered), promote it to canonical.
+        let snapshotCallCount = 0;
+
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        const snapshotResponseHandler = (event: MessageEvent) => {
+            const msg = (event as any).data;
+            if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
+                return;
+            }
+            snapshotCallCount++;
+            const isFirstSnapshot = snapshotCallCount <= 1;
+
+            // First snapshot: only user message (assistant-missing)
+            // Subsequent snapshots: full conversation with assistant message
+            const mapping = isFirstSnapshot
+                ? {
+                      root: { id: 'root', message: null, parent: null, children: ['u1'] },
+                      u1: {
+                          id: 'u1',
+                          parent: 'root',
+                          children: [],
+                          message: {
+                              id: 'u1',
+                              author: { role: 'user', name: null, metadata: {} },
+                              create_time: 1_700_000_010,
+                              update_time: 1_700_000_010,
+                              content: { content_type: 'text', parts: ['Prompt for thinking model'] },
+                              status: 'finished_successfully',
+                              end_turn: true,
+                              weight: 1,
+                              metadata: {},
+                              recipient: 'all',
+                              channel: null,
+                          },
+                      },
+                  }
+                : {
+                      root: { id: 'root', message: null, parent: null, children: ['u1'] },
+                      u1: {
+                          id: 'u1',
+                          parent: 'root',
+                          children: ['a1'],
+                          message: {
+                              id: 'u1',
+                              author: { role: 'user', name: null, metadata: {} },
+                              create_time: 1_700_000_010,
+                              update_time: 1_700_000_010,
+                              content: { content_type: 'text', parts: ['Prompt for thinking model'] },
+                              status: 'finished_successfully',
+                              end_turn: true,
+                              weight: 1,
+                              metadata: {},
+                              recipient: 'all',
+                              channel: null,
+                          },
+                      },
+                      a1: {
+                          id: 'a1',
+                          parent: 'u1',
+                          children: [],
+                          message: {
+                              id: 'a1',
+                              author: { role: 'assistant', name: null, metadata: {} },
+                              create_time: 1_700_000_020,
+                              update_time: 1_700_000_020,
+                              content: { content_type: 'text', parts: ['Thinking model final answer'] },
+                              status: 'finished_successfully',
+                              end_turn: true,
+                              weight: 1,
+                              metadata: {},
+                              recipient: 'all',
+                              channel: null,
+                          },
+                      },
+                  };
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                    requestId: msg.requestId,
+                    success: true,
+                    data: {
+                        title: 'Thinking Model Response',
+                        create_time: 1_700_000_000,
+                        update_time: 1_700_000_120,
+                        conversation_id: '123',
+                        current_node: isFirstSnapshot ? 'u1' : 'a1',
+                        moderation_results: [],
+                        plugin_ids: null,
+                        gizmo_id: null,
+                        gizmo_type: null,
+                        is_archived: false,
+                        default_model_slug: 'gpt',
+                        safe_urls: [],
+                        blocked_urls: [],
+                        mapping,
+                    },
+                },
+                window.location.origin,
+            );
+        };
+
+        window.addEventListener('message', snapshotResponseHandler as any);
+        try {
+            runPlatform();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:thinking-model',
+                    phase: 'prompt-sent',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:thinking-model',
+                    phase: 'completed',
+                    conversationId: '123',
+                },
+                window.location.origin,
+            );
+
+            // Wait for initial probe + snapshot (assistant-missing) + some retries
+            // that should re-request fresh snapshots
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+
+            // The snapshot handler should have been called more than once
+            // (initial + at least one retry re-request)
+            expect(snapshotCallCount).toBeGreaterThan(1);
+
+            // After retries re-request the snapshot and get the full version,
+            // the conversation should reach captured_ready (Save JSON, not Force Save)
+            const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            expect(saveButton).not.toBeNull();
+            expect(saveButton?.disabled).toBe(false);
+            expect(saveButton?.textContent?.includes('Force Save')).toBe(false);
+        } finally {
+            window.removeEventListener('message', snapshotResponseHandler as any);
+        }
+    }, 15_000);
+
+    it('should not enable button when RESPONSE_FINISHED arrives during active generation (V2.1-019 flicker fix)', async () => {
+        // During thinking/reasoning, the interceptor emits BLACKIYA_RESPONSE_FINISHED
+        // for every stream_status poll. The handleResponseFinishedMessage handler
+        // promotes lifecycleState to 'completed' before checking whether the platform
+        // is still generating. When a ChatGPT stop button is present in the DOM,
+        // this lifecycle corruption should be prevented because the signal is spurious.
+        //
+        // This test verifies that RESPONSE_FINISHED during prompt-sent + active
+        // generation does NOT process the signal (button stays disabled).
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        // Enter streaming phase
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:flicker-test',
+                phase: 'prompt-sent',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Simulate ChatGPT's stop button being visible (model is thinking)
+        const stopButton = document.createElement('button');
+        stopButton.setAttribute('data-testid', 'stop-button');
+        document.body.appendChild(stopButton);
+
+        // Send RESPONSE_FINISHED while stop button is visible.
+        // Without fix: lifecycleState is corrupted to 'completed'.
+        // With fix: lifecycleState stays 'prompt-sent' (signal rejected).
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:flicker-test',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Now send canonical data. If lifecycle was corrupted to 'completed',
+        // handleResponseFinished from the callback would process the signal,
+        // call scheduleButtonRefresh, start probes, etc. — eventually enabling
+        // the button. If lifecycle stayed 'prompt-sent', the streaming guard
+        // in refreshButtonState blocks button enabling.
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/123',
+                data: JSON.stringify(
+                    buildConversation('123', 'Final answer', {
+                        status: 'finished_successfully',
+                        endTurn: true,
+                    }),
+                ),
+                attemptId: 'attempt:flicker-test',
+            },
+            window.location.origin,
+        );
+
+        // Wait enough for stabilization retries and SFE to reach captured_ready
+        // (if lifecycle was wrongly 'completed', retries would be scheduled and
+        // the button would enable via the canonical_ready path)
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        // Button must still be disabled — the streaming guard should have
+        // blocked all button state transitions.
+        const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveButton).not.toBeNull();
+        expect(saveButton?.disabled).toBe(true);
+
+        stopButton.remove();
+    }, 15_000);
 });

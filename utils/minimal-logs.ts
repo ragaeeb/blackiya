@@ -120,12 +120,21 @@ function isCriticalLine(line: string): boolean {
         line.includes('Snapshot retry') ||
         line.includes('Promoting ready snapshot') ||
         line.includes('Snapshot promotion skipped') ||
+        line.includes('Fresh snapshot promoted') ||
+        line.includes('RESPONSE_FINISHED rejected') ||
+        line.includes('RESPONSE_FINISHED promoted lifecycle') ||
+        line.includes('Re-requesting fresh snapshot') ||
         line.includes('lifecycle signal') ||
         line.includes('canonical_stabilization') ||
         line.includes('disposeInFlight') ||
         line.includes('shouldProcessFinished') ||
         line.includes('handleConversationSwitch') ||
-        line.includes('clearCanonicalStabilization')
+        line.includes('clearCanonicalStabilization') ||
+        line.includes('Readiness decision:') ||
+        line.includes('Button readiness transition') ||
+        line.includes('Network source: marking canonical') ||
+        line.includes('Timeout: max retries') ||
+        line.includes('Timeout: elapsed exceeded')
     );
 }
 

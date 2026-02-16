@@ -1432,6 +1432,42 @@ export default defineContentScript({
             const response = await originalFetch(...args);
             const url = outgoingUrl;
             const contentType = response.headers.get('content-type') ?? '';
+            // #region agent log — Gemini broad network discovery
+            if (window.location.hostname.includes('gemini.google.com') && outgoingMethod === 'POST' && response.ok) {
+                const discoveryPath = safePathname(url);
+                const discoverySearch = (() => {
+                    try {
+                        return new URL(url, window.location.origin).search.slice(0, 200);
+                    } catch {
+                        return '';
+                    }
+                })();
+                log('info', '[DISCOVERY] Gemini fetch POST', {
+                    path: discoveryPath,
+                    search: discoverySearch,
+                    status: response.status,
+                    contentType,
+                });
+                if (
+                    discoveryPath.includes('batchexecute') ||
+                    discoveryPath.includes('BardChat') ||
+                    discoverySearch.includes('rpcids')
+                ) {
+                    const discoveryClone = response.clone();
+                    discoveryClone
+                        .text()
+                        .then((text) => {
+                            log('info', '[DISCOVERY] Gemini batchexecute body', {
+                                path: discoveryPath,
+                                search: discoverySearch,
+                                size: text.length,
+                                preview: text.slice(0, 400),
+                            });
+                        })
+                        .catch(() => {});
+                }
+            }
+            // #endregion
             if (isChatGptPromptRequest && contentType.includes('text/event-stream')) {
                 void monitorChatGptSseLifecycle(
                     response.clone(),
@@ -1472,6 +1508,41 @@ export default defineContentScript({
             const method = (this as any)._method || 'GET';
             this.addEventListener('load', function () {
                 const xhr = this as XMLHttpRequest;
+                // #region agent log — Gemini XHR discovery
+                if (
+                    window.location.hostname.includes('gemini.google.com') &&
+                    method.toUpperCase() === 'POST' &&
+                    xhr.status === 200
+                ) {
+                    const xhrUrl = (xhr as any)._url ?? '';
+                    const xhrPath = safePathname(xhrUrl);
+                    const xhrSearch = (() => {
+                        try {
+                            return new URL(xhrUrl, window.location.origin).search.slice(0, 200);
+                        } catch {
+                            return '';
+                        }
+                    })();
+                    log('info', '[DISCOVERY] Gemini XHR POST', {
+                        path: xhrPath,
+                        search: xhrSearch,
+                        status: xhr.status,
+                        size: xhr.responseText?.length ?? 0,
+                    });
+                    if (
+                        xhrPath.includes('batchexecute') ||
+                        xhrPath.includes('BardChat') ||
+                        xhrSearch.includes('rpcids')
+                    ) {
+                        log('info', '[DISCOVERY] Gemini XHR batchexecute body', {
+                            path: xhrPath,
+                            search: xhrSearch,
+                            size: xhr.responseText?.length ?? 0,
+                            preview: (xhr.responseText ?? '').slice(0, 400),
+                        });
+                    }
+                }
+                // #endregion
                 const completionAdapter = getPlatformAdapterByCompletionUrl((xhr as any)._url);
                 if (completionAdapter) {
                     const requestHeaders = toForwardableHeaderRecord((xhr as any)._headers);
@@ -1483,6 +1554,9 @@ export default defineContentScript({
         };
 
         log('info', 'init');
+        // #region agent log — confirm interceptor host
+        log('info', `[DISCOVERY] interceptor active on ${window.location.hostname}`);
+        // #endregion
 
         if (!(window as any).__blackiya) {
             const REQUEST_TYPE = 'BLACKIYA_GET_JSON_REQUEST';
