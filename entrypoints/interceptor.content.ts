@@ -1098,6 +1098,42 @@ function handleFetchInterception(args: Parameters<typeof fetch>, response: Respo
     const apiAdapter = getPlatformAdapterByApiUrl(url);
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
 
+    // #region agent log — H25-AB/H26-A/H27-A: log pattern matching for non-ChatGPT
+    if (
+        window.location.hostname.includes('gemini') ||
+        window.location.hostname.includes('grok') ||
+        window.location.hostname.includes('x.com')
+    ) {
+        const dbgPath = safePathname(url);
+        if (
+            apiAdapter ||
+            completionAdapter ||
+            dbgPath.includes('batch') ||
+            dbgPath.includes('grok') ||
+            dbgPath.includes('conversation') ||
+            dbgPath.includes('add_response')
+        ) {
+            const _df = (window as any).__BLACKIYA_DBG_FETCH__ ?? fetch;
+            _df('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    location: 'interceptor.content.ts:handleFetchInterception',
+                    message: 'Pattern match result',
+                    data: {
+                        path: dbgPath,
+                        apiAdapter: apiAdapter?.name ?? null,
+                        completionAdapter: completionAdapter?.name ?? null,
+                        hostname: window.location.hostname,
+                    },
+                    timestamp: Date.now(),
+                    hypothesisId: 'H25-AB_H26-A_H27-A',
+                }),
+            }).catch(() => {});
+        }
+    }
+    // #endregion
+
     if (apiAdapter) {
         handleApiMatchFromFetch(url, apiAdapter.name, response);
         if (completionAdapter) {
@@ -1261,6 +1297,20 @@ export default defineContentScript({
         }
         (window as any).__BLACKIYA_INTERCEPTED__ = true;
 
+        // #region agent log — H25-ALL: confirm interceptor MAIN world init
+        fetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                location: 'interceptor.content.ts:INIT',
+                message: 'Interceptor MAIN world initialized',
+                data: { hostname: window.location.hostname, href: window.location.href.slice(0, 120) },
+                timestamp: Date.now(),
+                hypothesisId: 'H25-ALL',
+            }),
+        }).catch(() => {});
+        // #endregion
+
         // Store originals for cleanup/restore
         if (!(window as any).__BLACKIYA_ORIGINALS__) {
             (window as any).__BLACKIYA_ORIGINALS__ = {
@@ -1272,6 +1322,10 @@ export default defineContentScript({
         }
 
         const originalFetch = window.fetch;
+        // #region agent log — debug fetch reference (avoids recursive wrapper)
+        const _dbgFetch = originalFetch.bind(window);
+        (window as any).__BLACKIYA_DBG_FETCH__ = _dbgFetch;
+        // #endregion
         const inFlightFetches = new Map<string, Promise<boolean>>();
         const proactiveSuccessAtByKey = new Map<string, number>();
         const proactiveHeadersByKey = new Map<string, HeaderRecord>();
@@ -1432,6 +1486,41 @@ export default defineContentScript({
             const response = await originalFetch(...args);
             const url = outgoingUrl;
             const contentType = response.headers.get('content-type') ?? '';
+            // #region agent log — H25-A/B: log ALL fetch calls on Gemini/Grok hosts
+            if (
+                window.location.hostname.includes('gemini.google.com') ||
+                window.location.hostname.includes('grok.com') ||
+                window.location.hostname.includes('x.com')
+            ) {
+                const dbgPath = safePathname(url);
+                const isPost = outgoingMethod === 'POST';
+                if (
+                    isPost ||
+                    dbgPath.includes('batchexecute') ||
+                    dbgPath.includes('grok') ||
+                    dbgPath.includes('conversation')
+                ) {
+                    _dbgFetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            location: 'interceptor.content.ts:FETCH',
+                            message: 'Fetch call observed',
+                            data: {
+                                hostname: window.location.hostname,
+                                method: outgoingMethod,
+                                path: dbgPath,
+                                status: response.status,
+                                contentType,
+                                size: response.headers.get('content-length'),
+                            },
+                            timestamp: Date.now(),
+                            hypothesisId: 'H25-AB',
+                        }),
+                    }).catch(() => {});
+                }
+            }
+            // #endregion
             // #region agent log — Gemini broad network discovery
             if (window.location.hostname.includes('gemini.google.com') && outgoingMethod === 'POST' && response.ok) {
                 const discoveryPath = safePathname(url);

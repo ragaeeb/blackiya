@@ -612,14 +612,14 @@ export function runPlatform(): void {
         const retries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
         const hasPendingTimer = canonicalStabilizationRetryTimers.has(attemptId);
         if (retries >= CANONICAL_STABILIZATION_MAX_RETRIES && !hasPendingTimer) {
-            // #region agent log
-            logger.info('Timeout: max retries exhausted with no pending timer', {
-                attemptId,
-                retries,
-                hasPendingTimer,
-                maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
-            });
-            // #endregion
+            if (!timeoutWarningByAttempt.has(attemptId)) {
+                logger.info('Timeout: max retries exhausted with no pending timer', {
+                    attemptId,
+                    retries,
+                    hasPendingTimer,
+                    maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
+                });
+            }
             return true;
         }
 
@@ -636,15 +636,13 @@ export function runPlatform(): void {
             CANONICAL_STABILIZATION_RETRY_DELAY_MS * CANONICAL_STABILIZATION_MAX_RETRIES +
             CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS;
         const elapsed = Date.now() - startedAt;
-        if (elapsed >= timeoutMs) {
-            // #region agent log
+        if (elapsed >= timeoutMs && !timeoutWarningByAttempt.has(attemptId)) {
             logger.info('Timeout: elapsed exceeded max wait', {
                 attemptId,
                 retries,
                 elapsed,
                 timeoutMs,
             });
-            // #endregion
         }
         return elapsed >= timeoutMs;
     }
@@ -1593,6 +1591,37 @@ export function runPlatform(): void {
         let decision = conversationId ? resolveReadinessDecision(conversationId) : null;
         let allowDegraded = decision?.mode === 'degraded_manual_only';
 
+        if (allowDegraded && conversationId) {
+            // V2.1-024: Attempt fresh snapshot before showing confirm dialog.
+            // The tab is visible now (user clicked the button), so DOM should be rendered.
+            const freshSnapshot = await requestPageSnapshot(conversationId);
+            if (freshSnapshot && isConversationDataLike(freshSnapshot)) {
+                interceptionManager.ingestConversationData(freshSnapshot, 'force-save-snapshot-recovery');
+                const freshReadiness = evaluateReadinessForData(interceptionManager.getConversation(conversationId)!);
+                if (freshReadiness.ready) {
+                    markCanonicalCaptureMeta(conversationId);
+                    const attemptId = resolveAttemptId(conversationId);
+                    ingestSfeCanonicalSample(interceptionManager.getConversation(conversationId)!, attemptId);
+                    refreshButtonState(conversationId);
+                    decision = resolveReadinessDecision(conversationId);
+                    allowDegraded = decision.mode === 'degraded_manual_only';
+                    if (!allowDegraded) {
+                        logger.info('Force Save recovered via fresh snapshot — using canonical path', {
+                            conversationId,
+                        });
+                    }
+                }
+            }
+
+            // Also try warm fetch
+            if (allowDegraded) {
+                await warmFetchConversationSnapshot(conversationId, 'force-save');
+                refreshButtonState(conversationId);
+                decision = resolveReadinessDecision(conversationId);
+                allowDegraded = decision.mode === 'degraded_manual_only';
+            }
+        }
+
         if (allowDegraded) {
             const confirmed =
                 typeof window.confirm === 'function'
@@ -1602,13 +1631,6 @@ export function runPlatform(): void {
                     : true;
             if (!confirmed) {
                 return;
-            }
-
-            if (conversationId) {
-                await warmFetchConversationSnapshot(conversationId, 'force-save');
-                refreshButtonState(conversationId);
-                decision = resolveReadinessDecision(conversationId);
-                allowDegraded = decision.mode === 'degraded_manual_only';
             }
         }
 
@@ -2893,15 +2915,13 @@ export function runPlatform(): void {
 
         if (!sfeEnabled) {
             const ready = readiness.ready;
-            // #region agent log
             if (ready) {
-                logger.info('Readiness decision: SFE disabled, legacy ready', {
+                logger.debug('Readiness decision: SFE disabled, legacy ready', {
                     conversationId,
                     fidelity: captureMeta.fidelity,
                     readinessReason: readiness.reason,
                 });
             }
-            // #endregion
             return {
                 ready,
                 mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
@@ -2913,14 +2933,12 @@ export function runPlatform(): void {
         const sfeReady = !!sfeResolution?.ready;
         logSfeMismatchIfNeeded(conversationId, readiness.ready);
         if (sfeReady && readiness.ready && captureMeta.fidelity === 'high') {
-            // #region agent log
-            logger.info('Readiness decision: canonical_ready', {
+            logger.debug('Readiness decision: canonical_ready', {
                 conversationId,
                 fidelity: captureMeta.fidelity,
                 sfeReady,
                 legacyReady: readiness.ready,
             });
-            // #endregion
             return {
                 ready: true,
                 mode: 'canonical_ready',
@@ -2933,22 +2951,11 @@ export function runPlatform(): void {
             sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
             (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
         if (hasTimeout) {
-            // #region agent log
-            const timeoutRetries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
-            const timeoutHasPendingTimer = canonicalStabilizationRetryTimers.has(attemptId);
-            const timeoutStartedAt = canonicalStabilizationStartedAt.get(attemptId);
-            logger.info('Readiness decision: degraded_manual_only (timeout)', {
+            logger.debug('Readiness decision: degraded_manual_only (timeout)', {
                 conversationId,
                 attemptId,
                 fidelity: captureMeta.fidelity,
-                sfeTimeout: sfeResolution?.blockingConditions.includes('stabilization_timeout'),
-                localRetries: timeoutRetries,
-                hasPendingTimer: timeoutHasPendingTimer,
-                startedAt: timeoutStartedAt,
-                elapsed: timeoutStartedAt ? Date.now() - timeoutStartedAt : null,
-                maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
             });
-            // #endregion
             emitTimeoutWarningOnce(attemptId, conversationId);
             return {
                 ready: false,
@@ -3619,6 +3626,59 @@ export function runPlatform(): void {
     cleanupCompletionWatcher = registerCompletionWatcher();
     cleanupButtonHealthCheck = registerButtonHealthCheck();
 
+    // V2.1-023: Recover background-completed tabs when user switches to them
+    const handleVisibilityChange = () => {
+        if (document.hidden) {
+            return;
+        }
+        const conversationId = currentAdapter?.extractConversationId(window.location.href) ?? currentConversationId;
+        if (!conversationId) {
+            return;
+        }
+        const decision = resolveReadinessDecision(conversationId);
+        if (decision.mode === 'canonical_ready') {
+            return;
+        }
+
+        // Tab just became visible — try to recover degraded conversations
+        logger.info('Tab became visible — reattempting capture', {
+            conversationId,
+            currentMode: decision.mode,
+            reason: decision.reason,
+        });
+
+        const attemptId = resolveAttemptId(conversationId);
+
+        // Re-arm canonical recovery if timed out
+        if (decision.mode === 'degraded_manual_only') {
+            maybeRestartCanonicalRecoveryAfterTimeout(conversationId, attemptId);
+        }
+
+        // Try fresh snapshot (tab is now visible, DOM should be rendered)
+        void requestPageSnapshot(conversationId).then((snapshot) => {
+            if (!snapshot || !isConversationDataLike(snapshot)) {
+                return;
+            }
+            interceptionManager.ingestConversationData(snapshot, 'visibility-recovery-snapshot');
+            const cached = interceptionManager.getConversation(conversationId);
+            if (!cached) {
+                return;
+            }
+            const readiness = evaluateReadinessForData(cached);
+            if (readiness.ready) {
+                markCanonicalCaptureMeta(conversationId);
+                ingestSfeCanonicalSample(cached, attemptId);
+            }
+            refreshButtonState(conversationId);
+        });
+
+        // Also attempt warm fetch in parallel
+        void warmFetchConversationSnapshot(conversationId, 'force-save').then(() => {
+            refreshButtonState(conversationId);
+        });
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     // Initial injection
     currentConversationId = currentAdapter.extractConversationId(url);
     injectSaveButton();
@@ -3640,6 +3700,7 @@ export function runPlatform(): void {
     // Cleanup on unload
     window.addEventListener('beforeunload', () => {
         try {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             const disposed = sfe.disposeAll();
             for (const attemptId of disposed) {
                 cancelStreamDoneProbe(attemptId, 'teardown');
