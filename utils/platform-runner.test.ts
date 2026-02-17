@@ -839,6 +839,72 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
+    it('should promote Grok lifecycle to completed when canonical-ready capture arrives from conversations/new', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => 'grok-conv-1',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/c/grok-conv-1',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-canonical-finish',
+                phase: 'prompt-sent',
+                conversationId: 'grok-conv-1',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-canonical-finish',
+                phase: 'streaming',
+                conversationId: 'grok-conv-1',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        const canonicalConversation = buildConversation('grok-conv-1', 'Grok final answer', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Grok',
+                url: 'https://grok.com/rest/app-chat/conversations/new',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:grok-canonical-finish',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
     it('should keep save disabled on no-conversation Gemini route despite finished hints', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),

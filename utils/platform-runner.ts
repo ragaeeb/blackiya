@@ -1441,10 +1441,9 @@ export function runPlatform(): void {
         conversationId: string | null,
     ): void {
         // #region agent log — lifecycle transition tracking
-        const prevLifecycle = lifecycleState;
         if (previousState !== nextState) {
             logger.info('Lifecycle transition', {
-                from: prevLifecycle,
+                from: previousState,
                 to: nextState,
                 conversationId,
             });
@@ -3876,6 +3875,45 @@ export function runPlatform(): void {
         runAutoCaptureFromPreference(conversationId, reason);
     }
 
+    function applyCompletedLifecycleState(conversationId: string, attemptId: string): void {
+        lifecycleAttemptId = attemptId;
+        lifecycleConversationId = conversationId;
+        setLifecycleState('completed', conversationId);
+    }
+
+    function shouldPromoteGrokFromCanonicalCapture(
+        source: 'network' | 'dom',
+        cachedReady: boolean,
+        lifecycle: LifecycleUiState,
+    ): boolean {
+        if (source !== 'network' || currentAdapter?.name !== 'Grok' || !cachedReady) {
+            return false;
+        }
+        return lifecycle === 'prompt-sent' || lifecycle === 'streaming';
+    }
+
+    function handleFinishedConversation(conversationId: string, attemptId: string, source: 'network' | 'dom'): void {
+        // When the SSE stream didn't deliver a "completed" lifecycle phase
+        // (e.g. tab was backgrounded and stream reader stalled), the DOM
+        // completion watcher is the only signal. In that case there may be
+        // no cached data yet. Trigger a stream-done probe to capture it.
+        const cached = interceptionManager.getConversation(conversationId);
+        const cachedReady = !!cached && evaluateReadinessForData(cached).ready;
+
+        if (shouldPromoteGrokFromCanonicalCapture(source, cachedReady, lifecycleState)) {
+            applyCompletedLifecycleState(conversationId, attemptId);
+        }
+
+        if (!cached || !cachedReady) {
+            applyCompletedLifecycleState(conversationId, attemptId);
+            void runStreamDoneProbe(conversationId, attemptId);
+        }
+
+        refreshButtonState(conversationId);
+        scheduleButtonRefresh(conversationId);
+        maybeRunAutoCapture(conversationId, 'response-finished');
+    }
+
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
         const conversationId = resolveActiveConversationId(hintedConversationId);
         if (!shouldProcessFinishedSignal(conversationId, source)) {
@@ -3902,20 +3940,7 @@ export function runPlatform(): void {
         }
 
         if (conversationId) {
-            // When the SSE stream didn't deliver a "completed" lifecycle phase
-            // (e.g. tab was backgrounded and stream reader stalled), the DOM
-            // completion watcher is the only signal. In that case there may be
-            // no cached data yet. Trigger a stream-done probe to capture it.
-            const cached = interceptionManager.getConversation(conversationId);
-            if (!cached || !evaluateReadinessForData(cached).ready) {
-                lifecycleAttemptId = attemptId;
-                lifecycleConversationId = conversationId;
-                setLifecycleState('completed', conversationId);
-                void runStreamDoneProbe(conversationId, attemptId);
-            }
-            refreshButtonState(conversationId);
-            scheduleButtonRefresh(conversationId);
-            maybeRunAutoCapture(conversationId, 'response-finished');
+            handleFinishedConversation(conversationId, attemptId, source);
         }
     }
 

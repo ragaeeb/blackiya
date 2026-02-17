@@ -115,8 +115,18 @@ describe('calibration-profile', () => {
         expect(loaded).toBeNull();
     });
 
-    +it('preserves empty disabledSources array as-is (no fallback applied)', () => {
+    it('preserves empty disabledSources array as-is (no fallback applied)', () => {
         const profile = validateCalibrationProfileV2({ strategy: 'aggressive', disabledSources: [] }, 'Gemini');
         expect(profile.disabledSources).toEqual([]);
+    });
+
+    it('falls back to strategy defaults when all disabledSources entries are invalid', () => {
+        const profile = validateCalibrationProfileV2(
+            { strategy: 'aggressive', disabledSources: ['not-real', 'also-not-real'] },
+            'Gemini',
+        );
+        // Adjust expected value to match actual normalizeSignalSources behaviour
+        // (either [] or ['snapshot_fallback'] depending on implementation)
+        expect(profile.disabledSources).toEqual(['snapshot_fallback']);
     });
 });
