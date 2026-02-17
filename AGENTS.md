@@ -18,33 +18,33 @@ Core goals:
 ## 2) Source of Truth Docs
 
 Read these first:
-1. `/Users/rhaq/workspace/blackiya/docs/architecture.md`
-2. `/Users/rhaq/workspace/blackiya/docs/handoff.md`
-3. `/Users/rhaq/workspace/blackiya/docs/post-v2.1-regressions.md`
-4. `/Users/rhaq/workspace/blackiya/docs/debug-logs-guide.md`
-5. `/Users/rhaq/workspace/blackiya/docs/discovery-mode.md`
+1. `docs/architecture.md`
+2. `docs/handoff.md`
+3. `docs/post-v2.1-regressions.md`
+4. `docs/debug-logs-guide.md`
+5. `docs/discovery-mode.md`
 
 ## 3) Runtime Architecture
 
 Two-world design:
 
 1. MAIN world interceptor:
-- `/Users/rhaq/workspace/blackiya/entrypoints/interceptor.content.ts`
+- `entrypoints/interceptor.content.ts`
 - Hooks `fetch` + `XMLHttpRequest`
 - Emits protocol events via `window.postMessage`
 
 2. ISOLATED world runner:
-- `/Users/rhaq/workspace/blackiya/entrypoints/main.content.ts`
-- `/Users/rhaq/workspace/blackiya/utils/platform-runner.ts`
+- `entrypoints/main.content.ts`
+- `utils/platform-runner.ts`
 - Handles lifecycle state, SFE readiness, UI gating, export
 
 Supporting modules:
-- Adapter interface: `/Users/rhaq/workspace/blackiya/platforms/types.ts`
-- Adapter factory: `/Users/rhaq/workspace/blackiya/platforms/factory.ts`
-- SFE: `/Users/rhaq/workspace/blackiya/utils/sfe/*`
-- Interception cache: `/Users/rhaq/workspace/blackiya/utils/managers/interception-manager.ts`
-- UI buttons: `/Users/rhaq/workspace/blackiya/utils/ui/button-manager.ts`
-- Protocol types: `/Users/rhaq/workspace/blackiya/utils/protocol/messages.ts`
+- Adapter interface: `platforms/types.ts`
+- Adapter factory: `platforms/factory.ts`
+- SFE: `utils/sfe/*`
+- Interception cache: `utils/managers/interception-manager.ts`
+- UI buttons: `utils/ui/button-manager.ts`
+- Protocol types: `utils/protocol/messages.ts`
 
 ## 4) Platform-Specific Notes
 
@@ -54,13 +54,13 @@ Supporting modules:
 
 ### Gemini
 - StreamGenerate + batchexecute/RPC parsing.
-- Uses `/Users/rhaq/workspace/blackiya/utils/gemini-stream-parser.ts` and request classifier.
+- Uses `utils/gemini-stream-parser.ts` and request classifier.
 
 ### Grok
 - NDJSON/REST across multiple endpoint forms.
 - Uses:
-  - `/Users/rhaq/workspace/blackiya/utils/grok-stream-parser.ts`
-  - `/Users/rhaq/workspace/blackiya/utils/grok-request-classifier.ts`
+  - `utils/grok-stream-parser.ts`
+  - `utils/grok-request-classifier.ts`
 - Endpoint classification is critical to avoid premature completion or lifecycle regressions.
 
 ## 5) Coding Standards
@@ -88,10 +88,10 @@ bun run tsc --noEmit
 
 Common targeted commands:
 ```bash
-bun test /Users/rhaq/workspace/blackiya/platforms/grok.test.ts --bail
-bun test /Users/rhaq/workspace/blackiya/platforms/gemini.test.ts --bail
-bun test /Users/rhaq/workspace/blackiya/platforms/chatgpt.test.ts --bail
-bun test /Users/rhaq/workspace/blackiya/utils/platform-runner.test.ts
+bun test platforms/grok.test.ts --bail
+bun test platforms/gemini.test.ts --bail
+bun test platforms/chatgpt.test.ts --bail
+bun test utils/platform-runner.test.ts
 ```
 
 ## 7) Logging and Diagnostics
@@ -121,17 +121,17 @@ When changing title handling:
 
 ## 9) Files Most Likely to Need Careful Review
 
-- `/Users/rhaq/workspace/blackiya/entrypoints/interceptor.content.ts`
-- `/Users/rhaq/workspace/blackiya/utils/platform-runner.ts`
-- `/Users/rhaq/workspace/blackiya/platforms/gemini.ts`
-- `/Users/rhaq/workspace/blackiya/platforms/grok.ts`
+- `entrypoints/interceptor.content.ts`
+- `utils/platform-runner.ts`
+- `platforms/gemini.ts`
+- `platforms/grok.ts`
 
 ## 10) Documentation Hygiene
 
 After meaningful behavior changes:
-- Update `/Users/rhaq/workspace/blackiya/docs/post-v2.1-regressions.md`
-- Update `/Users/rhaq/workspace/blackiya/docs/handoff.md`
-- Update `/Users/rhaq/workspace/blackiya/docs/architecture.md` if flow changed
+- Update `docs/post-v2.1-regressions.md`
+- Update `docs/handoff.md`
+- Update `docs/architecture.md` if flow changed
 
 Keep these four docs synchronized:
 - `README.md`

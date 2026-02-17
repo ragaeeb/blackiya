@@ -1485,6 +1485,9 @@ export function runPlatform(): void {
     }
 
     function setStreamProbePanel(status: string, body: string): void {
+        if (cleanedUp) {
+            return;
+        }
         const panel = ensureStreamProbePanel();
         const now = new Date().toLocaleTimeString();
         panel.textContent = `[Blackiya Stream Probe] ${status} @ ${now}\n\n${body}`;
@@ -4535,6 +4538,17 @@ export function runPlatform(): void {
         probeLeaseRetryTimers.clear();
     }
 
+    function cancelAllStreamProbeControllers(): void {
+        for (const controller of streamProbeControllers.values()) {
+            try {
+                controller.abort();
+            } catch {
+                // ignore
+            }
+        }
+        streamProbeControllers.clear();
+    }
+
     function clearStartupRetryTimeouts(): void {
         for (const timeoutId of retryTimeoutIds) {
             clearTimeout(timeoutId);
@@ -4575,6 +4589,7 @@ export function runPlatform(): void {
             cleanupButtonHealthCheck?.();
             browser.storage.onChanged.removeListener(storageChangeListener);
             clearRunnerRetryTimers();
+            cancelAllStreamProbeControllers();
             probeLease.dispose();
             clearStartupRetryTimeouts();
             autoCaptureDeferredLogged.clear();

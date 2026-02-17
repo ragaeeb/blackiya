@@ -107,6 +107,84 @@ describe('ChatGPT Platform Adapter', () => {
             expect(result?.conversation_id).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
 
+        it('should parse nested data.conversation payload', () => {
+            const wrapped = {
+                data: {
+                    conversation: {
+                        title: 'Nested Conversation',
+                        conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                        mapping: { root: { id: 'root', message: null, parent: null, children: [] } },
+                    },
+                },
+            };
+            const result = adapter.parseInterceptedData(JSON.stringify(wrapped), 'url');
+            expect(result).not.toBeNull();
+            expect(result?.title).toBe('Nested Conversation');
+        });
+
+        it('should return null when conversation ID is invalid in candidate payload', () => {
+            const invalid = {
+                title: 'Bad',
+                conversation_id: 'not-a-uuid',
+                mapping: { root: { id: 'root', message: null, parent: null, children: [] } },
+            };
+            const result = adapter.parseInterceptedData(JSON.stringify(invalid), 'url');
+            expect(result).toBeNull();
+        });
+
+        it('should derive current_node from latest message timestamp when current_node is missing/invalid', () => {
+            const payload = {
+                title: 'Derived Node',
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'missing-node',
+                default_model_slug: 'auto',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: ['assistant-2'],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: { model: 'gpt-5' } },
+                            create_time: 10,
+                            update_time: 10,
+                            content: { content_type: 'text', parts: ['old'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: { model: 'gpt-5' },
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                    'assistant-2': {
+                        id: 'assistant-2',
+                        parent: 'assistant-1',
+                        children: [],
+                        message: {
+                            id: 'assistant-2',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 11,
+                            update_time: 22,
+                            content: { content_type: 'text', parts: ['new'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+            };
+
+            const result = adapter.parseInterceptedData(JSON.stringify(payload), 'url');
+            expect(result).not.toBeNull();
+            expect(result?.current_node).toBe('assistant-2');
+            expect(result?.default_model_slug).toBe('gpt-5');
+        });
+
         it('should return null for invalid data', () => {
             const result = adapter.parseInterceptedData(JSON.stringify({ foo: 'bar' }), 'url');
             expect(result).toBeNull();
@@ -140,6 +218,94 @@ describe('ChatGPT Platform Adapter', () => {
             expect(result?.title).toBe('What is calibration?');
             expect(Object.keys(result?.mapping ?? {}).length).toBeGreaterThan(2);
             expect(result?.default_model_slug).toBe('gpt-5-t-mini');
+        });
+
+        it('should parse SSE payloads that contain a direct conversation object', () => {
+            const ssePayload = [
+                'event: message',
+                'data: {"conversation":{"title":"From SSE Conversation","conversation_id":"696bc3d5-fa84-8328-b209-4d65cb229e59","mapping":{"root":{"id":"root","message":null,"parent":null,"children":[]}}}}',
+                '',
+                'data: [DONE]',
+            ].join('\n');
+            const result = adapter.parseInterceptedData(ssePayload, 'https://chatgpt.com/backend-api/f/conversation');
+            expect(result).not.toBeNull();
+            expect(result?.title).toBe('From SSE Conversation');
+        });
+
+        it('should return null for SSE payloads without conversation ID or valid message IDs', () => {
+            const ssePayload = [
+                'event: message',
+                'data: {"title":"No IDs","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["hello"]}}}',
+                '',
+                'data: [DONE]',
+            ].join('\n');
+            const result = adapter.parseInterceptedData(ssePayload, 'https://chatgpt.com/backend-api/f/conversation');
+            expect(result).toBeNull();
+        });
+
+        it('should ignore SSE events where message payload is non-object', () => {
+            const ssePayload = [
+                'event: message',
+                'data: {"conversation_id":"696bc3d5-fa84-8328-b209-4d65cb229e59","message":12345}',
+                '',
+                'data: [DONE]',
+            ].join('\n');
+            const result = adapter.parseInterceptedData(ssePayload, 'https://chatgpt.com/backend-api/f/conversation');
+            expect(result).toBeNull();
+        });
+
+        it('should normalize unknown author roles to assistant and non-object content to empty text', () => {
+            const ssePayload = [
+                'event: message',
+                'data: {"conversation_id":"696bc3d5-fa84-8328-b209-4d65cb229e59","message":{"id":"assistant-1","author":{"role":"critic"},"content":"bad-shape","status":"finished_successfully","end_turn":true}}',
+                '',
+                'data: [DONE]',
+            ].join('\n');
+            const result = adapter.parseInterceptedData(ssePayload, 'https://chatgpt.com/backend-api/f/conversation');
+            expect(result).not.toBeNull();
+            const message = result?.mapping['assistant-1']?.message;
+            expect(message?.author.role).toBe('assistant');
+            expect(message?.content.parts).toEqual([]);
+        });
+
+        it('should keep placeholder title when first user message is empty', () => {
+            const payload = {
+                title: 'New chat',
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['u1'] },
+                    u1: {
+                        id: 'u1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'u1',
+                            author: { role: 'user', name: null, metadata: {} },
+                            create_time: 1,
+                            update_time: 1,
+                            content: { content_type: 'text', parts: ['   '] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+            };
+            const result = adapter.parseInterceptedData(JSON.stringify(payload), 'url');
+            expect(result?.title).toBe('New chat');
+        });
+
+        it('should return null when parse path throws unexpectedly', () => {
+            const throwingPayload = {
+                get conversation() {
+                    throw new Error('boom');
+                },
+            };
+            const result = adapter.parseInterceptedData(throwingPayload, 'url');
+            expect(result).toBeNull();
         });
 
         it('should derive title from first user message when payload title is a placeholder', () => {
@@ -369,6 +535,132 @@ describe('ChatGPT Platform Adapter', () => {
             expect(readiness.ready).toBe(false);
             expect(readiness.reason).toBe('assistant-latest-text-not-terminal-turn');
         });
+
+        it('should return assistant-missing when mapping has no assistant messages', () => {
+            const data = {
+                title: 'No assistant',
+                create_time: 1,
+                update_time: 1,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'user-1',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+                    'user-1': {
+                        id: 'user-1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'user-1',
+                            author: { role: 'user', name: null, metadata: {} },
+                            create_time: 1,
+                            update_time: 1,
+                            content: { content_type: 'text', parts: ['Hi'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+            const readiness = adapter.evaluateReadiness(data);
+            expect(readiness.reason).toBe('assistant-missing');
+            expect(readiness.ready).toBe(false);
+        });
+
+        it('should return assistant-in-progress when any assistant message is still in progress', () => {
+            const data = {
+                title: 'In progress',
+                create_time: 1,
+                update_time: 2,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant-1',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 2,
+                            update_time: 2,
+                            content: { content_type: 'text', parts: ['partial'] },
+                            status: 'in_progress',
+                            end_turn: false,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+            const readiness = adapter.evaluateReadiness(data);
+            expect(readiness.reason).toBe('assistant-in-progress');
+            expect(readiness.terminal).toBe(false);
+        });
+
+        it('should ignore non-finished assistant text messages when evaluating readiness', () => {
+            const data = {
+                title: 'Error turn',
+                create_time: 1,
+                update_time: 3,
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'assistant-1',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['assistant-1'] },
+                    'assistant-1': {
+                        id: 'assistant-1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'assistant-1',
+                            author: { role: 'assistant', name: null, metadata: {} },
+                            create_time: 3,
+                            update_time: 3,
+                            content: { content_type: 'text', parts: ['errored'] },
+                            status: 'error',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-5',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+            const readiness = adapter.evaluateReadiness(data);
+            expect(readiness.reason).toBe('assistant-text-missing');
+            expect(readiness.terminal).toBe(true);
+        });
     });
 
     describe('formatFilename', () => {
@@ -559,6 +851,49 @@ describe('ChatGPT Platform Adapter', () => {
             // Filename should be reasonable length (under 100 chars for title part)
             expect(filename.length).toBeLessThan(150);
         });
+
+        it('should truncate derived first-user-message fallback title with ellipsis', () => {
+            const longPrompt = `This is an intentionally long prompt ${'x'.repeat(140)}`;
+            const data = {
+                title: 'New chat',
+                create_time: 1768670166.492617,
+                update_time: 1768671022.523312,
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['u1'] },
+                    u1: {
+                        id: 'u1',
+                        parent: 'root',
+                        children: [],
+                        message: {
+                            id: 'u1',
+                            author: { role: 'user', name: null, metadata: {} },
+                            create_time: 1768670166.492617,
+                            update_time: 1768670166.492617,
+                            content: { content_type: 'text', parts: [longPrompt] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+                current_node: 'u1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gpt-4',
+                safe_urls: [],
+                blocked_urls: [],
+            };
+
+            const filename = adapter.formatFilename(data);
+            expect(filename).toContain('...');
+        });
     });
 
     describe('apiEndpointPattern', () => {
@@ -649,6 +984,11 @@ describe('ChatGPT Platform Adapter', () => {
             expect(adapter.extractConversationIdFromUrl(url)).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
         });
 
+        it('should return null for invalid UUID in stream_status URL extraction', () => {
+            const url = 'https://chatgpt.com/backend-api/conversation/not-a-uuid/stream_status';
+            expect(adapter.extractConversationIdFromUrl(url)).toBeNull();
+        });
+
         it('should not extract conversation ID from textdocs endpoint URL', () => {
             const url = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/textdocs';
             expect(adapter.extractConversationIdFromUrl(url)).toBeNull();
@@ -678,6 +1018,65 @@ describe('ChatGPT Platform Adapter', () => {
 
         it('should NOT have defaultTitles (ChatGPT uses SSE title resolution)', () => {
             expect(adapter.defaultTitles).toBeUndefined();
+        });
+    });
+
+    describe('getButtonInjectionTarget', () => {
+        it('should return parent element when selector matches nested target', () => {
+            const originalDocument = (globalThis as any).document;
+            const parent = { id: 'parent' };
+            (globalThis as any).document = {
+                querySelector: (selector: string) =>
+                    selector === '[data-testid="model-switcher-dropdown-button"]' ? { parentElement: parent } : null,
+            };
+            try {
+                expect(adapter.getButtonInjectionTarget()).toBe(parent);
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
+
+        it('should return null when no selector matches', () => {
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = {
+                querySelector: () => null,
+            };
+            try {
+                expect(adapter.getButtonInjectionTarget()).toBeNull();
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
+    });
+
+    describe('extractConversationId URL parsing fallback', () => {
+        it('should return null for invalid URL input when URL parser throws', () => {
+            expect(adapter.extractConversationId('not-a-valid-url')).toBeNull();
+        });
+
+        it('should parse via regex fallback when URL constructor is unavailable', () => {
+            const previousURL = (globalThis as any).URL;
+            try {
+                (globalThis as any).URL = undefined;
+                const valid = adapter.extractConversationId(
+                    'https://chatgpt.com/c/696bc3d5-fa84-8328-b209-4d65cb229e59',
+                );
+                const invalid = adapter.extractConversationId('https://chatgpt.com/c/invalid-id');
+                expect(valid).toBe('696bc3d5-fa84-8328-b209-4d65cb229e59');
+                expect(invalid).toBeNull();
+            } finally {
+                (globalThis as any).URL = previousURL;
+            }
+        });
+
+        it('should return null in regex fallback when URL has no hostname/path match', () => {
+            const previousURL = (globalThis as any).URL;
+            try {
+                (globalThis as any).URL = undefined;
+                expect(adapter.extractConversationId('not a url')).toBeNull();
+            } finally {
+                (globalThis as any).URL = previousURL;
+            }
         });
     });
 });
