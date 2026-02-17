@@ -12,7 +12,7 @@ Use this document as the standard operating template for:
 4. Producing the next implementation plan (TDD-first).
 
 If another agent is asked to continue this workflow, instruct them:
-- "Follow `/Users/rhaq/workspace/blackiya/docs/ai-review-template.md` exactly."
+- "Follow `docs/ai-review-template.md` exactly."
 
 ---
 
@@ -180,7 +180,7 @@ Never skip:
 ## 8) Regression Tracking Protocol
 
 After implementation, append to:
-- `/Users/rhaq/workspace/blackiya/docs/post-v2.1-regressions.md`
+- `docs/post-v2.1-regressions.md`
 
 Required entry fields:
 1. Date/time
