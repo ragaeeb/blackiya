@@ -227,6 +227,14 @@ export function runPlatform(): void {
     const structuredLogger = new StructuredAttemptLogger();
     const attemptByConversation = new Map<string, string>();
     const attemptAliasForward = new Map<string, string>();
+    const pendingLifecycleByAttempt = new Map<
+        string,
+        {
+            phase: ResponseLifecycleMessage['phase'];
+            platform: string;
+            receivedAtMs: number;
+        }
+    >();
     const captureMetaByConversation = new Map<string, ExportMeta>();
     const probeLease = new CrossTabProbeLease();
     const streamResolvedTitles = new Map<string, string>();
@@ -258,6 +266,43 @@ export function runPlatform(): void {
             }
             set.delete(oldest);
         }
+    }
+
+    function getLifecyclePhasePriority(phase: ResponseLifecycleMessage['phase']): number {
+        if (phase === 'prompt-sent') {
+            return 1;
+        }
+        if (phase === 'streaming') {
+            return 2;
+        }
+        if (phase === 'completed') {
+            return 3;
+        }
+        if (phase === 'terminated') {
+            return 4;
+        }
+        return 0;
+    }
+
+    function cachePendingLifecycleSignal(
+        attemptId: string,
+        phase: ResponseLifecycleMessage['phase'],
+        platform: string,
+    ): void {
+        const existing = pendingLifecycleByAttempt.get(attemptId);
+        if (existing && getLifecyclePhasePriority(existing.phase) > getLifecyclePhasePriority(phase)) {
+            return;
+        }
+        setBoundedMapValue(
+            pendingLifecycleByAttempt,
+            attemptId,
+            {
+                phase,
+                platform,
+                receivedAtMs: Date.now(),
+            },
+            MAX_CONVERSATION_ATTEMPTS * 2,
+        );
     }
 
     function setCaptureMetaForConversation(conversationId: string, meta: ExportMeta): void {
@@ -1073,6 +1118,7 @@ export function runPlatform(): void {
     }
 
     function emitAttemptDisposed(attemptId: string, reason: AttemptDisposedMessage['reason']): void {
+        pendingLifecycleByAttempt.delete(attemptId);
         structuredLogger.emit(
             attemptId,
             'info',
@@ -3156,7 +3202,15 @@ export function runPlatform(): void {
             logger.info('Finished signal ignored: missing conversation context', { source });
             return false;
         }
-        if (source === 'network' && conversationId && shouldBlockActionsForGeneration(conversationId)) {
+        // ChatGPT emits many non-terminal network finished hints (stream_status polling).
+        // Gemini/Grok finished hints should not be blocked by DOM-generation heuristics.
+        const shouldApplyNetworkGenerationGuard = currentAdapter?.name === 'ChatGPT';
+        if (
+            source === 'network' &&
+            shouldApplyNetworkGenerationGuard &&
+            conversationId &&
+            shouldBlockActionsForGeneration(conversationId)
+        ) {
             logger.info('Finished signal blocked by generation guard', { conversationId, source });
             return false;
         }
@@ -3380,7 +3434,8 @@ export function runPlatform(): void {
         // lifecycleState to 'completed' would corrupt the streaming guard and
         // cause the save button to flicker.
         if (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') {
-            if (currentAdapter && isPlatformGenerating(currentAdapter)) {
+            const shouldRejectWhileGenerating = currentAdapter?.name === 'ChatGPT';
+            if (shouldRejectWhileGenerating && currentAdapter && isPlatformGenerating(currentAdapter)) {
                 // #region agent log
                 logger.info('RESPONSE_FINISHED rejected: platform still generating', {
                     conversationId: resolvedConversationId,
@@ -3397,10 +3452,89 @@ export function runPlatform(): void {
                 previousLifecycle: lifecycleState,
             });
             // #endregion
-            lifecycleState = 'completed';
+            setLifecycleState('completed', resolvedConversationId);
         }
         handleResponseFinished('network', resolvedConversationId);
         return true;
+    }
+
+    function ingestSfeLifecycleFromWirePhase(
+        phase: ResponseLifecycleMessage['phase'],
+        attemptId: string,
+        conversationId?: string | null,
+    ): void {
+        if (phase === 'prompt-sent') {
+            ingestSfeLifecycle('prompt_sent', attemptId, conversationId ?? null);
+            return;
+        }
+        if (phase === 'streaming') {
+            ingestSfeLifecycle('streaming', attemptId, conversationId ?? null);
+            return;
+        }
+        if (phase === 'completed') {
+            ingestSfeLifecycle('completed_hint', attemptId, conversationId ?? null);
+            return;
+        }
+        if (phase === 'terminated') {
+            ingestSfeLifecycle('terminated_partial', attemptId, conversationId ?? null);
+        }
+    }
+
+    function applyLifecyclePhaseForConversation(
+        phase: ResponseLifecycleMessage['phase'],
+        platform: string,
+        attemptId: string,
+        conversationId: string,
+        source: 'direct' | 'replayed',
+    ): void {
+        logger.info('Lifecycle phase', {
+            platform,
+            phase,
+            attemptId,
+            conversationId,
+            source,
+        });
+
+        ingestSfeLifecycleFromWirePhase(phase, attemptId, conversationId);
+
+        if (phase === 'prompt-sent' || phase === 'streaming') {
+            if (!liveStreamPreviewByConversation.has(conversationId)) {
+                setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
+                setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
+            }
+            setLifecycleState(phase, conversationId);
+            return;
+        }
+
+        if (phase !== 'completed') {
+            return;
+        }
+
+        setLifecycleState('completed', conversationId);
+        if (!sfeEnabled) {
+            void runStreamDoneProbe(conversationId, attemptId);
+            return;
+        }
+
+        const resolution = sfe.resolve(attemptId);
+        const captureMeta = getCaptureMeta(conversationId);
+        const shouldRetryAfterCompletion =
+            !resolution.blockingConditions.includes('stabilization_timeout') &&
+            !resolution.ready &&
+            (resolution.phase === 'canonical_probing' || !shouldIngestAsCanonicalSample(captureMeta));
+        if (shouldRetryAfterCompletion) {
+            scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+        }
+        void runStreamDoneProbe(conversationId, attemptId);
+    }
+
+    function replayPendingLifecycleSignal(attemptId: string, conversationId: string): void {
+        const pending = pendingLifecycleByAttempt.get(attemptId);
+        if (!pending) {
+            return;
+        }
+        pendingLifecycleByAttempt.delete(attemptId);
+        applyLifecyclePhaseForConversation(pending.phase, pending.platform, attemptId, conversationId, 'replayed');
     }
 
     function handleLifecycleMessage(message: any): boolean {
@@ -3415,15 +3549,21 @@ export function runPlatform(): void {
         const phase = typed.phase;
         const platform = typed.platform;
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
+        const attemptId = resolveAliasedAttemptId(typed.attemptId);
+        if (phase !== 'prompt-sent' && phase !== 'streaming' && phase !== 'completed' && phase !== 'terminated') {
+            return true;
+        }
+
         if (!conversationId) {
-            logger.info('Lifecycle ignored: missing conversation context', {
+            cachePendingLifecycleSignal(attemptId, phase, platform);
+            ingestSfeLifecycleFromWirePhase(phase, attemptId, null);
+            logger.info('Lifecycle pending conversation resolution', {
                 phase,
                 platform,
                 attemptId: typed.attemptId,
             });
             return true;
         }
-        const attemptId = resolveAliasedAttemptId(typed.attemptId);
 
         if (phase === 'prompt-sent' && conversationId) {
             bindAttempt(conversationId, attemptId);
@@ -3439,53 +3579,7 @@ export function runPlatform(): void {
         }
         activeAttemptId = attemptId;
 
-        if (phase !== 'prompt-sent' && phase !== 'streaming' && phase !== 'completed' && phase !== 'terminated') {
-            return true;
-        }
-
-        logger.info('Lifecycle phase', {
-            platform,
-            phase,
-            attemptId,
-            conversationId: conversationId ?? null,
-        });
-
-        if (phase === 'prompt-sent') {
-            ingestSfeLifecycle('prompt_sent', attemptId, conversationId ?? null);
-        } else if (phase === 'streaming') {
-            ingestSfeLifecycle('streaming', attemptId, conversationId ?? null);
-        } else if (phase === 'completed') {
-            ingestSfeLifecycle('completed_hint', attemptId, conversationId ?? null);
-        } else if (phase === 'terminated') {
-            ingestSfeLifecycle('terminated_partial', attemptId, conversationId ?? null);
-        }
-
-        if ((phase === 'prompt-sent' || phase === 'streaming') && conversationId) {
-            if (!liveStreamPreviewByConversation.has(conversationId)) {
-                setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
-                setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
-            }
-        }
-
-        if (phase === 'completed') {
-            setLifecycleState('completed', conversationId);
-            if (conversationId) {
-                if (sfeEnabled) {
-                    const resolution = sfe.resolve(attemptId);
-                    const captureMeta = getCaptureMeta(conversationId);
-                    const shouldRetryAfterCompletion =
-                        !resolution.blockingConditions.includes('stabilization_timeout') &&
-                        !resolution.ready &&
-                        (resolution.phase === 'canonical_probing' || !shouldIngestAsCanonicalSample(captureMeta));
-                    if (shouldRetryAfterCompletion) {
-                        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-                    }
-                }
-                void runStreamDoneProbe(conversationId, attemptId);
-            }
-        } else if (phase === 'prompt-sent' || phase === 'streaming') {
-            setLifecycleState(phase, conversationId);
-        }
+        applyLifecyclePhaseForConversation(phase, platform, attemptId, conversationId, 'direct');
 
         return true;
     }
@@ -3578,8 +3672,11 @@ export function runPlatform(): void {
         }
 
         activeAttemptId = canonicalAttemptId;
+        currentConversationId = typed.conversationId;
         bindAttempt(typed.conversationId, canonicalAttemptId);
         sfe.getAttemptTracker().updateConversationId(canonicalAttemptId, typed.conversationId);
+        replayPendingLifecycleSignal(canonicalAttemptId, typed.conversationId);
+        refreshButtonState(typed.conversationId);
         return true;
     }
 
@@ -3595,6 +3692,7 @@ export function runPlatform(): void {
         cancelStreamDoneProbe(attemptId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
         clearCanonicalStabilizationRetry(attemptId);
         sfe.dispose(attemptId);
+        pendingLifecycleByAttempt.delete(attemptId);
         for (const [conversationId, attemptId] of attemptByConversation.entries()) {
             if (attemptId === typed.attemptId || attemptId === resolveAliasedAttemptId(typed.attemptId)) {
                 attemptByConversation.delete(conversationId);

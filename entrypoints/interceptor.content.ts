@@ -279,7 +279,7 @@ function resolveAttemptIdForConversation(conversationId?: string, platformName =
     return created;
 }
 
-function emitConversationIdResolvedSignal(attemptId: string, conversationId: string): void {
+function emitConversationIdResolvedSignal(attemptId: string, conversationId: string, platformOverride?: string): void {
     const key = `${attemptId}:${conversationId}`;
     const now = Date.now();
     const last = conversationResolvedSignalCache.get(key) ?? 0;
@@ -291,7 +291,7 @@ function emitConversationIdResolvedSignal(attemptId: string, conversationId: str
 
     const payload: ConversationIdResolvedMessage = {
         type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
-        platform: 'ChatGPT',
+        platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
     };
@@ -709,7 +709,7 @@ async function monitorGeminiResponseStream(
     const emittedTextOrder: string[] = [];
 
     if (conversationId) {
-        emitConversationIdResolvedSignal(attemptId, conversationId);
+        emitConversationIdResolvedSignal(attemptId, conversationId, 'Gemini');
     }
     if (shouldLogTransient(`gemini:fetch-stream:start:${attemptId}`, 8000)) {
         log('info', 'Gemini fetch stream monitor start', {
@@ -763,7 +763,7 @@ async function monitorGeminiResponseStream(
 
             if (!conversationId && parsedConversationId) {
                 conversationId = parsedConversationId;
-                emitConversationIdResolvedSignal(attemptId, conversationId);
+                emitConversationIdResolvedSignal(attemptId, conversationId, 'Gemini');
                 if (shouldLogTransient(`gemini:fetch-stream:resolved:${attemptId}`, 8000)) {
                     log('info', 'Gemini conversation resolved from stream', {
                         attemptId,
@@ -872,7 +872,7 @@ function processGeminiXhrProgressChunk(state: GeminiXhrStreamState, chunkText: s
     const resolvedConversationId = signals.conversationId ?? state.seedConversationId;
     if (!state.seedConversationId && resolvedConversationId) {
         state.seedConversationId = resolvedConversationId;
-        emitConversationIdResolvedSignal(state.attemptId, resolvedConversationId);
+        emitConversationIdResolvedSignal(state.attemptId, resolvedConversationId, 'Gemini');
         if (shouldLogTransient(`gemini:xhr-stream:resolved:${state.attemptId}`, 8000)) {
             log('info', 'Gemini XHR conversation resolved from stream', {
                 attemptId: state.attemptId,
@@ -920,6 +920,17 @@ function wireGeminiXhrProgressMonitor(
 
     const handleLoadEnd = () => {
         flushProgress();
+        // Gemini StreamGenerate completion can miss explicit completion hints in
+        // some sessions. Emit completed lifecycle when the XHR finishes cleanly.
+        if (
+            !isAttemptDisposed(state.attemptId) &&
+            xhr.readyState === XMLHttpRequest.DONE &&
+            xhr.status >= 200 &&
+            xhr.status < 300 &&
+            (state.emittedStreaming || !!state.seedConversationId)
+        ) {
+            emitLifecycleSignal(state.attemptId, 'completed', state.seedConversationId, 'Gemini');
+        }
         xhr.removeEventListener('progress', handleProgress);
         xhr.removeEventListener('loadend', handleLoadEnd);
     };

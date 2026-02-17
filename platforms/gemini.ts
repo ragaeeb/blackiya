@@ -33,6 +33,59 @@ const conversationTitles = new LRUCache<string, string>(50);
  */
 const activeConversations = new LRUCache<string, ConversationData>(50);
 
+const GEMINI_GENERIC_TITLES = new Set([
+    'gemini',
+    'google gemini',
+    'gemini conversation',
+    'new chat',
+    'new conversation',
+]);
+
+function normalizeGeminiDomTitle(rawTitle: string): string {
+    return rawTitle
+        .replace(/\s*[-|]\s*Gemini(?:\s+Advanced)?$/i, '')
+        .replace(/\s*[-|]\s*Google Gemini$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isGenericGeminiTitle(rawTitle: string): boolean {
+    const normalized = normalizeGeminiDomTitle(rawTitle).toLowerCase();
+    if (!normalized) {
+        return true;
+    }
+    return GEMINI_GENERIC_TITLES.has(normalized);
+}
+
+function extractTitleFromGeminiDomHeadings(): string | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+
+    const selectors = [
+        'main h1',
+        'main [role="heading"][aria-level="1"]',
+        'main [role="heading"]',
+        'header h1',
+        'h1',
+        'a[aria-current="page"]',
+        '[aria-selected="true"]',
+    ];
+
+    for (const selector of selectors) {
+        const nodes = document.querySelectorAll(selector);
+        for (const node of nodes) {
+            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
+            if (!candidate || isGenericGeminiTitle(candidate)) {
+                continue;
+            }
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
 /**
  * Parse the MaZiqc response to extract conversation titles
  */
@@ -574,24 +627,23 @@ export const geminiAdapter: LLMPlatform = {
         return evaluateGeminiReadiness(data);
     },
 
-    defaultTitles: ['Gemini Conversation'],
+    defaultTitles: ['Gemini Conversation', 'Google Gemini'],
 
     extractTitleFromDom() {
-        const raw = document.title?.trim();
-        if (!raw) {
+        if (typeof document === 'undefined') {
             return null;
         }
 
-        // Strip known Gemini page title patterns (e.g., "My Chat - Gemini")
-        const cleaned = raw.replace(/\s*-\s*Gemini$/i, '').trim();
-        if (!cleaned || cleaned.toLowerCase() === 'gemini') {
-            return null;
+        const tabTitle = normalizeGeminiDomTitle(document.title?.trim() ?? '');
+        if (tabTitle && !isGenericGeminiTitle(tabTitle)) {
+            return tabTitle;
         }
 
-        if (this.defaultTitles?.some((d: string) => d.toLowerCase() === cleaned.toLowerCase())) {
-            return null;
+        const headingTitle = extractTitleFromGeminiDomHeadings();
+        if (headingTitle) {
+            return headingTitle;
         }
 
-        return cleaned;
+        return null;
     },
 };

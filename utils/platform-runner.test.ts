@@ -324,6 +324,79 @@ describe('Platform Runner', () => {
         expect(resolved).toBe('Custom Thread Title');
     });
 
+    it('should use Gemini DOM title fallback on Save when cached title is generic', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => 'gem-title-1',
+            evaluateReadiness: evaluateReadinessMock,
+            defaultTitles: ['Gemini Conversation', 'Google Gemini'],
+            extractTitleFromDom: () => 'Discussion on Quranic Verse Meanings',
+            formatFilename: (data: { title: string }) => data.title.replace(/[^a-zA-Z0-9]/g, '_'),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const conversation = buildConversation('gem-title-1', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'Gemini Conversation';
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-title',
+                phase: 'completed',
+                conversationId: 'gem-title-1',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(conversation),
+                attemptId: 'attempt:gem-title',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(conversation),
+                attemptId: 'attempt:gem-title',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveBtn?.disabled).toBe(false);
+
+        saveBtn?.click();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(downloadCalls.length).toBeGreaterThanOrEqual(1);
+        const payload = downloadCalls.at(-1)?.data as Record<string, unknown>;
+        expect(payload.title).toBe('Discussion on Quranic Verse Meanings');
+        expect(downloadCalls.at(-1)?.filename).toContain('Discussion_on_Quranic_Verse_Meanings');
+    }, 10_000);
+
     it('should update lifecycle badge from network lifecycle messages', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -402,6 +475,210 @@ describe('Platform Runner', () => {
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
         expect(saveBtn?.disabled).toBe(true);
+    });
+
+    it('should replay pending Gemini lifecycle once conversation ID resolves mid-stream', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app',
+            origin: 'https://gemini.google.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-late-id',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-late-id',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-late-id',
+                conversationId: 'gem-late-1',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const badge = document.getElementById('blackiya-lifecycle-badge');
+        const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(badge?.textContent).toContain('Streaming');
+        expect(saveBtn?.disabled).toBe(true);
+    });
+
+    it('should keep Gemini Save disabled while streaming even after canonical samples arrive before completion', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app',
+            origin: 'https://gemini.google.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-stream-guard',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-stream-guard',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-stream-guard',
+                conversationId: 'gem-late-2',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 60));
+
+        const canonicalConversation = buildConversation('gem-late-2', 'Assistant final answer', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:gemini-stream-guard',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 950));
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:gemini-stream-guard',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        const saveDuringStream = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+        expect(saveDuringStream?.disabled).toBe(true);
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-stream-guard',
+                conversationId: 'gem-late-2',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        const saveAfterFinish = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+        expect(saveAfterFinish?.disabled).toBe(false);
+    }, 10_000);
+
+    it('should accept Gemini RESPONSE_FINISHED while streaming even if DOM has generating markers', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => 'gem-finish-1',
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app/gem-finish-1',
+            origin: 'https://gemini.google.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-finish-guard',
+                phase: 'streaming',
+                conversationId: 'gem-finish-1',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        const marker = document.createElement('div');
+        marker.className = 'still-generating streaming-marker';
+        document.body.appendChild(marker);
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-finish-guard',
+                conversationId: 'gem-finish-1',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
     it('should keep save disabled on no-conversation Gemini route despite finished hints', async () => {

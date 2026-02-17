@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+import { Window } from 'happy-dom';
 
 import type { Message, MessageNode } from '@/utils/types';
 
@@ -556,6 +557,46 @@ describe('Gemini Platform Adapter', () => {
             const url =
                 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
             expect(geminiAdapter.extractConversationIdFromUrl?.(url)).toBeNull();
+        });
+    });
+
+    describe('DOM Title Fallback', () => {
+        it('should extract active conversation title from DOM heading when document title is generic', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <main>
+                    <h1>Discussion on Quranic Verse Meanings</h1>
+                </main>
+            `;
+
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = doc;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBe('Discussion on Quranic Verse Meanings');
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
+
+        it('should return null when DOM heading is also generic', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <main>
+                    <h1>Google Gemini</h1>
+                </main>
+            `;
+
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = doc;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBeNull();
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
         });
     });
 });
