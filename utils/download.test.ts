@@ -5,7 +5,52 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { downloadAsJSON, generateTimestamp, sanitizeFilename } from '@/utils/download';
+
+type BrowserApiOverrides = {
+    document?: {
+        body?: {
+            appendChild?: (node: unknown) => void;
+            removeChild?: (node: unknown) => void;
+        };
+        createElement?: () => any;
+    };
+    createObjectURL?: (blob: Blob) => string;
+    revokeObjectURL?: (url: string) => void;
+};
+
+function withMockedBrowserAPIs(overrides: BrowserApiOverrides, fn: () => void): void {
+    const originalDocument = (globalThis as any).document;
+    const originalCreateObjectURL = globalThis.URL.createObjectURL;
+    const originalRevokeObjectURL = globalThis.URL.revokeObjectURL;
+
+    const body = {
+        appendChild: overrides.document?.body?.appendChild ?? (() => {}),
+        removeChild: overrides.document?.body?.removeChild ?? (() => {}),
+    };
+
+    (globalThis as any).document = {
+        body,
+        createElement:
+            overrides.document?.createElement ??
+            (() => ({
+                href: '',
+                download: '',
+                click: () => {},
+            })),
+    };
+
+    (globalThis.URL as any).createObjectURL = overrides.createObjectURL ?? (() => 'blob:mock');
+    (globalThis.URL as any).revokeObjectURL = overrides.revokeObjectURL ?? (() => {});
+
+    try {
+        fn();
+    } finally {
+        (globalThis as any).document = originalDocument;
+        (globalThis.URL as any).createObjectURL = originalCreateObjectURL;
+        (globalThis.URL as any).revokeObjectURL = originalRevokeObjectURL;
+    }
+}
 
 describe('Download Utilities', () => {
     describe('sanitizeFilename', () => {
@@ -80,6 +125,123 @@ describe('Download Utilities', () => {
             const timestamp = generateTimestamp(unixTime);
             // Should be a valid date string
             expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/);
+        });
+    });
+
+    describe('downloadAsJSON', () => {
+        it('should not throw when JSON serialization fails', () => {
+            const circular: Record<string, unknown> = {};
+            circular.self = circular;
+
+            const appended: unknown[] = [];
+            const removed: unknown[] = [];
+            const link = {
+                href: '',
+                download: '',
+                click: () => {},
+            };
+            withMockedBrowserAPIs(
+                {
+                    document: {
+                        body: {
+                            appendChild: (node: unknown) => {
+                                appended.push(node);
+                            },
+                            removeChild: (node: unknown) => {
+                                removed.push(node);
+                            },
+                        },
+                        createElement: () => link,
+                    },
+                },
+                () => {
+                    expect(() => downloadAsJSON(circular, 'test')).not.toThrow();
+                    expect(appended).toEqual([]);
+                    expect(removed).toEqual([]);
+                },
+            );
+        });
+
+        it('should remove link and revoke URL on successful download', () => {
+            const appended: unknown[] = [];
+            const removed: unknown[] = [];
+            const revokedUrls: string[] = [];
+            let clicked = false;
+
+            const body = {
+                appendChild: (node: any) => {
+                    node.parentNode = body;
+                    appended.push(node);
+                },
+                removeChild: (node: unknown) => {
+                    removed.push(node);
+                },
+            };
+
+            const link = {
+                href: '',
+                download: '',
+                parentNode: null as any,
+                click: () => {
+                    clicked = true;
+                },
+            };
+
+            withMockedBrowserAPIs(
+                {
+                    document: {
+                        body,
+                        createElement: () => link,
+                    },
+                    createObjectURL: () => 'blob:success',
+                    revokeObjectURL: (url: string) => {
+                        revokedUrls.push(url);
+                    },
+                },
+                () => {
+                    expect(() => downloadAsJSON({ ok: true }, 'test')).not.toThrow();
+                    expect(clicked).toBe(true);
+                    expect(link.download).toBe('test.json');
+                    expect(link.href).toBe('blob:success');
+                    expect(appended).toEqual([link]);
+                    expect(removed).toEqual([link]);
+                    expect(revokedUrls).toEqual(['blob:success']);
+                },
+            );
+        });
+
+        it('should not throw when createObjectURL fails', () => {
+            const appended: unknown[] = [];
+            const removed: unknown[] = [];
+            const link = {
+                href: '',
+                download: '',
+                click: () => {},
+            };
+
+            withMockedBrowserAPIs(
+                {
+                    document: {
+                        body: {
+                            appendChild: (node: unknown) => {
+                                appended.push(node);
+                            },
+                            removeChild: (node: unknown) => {
+                                removed.push(node);
+                            },
+                        },
+                        createElement: () => link,
+                    },
+                    createObjectURL: () => {
+                        throw new Error('blob-failure');
+                    },
+                },
+                () => {
+                    expect(() => downloadAsJSON({ ok: true }, 'test')).not.toThrow();
+                    expect(appended).toEqual([]);
+                    expect(removed).toEqual([]);
+                },
+            );
         });
     });
 });

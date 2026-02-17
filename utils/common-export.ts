@@ -189,7 +189,7 @@ const extractModel = (conversation: ConversationData, chain: Message[]): string 
 const findTerminalAssistantIndex = (chain: Message[]): number => {
     for (let i = chain.length - 1; i >= 0; i -= 1) {
         const message = chain[i];
-        if (message.author.role !== 'assistant') {
+        if (message.author?.role !== 'assistant') {
             continue;
         }
         if (extractMessageText(message) || extractReasoningFragments(message).length > 0) {
@@ -201,7 +201,7 @@ const findTerminalAssistantIndex = (chain: Message[]): number => {
 
 const findLastUserBefore = (chain: Message[], endIndex: number): number => {
     for (let i = endIndex - 1; i >= 0; i -= 1) {
-        if (chain[i].author.role === 'user') {
+        if (chain[i].author?.role === 'user') {
             return i;
         }
     }
@@ -211,7 +211,7 @@ const findLastUserBefore = (chain: Message[], endIndex: number): number => {
 const findLatestResponseText = (chain: Message[], startIndex: number, endIndex: number): string => {
     for (let i = endIndex; i > startIndex; i -= 1) {
         const message = chain[i];
-        if (message.author.role !== 'assistant') {
+        if (message.author?.role !== 'assistant') {
             continue;
         }
         const text = extractMessageText(message);
@@ -226,7 +226,7 @@ const collectReasoningForRange = (chain: Message[], startIndex: number, endIndex
     const collected: string[] = [];
     for (let i = startIndex + 1; i <= endIndex; i += 1) {
         const message = chain[i];
-        if (message.author.role !== 'assistant') {
+        if (message.author?.role !== 'assistant') {
             continue;
         }
         collected.push(...extractReasoningFragments(message));
@@ -237,7 +237,7 @@ const collectReasoningForRange = (chain: Message[], startIndex: number, endIndex
 const extractLatestPrompt = (chain: Message[]): string => {
     for (let i = chain.length - 1; i >= 0; i -= 1) {
         const message = chain[i];
-        if (message.author.role === 'user') {
+        if (message.author?.role === 'user') {
             return extractMessageText(message);
         }
     }

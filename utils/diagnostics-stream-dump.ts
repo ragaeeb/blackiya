@@ -76,9 +76,11 @@ interface StreamDumpOptions {
 
 const DEFAULT_FLUSH_THRESHOLD = 10;
 const DEFAULT_FLUSH_INTERVAL_MS = 1500;
-const DEFAULT_MAX_SESSIONS = 25;
-const DEFAULT_MAX_FRAMES_PER_SESSION = 240;
-const DEFAULT_MAX_TEXT_CHARS_PER_FRAME = 1200;
+const DEFAULT_MAX_SESSIONS = 10;
+const DEFAULT_MAX_FRAMES_PER_SESSION = 150;
+const DEFAULT_MAX_TEXT_CHARS_PER_FRAME = 900;
+
+const FRAME_TRUNCATION_SUFFIX = '...<truncated>';
 
 function createEmptyStore(): StreamDumpStore {
     const now = new Date().toISOString();
@@ -148,11 +150,20 @@ function redactSensitiveTokens(text: string): string {
 
 function sanitizeFrameText(text: string, maxChars: number): { text: string; truncated: boolean } {
     const normalized = redactSensitiveTokens(text.replace(/\0/g, '')).trim();
+    if (maxChars <= 0) {
+        return { text: '', truncated: normalized.length > 0 };
+    }
     if (normalized.length <= maxChars) {
         return { text: normalized, truncated: false };
     }
+    if (maxChars <= FRAME_TRUNCATION_SUFFIX.length) {
+        return {
+            text: FRAME_TRUNCATION_SUFFIX.slice(0, maxChars),
+            truncated: true,
+        };
+    }
     return {
-        text: `${normalized.slice(0, Math.max(0, maxChars - 13))}...<truncated>`,
+        text: `${normalized.slice(0, maxChars - FRAME_TRUNCATION_SUFFIX.length)}${FRAME_TRUNCATION_SUFFIX}`,
         truncated: true,
     };
 }
@@ -319,10 +330,18 @@ export class BufferedStreamDumpStorage {
         const sessions = [...byAttempt.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         const pruned = sessions.slice(0, this.maxSessions);
         const dropped = sessions.length - pruned.length;
-        if (dropped > 0) {
-            pruned[0].truncated = true;
+        if (dropped > 0 && pruned.length > 0) {
+            // Mark the oldest retained session to indicate older history was pruned.
+            pruned[pruned.length - 1].truncated = true;
         }
         return pruned;
+    }
+
+    private restoreBatch(batch: StreamDumpFrameInput[]): void {
+        if (batch.length === 0) {
+            return;
+        }
+        this.buffer = [...batch, ...this.buffer];
     }
 
     private async flush(): Promise<void> {
@@ -346,6 +365,10 @@ export class BufferedStreamDumpStorage {
             };
 
             await this.storage.set({ [this.storageKey]: nextStore });
+        } catch {
+            // Keep frames durable across transient quota/storage failures.
+            this.restoreBatch(batch);
+            this.scheduleFlush();
         } finally {
             this.isFlushing = false;
         }
