@@ -6,6 +6,12 @@
 import { logger } from '@/utils/logger';
 
 export class ButtonManager {
+    private readonly controlIds = [
+        'blackiya-lifecycle-badge',
+        'blackiya-save-btn',
+        'blackiya-copy-btn',
+        'blackiya-calibrate-btn',
+    ];
     private container: HTMLElement | null = null;
     private lifecycleBadge: HTMLElement | null = null;
     private saveStartButton: HTMLButtonElement | null = null;
@@ -13,6 +19,7 @@ export class ButtonManager {
     private calibrateButton: HTMLButtonElement | null = null;
     private saveButtonMode: 'default' | 'force-degraded' = 'default';
     private isFixedPosition = false;
+    private dedupeObserver: MutationObserver | null = null;
     private onSaveClick: () => Promise<void>;
     private onCopyClick: () => Promise<void>;
     private onCalibrateClick: () => Promise<void>;
@@ -30,8 +37,11 @@ export class ButtonManager {
 
     public inject(target: HTMLElement, conversationId: string | null): void {
         if (this.container && document.contains(this.container)) {
+            this.cleanupDuplicateControlIds(this.container);
             return;
         }
+
+        this.cleanupOrphanedControls();
 
         this.container = this.createContainer();
         this.lifecycleBadge = this.createLifecycleBadge();
@@ -55,11 +65,14 @@ export class ButtonManager {
             }
 
             target.appendChild(this.container);
+            this.cleanupDuplicateControlIds(this.container);
+            this.ensureDedupeObserver();
             logger.info(`Save/Copy buttons injected for conversation: ${conversationId}`);
         }
     }
 
     public remove(): void {
+        this.disconnectDedupeObserver();
         if (this.container?.parentElement) {
             this.container.parentElement.removeChild(this.container);
         }
@@ -217,8 +230,189 @@ export class ButtonManager {
     private createContainer(): HTMLElement {
         const div = document.createElement('div');
         div.id = 'blackiya-button-container';
+        div.setAttribute('data-blackiya-controls', '1');
         div.style.cssText = this.getContainerStyles('default');
         return div;
+    }
+
+    private isElementNode(value: unknown): value is HTMLElement {
+        return (
+            !!value &&
+            typeof value === 'object' &&
+            (value as { nodeType?: number }).nodeType === 1 &&
+            'style' in (value as Record<string, unknown>)
+        );
+    }
+
+    private isControlContainer(node: Element | null): node is HTMLElement {
+        return (
+            !!node &&
+            this.isElementNode(node) &&
+            (node.id === 'blackiya-button-container' || node.getAttribute('data-blackiya-controls') === '1')
+        );
+    }
+
+    private findControlContainer(node: Element | null): HTMLElement | null {
+        let cursor: Element | null = node;
+        while (cursor) {
+            if (this.isControlContainer(cursor)) {
+                return cursor;
+            }
+            cursor = cursor.parentElement;
+        }
+        return null;
+    }
+
+    private detachNode(node: HTMLElement): void {
+        const parent = node.parentNode;
+        if (parent) {
+            parent.removeChild(node);
+        }
+    }
+
+    private collectSearchRoots(): ParentNode[] {
+        const roots: ParentNode[] = [];
+        const queue: ParentNode[] = [document];
+        const visited = new Set<ParentNode>();
+
+        while (queue.length > 0) {
+            const root = queue.shift();
+            if (!root || visited.has(root)) {
+                continue;
+            }
+            visited.add(root);
+            roots.push(root);
+
+            const elements = root.querySelectorAll('*');
+            for (const element of elements) {
+                if (!this.isElementNode(element) || !('shadowRoot' in element) || !element.shadowRoot) {
+                    continue;
+                }
+                queue.push(element.shadowRoot);
+            }
+        }
+
+        return roots;
+    }
+
+    private queryAllAcrossRoots(selector: string): HTMLElement[] {
+        const matches: HTMLElement[] = [];
+        for (const root of this.collectSearchRoots()) {
+            const nodes = root.querySelectorAll(selector);
+            for (const node of nodes) {
+                if (this.isElementNode(node)) {
+                    matches.push(node);
+                }
+            }
+        }
+        return matches;
+    }
+
+    private queryControlContainersAcrossRoots(): HTMLElement[] {
+        const byId = this.queryAllAcrossRoots('#blackiya-button-container');
+        const byAttr = this.queryAllAcrossRoots('[data-blackiya-controls="1"]');
+        const seen = new Set<HTMLElement>();
+        const unique: HTMLElement[] = [];
+        for (const element of [...byId, ...byAttr]) {
+            if (seen.has(element)) {
+                continue;
+            }
+            seen.add(element);
+            unique.push(element);
+        }
+        return unique;
+    }
+
+    private collectPrimaryControls(activeContainer: HTMLElement): Set<HTMLElement> {
+        const keep = new Set<HTMLElement>();
+        for (const id of this.controlIds) {
+            const primary = activeContainer.querySelector(`#${id}`);
+            if (this.isElementNode(primary)) {
+                keep.add(primary);
+            }
+        }
+        return keep;
+    }
+
+    private removeDuplicateContainers(activeContainer: HTMLElement): void {
+        const allContainers = this.queryControlContainersAcrossRoots();
+        for (const container of allContainers) {
+            if (container === activeContainer) {
+                continue;
+            }
+            this.detachNode(container);
+        }
+    }
+
+    private removeDuplicateControlById(id: string, keep: Set<HTMLElement>, activeContainer: HTMLElement): void {
+        const matches = this.queryAllAcrossRoots(`#${id}`);
+        for (const match of matches) {
+            if (keep.has(match)) {
+                continue;
+            }
+            const parentContainer = this.findControlContainer(match);
+            this.detachNode(match);
+            if (parentContainer && parentContainer !== activeContainer) {
+                const hasRemainingControls = this.controlIds.some(
+                    (controlId) => !!parentContainer.querySelector(`#${controlId}`),
+                );
+                if (!hasRemainingControls) {
+                    this.detachNode(parentContainer);
+                }
+            }
+        }
+    }
+
+    private cleanupOrphanedControls(): void {
+        // V2.1-034 hardening: extension reloads can leave stale controls with
+        // older DOM shapes. Remove all known control roots before injecting.
+        const staleContainers = this.queryControlContainersAcrossRoots();
+        for (const container of staleContainers) {
+            this.detachNode(container);
+        }
+
+        for (const id of this.controlIds) {
+            const elements = this.queryAllAcrossRoots(`#${id}`);
+            for (const element of elements) {
+                const parentContainer = this.findControlContainer(element);
+                if (!parentContainer) {
+                    this.detachNode(element);
+                }
+            }
+        }
+    }
+
+    private cleanupDuplicateControlIds(activeContainer: HTMLElement): void {
+        const keep = this.collectPrimaryControls(activeContainer);
+        this.removeDuplicateContainers(activeContainer);
+        for (const id of this.controlIds) {
+            this.removeDuplicateControlById(id, keep, activeContainer);
+        }
+    }
+
+    private ensureDedupeObserver(): void {
+        if (this.dedupeObserver || !this.container || !document.body || typeof MutationObserver === 'undefined') {
+            return;
+        }
+        this.dedupeObserver = new MutationObserver(() => {
+            if (!this.container || !document.contains(this.container)) {
+                this.disconnectDedupeObserver();
+                return;
+            }
+            this.cleanupDuplicateControlIds(this.container);
+        });
+        this.dedupeObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+        });
+    }
+
+    private disconnectDedupeObserver(): void {
+        if (!this.dedupeObserver) {
+            return;
+        }
+        this.dedupeObserver.disconnect();
+        this.dedupeObserver = null;
     }
 
     private createLifecycleBadge(): HTMLElement {

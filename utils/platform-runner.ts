@@ -60,6 +60,11 @@ const PROBE_LEASE_RETRY_GRACE_MS = 500;
 const MAX_CONVERSATION_ATTEMPTS = 250;
 const MAX_STREAM_PREVIEWS = 150;
 const MAX_AUTOCAPTURE_KEYS = 400;
+const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
+
+type RunnerControl = {
+    cleanup?: () => void;
+};
 
 export function buildCalibrationOrderForMode(
     preferredStep: CalibrationStep | null,
@@ -117,7 +122,71 @@ function normalizeContentText(text: string): string {
     return text.trim().normalize('NFC');
 }
 
+function isGenericConversationTitle(title: string | undefined | null): boolean {
+    if (!title) {
+        return true;
+    }
+    const normalized = title.trim().toLowerCase();
+    if (normalized.length === 0) {
+        return true;
+    }
+    return (
+        normalized === 'new chat' ||
+        normalized === 'chatgpt' ||
+        normalized === 'google gemini' ||
+        normalized === 'gemini conversation' ||
+        normalized === 'grok conversation'
+    );
+}
+
+function deriveConversationTitleFromFirstUserMessage(data: ConversationData): string | null {
+    const userMessages = Object.values(data.mapping)
+        .map((node) => node.message)
+        .filter(
+            (message): message is NonNullable<(typeof data.mapping)[string]['message']> =>
+                !!message && message.author.role === 'user',
+        )
+        .sort((left, right) => {
+            const leftTs = left.create_time ?? left.update_time ?? 0;
+            const rightTs = right.create_time ?? right.update_time ?? 0;
+            return leftTs - rightTs;
+        });
+
+    for (const message of userMessages) {
+        const text = (message.content.parts ?? []).filter((part): part is string => typeof part === 'string').join(' ');
+        const normalized = text.replace(/\s+/g, ' ').trim();
+        if (normalized.length === 0) {
+            continue;
+        }
+        const maxLength = 80;
+        return normalized.length > maxLength ? normalized.slice(0, maxLength).trimEnd() : normalized;
+    }
+
+    return null;
+}
+
+export function resolveExportConversationTitle(data: ConversationData): string {
+    if (!isGenericConversationTitle(data.title)) {
+        return data.title;
+    }
+    return deriveConversationTitleFromFirstUserMessage(data) ?? data.title ?? 'Conversation';
+}
+
 export function runPlatform(): void {
+    const globalRunnerControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
+        | RunnerControl
+        | undefined;
+    if (globalRunnerControl?.cleanup) {
+        try {
+            globalRunnerControl.cleanup();
+        } catch (error) {
+            logger.debug('Error while cleaning previous runner instance:', error);
+        }
+    }
+
+    const runnerControl: RunnerControl = {};
+    (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] = runnerControl;
+
     let currentAdapter: LLMPlatform | null = null;
     let currentConversationId: string | null = null;
     let cleanupWindowBridge: (() => void) | null = null;
@@ -1184,6 +1253,16 @@ export function runPlatform(): void {
     }
 
     function setLifecycleState(state: LifecycleUiState, conversationId?: string): void {
+        // #region agent log — lifecycle transition tracking
+        const prevLifecycle = lifecycleState;
+        if (prevLifecycle !== state) {
+            logger.info('Lifecycle transition', {
+                from: prevLifecycle,
+                to: state,
+                conversationId: conversationId ?? currentConversationId ?? null,
+            });
+        }
+        // #endregion
         lifecycleState = state;
         buttonManager.setLifecycleState(state);
 
@@ -1192,7 +1271,7 @@ export function runPlatform(): void {
         }
 
         if (state === 'completed') {
-            const targetConversationId = conversationId || currentConversationId || undefined;
+            const targetConversationId = conversationId || extractConversationIdFromLocation() || undefined;
             if (targetConversationId) {
                 refreshButtonState(targetConversationId);
                 scheduleButtonRefresh(targetConversationId);
@@ -1587,7 +1666,7 @@ export function runPlatform(): void {
         if (!currentAdapter) {
             return;
         }
-        const conversationId = currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+        const conversationId = resolveConversationIdForUserAction();
         let decision = conversationId ? resolveReadinessDecision(conversationId) : null;
         let allowDegraded = decision?.mode === 'degraded_manual_only';
 
@@ -1854,7 +1933,7 @@ export function runPlatform(): void {
             return null;
         }
 
-        const conversationId = currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+        const conversationId = resolveConversationIdForUserAction();
         if (!conversationId) {
             markCalibrationError('Calibration failed: no conversation ID');
             return null;
@@ -2487,7 +2566,7 @@ export function runPlatform(): void {
             return null;
         }
 
-        const conversationId = currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+        const conversationId = resolveConversationIdForUserAction();
         if (!conversationId) {
             logger.error('No conversation ID found in URL');
             if (!options.silent) {
@@ -2526,6 +2605,27 @@ export function runPlatform(): void {
             }
             return null;
         }
+
+        // V2.1-037: If the cached title looks like a platform default (e.g., "New conversation"
+        // on Grok), try to extract the real title from the page DOM. Some platforms generate
+        // titles asynchronously after the AI responds, and the update is never intercepted.
+        if (currentAdapter.extractTitleFromDom && currentAdapter.defaultTitles) {
+            const isStaleTitle = currentAdapter.defaultTitles.some(
+                (d) => d.toLowerCase() === (data.title || '').toLowerCase(),
+            );
+            if (isStaleTitle || !data.title) {
+                const domTitle = currentAdapter.extractTitleFromDom();
+                if (domTitle) {
+                    logger.info('Title resolved from DOM fallback', {
+                        conversationId,
+                        oldTitle: data.title,
+                        newTitle: domTitle,
+                    });
+                    data.title = domTitle;
+                }
+            }
+        }
+
         return data;
     }
 
@@ -2549,6 +2649,10 @@ export function runPlatform(): void {
         }
 
         try {
+            const resolvedTitle = resolveExportConversationTitle(data);
+            if (resolvedTitle !== data.title) {
+                data.title = resolvedTitle;
+            }
             const filename = currentAdapter.formatFilename(data);
             const exportMeta: ExportMeta =
                 options.allowDegraded === true
@@ -2586,7 +2690,7 @@ export function runPlatform(): void {
     }
 
     function injectSaveButton(): void {
-        const conversationId = currentAdapter?.extractConversationId(window.location.href) || null;
+        const conversationId = extractConversationIdFromLocation();
         const target = currentAdapter?.getButtonInjectionTarget();
         if (!target) {
             logger.info('Button target missing; retry pending', {
@@ -2606,10 +2710,13 @@ export function runPlatform(): void {
 
         if (!conversationId) {
             logger.info('No conversation ID yet; showing calibration only');
-            const hasFallbackData =
-                !!currentConversationId && !!interceptionManager.getConversation(currentConversationId);
-            buttonManager.setActionButtonsEnabled(hasFallbackData);
-            buttonManager.setOpacity(hasFallbackData ? '1' : '0.6');
+            currentConversationId = null;
+            if (lifecycleState !== 'idle') {
+                setLifecycleState('idle');
+            }
+            buttonManager.setSaveButtonMode('default');
+            buttonManager.setActionButtonsEnabled(false);
+            buttonManager.setOpacity('0.6');
             return;
         }
 
@@ -2701,6 +2808,13 @@ export function runPlatform(): void {
         }
         const conversationId = forConversationId || currentAdapter.extractConversationId(window.location.href);
         if (!conversationId) {
+            currentConversationId = null;
+            if (lifecycleState !== 'idle') {
+                setLifecycleState('idle');
+            }
+            buttonManager.setSaveButtonMode('default');
+            buttonManager.setActionButtonsEnabled(false);
+            buttonManager.setOpacity('0.6');
             return;
         }
         if (
@@ -2893,11 +3007,16 @@ export function runPlatform(): void {
         if (isLifecycleGenerationPhase(conversationId)) {
             return true;
         }
-        if (currentAdapter?.name !== 'ChatGPT') {
-            return false;
+        // DOM-based fallback only for ChatGPT, whose stop-button selectors
+        // are validated and reliable. Gemini/Grok selectors are too broad
+        // (e.g., [class*="generating"]) and produce false positives that
+        // permanently block the save button after response completion.
+        // Non-ChatGPT platforms rely on lifecycle signals (V2.1-033) instead.
+        if (currentAdapter?.name === 'ChatGPT') {
+            const domBlocked = isPlatformGenerating(currentAdapter);
+            return domBlocked;
         }
-        // Fallback path when lifecycle events are missing.
-        return isPlatformGenerating(currentAdapter);
+        return false;
     }
 
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
@@ -2992,14 +3111,32 @@ export function runPlatform(): void {
         return options.includeDegraded === true && decision.mode === 'degraded_manual_only';
     }
 
+    function extractConversationIdFromLocation(): string | null {
+        if (!currentAdapter) {
+            return null;
+        }
+        return currentAdapter.extractConversationId(window.location.href) || null;
+    }
+
+    function resolveConversationIdForUserAction(): string | null {
+        const locationConversationId = extractConversationIdFromLocation();
+        if (locationConversationId) {
+            return locationConversationId;
+        }
+
+        // Guard against stale in-memory IDs on /app routes.
+        if (currentConversationId && window.location.href.includes(currentConversationId)) {
+            return currentConversationId;
+        }
+
+        return null;
+    }
+
     function resolveActiveConversationId(hintedConversationId?: string): string | null {
         if (hintedConversationId) {
             return hintedConversationId;
         }
-        if (!currentAdapter) {
-            return currentConversationId;
-        }
-        return currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+        return extractConversationIdFromLocation();
     }
 
     function getCaptureMeta(conversationId: string): ExportMeta {
@@ -3015,6 +3152,10 @@ export function runPlatform(): void {
     }
 
     function shouldProcessFinishedSignal(conversationId: string | null, source: 'network' | 'dom'): boolean {
+        if (!conversationId) {
+            logger.info('Finished signal ignored: missing conversation context', { source });
+            return false;
+        }
         if (source === 'network' && conversationId && shouldBlockActionsForGeneration(conversationId)) {
             logger.info('Finished signal blocked by generation guard', { conversationId, source });
             return false;
@@ -3218,14 +3359,20 @@ export function runPlatform(): void {
         }
         const typed = message as ResponseFinishedMessage;
         const hintedConversationId = typeof message.conversationId === 'string' ? message.conversationId : undefined;
+        const resolvedConversationId = resolveActiveConversationId(hintedConversationId);
+        if (!resolvedConversationId) {
+            logger.info('RESPONSE_FINISHED ignored: missing conversation context', {
+                attemptId: typed.attemptId,
+                platform: typed.platform,
+            });
+            return true;
+        }
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
-        if (isStaleAttemptMessage(attemptId, hintedConversationId, 'finished')) {
+        if (isStaleAttemptMessage(attemptId, resolvedConversationId, 'finished')) {
             return true;
         }
         activeAttemptId = attemptId;
-        if (hintedConversationId) {
-            bindAttempt(hintedConversationId, attemptId);
-        }
+        bindAttempt(resolvedConversationId, attemptId);
         // BLACKIYA_RESPONSE_FINISHED is an authoritative completion signal, but
         // during thinking/reasoning phases the interceptor emits these for every
         // stream_status poll. If the platform DOM still shows a generation
@@ -3236,7 +3383,7 @@ export function runPlatform(): void {
             if (currentAdapter && isPlatformGenerating(currentAdapter)) {
                 // #region agent log
                 logger.info('RESPONSE_FINISHED rejected: platform still generating', {
-                    conversationId: hintedConversationId ?? null,
+                    conversationId: resolvedConversationId,
                     attemptId,
                     lifecycleState,
                 });
@@ -3245,14 +3392,14 @@ export function runPlatform(): void {
             }
             // #region agent log
             logger.info('RESPONSE_FINISHED promoted lifecycle to completed', {
-                conversationId: hintedConversationId ?? null,
+                conversationId: resolvedConversationId,
                 attemptId,
                 previousLifecycle: lifecycleState,
             });
             // #endregion
             lifecycleState = 'completed';
         }
-        handleResponseFinished('network', hintedConversationId);
+        handleResponseFinished('network', resolvedConversationId);
         return true;
     }
 
@@ -3268,6 +3415,14 @@ export function runPlatform(): void {
         const phase = typed.phase;
         const platform = typed.platform;
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
+        if (!conversationId) {
+            logger.info('Lifecycle ignored: missing conversation context', {
+                phase,
+                platform,
+                attemptId: typed.attemptId,
+            });
+            return true;
+        }
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
 
         if (phase === 'prompt-sent' && conversationId) {
@@ -3340,9 +3495,6 @@ export function runPlatform(): void {
             (message as StreamDeltaMessage | undefined)?.type !== 'BLACKIYA_STREAM_DELTA' ||
             typeof (message as StreamDeltaMessage).attemptId !== 'string'
         ) {
-            return false;
-        }
-        if ((message as StreamDeltaMessage).platform !== 'ChatGPT') {
             return false;
         }
 
@@ -3538,9 +3690,9 @@ export function runPlatform(): void {
                 return;
             }
 
-            const activeConversationId =
-                currentAdapter.extractConversationId(window.location.href) || currentConversationId;
+            const activeConversationId = extractConversationIdFromLocation();
             if (!activeConversationId) {
+                refreshButtonState(undefined);
                 return;
             }
 
@@ -3565,6 +3717,8 @@ export function runPlatform(): void {
             conversationId,
             hasData,
             opacity,
+            lifecycleState,
+            hasCachedData: !!interceptionManager.getConversation(conversationId),
         });
     }
 
@@ -3697,8 +3851,14 @@ export function runPlatform(): void {
         retryTimeoutIds.push(timeoutId);
     }
 
-    // Cleanup on unload
-    window.addEventListener('beforeunload', () => {
+    let cleanedUp = false;
+    let beforeUnloadHandler: (() => void) | null = null;
+
+    const cleanupRuntime = () => {
+        if (cleanedUp) {
+            return;
+        }
+        cleanedUp = true;
         try {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             const disposed = sfe.disposeAll();
@@ -3734,8 +3894,22 @@ export function runPlatform(): void {
             }
             retryTimeoutIds.length = 0;
             autoCaptureDeferredLogged.clear();
+            if (beforeUnloadHandler) {
+                window.removeEventListener('beforeunload', beforeUnloadHandler);
+                beforeUnloadHandler = null;
+            }
+            const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
+                | RunnerControl
+                | undefined;
+            if (globalControl === runnerControl) {
+                delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
+            }
         } catch (error) {
             logger.debug('Error during cleanup:', error);
         }
-    });
+    };
+
+    beforeUnloadHandler = cleanupRuntime;
+    window.addEventListener('beforeunload', cleanupRuntime);
+    runnerControl.cleanup = cleanupRuntime;
 }

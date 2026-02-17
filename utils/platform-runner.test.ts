@@ -143,7 +143,7 @@ mock.module('wxt/browser', () => ({
 }));
 
 // Import subject under test AFTER mocking
-import { runPlatform } from './platform-runner';
+import { resolveExportConversationTitle, runPlatform } from './platform-runner';
 
 describe('Platform Runner', () => {
     beforeEach(() => {
@@ -301,6 +301,29 @@ describe('Platform Runner', () => {
         expect(saveBtn?.textContent).toContain('Save JSON');
     });
 
+    it('should derive export title from first user message when title is generic', () => {
+        const conversation = buildConversation('gem-1', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'Google Gemini';
+        conversation.mapping.u1.message.content.parts = ['Tafsir of Quranic Verses on Gender'];
+
+        const resolved = resolveExportConversationTitle(conversation as any);
+        expect(resolved).toContain('Tafsir of Quranic Verses on Gender');
+    });
+
+    it('should keep explicit non-generic export title', () => {
+        const conversation = buildConversation('gem-2', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'Custom Thread Title';
+
+        const resolved = resolveExportConversationTitle(conversation as any);
+        expect(resolved).toBe('Custom Thread Title');
+    });
+
     it('should update lifecycle badge from network lifecycle messages', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -348,6 +371,129 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
+    it('should ignore lifecycle messages without conversation context', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-null-conv',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-null-conv',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+        expect(saveBtn?.disabled).toBe(true);
+    });
+
+    it('should keep save disabled on no-conversation Gemini route despite finished hints', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => null,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app',
+            origin: 'https://gemini.google.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'Gemini',
+                attemptId: 'attempt:gemini-finished-null',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+        expect(saveBtn?.disabled).toBe(true);
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText.includes('stream-done: no api url candidates')).toBe(false);
+    });
+
+    it('should not reuse stale conversation id on Gemini /app health checks', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => 'gem-conv-1',
+        };
+
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app/gem-conv-1',
+            origin: 'https://gemini.google.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Put the lifecycle into a terminal state for the conversation route.
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-health',
+                phase: 'completed',
+                conversationId: 'gem-conv-1',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-health',
+                conversationId: 'gem-conv-1',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+
+        // Route moved to /app (no conversation ID). Adapter now returns null.
+        currentAdapterMock.extractConversationId = () => null;
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app',
+            origin: 'https://gemini.google.com',
+        };
+
+        // Wait past the health-check interval.
+        await new Promise((resolve) => setTimeout(resolve, 1900));
+
+        const saveAfter = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        const lifecycle = document.getElementById('blackiya-lifecycle-badge');
+        expect(saveAfter?.disabled).toBe(true);
+        expect(lifecycle?.textContent).toContain('Idle');
+    });
+
     it('should append live stream delta text to stream probe panel', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -380,6 +526,28 @@ describe('Platform Runner', () => {
         expect(panel).not.toBeNull();
         expect(panel?.textContent).toContain('stream: live mirror');
         expect(panel?.textContent).toContain('Hello world');
+    });
+
+    it('should append live stream delta text from non-ChatGPT platforms', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Gemini',
+                attemptId: 'attempt:test-gemini-delta',
+                conversationId: '123',
+                text: 'Gemini response chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panel = document.getElementById('blackiya-stream-probe');
+        expect(panel).not.toBeNull();
+        expect(panel?.textContent).toContain('stream: live mirror');
+        expect(panel?.textContent).toContain('Gemini response chunk');
     });
 
     it('should preserve word boundaries when concatenating stream deltas', async () => {
@@ -486,6 +654,18 @@ describe('Platform Runner', () => {
 
         const container = document.getElementById('blackiya-button-container');
         expect(container?.getAttribute('data-readiness-source')).toBe('sfe');
+    });
+
+    it('should tear down previous runner instance before starting a new one', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        expect(document.querySelectorAll('#blackiya-button-container').length).toBe(1);
+        expect(document.querySelectorAll('#blackiya-save-btn').length).toBe(1);
+        expect(document.querySelectorAll('#blackiya-copy-btn').length).toBe(1);
+        expect(document.querySelectorAll('#blackiya-calibrate-btn').length).toBe(1);
     });
 
     it('should keep SFE readiness source enabled', async () => {

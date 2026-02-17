@@ -157,6 +157,76 @@ describe('Minimal Debug Report', () => {
         expect(report).toContain('Button state');
     });
 
+    it('should include unmatched interceptor lines in diagnostics fallback', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] [Blackiya] Intercepted XHR: /_/BardChatUi/data/batchexecute?rpcids=ESY5D, Adapter: None',
+                context: 'content',
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: 'Save/Copy buttons injected for conversation: eb720ccfdc22abd5',
+                context: 'content',
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+
+        expect(report).toContain('No interception sessions');
+        expect(report).toContain('## Diagnostics');
+        expect(report).toContain('Intercepted XHR: /_/BardChatUi/data/batchexecute?rpcids=ESY5D');
+        expect(report).toContain('Adapter: None');
+    });
+
+    it('should preserve adapter-miss diagnostics for Gemini StreamGenerate intercepts', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message:
+                    '[i] [Blackiya] Intercepted XHR: /_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?rt=c, Adapter: None',
+                context: 'content',
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('Intercepted XHR');
+        expect(report).toContain('BardFrontendService/StreamGenerate');
+        expect(report).toContain('Adapter: None');
+    });
+
+    it('should include Gemini stream diagnostics in fallback report', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] Gemini XHR stream monitor start {"attemptId":"gemini:1","conversationId":"abc"}',
+                context: 'content',
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] Gemini XHR stream progress {"attemptId":"gemini:1","chunkBytes":1024}',
+                context: 'content',
+            },
+            {
+                timestamp: '',
+                level: 'warn',
+                message:
+                    '[i] Gemini endpoint unmatched by adapter {"path":"/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"}',
+                context: 'content',
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('Gemini XHR stream monitor start');
+        expect(report).toContain('Gemini XHR stream progress');
+        expect(report).toContain('Gemini endpoint unmatched by adapter');
+    });
+
     it('should support legacy [interceptor] prefix', () => {
         const logs: LogEntry[] = [
             {

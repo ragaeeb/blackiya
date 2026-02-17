@@ -670,4 +670,14 @@ describe('ChatGPT Platform Adapter', () => {
             );
         });
     });
+
+    describe('no DOM title fallback needed (V2.1-036 guard)', () => {
+        it('should NOT have extractTitleFromDom (ChatGPT uses SSE title resolution)', () => {
+            expect(adapter.extractTitleFromDom).toBeUndefined();
+        });
+
+        it('should NOT have defaultTitles (ChatGPT uses SSE title resolution)', () => {
+            expect(adapter.defaultTitles).toBeUndefined();
+        });
+    });
 });

@@ -52,6 +52,11 @@ export class InterceptionManager {
             this.processQueuedMessages();
             this.processQueuedLogMessages();
         }, 0);
+        // #region agent log — diagnostic: confirm message listener is attached
+        logger.info('[InterceptionManager] Message listener attached', {
+            platform: this.currentAdapter?.name ?? 'none',
+        });
+        // #endregion
     }
 
     public flushQueuedMessages(): void {
@@ -190,7 +195,7 @@ export class InterceptionManager {
                 };
 
                 if (level === 'info') {
-                    logger.info('Failed to parse conversation ID from intercepted data', payload);
+                    logger.info('Metadata-only response (no messages yet)', payload);
                 } else {
                     logger.warn('Failed to parse conversation ID from intercepted data', payload);
                 }

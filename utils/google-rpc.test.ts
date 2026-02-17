@@ -14,22 +14,6 @@ describe('Google RPC Parser', () => {
     });
 
     it('should extract valid RPC entries', () => {
-        // Note: The structure of batchexecute response is essentially a double-encoded string sometimes.
-        // Usually: )]}' \n\n [["wrb.fr", "BIG_JSON_STRING", ...]]
-        // And BIG_JSON_STRING parses to: [[["rpcId", "payload_str", ...], ...]]
-
-        // Let's mock a simpler valid structure often seen after the initial outer envelope is peeled:
-        // Actually, usually we get a raw string, we strip header, parse JSON.
-        // The JSON is an array. Inside, we might have "wrb.fr" wrapper OR just the RPC array directly depending on endpoint.
-        // But commonly: `)]}'\n\n[ ["wrb.fr", "[[[\"MaZiqc\",\"[...]\"]]]" ] ]`
-
-        // However, the current gemini.ts implementation logic suggests:
-        // 1. Strip )]}'
-        // 2. Extract balanced JSON (finding the outer [ ... ])
-        // 3. Parse that JSON.
-        // 4. Iterate over items. If item[0] === 'wrb.fr', parse item[1] (which is the inner json string).
-        // 5. That inner JSON is an array of RPC calls: [ ["rpcId", "payload", ...] ]
-
         const innerPayload = JSON.stringify([
             ['rpc1', '{"data":1}', null, '1'],
             ['rpc2', '{"data":2}', null, '2'],
@@ -40,7 +24,6 @@ describe('Google RPC Parser', () => {
 
         const input = GOOGLE_SECURITY_PREFIX + outerPayload;
 
-        // Gemini often uses: ['wrb.fr', 'RPC_ID', 'PAYLOAD_STRING', ...]
         const geminiStyle = JSON.stringify([['wrb.fr', 'MaZiqc', '{"title":"New Chat"}', null, null]]);
         const input2 = GOOGLE_SECURITY_PREFIX + geminiStyle;
         const result2 = parseBatchexecuteResponse(input2);
@@ -51,5 +34,46 @@ describe('Google RPC Parser', () => {
         expect(result).toHaveLength(2);
         expect(result[0]).toEqual({ rpcId: 'rpc1', payload: '{"data":1}' });
         expect(result[1]).toEqual({ rpcId: 'rpc2', payload: '{"data":2}' });
+    });
+
+    describe('Multi-chunk responses (StreamGenerate format — V2.1-025)', () => {
+        it('should extract RPC results from ALL chunks in a length-prefixed response', () => {
+            // StreamGenerate uses: )]}'  \n\n {len}\n[["wrb.fr",...]] \n {len}\n[["wrb.fr",...]]
+            const chunk1 = JSON.stringify([['wrb.fr', 'RPC1', '{"data":"first"}', null]]);
+            const chunk2 = JSON.stringify([['wrb.fr', 'RPC2', '{"data":"second"}', null]]);
+            const input = `)]}'  \n\n${chunk1.length}\n${chunk1}\n${chunk2.length}\n${chunk2}\n`;
+            const result = parseBatchexecuteResponse(input);
+            expect(result).toHaveLength(2);
+            expect(result[0]).toEqual({ rpcId: 'RPC1', payload: '{"data":"first"}' });
+            expect(result[1]).toEqual({ rpcId: 'RPC2', payload: '{"data":"second"}' });
+        });
+
+        it('should handle null rpcId in wrb.fr wrapper (StreamGenerate)', () => {
+            // Gemini 3.0 StreamGenerate format: ["wrb.fr", null, "PAYLOAD", ...]
+            const json = JSON.stringify([['wrb.fr', null, '{"conversation":"data"}', null]]);
+            const input = `)]}'  \n\n${json}`;
+            const result = parseBatchexecuteResponse(input);
+            expect(result).toHaveLength(1);
+            expect(result[0].payload).toBe('{"conversation":"data"}');
+            // rpcId should be a synthetic placeholder, not null
+            expect(typeof result[0].rpcId).toBe('string');
+        });
+
+        it('should extract conversation payload from multi-chunk null-rpcId response', () => {
+            // Realistic StreamGenerate: metadata chunk + conversation chunk
+            const metaPayload =
+                '[null,[null,"r_abc123"],null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"r_abc123"]';
+            const convPayload = '[null,["c_59f84576f1e364bb","r_abc123"],null,"conversation content"]';
+            const chunk1 = JSON.stringify([['wrb.fr', null, metaPayload, null]]);
+            const chunk2 = JSON.stringify([['wrb.fr', null, convPayload, null]]);
+            const input = `)]}'  \n\n${chunk1.length}\n${chunk1}\n${chunk2.length}\n${chunk2}\n`;
+            const result = parseBatchexecuteResponse(input);
+            expect(result).toHaveLength(2);
+            // Both should have valid payloads
+            expect(result[0].payload).toBe(metaPayload);
+            expect(result[1].payload).toBe(convPayload);
+            // The conversation chunk payload should contain the conversation ID
+            expect(result[1].payload).toContain('c_59f84576f1e364bb');
+        });
     });
 });

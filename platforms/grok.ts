@@ -70,6 +70,7 @@ const createGrokComConversation = (conversationId: string) => {
 };
 
 const getOrCreateGrokComConversation = (conversationId: string) => {
+    _lastActiveGrokComConversationId = conversationId;
     const existing = activeConversations.get(conversationId);
     if (existing) {
         return existing;
@@ -267,6 +268,20 @@ const normalizeGrokComResponses = (data: any): any[] | null => {
         if (data.response && typeof data.response === 'object') {
             return [data.response];
         }
+
+        // Handle {result: {response: {modelResponse: {...}}} or {result: {response: {userResponse: {...}}}}
+        // Used by reconnect-response-v2 and conversations/new NDJSON (V2.1-032)
+        const resultResponse = data.result?.response;
+        if (resultResponse && typeof resultResponse === 'object') {
+            const modelResp = resultResponse.modelResponse;
+            const userResp = resultResponse.userResponse;
+            if (modelResp && typeof modelResp.responseId === 'string') {
+                return [modelResp];
+            }
+            if (userResp && typeof userResp.responseId === 'string') {
+                return [userResp];
+            }
+        }
     }
 
     if (Array.isArray(data)) {
@@ -317,6 +332,107 @@ const parseGrokComResponses = (data: any, conversationId: string) => {
     conversation.current_node = latestNodeId;
     return conversation;
 };
+
+/**
+ * Resilient NDJSON parser for Grok streaming endpoints.
+ *
+ * Design: Instead of matching specific endpoint paths, this function handles
+ * ANY Grok endpoint that returns newline-delimited JSON. It:
+ * 1. Parses each line independently (one bad line doesn't break the rest)
+ * 2. Extracts conversationId from any line that has one
+ * 3. Uses the existing grok.com response parsers for message extraction
+ * 4. Falls back to activeConversations cache when URL lacks conversation ID
+ *
+ * This makes the adapter resilient to endpoint URL changes — as long as the
+ * response payload structure is similar, it will work.
+ */
+const tryParseGrokNdjson = (data: string, url: string): ConversationData | null => {
+    const lines = data.split('\n').filter((line) => line.trim());
+    if (lines.length < 2) {
+        return null;
+    }
+
+    logger.info(`[Blackiya/Grok] Parsing NDJSON fallback (${lines.length} lines)`, {
+        url: url.slice(0, 120),
+    });
+
+    // Try to determine conversation ID from:
+    // 1. URL path (e.g., /conversations/{id}/...)
+    // 2. NDJSON payload fields (conversationId in any line)
+    // 3. Existing activeConversations cache (last-resort)
+    let conversationId = extractGrokComConversationIdFromUrl(url);
+    const parsedLines: any[] = [];
+
+    for (const line of lines) {
+        try {
+            const parsed = JSON.parse(line);
+            parsedLines.push(parsed);
+            // Extract conversationId from any line that has it
+            if (!conversationId) {
+                // Direct field: {conversationId: "..."}
+                if (typeof parsed?.conversationId === 'string') {
+                    const candidate = parsed.conversationId;
+                    if (GROK_COM_CONVERSATION_ID_PATTERN.test(candidate)) {
+                        conversationId = candidate;
+                    }
+                }
+                // Envelope format: {result: {conversation: {conversationId: "..."}}} (V2.1-032)
+                if (typeof parsed?.result?.conversation?.conversationId === 'string') {
+                    const candidate = parsed.result.conversation.conversationId;
+                    if (GROK_COM_CONVERSATION_ID_PATTERN.test(candidate)) {
+                        conversationId = candidate;
+                    }
+                }
+            }
+        } catch (_e) {
+            // Skip unparseable lines — don't let one bad line break everything
+        }
+    }
+
+    if (parsedLines.length === 0) {
+        return null;
+    }
+
+    // If we still don't have a conversation ID, try the most recently active conversation
+    if (!conversationId) {
+        const lastActive = getLastActiveGrokComConversationId();
+        if (lastActive) {
+            conversationId = lastActive;
+            logger.info('[Blackiya/Grok] NDJSON using last-active conversation ID', {
+                conversationId,
+            });
+        }
+    }
+
+    if (!conversationId) {
+        logger.info('[Blackiya/Grok] NDJSON could not determine conversation ID');
+        return null;
+    }
+
+    // Parse each line using the existing grok.com response parsers
+    const conversation = getOrCreateGrokComConversation(conversationId);
+    let foundMessages = false;
+
+    for (const parsed of parsedLines) {
+        const result = parseGrokComResponses(parsed, conversationId);
+        if (result && hasGrokComMessages(result)) {
+            foundMessages = true;
+        }
+    }
+
+    return foundMessages ? conversation : null;
+};
+
+/**
+ * Get the most recently active grok.com conversation ID from the cache.
+ * Used as a last-resort fallback when the NDJSON URL doesn't contain an ID.
+ */
+const getLastActiveGrokComConversationId = (): string | null => {
+    // LRUCache doesn't expose iteration, so we use a separate tracking variable
+    return _lastActiveGrokComConversationId;
+};
+
+let _lastActiveGrokComConversationId: string | null = null;
 
 const isGrokComMetaEndpoint = (url: string) => url.includes('/rest/app-chat/conversations_v2/');
 
@@ -774,9 +890,9 @@ export const grokAdapter: LLMPlatform = {
 
     // Match BOTH the conversation endpoint AND the history endpoint
     apiEndpointPattern:
-        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
+        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
     completionTriggerPattern:
-        /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|grok\.com\/rest\/app-chat\/conversations\/[^/]+\/(response-node|load-responses)/,
+        /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/,
 
     /**
      * Check if a URL belongs to Grok
@@ -876,8 +992,7 @@ export const grokAdapter: LLMPlatform = {
      * @param url - The API endpoint URL
      */
     parseInterceptedData(data: string | any, url: string) {
-        // #region agent log — H26-A/H27-B: log parse entry with URL routing
-        const _dbgDataLen = typeof data === 'string' ? data.length : JSON.stringify(data).length;
+        // #region agent log — debug: log parse entry with URL routing
         const _dbgPath = (() => {
             try {
                 return new URL(url).pathname;
@@ -885,25 +1000,14 @@ export const grokAdapter: LLMPlatform = {
                 return url.slice(0, 120);
             }
         })();
-        fetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                location: 'grok.ts:parseInterceptedData',
-                message: 'Grok parseInterceptedData called',
-                data: {
-                    path: _dbgPath,
-                    dataLen: _dbgDataLen,
-                    isGrokComMeta: isGrokComMetaEndpoint(url),
-                    isResponseNodes: isGrokComResponseNodesEndpoint(url),
-                    isLoadResponses: isGrokComLoadResponsesEndpoint(url),
-                    isXGraphql: isXGraphqlEndpoint(url),
-                    preview: typeof data === 'string' ? data.slice(0, 200) : '[object]',
-                },
-                timestamp: Date.now(),
-                hypothesisId: 'H26-A_H27-B',
-            }),
-        }).catch(() => {});
+        logger.info('[Blackiya/Grok] parseInterceptedData entry', {
+            path: _dbgPath,
+            dataLen: typeof data === 'string' ? data.length : -1,
+            isGrokComMeta: isGrokComMetaEndpoint(url),
+            isResponseNodes: isGrokComResponseNodesEndpoint(url),
+            isLoadResponses: isGrokComLoadResponsesEndpoint(url),
+            isXGraphql: isXGraphqlEndpoint(url),
+        });
         // #endregion
 
         // Check if this is a titles endpoint
@@ -982,7 +1086,7 @@ export const grokAdapter: LLMPlatform = {
             }
         }
 
-        // Otherwise, parse as conversation data (x.com GraphQL)
+        // Otherwise, parse as conversation data (x.com GraphQL or grok.com NDJSON fallback)
         try {
             const parsed = typeof data === 'string' ? JSON.parse(data) : data;
 
@@ -997,27 +1101,12 @@ export const grokAdapter: LLMPlatform = {
 
             return parseGrokResponse(parsed, conversationIdFromUrl);
         } catch (e) {
-            // #region agent log — H26-A/H26-C: log JSON parse failure in generic fallback
-            fetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    location: 'grok.ts:parseInterceptedData:catch',
-                    message: 'Grok generic JSON.parse FAILED',
-                    data: {
-                        path: _dbgPath,
-                        dataLen: _dbgDataLen,
-                        error: String(e),
-                        isNdjson: typeof data === 'string' && data.includes('\n'),
-                        lineCount:
-                            typeof data === 'string' ? data.split('\n').filter((l: string) => l.trim()).length : 0,
-                        preview: typeof data === 'string' ? data.slice(0, 300) : '[object]',
-                    },
-                    timestamp: Date.now(),
-                    hypothesisId: 'H26-AC',
-                }),
-            }).catch(() => {});
-            // #endregion
+            // JSON.parse failed — try NDJSON (newline-delimited JSON) as a resilient fallback.
+            // This handles any grok.com endpoint that returns streaming NDJSON
+            // (e.g., conversations/new, add_response.json, or future endpoints).
+            if (typeof data === 'string' && data.includes('\n')) {
+                return tryParseGrokNdjson(data, url);
+            }
             logger.error('[Blackiya/Grok] Failed to parse data:', e);
             return null;
         }
@@ -1072,5 +1161,27 @@ export const grokAdapter: LLMPlatform = {
 
     evaluateReadiness(data: ConversationData) {
         return evaluateGrokReadiness(data);
+    },
+
+    defaultTitles: ['New conversation', 'Grok Conversation'],
+
+    extractTitleFromDom() {
+        const raw = document.title?.trim();
+        if (!raw) {
+            return null;
+        }
+
+        // Strip common Grok page title suffixes (e.g., "My Chat - Grok")
+        const cleaned = raw.replace(/\s*-\s*Grok$/i, '').trim();
+        if (!cleaned || cleaned.toLowerCase() === 'grok') {
+            return null;
+        }
+
+        // Ignore known defaults
+        if (this.defaultTitles?.some((d: string) => d.toLowerCase() === cleaned.toLowerCase())) {
+            return null;
+        }
+
+        return cleaned;
     },
 };

@@ -67,6 +67,10 @@ function isInterceptorMessage(msg: string): boolean {
 }
 
 function isNoiseLine(line: string): boolean {
+    const isUnmatchedIntercept = line.includes('Intercepted XHR:') && line.includes('Adapter: None');
+    if (isUnmatchedIntercept) {
+        return false;
+    }
     // Filter out verbose debug messages that don't add value
     return (
         line.includes('Fetch intercepted') ||
@@ -132,7 +136,19 @@ function isCriticalLine(line: string): boolean {
         line.includes('clearCanonicalStabilization') ||
         line.includes('Network source: marking canonical') ||
         line.includes('Conversation switch') ||
-        line.includes('Tab became visible')
+        line.includes('Tab became visible') ||
+        line.includes('[InterceptionManager]') ||
+        line.includes('fetch wrapper alive') ||
+        line.includes('parseInterceptedData entry') ||
+        line.includes('Gemini endpoint unmatched by adapter') ||
+        line.includes('Gemini lifecycle suppressed for non-generation endpoint') ||
+        line.includes('Gemini fetch stream monitor start') ||
+        line.includes('Gemini fetch stream progress') ||
+        line.includes('Gemini stream candidate emitted') ||
+        line.includes('Gemini conversation resolved from stream') ||
+        line.includes('Gemini XHR stream monitor start') ||
+        line.includes('Gemini XHR stream progress') ||
+        line.includes('Gemini XHR conversation resolved from stream')
     );
 }
 
@@ -148,9 +164,23 @@ function pickFallbackDiagnosticLines(logs: LogEntry[]): string[] {
         'Button skipped',
         'No data captured for this conversation yet',
         'No currentAdapter in manager',
+        'Intercepted XHR:',
+        'Intercepted fetch:',
+        'Adapter: None',
         'API skip conversation URL',
         'XHR skip conversation URL',
         'Background service worker started',
+        '[InterceptionManager]',
+        'fetch wrapper alive',
+        'Gemini endpoint unmatched by adapter',
+        'Gemini lifecycle suppressed for non-generation endpoint',
+        'Gemini fetch stream monitor start',
+        'Gemini fetch stream progress',
+        'Gemini stream candidate emitted',
+        'Gemini conversation resolved from stream',
+        'Gemini XHR stream monitor start',
+        'Gemini XHR stream progress',
+        'Gemini XHR conversation resolved from stream',
     ];
 
     const picked = logs

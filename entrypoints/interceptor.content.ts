@@ -3,6 +3,8 @@ import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { isConversationReady } from '@/utils/conversation-readiness';
+import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
+import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
 import {
     extractForwardableHeadersFromFetchArgs,
     type HeaderRecord,
@@ -21,6 +23,7 @@ import {
     type StreamDumpConfigMessage,
     type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
+import type { ConversationData } from '@/utils/types';
 
 interface RawCaptureSnapshot {
     __blackiyaSnapshotType: 'raw-capture';
@@ -53,8 +56,20 @@ const conversationResolvedSignalCache = new Map<string, number>();
 const disposedAttemptIds = new Set<string>();
 const streamDumpFrameCountByAttempt = new Map<string, number>();
 const streamDumpLastTextByAttempt = new Map<string, string>();
-let latestChatGptAttemptId: string | null = null;
+const latestAttemptIdByPlatform = new Map<string, string>();
 let streamDumpEnabled = false;
+const INTERCEPTOR_RUNTIME_TAG = 'v2.1.1-gemini-stream';
+type GeminiXhrStreamState = {
+    attemptId: string;
+    seedConversationId?: string;
+    lastLength: number;
+    buffer: string;
+    seenPayloads: Set<string>;
+    seenPayloadOrder: string[];
+    emittedText: Set<string>;
+    emittedTextOrder: string[];
+    emittedStreaming: boolean;
+};
 
 function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
     // Keep page-console output for warnings/errors while avoiding info-level floods.
@@ -150,6 +165,45 @@ function safePathname(url: string): string {
     }
 }
 
+function detectPlatformFromHostname(): string {
+    const hostname = window.location.hostname;
+    if (hostname.includes('gemini')) {
+        return 'Gemini';
+    }
+    if (hostname.includes('grok')) {
+        return 'Grok';
+    }
+    if (hostname.includes('chatgpt')) {
+        return 'ChatGPT';
+    }
+    return 'Discovery';
+}
+
+function isDiscoveryDiagnosticsEnabled(): boolean {
+    try {
+        return window.localStorage.getItem('blackiya.discovery') === '1';
+    } catch {
+        return false;
+    }
+}
+
+function emitDiscoveryDumpFrame(label: string, path: string, text: string): void {
+    if (!streamDumpEnabled || text.length <= 1000) {
+        return;
+    }
+    const platform = detectPlatformFromHostname();
+    const attemptId = `discovery:${platform.toLowerCase()}:${Date.now()}`;
+    const preview = text.length > 8000 ? text.slice(0, 8000) : text;
+    emitStreamDumpFrame(
+        attemptId,
+        undefined,
+        'snapshot',
+        `[${platform} ${label}] ${path} (${text.length}b)\n${preview}`,
+        text.length,
+        platform,
+    );
+}
+
 function shouldEmitCapturedPayload(adapterName: string, url: string, payload: string, intervalMs = 5000): boolean {
     const path = safePathname(url);
     const suffix = payload.length > 128 ? payload.slice(payload.length - 128) : payload;
@@ -192,21 +246,33 @@ function bindAttemptToConversation(attemptId: string | null | undefined, convers
     attemptByConversationId.set(conversationId, attemptId);
 }
 
-function resolveAttemptIdForConversation(conversationId?: string): string {
+function toAttemptPrefix(platformName: string): string {
+    return platformName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+function resolveAttemptIdForConversation(conversationId?: string, platformName = chatGPTAdapter.name): string {
+    const platformKey = platformName || chatGPTAdapter.name;
     if (conversationId) {
         const bound = attemptByConversationId.get(conversationId);
         if (bound) {
             return bound;
         }
     }
-    if (latestChatGptAttemptId) {
+    const latestAttemptId = latestAttemptIdByPlatform.get(platformKey);
+    if (latestAttemptId && !disposedAttemptIds.has(latestAttemptId)) {
         if (conversationId) {
-            bindAttemptToConversation(latestChatGptAttemptId, conversationId);
+            bindAttemptToConversation(latestAttemptId, conversationId);
         }
-        return latestChatGptAttemptId;
+        return latestAttemptId;
     }
-    const created = createAttemptId('chatgpt');
-    latestChatGptAttemptId = created;
+    if (latestAttemptId && disposedAttemptIds.has(latestAttemptId)) {
+        latestAttemptIdByPlatform.delete(platformKey);
+    }
+    const created = createAttemptId(toAttemptPrefix(platformKey));
+    latestAttemptIdByPlatform.set(platformKey, created);
     if (conversationId) {
         bindAttemptToConversation(created, conversationId);
     }
@@ -238,7 +304,7 @@ function isAttemptDisposed(attemptId: string | undefined): boolean {
 
 function emitResponseFinishedSignal(adapter: LLMPlatform, url: string): void {
     const conversationId = adapter.extractConversationIdFromUrl?.(url) ?? undefined;
-    const attemptId = resolveAttemptIdForConversation(conversationId);
+    const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
     const dedupeKey = `${adapter.name}:${conversationId ?? safePathname(url)}`;
     const now = Date.now();
     const last = completionSignalCache.get(dedupeKey) ?? 0;
@@ -298,6 +364,45 @@ function resolveLifecycleConversationId(args: Parameters<typeof fetch>): string 
     return extractConversationIdFromRequestBody(args) ?? extractConversationIdFromChatGptUrl(window.location.href);
 }
 
+function resolveRequestConversationId(adapter: LLMPlatform, requestUrl: string): string | undefined {
+    return (
+        adapter.extractConversationIdFromUrl?.(requestUrl) ??
+        adapter.extractConversationId(window.location.href) ??
+        undefined
+    );
+}
+
+function isGeminiTitlesEndpoint(url: string): boolean {
+    return /\/_\/BardChatUi\/data\/batchexecute/i.test(url) && /[?&]rpcids=MaZiqc(?:&|$)/i.test(url);
+}
+
+function shouldEmitNonChatLifecycleForRequest(adapter: LLMPlatform, url: string): boolean {
+    if (adapter.name !== 'Gemini') {
+        return true;
+    }
+    const allowed = shouldEmitGeminiLifecycle(url);
+    if (!allowed && shouldLogTransient(`gemini:lifecycle-suppressed:${safePathname(url)}`, 8000)) {
+        log('info', 'Gemini lifecycle suppressed for non-generation endpoint', {
+            path: safePathname(url),
+        });
+    }
+    return allowed;
+}
+
+function shouldEmitCompletionSignalForUrl(adapter: LLMPlatform, url: string): boolean {
+    if (adapter.name !== 'Gemini') {
+        return true;
+    }
+    if (isGeminiTitlesEndpoint(url)) {
+        return false;
+    }
+    return shouldEmitGeminiCompletion(url);
+}
+
+function shouldSuppressCompletionSignal(adapter: LLMPlatform, url: string): boolean {
+    return !shouldEmitCompletionSignalForUrl(adapter, url);
+}
+
 function shouldEmitLifecycleSignal(phase: ResponseLifecycleSignal['phase'], conversationId?: string): boolean {
     const key = `${phase}:${conversationId ?? 'unknown'}`;
     const now = Date.now();
@@ -313,6 +418,7 @@ function emitLifecycleSignal(
     attemptId: string,
     phase: ResponseLifecycleSignal['phase'],
     conversationId?: string,
+    platformOverride?: string,
 ): void {
     if (!shouldEmitLifecycleSignal(phase, conversationId)) {
         return;
@@ -323,16 +429,17 @@ function emitLifecycleSignal(
     }
     bindAttemptToConversation(attemptId, conversationId);
 
+    const platform = platformOverride ?? chatGPTAdapter.name;
     const payload: ResponseLifecycleSignal = {
         type: 'BLACKIYA_RESPONSE_LIFECYCLE',
-        platform: chatGPTAdapter.name,
+        platform,
         attemptId,
         phase,
         conversationId,
     };
     window.postMessage(payload, window.location.origin);
     log('info', 'lifecycle signal', {
-        platform: 'ChatGPT',
+        platform,
         phase,
         conversationId: conversationId ?? null,
     });
@@ -369,7 +476,12 @@ function extractTitleFromSsePayload(dataPayload: string): string | null {
     return null;
 }
 
-function emitStreamDeltaSignal(attemptId: string, conversationId: string | undefined, text: string): void {
+function emitStreamDeltaSignal(
+    attemptId: string,
+    conversationId: string | undefined,
+    text: string,
+    platformOverride?: string,
+): void {
     const normalized = text.replace(/\r\n/g, '\n');
     const trimmed = normalized.trim();
     if (trimmed.length === 0 || /^v\d+$/i.test(trimmed)) {
@@ -381,7 +493,7 @@ function emitStreamDeltaSignal(attemptId: string, conversationId: string | undef
     bindAttemptToConversation(attemptId, conversationId);
     const payload: ResponseStreamDeltaSignal = {
         type: 'BLACKIYA_STREAM_DELTA',
-        platform: chatGPTAdapter.name,
+        platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
         text: normalized,
@@ -395,6 +507,7 @@ function emitStreamDumpFrame(
     kind: StreamDumpFrameMessage['kind'],
     text: string,
     chunkBytes?: number,
+    platformOverride?: string,
 ): void {
     if (!streamDumpEnabled || isAttemptDisposed(attemptId)) {
         return;
@@ -417,7 +530,7 @@ function emitStreamDumpFrame(
 
     const payload: StreamDumpFrameMessage = {
         type: 'BLACKIYA_STREAM_DUMP_FRAME',
-        platform: chatGPTAdapter.name,
+        platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
         kind,
@@ -428,6 +541,29 @@ function emitStreamDumpFrame(
     };
 
     window.postMessage(payload, window.location.origin);
+}
+
+/**
+ * Emit a stream dump frame for a captured API response (Gemini, Grok, etc.).
+ * Includes the URL path and response body for debugging.
+ */
+function emitApiResponseDumpFrame(
+    adapterName: string,
+    url: string,
+    responseText: string,
+    attemptId: string,
+    conversationId?: string,
+): void {
+    if (!streamDumpEnabled) {
+        return;
+    }
+    const path = safePathname(url);
+    const header = `[${adapterName} API] ${path} (${responseText.length}b)`;
+    const body =
+        responseText.length > 8000
+            ? `${responseText.slice(0, 8000)}\n...<truncated ${responseText.length - 8000}b>`
+            : responseText;
+    emitStreamDumpFrame(attemptId, conversationId, 'snapshot', `${header}\n${body}`, responseText.length, adapterName);
 }
 
 function extractAssistantTextSnapshotFromSseBuffer(sseBuffer: string): string | null {
@@ -531,6 +667,326 @@ function extractLikelyTextFromSsePayload(payload: string): string[] {
     } catch {
         return [];
     }
+}
+
+function trimGeminiPayloadHistory(seenPayloadOrder: string[], seenPayloads: Set<string>): void {
+    const maxEntries = 220;
+    while (seenPayloadOrder.length > maxEntries) {
+        const oldest = seenPayloadOrder.shift();
+        if (oldest) {
+            seenPayloads.delete(oldest);
+        }
+    }
+}
+
+function trimGeminiDeltaHistory(emittedTextOrder: string[], emittedText: Set<string>): void {
+    const maxEntries = 260;
+    while (emittedTextOrder.length > maxEntries) {
+        const oldest = emittedTextOrder.shift();
+        if (oldest) {
+            emittedText.delete(oldest);
+        }
+    }
+}
+
+async function monitorGeminiResponseStream(
+    response: Response,
+    attemptId: string,
+    seedConversationId: string | undefined,
+): Promise<void> {
+    if (!response.body || isAttemptDisposed(attemptId)) {
+        return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let conversationId = seedConversationId;
+    let emittedStreaming = false;
+    const seenPayloads = new Set<string>();
+    const seenPayloadOrder: string[] = [];
+    const emittedText = new Set<string>();
+    const emittedTextOrder: string[] = [];
+
+    if (conversationId) {
+        emitConversationIdResolvedSignal(attemptId, conversationId);
+    }
+    if (shouldLogTransient(`gemini:fetch-stream:start:${attemptId}`, 8000)) {
+        log('info', 'Gemini fetch stream monitor start', {
+            attemptId,
+            conversationId: conversationId ?? null,
+        });
+    }
+
+    try {
+        while (true) {
+            if (isAttemptDisposed(attemptId)) {
+                break;
+            }
+            const { value, done } = await reader.read();
+            if (done) {
+                break;
+            }
+            if (!value || value.length === 0) {
+                continue;
+            }
+
+            const chunkText = decoder.decode(value, { stream: true });
+            if (chunkText.length === 0) {
+                continue;
+            }
+            if (shouldLogTransient(`gemini:fetch-stream:chunk:${attemptId}`, 8000)) {
+                log('info', 'Gemini fetch stream progress', {
+                    attemptId,
+                    chunkBytes: value.length,
+                    conversationId: conversationId ?? null,
+                });
+            }
+
+            buffer += chunkText;
+            if (buffer.length > 900_000) {
+                buffer = buffer.slice(-700_000);
+            }
+            emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, value.length, 'Gemini');
+
+            const { conversationId: parsedConversationId, textCandidates } = extractGeminiStreamSignalsFromBuffer(
+                buffer,
+                seenPayloads,
+            );
+            for (const payload of seenPayloads) {
+                if (seenPayloadOrder.includes(payload)) {
+                    continue;
+                }
+                seenPayloadOrder.push(payload);
+            }
+            trimGeminiPayloadHistory(seenPayloadOrder, seenPayloads);
+
+            if (!conversationId && parsedConversationId) {
+                conversationId = parsedConversationId;
+                emitConversationIdResolvedSignal(attemptId, conversationId);
+                if (shouldLogTransient(`gemini:fetch-stream:resolved:${attemptId}`, 8000)) {
+                    log('info', 'Gemini conversation resolved from stream', {
+                        attemptId,
+                        conversationId,
+                    });
+                }
+            }
+
+            if (!emittedStreaming && (textCandidates.length > 0 || chunkText.trim().length > 0)) {
+                emittedStreaming = true;
+                emitLifecycleSignal(attemptId, 'streaming', conversationId, 'Gemini');
+            }
+
+            for (const candidate of textCandidates) {
+                if (emittedText.has(candidate)) {
+                    continue;
+                }
+                emittedText.add(candidate);
+                emittedTextOrder.push(candidate);
+                trimGeminiDeltaHistory(emittedTextOrder, emittedText);
+                emitStreamDeltaSignal(attemptId, conversationId, candidate, 'Gemini');
+                emitStreamDumpFrame(attemptId, conversationId, 'heuristic', candidate, candidate.length, 'Gemini');
+                if (shouldLogTransient(`gemini:fetch-stream:candidate:${attemptId}`, 6000)) {
+                    log('info', 'Gemini stream candidate emitted', {
+                        attemptId,
+                        conversationId: conversationId ?? null,
+                        length: candidate.length,
+                        preview: candidate.slice(0, 120),
+                    });
+                }
+            }
+        }
+    } catch {
+        // Ignore monitor read errors; completion + canonical capture path remains authoritative.
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+function createGeminiXhrStreamState(attemptId: string, seedConversationId?: string): GeminiXhrStreamState {
+    return {
+        attemptId,
+        seedConversationId,
+        lastLength: 0,
+        buffer: '',
+        seenPayloads: new Set<string>(),
+        seenPayloadOrder: [],
+        emittedText: new Set<string>(),
+        emittedTextOrder: [],
+        emittedStreaming: false,
+    };
+}
+
+function syncGeminiSeenPayloadOrder(state: GeminiXhrStreamState): void {
+    for (const payload of state.seenPayloads) {
+        if (state.seenPayloadOrder.includes(payload)) {
+            continue;
+        }
+        state.seenPayloadOrder.push(payload);
+    }
+    trimGeminiPayloadHistory(state.seenPayloadOrder, state.seenPayloads);
+}
+
+function emitGeminiTextCandidates(
+    state: GeminiXhrStreamState,
+    conversationId: string | undefined,
+    candidates: string[],
+): void {
+    for (const candidate of candidates) {
+        if (state.emittedText.has(candidate)) {
+            continue;
+        }
+        state.emittedText.add(candidate);
+        state.emittedTextOrder.push(candidate);
+        trimGeminiDeltaHistory(state.emittedTextOrder, state.emittedText);
+        emitStreamDeltaSignal(state.attemptId, conversationId, candidate, 'Gemini');
+        emitStreamDumpFrame(state.attemptId, conversationId, 'heuristic', candidate, candidate.length, 'Gemini');
+    }
+}
+
+function processGeminiXhrProgressChunk(state: GeminiXhrStreamState, chunkText: string): void {
+    if (chunkText.length === 0) {
+        return;
+    }
+    if (isAttemptDisposed(state.attemptId)) {
+        return;
+    }
+    if (shouldLogTransient(`gemini:xhr-stream:chunk:${state.attemptId}`, 8000)) {
+        log('info', 'Gemini XHR stream progress', {
+            attemptId: state.attemptId,
+            chunkBytes: chunkText.length,
+            conversationId: state.seedConversationId ?? null,
+        });
+    }
+
+    state.buffer += chunkText;
+    if (state.buffer.length > 900_000) {
+        state.buffer = state.buffer.slice(-700_000);
+    }
+
+    emitStreamDumpFrame(state.attemptId, state.seedConversationId, 'delta', chunkText, chunkText.length, 'Gemini');
+
+    const signals = extractGeminiStreamSignalsFromBuffer(state.buffer, state.seenPayloads);
+    syncGeminiSeenPayloadOrder(state);
+
+    const resolvedConversationId = signals.conversationId ?? state.seedConversationId;
+    if (!state.seedConversationId && resolvedConversationId) {
+        state.seedConversationId = resolvedConversationId;
+        emitConversationIdResolvedSignal(state.attemptId, resolvedConversationId);
+        if (shouldLogTransient(`gemini:xhr-stream:resolved:${state.attemptId}`, 8000)) {
+            log('info', 'Gemini XHR conversation resolved from stream', {
+                attemptId: state.attemptId,
+                conversationId: resolvedConversationId,
+            });
+        }
+    }
+
+    if (!state.emittedStreaming && (signals.textCandidates.length > 0 || chunkText.trim().length > 0)) {
+        state.emittedStreaming = true;
+        emitLifecycleSignal(state.attemptId, 'streaming', resolvedConversationId, 'Gemini');
+    }
+
+    emitGeminiTextCandidates(state, resolvedConversationId, signals.textCandidates);
+}
+
+function wireGeminiXhrProgressMonitor(
+    xhr: XMLHttpRequest,
+    attemptId: string,
+    seedConversationId: string | undefined,
+): void {
+    if (shouldLogTransient(`gemini:xhr-stream:start:${attemptId}`, 8000)) {
+        log('info', 'Gemini XHR stream monitor start', {
+            attemptId,
+            conversationId: seedConversationId ?? null,
+        });
+    }
+    const state = createGeminiXhrStreamState(attemptId, seedConversationId);
+
+    const flushProgress = () => {
+        if (typeof xhr.responseText !== 'string') {
+            return;
+        }
+        if (xhr.responseText.length <= state.lastLength) {
+            return;
+        }
+        const chunkText = xhr.responseText.slice(state.lastLength);
+        state.lastLength = xhr.responseText.length;
+        processGeminiXhrProgressChunk(state, chunkText);
+    };
+
+    const handleProgress = () => {
+        flushProgress();
+    };
+
+    const handleLoadEnd = () => {
+        flushProgress();
+        xhr.removeEventListener('progress', handleProgress);
+        xhr.removeEventListener('loadend', handleLoadEnd);
+    };
+
+    xhr.addEventListener('progress', handleProgress);
+    xhr.addEventListener('loadend', handleLoadEnd);
+}
+
+function parseConversationData(adapter: LLMPlatform, payload: string, url: string): ConversationData | null {
+    try {
+        return adapter.parseInterceptedData(payload, url);
+    } catch {
+        return null;
+    }
+}
+
+function resolveParsedConversationId(
+    adapter: LLMPlatform,
+    parsed: ConversationData | null,
+    url: string,
+): string | undefined {
+    return (
+        parsed?.conversation_id ?? adapter.extractConversationIdFromUrl?.(url) ?? extractConversationIdFromAnyUrl(url)
+    );
+}
+
+function extractLatestAssistantText(parsed: ConversationData): string | null {
+    const messages = Object.values(parsed.mapping)
+        .map((node) => node.message)
+        .filter(
+            (message): message is NonNullable<(typeof parsed.mapping)[string]['message']> =>
+                !!message && message.author.role === 'assistant',
+        )
+        .sort((left, right) => {
+            const leftTs = left.update_time ?? left.create_time ?? 0;
+            const rightTs = right.update_time ?? right.create_time ?? 0;
+            return leftTs - rightTs;
+        });
+
+    if (messages.length === 0) {
+        return null;
+    }
+
+    const latest = messages[messages.length - 1];
+    const text = (latest.content.parts ?? []).filter((part): part is string => typeof part === 'string').join('');
+    const normalized = text.trim();
+    if (normalized.length === 0 || /^v\d+$/i.test(normalized)) {
+        return null;
+    }
+    return normalized;
+}
+
+function emitNonChatGptStreamSnapshot(
+    adapter: LLMPlatform,
+    attemptId: string,
+    conversationId: string | undefined,
+    parsed: ConversationData | null,
+): void {
+    if (!parsed || adapter.name === 'ChatGPT') {
+        return;
+    }
+    const text = extractLatestAssistantText(parsed);
+    if (!text) {
+        return;
+    }
+    emitStreamDeltaSignal(attemptId, conversationId, text, adapter.name);
+    emitStreamDumpFrame(attemptId, conversationId, 'snapshot', text, text.length, adapter.name);
 }
 
 async function monitorChatGptSseLifecycle(
@@ -991,7 +1447,13 @@ function emitCapturePayload(url: string, data: string, platform: string, attempt
     window.postMessage(payload, window.location.origin);
 }
 
-function handleApiMatchFromFetch(url: string, adapterName: string, response: Response): void {
+function handleApiMatchFromFetch(
+    url: string,
+    adapter: LLMPlatform,
+    response: Response,
+    deferredCompletionAdapter?: LLMPlatform,
+): void {
+    const adapterName = adapter.name;
     const path = safePathname(url);
     if (shouldLogTransient(`api:match:${adapterName}:${path}`, 2500)) {
         log('info', `API match ${adapterName}`);
@@ -1001,13 +1463,36 @@ function handleApiMatchFromFetch(url: string, adapterName: string, response: Res
         .text()
         .then((text) => {
             if (!shouldEmitCapturedPayload(adapterName, url, text)) {
+                // Even if we skip the capture, emit the deferred completion signal
+                // so the SFE can transition — the body is now fully read.
+                if (deferredCompletionAdapter && !shouldSuppressCompletionSignal(deferredCompletionAdapter, url)) {
+                    emitResponseFinishedSignal(deferredCompletionAdapter, url);
+                }
                 return;
             }
             log('info', `API ${text.length}b ${adapterName}`);
-            const attemptId = resolveAttemptIdForConversation(extractConversationIdFromAnyUrl(url));
+            const parsed = parseConversationData(adapter, text, url);
+            const conversationId = resolveParsedConversationId(adapter, parsed, url);
+            const attemptId = resolveAttemptIdForConversation(conversationId, adapterName);
+            emitApiResponseDumpFrame(adapterName, url, text, attemptId, conversationId);
             emitCapturePayload(url, text, adapterName, attemptId);
+            emitNonChatGptStreamSnapshot(adapter, attemptId, conversationId, parsed);
+            // Emit completion signal AFTER the body is fully read and data is captured.
+            // This ensures SFE transitions only after data is available in the cache,
+            // preventing premature completed_hint → stabilization retry flickering.
+            if (deferredCompletionAdapter && !shouldSuppressCompletionSignal(deferredCompletionAdapter, url)) {
+                emitResponseFinishedSignal(deferredCompletionAdapter, url);
+                return;
+            }
+            if (adapterName !== chatGPTAdapter.name && parsed?.conversation_id) {
+                emitResponseFinishedSignal(adapter, url);
+            }
         })
         .catch(() => {
+            // Emit deferred completion even on error so the SFE isn't stuck
+            if (deferredCompletionAdapter && !shouldSuppressCompletionSignal(deferredCompletionAdapter, url)) {
+                emitResponseFinishedSignal(deferredCompletionAdapter, url);
+            }
             const path = safePathname(url);
             if (adapterName === 'ChatGPT' && path.startsWith('/backend-api/f/conversation')) {
                 return;
@@ -1017,20 +1502,20 @@ function handleApiMatchFromFetch(url: string, adapterName: string, response: Res
 }
 
 function tryParseAndEmitConversation(adapter: LLMPlatform, url: string, text: string, source: string): boolean {
-    try {
-        const parsed = adapter.parseInterceptedData(text, url);
-        if (parsed?.conversation_id) {
-            const payload = JSON.stringify(parsed);
-            if (!shouldEmitCapturedPayload(adapter.name, url, payload)) {
-                return true;
-            }
-            log('info', `${source} captured ${adapter.name} ${parsed.conversation_id}`);
-            const attemptId = resolveAttemptIdForConversation(parsed.conversation_id);
-            emitCapturePayload(url, payload, adapter.name, attemptId);
+    const parsed = parseConversationData(adapter, text, url);
+    if (parsed?.conversation_id) {
+        const payload = JSON.stringify(parsed);
+        if (!shouldEmitCapturedPayload(adapter.name, url, payload)) {
             return true;
         }
-    } catch {
-        // Ignore parse failures for auxiliary endpoints
+        log('info', `${source} captured ${adapter.name} ${parsed.conversation_id}`);
+        const attemptId = resolveAttemptIdForConversation(parsed.conversation_id, adapter.name);
+        emitCapturePayload(url, payload, adapter.name, attemptId);
+        emitNonChatGptStreamSnapshot(adapter, attemptId, parsed.conversation_id, parsed);
+        if (adapter.name !== chatGPTAdapter.name && !shouldSuppressCompletionSignal(adapter, url)) {
+            emitResponseFinishedSignal(adapter, url);
+        }
+        return true;
     }
     return false;
 }
@@ -1048,6 +1533,12 @@ function inspectAuxConversationFetch(url: string, response: Response, adapter: L
             if (!response.ok || text.length === 0) {
                 return;
             }
+            // Emit stream dump for aux responses (helps debug Grok NDJSON, Gemini side-fetches)
+            if (streamDumpEnabled && text.length > 100) {
+                const conversationId = extractConversationIdFromAnyUrl(url);
+                const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
+                emitApiResponseDumpFrame(adapter.name, url, text, attemptId, conversationId);
+            }
             const captured = tryParseAndEmitConversation(adapter, url, text, 'aux');
             if (!captured) {
                 const path = safePathname(url);
@@ -1062,6 +1553,9 @@ function inspectAuxConversationFetch(url: string, response: Response, adapter: L
 }
 
 function logDiscoveryFetch(url: string, response: Response): void {
+    if (!isDiscoveryDiagnosticsEnabled()) {
+        return;
+    }
     const urlObj = new URL(url);
     const path = urlObj.pathname;
     if (isStaticAssetPath(path)) {
@@ -1087,6 +1581,7 @@ function logDiscoveryFetch(url: string, response: Response): void {
                     preview: text.slice(0, 300),
                 });
             }
+            emitDiscoveryDumpFrame('DISCOVERY', path, text);
         })
         .catch(() => {
             // Ignore read errors in discovery mode
@@ -1098,52 +1593,21 @@ function handleFetchInterception(args: Parameters<typeof fetch>, response: Respo
     const apiAdapter = getPlatformAdapterByApiUrl(url);
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
 
-    // #region agent log — H25-AB/H26-A/H27-A: log pattern matching for non-ChatGPT
-    if (
-        window.location.hostname.includes('gemini') ||
-        window.location.hostname.includes('grok') ||
-        window.location.hostname.includes('x.com')
-    ) {
-        const dbgPath = safePathname(url);
-        if (
-            apiAdapter ||
-            completionAdapter ||
-            dbgPath.includes('batch') ||
-            dbgPath.includes('grok') ||
-            dbgPath.includes('conversation') ||
-            dbgPath.includes('add_response')
-        ) {
-            const _df = (window as any).__BLACKIYA_DBG_FETCH__ ?? fetch;
-            _df('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    location: 'interceptor.content.ts:handleFetchInterception',
-                    message: 'Pattern match result',
-                    data: {
-                        path: dbgPath,
-                        apiAdapter: apiAdapter?.name ?? null,
-                        completionAdapter: completionAdapter?.name ?? null,
-                        hostname: window.location.hostname,
-                    },
-                    timestamp: Date.now(),
-                    hypothesisId: 'H25-AB_H26-A_H27-A',
-                }),
-            }).catch(() => {});
-        }
-    }
-    // #endregion
-
     if (apiAdapter) {
-        handleApiMatchFromFetch(url, apiAdapter.name, response);
-        if (completionAdapter) {
-            emitResponseFinishedSignal(completionAdapter, url);
-        }
+        // When a URL matches BOTH apiEndpointPattern and completionTriggerPattern,
+        // defer the completion signal until after .text() resolves. This prevents
+        // SFE from transitioning to completed_hint before data is available in cache,
+        // which caused button flickering on Grok (conversations/new) and similar streaming fetch responses.
+        handleApiMatchFromFetch(url, apiAdapter, response, completionAdapter ?? undefined);
         return;
     }
 
     if (completionAdapter) {
-        emitResponseFinishedSignal(completionAdapter, url);
+        // Completion-only URLs (e.g., ChatGPT stream_status) — fire immediately
+        // because these are small non-streaming responses.
+        if (shouldEmitCompletionSignalForUrl(completionAdapter, url)) {
+            emitResponseFinishedSignal(completionAdapter, url);
+        }
         inspectAuxConversationFetch(url, response, completionAdapter);
         return;
     }
@@ -1154,12 +1618,32 @@ function handleFetchInterception(args: Parameters<typeof fetch>, response: Respo
     }
 
     const method = getRequestMethod(args);
-    if (method === 'POST' && response.ok && isDiscoveryModeHost(window.location.hostname)) {
+    if (
+        method === 'POST' &&
+        response.ok &&
+        isDiscoveryModeHost(window.location.hostname) &&
+        isDiscoveryDiagnosticsEnabled()
+    ) {
         logDiscoveryFetch(url, response);
+    }
+
+    if (
+        window.location.hostname.includes('gemini.google.com') &&
+        safePathname(url).includes('/_/BardChatUi/data/') &&
+        !apiAdapter &&
+        !completionAdapter &&
+        shouldLogTransient(`gemini:adapter-miss:fetch:${safePathname(url)}`, 8000)
+    ) {
+        log('warn', 'Gemini endpoint unmatched by adapter', {
+            path: safePathname(url),
+        });
     }
 }
 
 function logDiscoveryXhr(url: string, responseText: string): void {
+    if (!isDiscoveryDiagnosticsEnabled()) {
+        return;
+    }
     const urlObj = new URL(url);
     const path = urlObj.pathname;
     if (isStaticAssetPath(path) || responseText.length <= 500) {
@@ -1171,6 +1655,7 @@ function logDiscoveryXhr(url: string, responseText: string): void {
         size: responseText.length,
         preview: responseText.slice(0, 300),
     });
+    emitDiscoveryDumpFrame('XHR DISCOVERY', path, responseText);
 }
 
 function handleXhrLoad(xhr: XMLHttpRequest, method: string): void {
@@ -1179,14 +1664,14 @@ function handleXhrLoad(xhr: XMLHttpRequest, method: string): void {
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
 
     if (processXhrApiMatch(url, xhr, adapter)) {
-        if (completionAdapter) {
+        if (completionAdapter && !shouldSuppressCompletionSignal(completionAdapter, url)) {
             emitResponseFinishedSignal(completionAdapter, url);
         }
         return;
     }
 
     processXhrAuxConversation(url, xhr, completionAdapter);
-    if (completionAdapter) {
+    if (completionAdapter && !shouldSuppressCompletionSignal(completionAdapter, url)) {
         emitResponseFinishedSignal(completionAdapter, url);
         return;
     }
@@ -1196,12 +1681,31 @@ function handleXhrLoad(xhr: XMLHttpRequest, method: string): void {
         return;
     }
 
-    if (isDiscoveryModeHost(window.location.hostname) && method === 'POST' && xhr.status === 200) {
+    if (
+        isDiscoveryModeHost(window.location.hostname) &&
+        method === 'POST' &&
+        xhr.status === 200 &&
+        isDiscoveryDiagnosticsEnabled()
+    ) {
         try {
             logDiscoveryXhr(url, xhr.responseText);
         } catch {
             // Ignore errors in discovery mode
         }
+    }
+
+    if (
+        window.location.hostname.includes('gemini.google.com') &&
+        safePathname(url).includes('/_/BardChatUi/data/') &&
+        !adapter &&
+        !completionAdapter &&
+        shouldLogTransient(`gemini:adapter-miss:xhr:${safePathname(url)}`, 8000)
+    ) {
+        log('warn', 'Gemini endpoint unmatched by adapter', {
+            path: safePathname(url),
+            method,
+            status: xhr.status,
+        });
     }
 }
 
@@ -1212,8 +1716,19 @@ function processXhrApiMatch(url: string, xhr: XMLHttpRequest, adapter: LLMPlatfo
 
     try {
         log('info', `XHR API ${adapter.name}`);
-        const attemptId = resolveAttemptIdForConversation(extractConversationIdFromAnyUrl(url));
+        const parsed = parseConversationData(adapter, xhr.responseText, url);
+        const conversationId = resolveParsedConversationId(adapter, parsed, url);
+        const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
+        emitApiResponseDumpFrame(adapter.name, url, xhr.responseText, attemptId, conversationId);
         emitCapturePayload(url, xhr.responseText, adapter.name, attemptId);
+        emitNonChatGptStreamSnapshot(adapter, attemptId, conversationId, parsed);
+        if (
+            adapter.name !== chatGPTAdapter.name &&
+            parsed?.conversation_id &&
+            !shouldSuppressCompletionSignal(adapter, url)
+        ) {
+            emitResponseFinishedSignal(adapter, url);
+        }
     } catch {
         log('error', 'XHR read err');
     }
@@ -1292,24 +1807,10 @@ export default defineContentScript({
     main() {
         // Idempotency: prevent double-injection if the extension is reloaded or content script runs twice
         if ((window as any).__BLACKIYA_INTERCEPTED__) {
-            log('warn', 'already init');
+            log('info', 'already init (skip duplicate interceptor bootstrap)');
             return;
         }
         (window as any).__BLACKIYA_INTERCEPTED__ = true;
-
-        // #region agent log — H25-ALL: confirm interceptor MAIN world init
-        fetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                location: 'interceptor.content.ts:INIT',
-                message: 'Interceptor MAIN world initialized',
-                data: { hostname: window.location.hostname, href: window.location.href.slice(0, 120) },
-                timestamp: Date.now(),
-                hypothesisId: 'H25-ALL',
-            }),
-        }).catch(() => {});
-        // #endregion
 
         // Store originals for cleanup/restore
         if (!(window as any).__BLACKIYA_ORIGINALS__) {
@@ -1322,10 +1823,6 @@ export default defineContentScript({
         }
 
         const originalFetch = window.fetch;
-        // #region agent log — debug fetch reference (avoids recursive wrapper)
-        const _dbgFetch = originalFetch.bind(window);
-        (window as any).__BLACKIYA_DBG_FETCH__ = _dbgFetch;
-        // #endregion
         const inFlightFetches = new Map<string, Promise<boolean>>();
         const proactiveSuccessAtByKey = new Map<string, number>();
         const proactiveHeadersByKey = new Map<string, HeaderRecord>();
@@ -1453,7 +1950,7 @@ export default defineContentScript({
 
             log('info', `trigger ${adapter.name} ${conversationId}`);
 
-            const attemptId = resolveAttemptIdForConversation(conversationId);
+            const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
             const run = runProactiveFetch(adapter, conversationId, key, attemptId);
 
             inFlightFetches.set(key, run);
@@ -1467,13 +1964,25 @@ export default defineContentScript({
             const outgoingUrl = getRequestUrl(args[0]);
             const outgoingMethod = getRequestMethod(args).toUpperCase();
             const outgoingPath = safePathname(outgoingUrl);
+            const fetchApiAdapter = outgoingMethod === 'POST' ? getPlatformAdapterByApiUrl(outgoingUrl) : null;
+            const isNonChatGptApiRequest =
+                !!fetchApiAdapter &&
+                fetchApiAdapter.name !== chatGPTAdapter.name &&
+                shouldEmitNonChatLifecycleForRequest(fetchApiAdapter, outgoingUrl);
+            const nonChatConversationId = isNonChatGptApiRequest
+                ? resolveRequestConversationId(fetchApiAdapter, outgoingUrl)
+                : undefined;
+            const nonChatAttemptId =
+                isNonChatGptApiRequest && fetchApiAdapter
+                    ? resolveAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
+                    : undefined;
             const isChatGptPromptRequest =
                 outgoingMethod === 'POST' && /\/backend-api\/f\/conversation(?:\?.*)?$/i.test(outgoingPath);
             const lifecycleConversationId = isChatGptPromptRequest ? resolveLifecycleConversationId(args) : undefined;
             const lifecycleAttemptId = isChatGptPromptRequest ? createAttemptId('chatgpt') : undefined;
             if (isChatGptPromptRequest) {
                 if (lifecycleAttemptId) {
-                    latestChatGptAttemptId = lifecycleAttemptId;
+                    latestAttemptIdByPlatform.set(chatGPTAdapter.name, lifecycleAttemptId);
                     disposedAttemptIds.delete(lifecycleAttemptId);
                     bindAttemptToConversation(lifecycleAttemptId, lifecycleConversationId);
                     if (lifecycleConversationId) {
@@ -1482,87 +1991,37 @@ export default defineContentScript({
                     emitLifecycleSignal(lifecycleAttemptId, 'prompt-sent', lifecycleConversationId);
                 }
             }
+            if (isNonChatGptApiRequest && fetchApiAdapter && nonChatAttemptId) {
+                emitLifecycleSignal(nonChatAttemptId, 'prompt-sent', nonChatConversationId, fetchApiAdapter.name);
+                if (fetchApiAdapter.name !== 'Gemini') {
+                    emitLifecycleSignal(nonChatAttemptId, 'streaming', nonChatConversationId, fetchApiAdapter.name);
+                }
+            }
 
             const response = await originalFetch(...args);
             const url = outgoingUrl;
             const contentType = response.headers.get('content-type') ?? '';
-            // #region agent log — H25-A/B: log ALL fetch calls on Gemini/Grok hosts
             if (
-                window.location.hostname.includes('gemini.google.com') ||
-                window.location.hostname.includes('grok.com') ||
-                window.location.hostname.includes('x.com')
+                isDiscoveryDiagnosticsEnabled() &&
+                window.location.hostname.includes('gemini.google.com') &&
+                outgoingMethod === 'POST' &&
+                response.ok
             ) {
-                const dbgPath = safePathname(url);
-                const isPost = outgoingMethod === 'POST';
-                if (
-                    isPost ||
-                    dbgPath.includes('batchexecute') ||
-                    dbgPath.includes('grok') ||
-                    dbgPath.includes('conversation')
-                ) {
-                    _dbgFetch('http://127.0.0.1:7242/ingest/1a94ca73-1586-415b-93d0-a8566f87d24d', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            location: 'interceptor.content.ts:FETCH',
-                            message: 'Fetch call observed',
-                            data: {
-                                hostname: window.location.hostname,
-                                method: outgoingMethod,
-                                path: dbgPath,
-                                status: response.status,
-                                contentType,
-                                size: response.headers.get('content-length'),
-                            },
-                            timestamp: Date.now(),
-                            hypothesisId: 'H25-AB',
-                        }),
-                    }).catch(() => {});
-                }
-            }
-            // #endregion
-            // #region agent log — Gemini broad network discovery
-            if (window.location.hostname.includes('gemini.google.com') && outgoingMethod === 'POST' && response.ok) {
-                const discoveryPath = safePathname(url);
-                const discoverySearch = (() => {
-                    try {
-                        return new URL(url, window.location.origin).search.slice(0, 200);
-                    } catch {
-                        return '';
-                    }
-                })();
                 log('info', '[DISCOVERY] Gemini fetch POST', {
-                    path: discoveryPath,
-                    search: discoverySearch,
+                    path: safePathname(url),
                     status: response.status,
                     contentType,
                 });
-                if (
-                    discoveryPath.includes('batchexecute') ||
-                    discoveryPath.includes('BardChat') ||
-                    discoverySearch.includes('rpcids')
-                ) {
-                    const discoveryClone = response.clone();
-                    discoveryClone
-                        .text()
-                        .then((text) => {
-                            log('info', '[DISCOVERY] Gemini batchexecute body', {
-                                path: discoveryPath,
-                                search: discoverySearch,
-                                size: text.length,
-                                preview: text.slice(0, 400),
-                            });
-                        })
-                        .catch(() => {});
-                }
             }
-            // #endregion
             if (isChatGptPromptRequest && contentType.includes('text/event-stream')) {
                 void monitorChatGptSseLifecycle(
                     response.clone(),
-                    lifecycleAttemptId ?? resolveAttemptIdForConversation(lifecycleConversationId),
+                    lifecycleAttemptId ?? resolveAttemptIdForConversation(lifecycleConversationId, chatGPTAdapter.name),
                     lifecycleConversationId,
                 );
+            }
+            if (isNonChatGptApiRequest && fetchApiAdapter?.name === 'Gemini' && nonChatAttemptId) {
+                void monitorGeminiResponseStream(response.clone(), nonChatAttemptId, nonChatConversationId);
             }
             const completionAdapter = getPlatformAdapterByCompletionUrl(url);
             if (completionAdapter) {
@@ -1595,43 +2054,37 @@ export default defineContentScript({
 
         XHR.prototype.send = function (body?: any) {
             const method = (this as any)._method || 'GET';
+            const requestUrl = ((this as any)._url as string | undefined) ?? '';
+            const requestAdapter = method.toUpperCase() === 'POST' ? getPlatformAdapterByApiUrl(requestUrl) : null;
+            const shouldEmitNonChatLifecycle =
+                !!requestAdapter &&
+                requestAdapter.name !== chatGPTAdapter.name &&
+                shouldEmitNonChatLifecycleForRequest(requestAdapter, requestUrl);
+            if (shouldEmitNonChatLifecycle && requestAdapter) {
+                const conversationId = resolveRequestConversationId(requestAdapter, requestUrl);
+                const attemptId = resolveAttemptIdForConversation(conversationId, requestAdapter.name);
+                emitLifecycleSignal(attemptId, 'prompt-sent', conversationId, requestAdapter.name);
+                if (requestAdapter.name === 'Gemini') {
+                    wireGeminiXhrProgressMonitor(this as XMLHttpRequest, attemptId, conversationId);
+                } else {
+                    emitLifecycleSignal(attemptId, 'streaming', conversationId, requestAdapter.name);
+                }
+            }
             this.addEventListener('load', function () {
                 const xhr = this as XMLHttpRequest;
-                // #region agent log — Gemini XHR discovery
                 if (
+                    isDiscoveryDiagnosticsEnabled() &&
                     window.location.hostname.includes('gemini.google.com') &&
                     method.toUpperCase() === 'POST' &&
                     xhr.status === 200
                 ) {
                     const xhrUrl = (xhr as any)._url ?? '';
-                    const xhrPath = safePathname(xhrUrl);
-                    const xhrSearch = (() => {
-                        try {
-                            return new URL(xhrUrl, window.location.origin).search.slice(0, 200);
-                        } catch {
-                            return '';
-                        }
-                    })();
                     log('info', '[DISCOVERY] Gemini XHR POST', {
-                        path: xhrPath,
-                        search: xhrSearch,
+                        path: safePathname(xhrUrl),
                         status: xhr.status,
                         size: xhr.responseText?.length ?? 0,
                     });
-                    if (
-                        xhrPath.includes('batchexecute') ||
-                        xhrPath.includes('BardChat') ||
-                        xhrSearch.includes('rpcids')
-                    ) {
-                        log('info', '[DISCOVERY] Gemini XHR batchexecute body', {
-                            path: xhrPath,
-                            search: xhrSearch,
-                            size: xhr.responseText?.length ?? 0,
-                            preview: (xhr.responseText ?? '').slice(0, 400),
-                        });
-                    }
                 }
-                // #endregion
                 const completionAdapter = getPlatformAdapterByCompletionUrl((xhr as any)._url);
                 if (completionAdapter) {
                     const requestHeaders = toForwardableHeaderRecord((xhr as any)._headers);
@@ -1642,10 +2095,10 @@ export default defineContentScript({
             return originalSend.call(this, body);
         };
 
-        log('info', 'init');
-        // #region agent log — confirm interceptor host
-        log('info', `[DISCOVERY] interceptor active on ${window.location.hostname}`);
-        // #endregion
+        log('info', 'init', {
+            host: window.location.hostname,
+            runtimeTag: INTERCEPTOR_RUNTIME_TAG,
+        });
 
         if (!(window as any).__blackiya) {
             const REQUEST_TYPE = 'BLACKIYA_GET_JSON_REQUEST';
@@ -1724,6 +2177,11 @@ export default defineContentScript({
                 disposedAttemptIds.add(message.attemptId);
                 streamDumpFrameCountByAttempt.delete(message.attemptId);
                 streamDumpLastTextByAttempt.delete(message.attemptId);
+                for (const [platform, attemptId] of latestAttemptIdByPlatform.entries()) {
+                    if (attemptId === message.attemptId) {
+                        latestAttemptIdByPlatform.delete(platform);
+                    }
+                }
                 for (const [conversationId, attemptId] of attemptByConversationId.entries()) {
                     if (attemptId === message.attemptId) {
                         attemptByConversationId.delete(conversationId);

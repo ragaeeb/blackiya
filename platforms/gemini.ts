@@ -112,34 +112,42 @@ function isTitlesEndpoint(url: string): boolean {
 }
 
 /**
- * Finds the valid conversation RPC from a list of batchexecute results
+ * Finds the valid conversation RPC from a list of batchexecute results.
+ *
+ * Priority:
+ * 1. Exact RPC ID match (hNvQHb — standard batchexecute)
+ * 2. Heuristic payload match, searching from the END of results so that
+ *    StreamGenerate's last (richest) chunk is preferred over early partial chunks.
  */
 function findConversationRpc(
     results: BatchexecuteResult[],
     isConversationPayload?: (payload: any) => boolean,
 ): { rpcId: string; payload: any } | null {
-    // Try to find by ID or heuristic
-    const conversationRes = results.find((res) => {
+    // Priority 1: Exact RPC ID match
+    const exactMatch = results.find((res) => res.rpcId === GEMINI_RPC_IDS.CONVERSATION && res.payload);
+    if (exactMatch?.payload) {
+        try {
+            const payload = JSON.parse(exactMatch.payload);
+            logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${exactMatch.rpcId}`);
+            return { rpcId: exactMatch.rpcId, payload };
+        } catch {}
+    }
+
+    // Priority 2: Heuristic match — search from END for richest StreamGenerate chunk
+    for (let i = results.length - 1; i >= 0; i--) {
+        const res = results[i];
         if (!res.payload) {
-            return false;
-        }
-        if (res.rpcId === GEMINI_RPC_IDS.CONVERSATION) {
-            return true;
+            continue;
         }
 
         try {
             const payload = JSON.parse(res.payload);
-            return isConversationPayload?.(payload);
-        } catch {
-            return false;
-        }
-    });
-
-    if (conversationRes?.payload) {
-        try {
-            const payload = JSON.parse(conversationRes.payload);
-            logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${conversationRes.rpcId}`);
-            return { rpcId: conversationRes.rpcId, payload };
+            if (isConversationPayload?.(payload)) {
+                logger.info(
+                    `[Blackiya/Gemini] Found conversation data in RPC ID: ${res.rpcId} (heuristic, index ${i}/${results.length})`,
+                );
+                return { rpcId: res.rpcId, payload };
+            }
         } catch {}
     }
 
@@ -154,15 +162,30 @@ function parseConversationPayload(
     titlesCache: LRUCache<string, string>,
     activeConvos: LRUCache<string, ConversationData>,
 ): ConversationData | null {
-    // Navigate to conversation data
-    const conversationRoot = payload[0]?.[0];
+    // Detect format and navigate to conversation data
+    // Format A (Batchexecute): payload[0][0] = conversationRoot
+    // Format B (StreamGenerate): payload itself is the root (shifted indices)
+    let conversationRoot: any;
+    let isStreamFormat = false;
+
+    conversationRoot = payload[0]?.[0];
+    if (!conversationRoot || !Array.isArray(conversationRoot)) {
+        // StreamGenerate: [null, [c_id, r_id], null, null, [[candidates]], ...]
+        if (Array.isArray(payload) && payload[0] === null && Array.isArray(payload[1])) {
+            conversationRoot = payload;
+            isStreamFormat = true;
+        }
+    }
+
     if (!conversationRoot || !Array.isArray(conversationRoot)) {
         logger.info('[Blackiya/Gemini] Invalid conversation root structure');
         return null;
     }
 
-    // Extract IDs
-    const idArray = conversationRoot[0];
+    // Extract IDs — index differs by format
+    // Batchexecute: conversationRoot[0] = idArray
+    // StreamGenerate: conversationRoot[1] = idArray (index shifted by 1)
+    const idArray = isStreamFormat ? conversationRoot[1] : conversationRoot[0];
     let conversationId = Array.isArray(idArray) ? idArray[0] : null;
 
     if (conversationId && typeof conversationId === 'string' && conversationId.startsWith('c_')) {
@@ -201,21 +224,26 @@ function parseConversationPayload(
         return extractText(node[0]);
     };
 
-    // User message (index 2)
-    const userSlot = conversationRoot[2];
-    if (userSlot && Array.isArray(userSlot)) {
-        const rawUserContent = extractText(userSlot);
-        if (rawUserContent) {
-            parsedMessages.push({
-                role: 'user',
-                content: rawUserContent,
-            });
+    // User message — only present in batchexecute format (index 2)
+    // StreamGenerate chunks typically don't contain the user message
+    if (!isStreamFormat) {
+        const userSlot = conversationRoot[2];
+        if (userSlot && Array.isArray(userSlot)) {
+            const rawUserContent = extractText(userSlot);
+            if (rawUserContent) {
+                parsedMessages.push({
+                    role: 'user',
+                    content: rawUserContent,
+                });
+            }
         }
     }
 
-    // Assistant message (index 3)
-    const assistantSlot = conversationRoot[3];
-    const assistantCandidate = assistantSlot?.[0]?.[0];
+    // Assistant message
+    // Batchexecute: conversationRoot[3] = [[[candidate]]] (3 nesting levels)
+    // StreamGenerate: conversationRoot[4] = [[candidate]] (2 nesting levels)
+    const assistantSlot = isStreamFormat ? conversationRoot[4] : conversationRoot[3];
+    const assistantCandidate = isStreamFormat ? assistantSlot?.[0] : assistantSlot?.[0]?.[0];
 
     if (Array.isArray(assistantCandidate)) {
         // Response text is at index 1 -> [0]
@@ -256,10 +284,11 @@ function parseConversationPayload(
     // Build mapping
     const mapping: Record<string, MessageNode> = {};
 
-    // Extract model name from assistantSlot[21] if available
+    // Extract model name — location differs by format
     let modelName = 'gemini-2.0';
-    if (conversationRoot[3] && Array.isArray(conversationRoot[3]) && conversationRoot[3].length > 21) {
-        const modelSlug = conversationRoot[3][21];
+    const modelSlotSource = isStreamFormat ? conversationRoot[4] : conversationRoot[3];
+    if (modelSlotSource && Array.isArray(modelSlotSource) && modelSlotSource.length > 21) {
+        const modelSlug = modelSlotSource[21];
         if (typeof modelSlug === 'string') {
             modelName = `gemini-${modelSlug.toLowerCase().replace(/\s+/g, '-')}`;
             logger.info('[Blackiya/Gemini] Extracted model name:', modelName);
@@ -394,11 +423,13 @@ export const geminiAdapter: LLMPlatform = {
     name: 'Gemini',
     urlMatchPattern: 'https://gemini.google.com/*',
 
-    // Match ANY batchexecute endpoint (both conversation data and titles)
-    // Match batchexecute endpoints containing specific RPC IDs:
-    // hNvQHb (Conversation Data) OR MaZiqc (Conversation Titles)
-    apiEndpointPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*(hNvQHb|MaZiqc)/,
-    completionTriggerPattern: /\/_\/BardChatUi\/data\/batchexecute.*\?.*rpcids=.*hNvQHb/,
+    // Match Gemini API endpoints that carry conversation data:
+    // - Legacy/new batchexecute RPC envelopes (RPC IDs can drift, e.g. ESY5D)
+    // - Gemini 3.0 StreamGenerate endpoint (V2.1-025 fix)
+    apiEndpointPattern:
+        /\/_\/BardChatUi\/data\/(?:batchexecute(?:\?.*)?|assistant\.lamda\.BardFrontendService\/StreamGenerate)/,
+    completionTriggerPattern:
+        /\/_\/BardChatUi\/data\/(?:batchexecute(?:\?.*)?|assistant\.lamda\.BardFrontendService\/StreamGenerate)/,
 
     isPlatformUrl(url: string): boolean {
         return url.includes('gemini.google.com');
@@ -483,24 +514,27 @@ export const geminiAdapter: LLMPlatform = {
                 return false;
             }
 
+            // Format A: Batchexecute — payload[0][0][0] has c_ ID
             const level1 = payload[0];
-            if (!Array.isArray(level1) || level1.length === 0) {
-                return false;
+            if (Array.isArray(level1) && level1.length > 0) {
+                const conversationRoot = level1[0];
+                if (Array.isArray(conversationRoot) && conversationRoot.length >= 3) {
+                    const idArray = conversationRoot[0];
+                    if (Array.isArray(idArray) && idArray.length >= 2) {
+                        const firstId = idArray[0];
+                        if (typeof firstId === 'string' && (firstId.startsWith('c_') || /^[a-f0-9]+$/i.test(firstId))) {
+                            return true;
+                        }
+                    }
+                }
             }
 
-            const conversationRoot = level1[0];
-            if (!Array.isArray(conversationRoot) || conversationRoot.length < 3) {
-                return false;
-            }
-
-            const idArray = conversationRoot[0];
-            if (!Array.isArray(idArray) || idArray.length < 2) {
-                return false;
-            }
-
-            const firstId = idArray[0];
-            if (typeof firstId === 'string' && (firstId.startsWith('c_') || /^[a-f0-9]+$/i.test(firstId))) {
-                return true;
+            // Format B: StreamGenerate — [null, ["c_id", "r_id"], ...]
+            if (level1 === null && Array.isArray(payload[1]) && payload[1].length >= 1) {
+                const firstId = payload[1][0];
+                if (typeof firstId === 'string' && (firstId.startsWith('c_') || /^[a-f0-9]+$/i.test(firstId))) {
+                    return true;
+                }
             }
 
             return false;
@@ -538,5 +572,26 @@ export const geminiAdapter: LLMPlatform = {
 
     evaluateReadiness(data: ConversationData) {
         return evaluateGeminiReadiness(data);
+    },
+
+    defaultTitles: ['Gemini Conversation'],
+
+    extractTitleFromDom() {
+        const raw = document.title?.trim();
+        if (!raw) {
+            return null;
+        }
+
+        // Strip known Gemini page title patterns (e.g., "My Chat - Gemini")
+        const cleaned = raw.replace(/\s*-\s*Gemini$/i, '').trim();
+        if (!cleaned || cleaned.toLowerCase() === 'gemini') {
+            return null;
+        }
+
+        if (this.defaultTitles?.some((d: string) => d.toLowerCase() === cleaned.toLowerCase())) {
+            return null;
+        }
+
+        return cleaned;
     },
 };

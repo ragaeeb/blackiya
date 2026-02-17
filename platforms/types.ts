@@ -119,4 +119,20 @@ export interface LLMPlatform {
      * If omitted, the runner falls back to generic readiness checks.
      */
     evaluateReadiness?: (data: ConversationData) => PlatformReadiness;
+
+    /**
+     * Optional DOM-based title extraction fallback.
+     * Called at save/copy time when the cached title appears to be a
+     * platform default (e.g., "New conversation") because the real title
+     * was generated asynchronously and never intercepted via API.
+     *
+     * @returns The conversation title extracted from the page DOM, or null.
+     */
+    extractTitleFromDom?: () => string | null;
+
+    /**
+     * Optional list of known default/placeholder titles for this platform.
+     * Used to decide whether `extractTitleFromDom` should be attempted.
+     */
+    defaultTitles?: string[];
 }
