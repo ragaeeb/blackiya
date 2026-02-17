@@ -542,6 +542,36 @@ describe('Grok Platform Adapter', () => {
             expect(result?.conversation_id).toBe(conversationId);
         });
 
+        it('should return null (not throw) for malformed conversations_v2 payload', () => {
+            const url =
+                'https://grok.com/rest/app-chat/conversations_v2/af642f01-1a30-4ad2-a588-c15293a4fafe?includeWorkspaces=true';
+            let result: unknown;
+            expect(() => {
+                result = grokAdapter.parseInterceptedData('{"broken"', url);
+            }).not.toThrow();
+            expect(result).toBeNull();
+        });
+
+        it('should return null (not throw) for malformed response-node payload', () => {
+            const url =
+                'https://grok.com/rest/app-chat/conversations/af642f01-1a30-4ad2-a588-c15293a4fafe/response-node?includeThreads=true';
+            let result: unknown;
+            expect(() => {
+                result = grokAdapter.parseInterceptedData('{"broken"', url);
+            }).not.toThrow();
+            expect(result).toBeNull();
+        });
+
+        it('should return null (not throw) for malformed load-responses payload', () => {
+            const url =
+                'https://grok.com/rest/app-chat/conversations/af642f01-1a30-4ad2-a588-c15293a4fafe/load-responses';
+            let result: unknown;
+            expect(() => {
+                result = grokAdapter.parseInterceptedData('{"broken"', url);
+            }).not.toThrow();
+            expect(result).toBeNull();
+        });
+
         it('should parse x.com add_response.json NDJSON streaming (V2.1-027)', () => {
             const conversationId = '2023309163200168014';
 

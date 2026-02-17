@@ -156,7 +156,7 @@ mock.module('wxt/browser', () => ({
 }));
 
 // Import subject under test AFTER mocking
-import { resolveExportConversationTitle, runPlatform } from './platform-runner';
+import { resolveExportConversationTitle, runPlatform, shouldRemoveDisposedAttemptBinding } from './platform-runner';
 
 describe('Platform Runner', () => {
     beforeEach(() => {
@@ -563,6 +563,37 @@ describe('Platform Runner', () => {
                 platform: 'ChatGPT',
                 attemptId: 'attempt:test-1',
                 phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
+    it('should block lifecycle regression from completed to streaming for same attempt and conversation', async () => {
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:monotonic-1',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:monotonic-1',
+                phase: 'streaming',
                 conversationId: '123',
             },
             window.location.origin,
@@ -2517,6 +2548,78 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).not.toContain('Completed');
     });
 
+    it('should clear aliased conversation bindings when disposing an upstream alias attempt', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const postLifecycle = async (attemptId: string, conversationId: string) => {
+            window.postMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId,
+                    phase: 'prompt-sent',
+                    conversationId,
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 15));
+        };
+
+        // Build alias chain A -> B, then bind conv-2 to raw A via interception metadata.
+        await postLifecycle('attempt:chain-a', 'conv-1');
+        await postLifecycle('attempt:chain-b', 'conv-1');
+
+        const captureForConv2 = buildConversation('conv-2', 'Partial response', {
+            status: 'in_progress',
+            endTurn: false,
+        });
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/conv-2',
+                data: JSON.stringify(captureForConv2),
+                attemptId: 'attempt:chain-a',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Extend alias chain to A -> B -> C. If cleanup only checks raw IDs, conv-2's raw A survives.
+        await postLifecycle('attempt:chain-c', 'conv-1');
+
+        const postedMessages: any[] = [];
+        const originalPostMessage = window.postMessage.bind(window);
+        (window as any).postMessage = (payload: any, targetOrigin: string) => {
+            postedMessages.push(payload);
+            return originalPostMessage(payload, targetOrigin);
+        };
+        try {
+            // If conv-2 binding for aliased A was not cleared, rebinding emits an unnecessary C superseded disposal.
+            await postLifecycle('attempt:chain-d', 'conv-2');
+            await new Promise((resolve) => setTimeout(resolve, 40));
+        } finally {
+            (window as any).postMessage = originalPostMessage;
+        }
+
+        const supersededDisposals = postedMessages
+            .filter((payload) => payload?.type === 'BLACKIYA_ATTEMPT_DISPOSED' && payload?.reason === 'superseded')
+            .map((payload) => payload.attemptId);
+        expect(supersededDisposals).not.toContain('attempt:chain-c');
+    });
+
     it('should keep ChatGPT stream deltas after navigation into the same conversation route', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),
@@ -3407,4 +3510,32 @@ describe('Platform Runner', () => {
 
         stopButton.remove();
     }, 15_000);
+});
+
+describe('shouldRemoveDisposedAttemptBinding', () => {
+    const resolveFromMap = (aliases: Record<string, string>) => (attemptId: string) => {
+        let current = attemptId;
+        const visited = new Set<string>();
+        while (aliases[current] && !visited.has(current)) {
+            visited.add(current);
+            current = aliases[current];
+        }
+        return current;
+    };
+
+    it('removes mapped attempts that resolve to disposed canonical attempt', () => {
+        const resolve = resolveFromMap({
+            'attempt:raw-a': 'attempt:raw-b',
+            'attempt:raw-b': 'attempt:canonical-c',
+        });
+        expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBe(true);
+    });
+
+    it('keeps mapped attempts that resolve to a different canonical attempt', () => {
+        const resolve = resolveFromMap({
+            'attempt:raw-a': 'attempt:canonical-a',
+            'attempt:raw-b': 'attempt:canonical-b',
+        });
+        expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBe(false);
+    });
 });

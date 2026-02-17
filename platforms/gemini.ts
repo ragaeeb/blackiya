@@ -258,7 +258,14 @@ function getGeminiTitlesPayload(data: string): unknown | null {
         logger.debug('[Blackiya/Gemini/Titles] No MaZiqc RPC result found');
         return null;
     }
-    return JSON.parse(titleRpc.payload);
+    try {
+        return JSON.parse(titleRpc.payload);
+    } catch (error) {
+        logger.warn('[Blackiya/Gemini/Titles] Failed to parse Gemini title RPC payload', {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+    }
 }
 
 function getGeminiConversationList(payload: unknown): unknown[] | null {

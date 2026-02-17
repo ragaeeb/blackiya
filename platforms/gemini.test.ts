@@ -1,13 +1,31 @@
-import { beforeAll, describe, expect, it } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { join } from 'node:path';
 import { Window } from 'happy-dom';
 
 import type { Message, MessageNode } from '@/utils/types';
 
+const loggerSpies = {
+    info: mock(() => {}),
+    warn: mock(() => {}),
+    error: mock(() => {}),
+    debug: mock(() => {}),
+};
+
+mock.module('@/utils/logger', () => ({
+    logger: loggerSpies,
+}));
+
 describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;
     let titlesResponseRaw: string;
     let geminiAdapter: any;
+
+    beforeEach(() => {
+        loggerSpies.info.mockClear();
+        loggerSpies.warn.mockClear();
+        loggerSpies.error.mockClear();
+        loggerSpies.debug.mockClear();
+    });
 
     beforeAll(async () => {
         // Dynamic import to ensure mocks apply
@@ -270,6 +288,20 @@ describe('Gemini Platform Adapter', () => {
 
             expect(convResult).not.toBeNull();
             expect(convResult?.title).toBe('Gemini Conversation');
+        });
+
+        it('should return null and warn (not error) for malformed MaZiqc title payload', () => {
+            const malformedPayload = '{"broken"';
+            const chunk = JSON.stringify([['wrb.fr', 'MaZiqc', malformedPayload, null]]);
+            const response = `)]}'\n\n${chunk.length}\n${chunk}\n`;
+            const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc';
+            const errorCountBefore = loggerSpies.error.mock.calls.length;
+            const warnCountBefore = loggerSpies.warn.mock.calls.length;
+
+            const result = geminiAdapter.parseInterceptedData(response, url);
+            expect(result).toBeNull();
+            expect(loggerSpies.error.mock.calls.length).toBe(errorCountBefore);
+            expect(loggerSpies.warn.mock.calls.length).toBeGreaterThan(warnCountBefore);
         });
     });
 

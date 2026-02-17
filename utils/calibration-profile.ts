@@ -46,15 +46,19 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
     return Math.max(min, Math.min(max, value));
 }
 
-function normalizeSignalSources(value: unknown): SignalSource[] {
+function normalizeSignalSources(value: unknown, fallback: SignalSource[]): SignalSource[] {
     if (!Array.isArray(value)) {
-        return ['dom_hint', 'snapshot_fallback'];
+        return [...fallback];
     }
     const normalized = value.filter(
         (source): source is SignalSource =>
             typeof source === 'string' && ALLOWED_SOURCE_SET.has(source as SignalSource),
     );
-    return Array.from(new Set(normalized));
+    const deduped = Array.from(new Set(normalized));
+    if (value.length > 0 && deduped.length === 0) {
+        return [...fallback];
+    }
+    return deduped;
 }
 
 function strategyDefaults(strategy: CalibrationStrategy): CalibrationProfileV2 {
@@ -151,7 +155,7 @@ export function validateCalibrationProfileV2(input: unknown, platform: string): 
         schemaVersion: 2,
         platform,
         strategy,
-        disabledSources: normalizeSignalSources(input.disabledSources),
+        disabledSources: normalizeSignalSources(input.disabledSources, defaults.disabledSources),
         timingsMs: {
             passiveWait: clampNumber(timingsMsInput.passiveWait, defaults.timingsMs.passiveWait, 100, 60_000),
             domQuietWindow: clampNumber(timingsMsInput.domQuietWindow, defaults.timingsMs.domQuietWindow, 100, 60_000),

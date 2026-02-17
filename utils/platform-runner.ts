@@ -175,6 +175,14 @@ export function resolveExportConversationTitle(data: ConversationData): string {
     return resolveExportConversationTitleDecision(data).title;
 }
 
+export function shouldRemoveDisposedAttemptBinding(
+    mappedAttemptId: string,
+    disposedAttemptId: string,
+    resolveAttemptId: (attemptId: string) => string,
+): boolean {
+    return resolveAttemptId(mappedAttemptId) === resolveAttemptId(disposedAttemptId);
+}
+
 type ExportTitleSource = 'existing' | 'first-user-message' | 'fallback';
 
 function resolveExportConversationTitleDecision(data: ConversationData): { title: string; source: ExportTitleSource } {
@@ -212,6 +220,8 @@ export function runPlatform(): void {
     let lastButtonStateLog = '';
     let calibrationState: CalibrationUiState = 'idle';
     let lifecycleState: LifecycleUiState = 'idle';
+    let lifecycleAttemptId: string | null = null;
+    let lifecycleConversationId: string | null = null;
     let lastStreamProbeKey = '';
     let lastStreamProbeConversationId: string | null = null;
     const liveStreamPreviewByConversation = new Map<string, string>();
@@ -1425,20 +1435,35 @@ export function runPlatform(): void {
         });
     }
 
-    function setLifecycleState(state: LifecycleUiState, conversationId?: string): void {
+    function logLifecycleTransition(
+        previousState: LifecycleUiState,
+        nextState: LifecycleUiState,
+        conversationId: string | null,
+    ): void {
         // #region agent log — lifecycle transition tracking
         const prevLifecycle = lifecycleState;
-        if (prevLifecycle !== state) {
+        if (previousState !== nextState) {
             logger.info('Lifecycle transition', {
                 from: prevLifecycle,
-                to: state,
-                conversationId: conversationId ?? currentConversationId ?? null,
+                to: nextState,
+                conversationId,
             });
         }
         // #endregion
-        lifecycleState = state;
-        buttonManager.setLifecycleState(state);
+    }
 
+    function syncLifecycleContext(state: LifecycleUiState, conversationId: string | null): void {
+        if (state === 'idle') {
+            lifecycleConversationId = null;
+            lifecycleAttemptId = null;
+            return;
+        }
+        if (conversationId) {
+            lifecycleConversationId = conversationId;
+        }
+    }
+
+    function applyLifecycleUiState(state: LifecycleUiState, conversationId?: string): void {
         if (!buttonManager.exists()) {
             return;
         }
@@ -1452,11 +1477,19 @@ export function runPlatform(): void {
             return;
         }
 
-        // While prompt is in-flight/streaming, disable actions to avoid partial exports.
         if (state === 'prompt-sent' || state === 'streaming') {
             buttonManager.setActionButtonsEnabled(false);
             buttonManager.setOpacity('0.6');
         }
+    }
+
+    function setLifecycleState(state: LifecycleUiState, conversationId?: string): void {
+        const resolvedConversationId = conversationId ?? currentConversationId ?? null;
+        logLifecycleTransition(lifecycleState, state, resolvedConversationId);
+        lifecycleState = state;
+        syncLifecycleContext(state, resolvedConversationId);
+        buttonManager.setLifecycleState(state);
+        applyLifecycleUiState(state, conversationId);
     }
 
     function ensureStreamProbePanel(): HTMLDivElement {
@@ -3875,6 +3908,8 @@ export function runPlatform(): void {
             // no cached data yet. Trigger a stream-done probe to capture it.
             const cached = interceptionManager.getConversation(conversationId);
             if (!cached || !evaluateReadinessForData(cached).ready) {
+                lifecycleAttemptId = attemptId;
+                lifecycleConversationId = conversationId;
                 setLifecycleState('completed', conversationId);
                 void runStreamDoneProbe(conversationId, attemptId);
             }
@@ -4003,6 +4038,8 @@ export function runPlatform(): void {
             attemptId,
             previousLifecycle: lifecycleState,
         });
+        lifecycleAttemptId = attemptId;
+        lifecycleConversationId = conversationId;
         setLifecycleState('completed', conversationId);
         return true;
     }
@@ -4047,11 +4084,7 @@ export function runPlatform(): void {
         ingestSfeLifecycleFromWirePhase(phase, attemptId, conversationId);
 
         if (phase === 'prompt-sent' || phase === 'streaming') {
-            if (!liveStreamPreviewByConversation.has(conversationId)) {
-                setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
-                setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
-            }
-            setLifecycleState(phase, conversationId);
+            applyActiveLifecyclePhase(phase, attemptId, conversationId, source);
             return;
         }
 
@@ -4059,6 +4092,53 @@ export function runPlatform(): void {
             return;
         }
 
+        applyCompletedLifecyclePhase(conversationId, attemptId);
+    }
+
+    function shouldBlockLifecycleRegression(
+        phase: 'prompt-sent' | 'streaming',
+        attemptId: string,
+        conversationId: string,
+        source: 'direct' | 'replayed',
+    ): boolean {
+        if (
+            lifecycleState !== 'completed' ||
+            lifecycleConversationId !== conversationId ||
+            lifecycleAttemptId !== attemptId
+        ) {
+            return false;
+        }
+        logger.info('Lifecycle regression blocked', {
+            from: lifecycleState,
+            to: phase,
+            attemptId,
+            conversationId,
+            source,
+        });
+        return true;
+    }
+
+    function applyActiveLifecyclePhase(
+        phase: 'prompt-sent' | 'streaming',
+        attemptId: string,
+        conversationId: string,
+        source: 'direct' | 'replayed',
+    ): void {
+        if (shouldBlockLifecycleRegression(phase, attemptId, conversationId, source)) {
+            return;
+        }
+        if (!liveStreamPreviewByConversation.has(conversationId)) {
+            setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
+            setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
+        }
+        lifecycleAttemptId = attemptId;
+        lifecycleConversationId = conversationId;
+        setLifecycleState(phase, conversationId);
+    }
+
+    function applyCompletedLifecyclePhase(conversationId: string, attemptId: string): void {
+        lifecycleAttemptId = attemptId;
+        lifecycleConversationId = conversationId;
         setLifecycleState('completed', conversationId);
         if (!sfeEnabled) {
             void runStreamDoneProbe(conversationId, attemptId);
@@ -4281,17 +4361,20 @@ export function runPlatform(): void {
         if (typeof typed.attemptId !== 'string') {
             return false;
         }
-        const attemptId = resolveAliasedAttemptId(typed.attemptId);
-        cancelStreamDoneProbe(attemptId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
-        clearCanonicalStabilizationRetry(attemptId);
-        sfe.dispose(attemptId);
-        pendingLifecycleByAttempt.delete(attemptId);
-        for (const [conversationId, attemptId] of attemptByConversation.entries()) {
-            if (attemptId === typed.attemptId || attemptId === resolveAliasedAttemptId(typed.attemptId)) {
+        const canonicalDisposedId = resolveAliasedAttemptId(typed.attemptId);
+        cancelStreamDoneProbe(canonicalDisposedId, typed.reason === 'superseded' ? 'superseded' : 'disposed');
+        clearCanonicalStabilizationRetry(canonicalDisposedId);
+        sfe.dispose(canonicalDisposedId);
+        pendingLifecycleByAttempt.delete(canonicalDisposedId);
+        for (const [conversationId, mappedAttemptId] of attemptByConversation.entries()) {
+            if (shouldRemoveDisposedAttemptBinding(mappedAttemptId, canonicalDisposedId, resolveAliasedAttemptId)) {
                 attemptByConversation.delete(conversationId);
             }
         }
-        if (activeAttemptId === attemptId || activeAttemptId === typed.attemptId) {
+        if (
+            activeAttemptId &&
+            shouldRemoveDisposedAttemptBinding(activeAttemptId, canonicalDisposedId, resolveAliasedAttemptId)
+        ) {
             activeAttemptId = null;
         }
         return true;

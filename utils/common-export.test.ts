@@ -335,4 +335,66 @@ describe('buildCommonExport', () => {
         const result = buildCommonExport(conversation, 'ChatGPT');
         expect(result.model).toBe('gpt-5-t-mini');
     });
+
+    it('should tolerate malformed message author shapes without throwing', () => {
+        const conversation = {
+            title: 'Malformed Author',
+            create_time: 1_700_030_000,
+            update_time: 1_700_030_100,
+            conversation_id: 'conversation-malformed',
+            current_node: 'assistant',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['user'] },
+                user: {
+                    id: 'user',
+                    message: {
+                        id: 'user',
+                        author: null,
+                        create_time: 1_700_030_010,
+                        update_time: 1_700_030_010,
+                        content: { content_type: 'text', parts: ['Prompt with malformed author'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'root',
+                    children: ['assistant'],
+                },
+                assistant: {
+                    id: 'assistant',
+                    message: {
+                        id: 'assistant',
+                        author: {},
+                        create_time: 1_700_030_020,
+                        update_time: 1_700_030_020,
+                        content: { content_type: 'text', parts: ['Answer with malformed author'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: [],
+                },
+            },
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'auto',
+            safe_urls: [],
+            blocked_urls: [],
+        } as unknown as ConversationData;
+
+        expect(() => buildCommonExport(conversation, 'ChatGPT')).not.toThrow();
+        const result = buildCommonExport(conversation, 'ChatGPT');
+        expect(result.prompt).toBe('');
+        expect(result.response).toBe('');
+    });
 });

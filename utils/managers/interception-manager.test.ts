@@ -121,6 +121,125 @@ describe('InterceptionManager', () => {
         manager.stop();
     });
 
+    it('should continue processing queued capture messages when one queued message throws', () => {
+        const captured: string[] = [];
+        const globalRef = {} as any;
+        const manager = new InterceptionManager((id) => captured.push(id), {
+            window: windowInstance as any,
+            global: globalRef,
+        });
+
+        const adapter = {
+            parseInterceptedData: (raw: string) => JSON.parse(raw),
+        };
+        manager.updateAdapter(adapter as any);
+
+        globalRef.__BLACKIYA_CAPTURE_QUEUE__ = [
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/conversation/one',
+                data: JSON.stringify({
+                    conversation_id: 'one',
+                    mapping: {},
+                    title: 'One',
+                    create_time: 1,
+                    update_time: 1,
+                    current_node: 'n1',
+                    moderation_results: [],
+                    plugin_ids: null,
+                    gizmo_id: null,
+                    gizmo_type: null,
+                    is_archived: false,
+                    default_model_slug: 'x',
+                    safe_urls: [],
+                    blocked_urls: [],
+                }),
+            },
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/conversation/two',
+                data: JSON.stringify({ conversation_id: 'two', mapping: {} }),
+            },
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/conversation/three',
+                data: JSON.stringify({
+                    conversation_id: 'three',
+                    mapping: {},
+                    title: 'Three',
+                    create_time: 1,
+                    update_time: 1,
+                    current_node: 'n1',
+                    moderation_results: [],
+                    plugin_ids: null,
+                    gizmo_id: null,
+                    gizmo_type: null,
+                    is_archived: false,
+                    default_model_slug: 'x',
+                    safe_urls: [],
+                    blocked_urls: [],
+                }),
+            },
+        ];
+
+        let calls = 0;
+        const managerAny = manager as any;
+        const originalHandleInterceptedData = managerAny.handleInterceptedData.bind(managerAny);
+        managerAny.handleInterceptedData = (message: any) => {
+            calls += 1;
+            if (calls === 2) {
+                throw new Error('boom');
+            }
+            originalHandleInterceptedData(message);
+        };
+
+        expect(() => manager.flushQueuedMessages()).not.toThrow();
+        expect(captured).toEqual(['one', 'three']);
+        expect(globalRef.__BLACKIYA_CAPTURE_QUEUE__).toEqual([]);
+
+        manager.flushQueuedMessages();
+        expect(captured).toEqual(['one', 'three']);
+    });
+
+    it('should continue processing queued log messages when one queued log throws', () => {
+        const globalRef = {} as any;
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalRef,
+        });
+
+        globalRef.__BLACKIYA_LOG_QUEUE__ = [
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'first', data: [], context: 'interceptor' },
+            },
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'second', data: [], context: 'interceptor' },
+            },
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'third', data: [], context: 'interceptor' },
+            },
+        ];
+
+        const handled: string[] = [];
+        const managerAny = manager as any;
+        managerAny.handleLogEntry = (payload: any) => {
+            handled.push(payload?.message ?? 'unknown');
+            if (payload?.message === 'second') {
+                throw new Error('log boom');
+            }
+        };
+
+        expect(() => managerAny.processQueuedLogMessages()).not.toThrow();
+        expect(handled).toEqual(['first', 'second', 'third']);
+        expect(globalRef.__BLACKIYA_LOG_QUEUE__).toEqual([]);
+
+        managerAny.processQueuedLogMessages();
+        expect(handled).toEqual(['first', 'second', 'third']);
+    });
+
     it('should cache direct conversation payloads from snapshot fallback', () => {
         const captured: string[] = [];
         const manager = new InterceptionManager((id) => captured.push(id), {

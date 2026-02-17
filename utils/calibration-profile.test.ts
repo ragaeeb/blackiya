@@ -60,6 +60,42 @@ describe('calibration-profile', () => {
         expect(profile.disabledSources).toEqual(['dom_hint']);
     });
 
+    it('preserves strategy disabledSources defaults when disabledSources is missing', () => {
+        const aggressive = validateCalibrationProfileV2({ strategy: 'aggressive' }, 'Gemini');
+        const balanced = validateCalibrationProfileV2({ strategy: 'balanced' }, 'Gemini');
+        const conservative = validateCalibrationProfileV2({ strategy: 'conservative' }, 'Gemini');
+
+        expect(aggressive.disabledSources).toEqual(['snapshot_fallback']);
+        expect(balanced.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+        expect(conservative.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
+    it('preserves strategy disabledSources defaults when disabledSources is invalid', () => {
+        const aggressive = validateCalibrationProfileV2(
+            { strategy: 'aggressive', disabledSources: 'bad' as unknown },
+            'Gemini',
+        );
+        const balanced = validateCalibrationProfileV2(
+            { strategy: 'balanced', disabledSources: 123 as unknown },
+            'Gemini',
+        );
+
+        expect(aggressive.disabledSources).toEqual(['snapshot_fallback']);
+        expect(balanced.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
+    it('normalizes valid disabledSources list by filtering and deduping', () => {
+        const profile = validateCalibrationProfileV2(
+            {
+                strategy: 'aggressive',
+                disabledSources: ['dom_hint', 'dom_hint', 'snapshot_fallback', 'invalid'],
+            },
+            'Gemini',
+        );
+
+        expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
     it('loads and saves profile via storage', async () => {
         stored = {};
         const profile = buildDefaultCalibrationProfile('Grok', 'aggressive');

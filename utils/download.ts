@@ -6,6 +6,8 @@
  * @module utils/download
  */
 
+import { logger } from '@/utils/logger';
+
 /**
  * Sanitize a string for use as a filename
  *
@@ -68,17 +70,32 @@ export function generateTimestamp(unixTime?: number): string {
  * @param filename - The filename (without .json extension)
  */
 export function downloadAsJSON(data: unknown, filename: string): void {
-    const jsonString = JSON.stringify(data, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    let url: string | null = null;
+    let link: HTMLAnchorElement | null = null;
 
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${filename}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+        if (typeof document === 'undefined' || typeof URL === 'undefined') {
+            logger.error('Download failed: browser APIs are unavailable');
+            return;
+        }
 
-    // Clean up the blob URL
-    URL.revokeObjectURL(url);
+        const jsonString = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        url = URL.createObjectURL(blob);
+
+        link = document.createElement('a');
+        link.href = url;
+        link.download = `${filename}.json`;
+        document.body.appendChild(link);
+        link.click();
+    } catch (error) {
+        logger.error('Download failed:', error);
+    } finally {
+        if (link?.parentNode) {
+            link.parentNode.removeChild(link);
+        }
+        if (url) {
+            URL.revokeObjectURL(url);
+        }
+    }
 }

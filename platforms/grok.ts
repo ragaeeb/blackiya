@@ -897,7 +897,16 @@ const evaluateGrokReadiness = (data: ConversationData): PlatformReadiness => {
     };
 };
 
-const parseJsonIfNeeded = (data: string | any): any => (typeof data === 'string' ? JSON.parse(data) : data);
+const tryParseJsonIfNeeded = (data: string | any): any | null => {
+    if (typeof data !== 'string') {
+        return data;
+    }
+    try {
+        return JSON.parse(data);
+    } catch {
+        return null;
+    }
+};
 
 const tryHandleGrokTitlesEndpoint = (data: string | any, url: string): boolean => {
     if (!isTitlesEndpoint(url)) {
@@ -925,7 +934,11 @@ const parseGrokComLoadResponsesPayload = (data: string | any, conversationId: st
         .filter((line) => line.trim());
 
     if (lines.length <= 1) {
-        return parseGrokComResponses(parseJsonIfNeeded(data), conversationId);
+        const parsed = tryParseJsonIfNeeded(data);
+        if (!parsed) {
+            return null;
+        }
+        return parseGrokComResponses(parsed, conversationId);
     }
 
     logger.info(`[Blackiya/Grok] Parsing NDJSON with ${lines.length} lines`);
@@ -950,7 +963,11 @@ const tryParseGrokComRestEndpoint = (data: string | any, url: string): Conversat
         if (!conversationId) {
             return null;
         }
-        return parseGrokComConversationMeta(parseJsonIfNeeded(data), conversationId);
+        const parsed = tryParseJsonIfNeeded(data);
+        if (!parsed) {
+            return null;
+        }
+        return parseGrokComConversationMeta(parsed, conversationId);
     }
 
     if (isGrokComResponseNodesEndpoint(url)) {
@@ -958,7 +975,11 @@ const tryParseGrokComRestEndpoint = (data: string | any, url: string): Conversat
         if (!conversationId) {
             return null;
         }
-        return parseGrokComResponseNodes(parseJsonIfNeeded(data), conversationId);
+        const parsed = tryParseJsonIfNeeded(data);
+        if (!parsed) {
+            return null;
+        }
+        return parseGrokComResponseNodes(parsed, conversationId);
     }
 
     if (isGrokComLoadResponsesEndpoint(url)) {
@@ -982,7 +1003,13 @@ const resolveXGraphqlConversationId = (url: string): string | undefined => {
 
 const parseDefaultGrokPayload = (data: string | any, url: string): ConversationData | null => {
     try {
-        const parsed = parseJsonIfNeeded(data);
+        const parsed = tryParseJsonIfNeeded(data);
+        if (!parsed) {
+            if (typeof data === 'string' && data.includes('\n')) {
+                return tryParseGrokNdjson(data, url);
+            }
+            return null;
+        }
         return parseGrokResponse(parsed, resolveXGraphqlConversationId(url));
     } catch (e) {
         if (typeof data === 'string' && data.includes('\n')) {

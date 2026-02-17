@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { downloadAsJSON, generateTimestamp, sanitizeFilename } from '@/utils/download';
 
 describe('Download Utilities', () => {
     describe('sanitizeFilename', () => {
@@ -80,6 +80,85 @@ describe('Download Utilities', () => {
             const timestamp = generateTimestamp(unixTime);
             // Should be a valid date string
             expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/);
+        });
+    });
+
+    describe('downloadAsJSON', () => {
+        it('should not throw when JSON serialization fails', () => {
+            const circular: Record<string, unknown> = {};
+            circular.self = circular;
+
+            const originalDocument = (globalThis as any).document;
+            const originalCreateObjectURL = globalThis.URL.createObjectURL;
+            const originalRevokeObjectURL = globalThis.URL.revokeObjectURL;
+            const appended: unknown[] = [];
+            const removed: unknown[] = [];
+            const link = {
+                href: '',
+                download: '',
+                click: () => {},
+            };
+            (globalThis as any).document = {
+                body: {
+                    appendChild: (node: unknown) => {
+                        appended.push(node);
+                    },
+                    removeChild: (node: unknown) => {
+                        removed.push(node);
+                    },
+                },
+                createElement: () => link,
+            };
+            (globalThis.URL as any).createObjectURL = () => 'blob:mock';
+            (globalThis.URL as any).revokeObjectURL = () => {};
+
+            try {
+                expect(() => downloadAsJSON(circular, 'test')).not.toThrow();
+                expect(appended).toEqual([]);
+                expect(removed).toEqual([]);
+            } finally {
+                (globalThis as any).document = originalDocument;
+                (globalThis.URL as any).createObjectURL = originalCreateObjectURL;
+                (globalThis.URL as any).revokeObjectURL = originalRevokeObjectURL;
+            }
+        });
+
+        it('should not throw when createObjectURL fails', () => {
+            const originalDocument = (globalThis as any).document;
+            const originalCreateObjectURL = globalThis.URL.createObjectURL;
+            const originalRevokeObjectURL = globalThis.URL.revokeObjectURL;
+            const appended: unknown[] = [];
+            const removed: unknown[] = [];
+            const link = {
+                href: '',
+                download: '',
+                click: () => {},
+            };
+            (globalThis as any).document = {
+                body: {
+                    appendChild: (node: unknown) => {
+                        appended.push(node);
+                    },
+                    removeChild: (node: unknown) => {
+                        removed.push(node);
+                    },
+                },
+                createElement: () => link,
+            };
+            (globalThis.URL as any).createObjectURL = () => {
+                throw new Error('blob-failure');
+            };
+            (globalThis.URL as any).revokeObjectURL = () => {};
+
+            try {
+                expect(() => downloadAsJSON({ ok: true }, 'test')).not.toThrow();
+                expect(appended).toEqual([]);
+                expect(removed).toEqual([]);
+            } finally {
+                (globalThis as any).document = originalDocument;
+                (globalThis.URL as any).createObjectURL = originalCreateObjectURL;
+                (globalThis.URL as any).revokeObjectURL = originalRevokeObjectURL;
+            }
         });
     });
 });
