@@ -75,5 +75,24 @@ describe('Google RPC Parser', () => {
             // The conversation chunk payload should contain the conversation ID
             expect(result[1].payload).toContain('c_59f84576f1e364bb');
         });
+
+        it('should parse array chunks even when prefixed with non-array noise', () => {
+            const chunk1 = JSON.stringify([['wrb.fr', 'RPC1', '{"data":"first"}', null]]);
+            const chunk2 = JSON.stringify([['wrb.fr', 'RPC2', '{"data":"second"}', null]]);
+            const input = `)]}'\nxyz-prefix\n${chunk1.length}\n${chunk1}\nnotes\n${chunk2.length}\n${chunk2}\n`;
+            const result = parseBatchexecuteResponse(input);
+            expect(result).toHaveLength(2);
+            expect(result[0]).toEqual({ rpcId: 'RPC1', payload: '{"data":"first"}' });
+            expect(result[1]).toEqual({ rpcId: 'RPC2', payload: '{"data":"second"}' });
+        });
+
+        it('should continue scanning after malformed bracketed chunk and parse subsequent valid chunk', () => {
+            const brokenPrefix = '[broken chunk without a closing bracket';
+            const validChunk = JSON.stringify([['wrb.fr', 'RPC_OK', '{"ok":true}', null]]);
+            const input = `)]}'\n${brokenPrefix}\nnoise\n${validChunk.length}\n${validChunk}\n`;
+            const result = parseBatchexecuteResponse(input);
+            expect(result).toHaveLength(1);
+            expect(result[0]).toEqual({ rpcId: 'RPC_OK', payload: '{"ok":true}' });
+        });
     });
 });

@@ -319,14 +319,21 @@ export class InterceptionManager {
             return;
         }
 
-        for (const message of queue) {
-            if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
-                this.handleInterceptedData(message);
-            }
-        }
-
+        // Take ownership up front so retries don't double-process already-dequeued messages.
         (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
         (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
+
+        for (const message of queue) {
+            if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
+                try {
+                    this.handleInterceptedData(message);
+                } catch (error) {
+                    logger.warn('Failed to process queued intercepted message', {
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
+            }
+        }
     }
 
     private processQueuedLogMessages(): void {
@@ -337,13 +344,20 @@ export class InterceptionManager {
             return;
         }
 
-        for (const message of queue) {
-            if (message?.type === 'LLM_LOG_ENTRY') {
-                this.handleLogEntry(message.payload);
-            }
-        }
-
+        // Take ownership up front so retries don't double-process already-dequeued messages.
         (this.globalRef as any).__BLACKIYA_LOG_QUEUE__ = [];
         (this.windowRef as any).__BLACKIYA_LOG_QUEUE__ = [];
+
+        for (const message of queue) {
+            if (message?.type === 'LLM_LOG_ENTRY') {
+                try {
+                    this.handleLogEntry(message.payload);
+                } catch (error) {
+                    logger.warn('Failed to process queued log message', {
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
+            }
+        }
     }
 }

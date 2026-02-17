@@ -25,9 +25,11 @@ export function parseBatchexecuteResponse(text: string) {
             break;
         }
 
-        const outerJson = extractBalancedJsonArray(cleanText, searchFrom);
+        const outerJson = extractBalancedJsonArray(cleanText, startBracket);
         if (!outerJson) {
-            break;
+            // Malformed chunk: skip this bracket and continue scanning.
+            searchFrom = startBracket + 1;
+            continue;
         }
 
         // Advance past the extracted array for the next iteration

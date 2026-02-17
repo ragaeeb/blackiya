@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-17 (PR finalization docs pass)
+> Last updated: 2026-02-17 (v2.0.1 P0 stability pass)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -83,6 +83,7 @@ Critical invariant:
 - Completion hint alone never guarantees export readiness.
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
+- Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 
 ## 5) End-to-End Flow (Generic)
 
@@ -142,8 +143,9 @@ Flow:
 2. For StreamGenerate, monitor fetch/XHR progress and parse incremental buffer via:
    - `utils/gemini-stream-parser.ts`
 3. Emit stream deltas, conversation-id resolved, and title candidates from stream metadata.
-4. Parse intercepted payloads into canonical `ConversationData`.
-5. Runner waits for canonical readiness before Save.
+4. XHR `loadend` completion is one-shot per attempt state to avoid duplicate `completed` lifecycle emission.
+5. Parse intercepted payloads into canonical `ConversationData`.
+6. Runner waits for canonical readiness before Save.
 
 Title strategy:
 1. Stream-derived title (`BLACKIYA_TITLE_RESOLVED`) if available.
@@ -200,6 +202,7 @@ Source of truth priority:
 4. Fallback stabilization probes
 
 The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
+For the same attempt/conversation, regressive lifecycle transitions are rejected (`completed` remains terminal).
 On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 

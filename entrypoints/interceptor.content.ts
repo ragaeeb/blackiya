@@ -72,6 +72,7 @@ type GeminiXhrStreamState = {
     emittedTextOrder: string[];
     emittedTitles: Set<string>;
     emittedStreaming: boolean;
+    emittedCompleted: boolean;
 };
 
 type GrokXhrStreamState = {
@@ -944,7 +945,25 @@ function createGeminiXhrStreamState(attemptId: string, seedConversationId?: stri
         emittedTextOrder: [],
         emittedTitles: new Set<string>(),
         emittedStreaming: false,
+        emittedCompleted: false,
     };
+}
+
+export function shouldEmitGeminiXhrLoadendCompletion(
+    state: Pick<GeminiXhrStreamState, 'emittedCompleted' | 'emittedStreaming' | 'seedConversationId'>,
+    requestUrl: string,
+): boolean {
+    if (state.emittedCompleted) {
+        return false;
+    }
+    if (!shouldEmitGeminiCompletion(requestUrl)) {
+        return false;
+    }
+    if (!state.emittedStreaming && !state.seedConversationId) {
+        return false;
+    }
+    state.emittedCompleted = true;
+    return true;
 }
 
 function syncGeminiSeenPayloadOrder(state: GeminiXhrStreamState): void {
@@ -1050,6 +1069,7 @@ function wireGeminiXhrProgressMonitor(
     xhr: XMLHttpRequest,
     attemptId: string,
     seedConversationId: string | undefined,
+    requestUrl: string,
 ): void {
     if (shouldLogTransient(`gemini:xhr-stream:start:${attemptId}`, 8000)) {
         log('info', 'Gemini XHR stream monitor start', {
@@ -1084,7 +1104,7 @@ function wireGeminiXhrProgressMonitor(
             xhr.readyState === XMLHttpRequest.DONE &&
             xhr.status >= 200 &&
             xhr.status < 300 &&
-            (state.emittedStreaming || !!state.seedConversationId)
+            shouldEmitGeminiXhrLoadendCompletion(state, requestUrl)
         ) {
             emitLifecycleSignal(state.attemptId, 'completed', state.seedConversationId, 'Gemini');
         }
@@ -2902,7 +2922,7 @@ export default defineContentScript({
             emitLifecycleSignal(context.attemptId, 'prompt-sent', context.conversationId, context.requestAdapter.name);
 
             if (context.requestAdapter.name === 'Gemini') {
-                wireGeminiXhrProgressMonitor(xhr, context.attemptId, context.conversationId);
+                wireGeminiXhrProgressMonitor(xhr, context.attemptId, context.conversationId, context.requestUrl);
                 return;
             }
             if (context.requestAdapter.name === 'Grok') {

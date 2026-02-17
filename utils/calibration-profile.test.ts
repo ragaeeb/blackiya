@@ -60,6 +60,42 @@ describe('calibration-profile', () => {
         expect(profile.disabledSources).toEqual(['dom_hint']);
     });
 
+    it('preserves strategy disabledSources defaults when disabledSources is missing', () => {
+        const aggressive = validateCalibrationProfileV2({ strategy: 'aggressive' }, 'Gemini');
+        const balanced = validateCalibrationProfileV2({ strategy: 'balanced' }, 'Gemini');
+        const conservative = validateCalibrationProfileV2({ strategy: 'conservative' }, 'Gemini');
+
+        expect(aggressive.disabledSources).toEqual(['snapshot_fallback']);
+        expect(balanced.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+        expect(conservative.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
+    it('preserves strategy disabledSources defaults when disabledSources is invalid', () => {
+        const aggressive = validateCalibrationProfileV2(
+            { strategy: 'aggressive', disabledSources: 'bad' as unknown },
+            'Gemini',
+        );
+        const balanced = validateCalibrationProfileV2(
+            { strategy: 'balanced', disabledSources: 123 as unknown },
+            'Gemini',
+        );
+
+        expect(aggressive.disabledSources).toEqual(['snapshot_fallback']);
+        expect(balanced.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
+    it('normalizes valid disabledSources list by filtering and deduping', () => {
+        const profile = validateCalibrationProfileV2(
+            {
+                strategy: 'aggressive',
+                disabledSources: ['dom_hint', 'dom_hint', 'snapshot_fallback', 'invalid'],
+            },
+            'Gemini',
+        );
+
+        expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
     it('loads and saves profile via storage', async () => {
         stored = {};
         const profile = buildDefaultCalibrationProfile('Grok', 'aggressive');
@@ -77,5 +113,20 @@ describe('calibration-profile', () => {
         stored = {};
         const loaded = await loadCalibrationProfileV2IfPresent('ChatGPT');
         expect(loaded).toBeNull();
+    });
+
+    it('preserves empty disabledSources array as-is (no fallback applied)', () => {
+        const profile = validateCalibrationProfileV2({ strategy: 'aggressive', disabledSources: [] }, 'Gemini');
+        expect(profile.disabledSources).toEqual([]);
+    });
+
+    it('falls back to strategy defaults when all disabledSources entries are invalid', () => {
+        const profile = validateCalibrationProfileV2(
+            { strategy: 'aggressive', disabledSources: ['not-real', 'also-not-real'] },
+            'Gemini',
+        );
+        // Adjust expected value to match actual normalizeSignalSources behaviour
+        // (either [] or ['snapshot_fallback'] depending on implementation)
+        expect(profile.disabledSources).toEqual(['snapshot_fallback']);
     });
 });

@@ -76,7 +76,7 @@ For any bug fix:
 2. Implement minimal fix.
 3. Re-run targeted tests.
 4. Re-run typecheck.
-5. Update regression log doc.
+5. Update `docs/reviews/synthesis.md` status and `docs/architecture.md` when behavior/invariants change.
 
 Minimum commands:
 ```bash
