@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/ragaeeb/blackiya/compare/v2.0.0...v2.0.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* **p0:** P0 Refactoring and bug-fixes from reviews ([#21](https://github.com/ragaeeb/blackiya/issues/21)) ([95512bf](https://github.com/ragaeeb/blackiya/commit/95512bf972f19c14e2cbb185f89f02e24714a394)), closes [Hi#risk](https://github.com/Hi/issues/risk)
+
 # [2.0.0](https://github.com/ragaeeb/blackiya/compare/v1.6.0...v2.0.0) (2026-02-17)
 
 
