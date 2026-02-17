@@ -256,38 +256,50 @@ const parseGrokComResponseItem = (response: any, rootId: string) => {
     };
 };
 
+const normalizeFromGrokComObject = (data: any): any[] | null => {
+    if (typeof data.responseId === 'string') {
+        return [data];
+    }
+    if (data.response && typeof data.response === 'object') {
+        return [data.response];
+    }
+
+    const resultResponse = data.result?.response;
+    if (!resultResponse || typeof resultResponse !== 'object') {
+        return null;
+    }
+    const modelResp = resultResponse.modelResponse;
+    const userResp = resultResponse.userResponse;
+    if (modelResp && typeof modelResp.responseId === 'string') {
+        return [modelResp];
+    }
+    if (userResp && typeof userResp.responseId === 'string') {
+        return [userResp];
+    }
+    return null;
+};
+
+const normalizeFromGrokComArray = (data: any[]): any[] | null => {
+    const directResponses = data.filter((item) => item && typeof item?.responseId === 'string');
+    return directResponses.length > 0 ? directResponses : null;
+};
+
 const normalizeGrokComResponses = (data: any): any[] | null => {
     if (Array.isArray(data?.responses)) {
         return data.responses;
     }
 
     if (data && typeof data === 'object') {
-        if (typeof data.responseId === 'string') {
-            return [data];
-        }
-        if (data.response && typeof data.response === 'object') {
-            return [data.response];
-        }
-
-        // Handle {result: {response: {modelResponse: {...}}} or {result: {response: {userResponse: {...}}}}
-        // Used by reconnect-response-v2 and conversations/new NDJSON (V2.1-032)
-        const resultResponse = data.result?.response;
-        if (resultResponse && typeof resultResponse === 'object') {
-            const modelResp = resultResponse.modelResponse;
-            const userResp = resultResponse.userResponse;
-            if (modelResp && typeof modelResp.responseId === 'string') {
-                return [modelResp];
-            }
-            if (userResp && typeof userResp.responseId === 'string') {
-                return [userResp];
-            }
+        const normalizedObject = normalizeFromGrokComObject(data);
+        if (normalizedObject) {
+            return normalizedObject;
         }
     }
 
     if (Array.isArray(data)) {
-        const directResponses = data.filter((item) => item && typeof item?.responseId === 'string');
-        if (directResponses.length > 0) {
-            return directResponses;
+        const normalizedArray = normalizeFromGrokComArray(data);
+        if (normalizedArray) {
+            return normalizedArray;
         }
     }
 
@@ -356,70 +368,77 @@ const tryParseGrokNdjson = (data: string, url: string): ConversationData | null 
         url: url.slice(0, 120),
     });
 
-    // Try to determine conversation ID from:
-    // 1. URL path (e.g., /conversations/{id}/...)
-    // 2. NDJSON payload fields (conversationId in any line)
-    // 3. Existing activeConversations cache (last-resort)
-    let conversationId = extractGrokComConversationIdFromUrl(url);
-    const parsedLines: any[] = [];
-
-    for (const line of lines) {
-        try {
-            const parsed = JSON.parse(line);
-            parsedLines.push(parsed);
-            // Extract conversationId from any line that has it
-            if (!conversationId) {
-                // Direct field: {conversationId: "..."}
-                if (typeof parsed?.conversationId === 'string') {
-                    const candidate = parsed.conversationId;
-                    if (GROK_COM_CONVERSATION_ID_PATTERN.test(candidate)) {
-                        conversationId = candidate;
-                    }
-                }
-                // Envelope format: {result: {conversation: {conversationId: "..."}}} (V2.1-032)
-                if (typeof parsed?.result?.conversation?.conversationId === 'string') {
-                    const candidate = parsed.result.conversation.conversationId;
-                    if (GROK_COM_CONVERSATION_ID_PATTERN.test(candidate)) {
-                        conversationId = candidate;
-                    }
-                }
-            }
-        } catch (_e) {
-            // Skip unparseable lines — don't let one bad line break everything
-        }
-    }
-
+    const parsedLines = parseGrokNdjsonLines(lines);
     if (parsedLines.length === 0) {
         return null;
     }
 
-    // If we still don't have a conversation ID, try the most recently active conversation
-    if (!conversationId) {
-        const lastActive = getLastActiveGrokComConversationId();
-        if (lastActive) {
-            conversationId = lastActive;
-            logger.info('[Blackiya/Grok] NDJSON using last-active conversation ID', {
-                conversationId,
-            });
-        }
-    }
-
+    const conversationId = resolveGrokNdjsonConversationId(url, parsedLines);
     if (!conversationId) {
         logger.info('[Blackiya/Grok] NDJSON could not determine conversation ID');
         return null;
     }
 
-    // Parse each line using the existing grok.com response parsers
+    return parseGrokNdjsonConversation(parsedLines, conversationId);
+};
+
+const parseGrokNdjsonLines = (lines: string[]): any[] => {
+    const parsedLines: any[] = [];
+    for (const line of lines) {
+        try {
+            parsedLines.push(JSON.parse(line));
+        } catch {
+            // Skip unparseable lines — don't let one bad line break everything.
+        }
+    }
+    return parsedLines;
+};
+
+const extractGrokNdjsonConversationIdFromPayload = (parsed: any): string | null => {
+    const directCandidate = parsed?.conversationId;
+    if (typeof directCandidate === 'string' && GROK_COM_CONVERSATION_ID_PATTERN.test(directCandidate)) {
+        return directCandidate;
+    }
+    const nestedCandidate = parsed?.result?.conversation?.conversationId;
+    if (typeof nestedCandidate === 'string' && GROK_COM_CONVERSATION_ID_PATTERN.test(nestedCandidate)) {
+        return nestedCandidate;
+    }
+    return null;
+};
+
+const resolveGrokNdjsonConversationId = (url: string, parsedLines: any[]): string | null => {
+    let conversationId = extractGrokComConversationIdFromUrl(url);
+    if (!conversationId) {
+        for (const parsed of parsedLines) {
+            conversationId = extractGrokNdjsonConversationIdFromPayload(parsed);
+            if (conversationId) {
+                break;
+            }
+        }
+    }
+    if (conversationId) {
+        return conversationId;
+    }
+
+    const lastActive = getLastActiveGrokComConversationId();
+    if (lastActive) {
+        logger.info('[Blackiya/Grok] NDJSON using last-active conversation ID', {
+            conversationId: lastActive,
+        });
+        return lastActive;
+    }
+    return null;
+};
+
+const parseGrokNdjsonConversation = (parsedLines: any[], conversationId: string): ConversationData | null => {
     const conversation = getOrCreateGrokComConversation(conversationId);
     let foundMessages = false;
-
     for (const parsed of parsedLines) {
         const result = parseGrokComResponses(parsed, conversationId);
         if (result && hasGrokComMessages(result)) {
             foundMessages = true;
         }
     }
-
     return foundMessages ? conversation : null;
 };
 
@@ -878,6 +897,102 @@ const evaluateGrokReadiness = (data: ConversationData): PlatformReadiness => {
     };
 };
 
+const parseJsonIfNeeded = (data: string | any): any => (typeof data === 'string' ? JSON.parse(data) : data);
+
+const tryHandleGrokTitlesEndpoint = (data: string | any, url: string): boolean => {
+    if (!isTitlesEndpoint(url)) {
+        return false;
+    }
+
+    const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    const titles = parseTitlesResponse(dataStr, url);
+    if (titles) {
+        for (const [id, title] of titles) {
+            conversationTitles.set(id, title);
+        }
+        logger.info(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
+    } else {
+        logger.info('[Blackiya/Grok/Titles] Failed to extract titles from this response');
+    }
+    return true;
+};
+
+const parseGrokComLoadResponsesPayload = (data: string | any, conversationId: string): ConversationData | null => {
+    const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    const lines = dataStr
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim());
+
+    if (lines.length <= 1) {
+        return parseGrokComResponses(parseJsonIfNeeded(data), conversationId);
+    }
+
+    logger.info(`[Blackiya/Grok] Parsing NDJSON with ${lines.length} lines`);
+    let result: ConversationData | null = null;
+    for (const line of lines) {
+        try {
+            const parsed = JSON.parse(line);
+            const lineResult = parseGrokComResponses(parsed, conversationId);
+            if (lineResult) {
+                result = lineResult;
+            }
+        } catch (_e) {
+            logger.warn(`[Blackiya/Grok] Failed to parse NDJSON line: ${line.slice(0, 100)}`);
+        }
+    }
+    return result;
+};
+
+const tryParseGrokComRestEndpoint = (data: string | any, url: string): ConversationData | null | undefined => {
+    if (isGrokComMetaEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url);
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComConversationMeta(parseJsonIfNeeded(data), conversationId);
+    }
+
+    if (isGrokComResponseNodesEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url);
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComResponseNodes(parseJsonIfNeeded(data), conversationId);
+    }
+
+    if (isGrokComLoadResponsesEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url);
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComLoadResponsesPayload(data, conversationId);
+    }
+
+    return undefined;
+};
+
+const resolveXGraphqlConversationId = (url: string): string | undefined => {
+    if (!url || !isXGraphqlEndpoint(url)) {
+        return undefined;
+    }
+    const extracted = extractXConversationIdFromApiUrl(url);
+    return extracted || undefined;
+};
+
+const parseDefaultGrokPayload = (data: string | any, url: string): ConversationData | null => {
+    try {
+        const parsed = parseJsonIfNeeded(data);
+        return parseGrokResponse(parsed, resolveXGraphqlConversationId(url));
+    } catch (e) {
+        if (typeof data === 'string' && data.includes('\n')) {
+            return tryParseGrokNdjson(data, url);
+        }
+        logger.error('[Blackiya/Grok] Failed to parse data:', e);
+        return null;
+    }
+};
+
 /**
  * Grok Platform Adapter
  *
@@ -1010,106 +1125,16 @@ export const grokAdapter: LLMPlatform = {
         });
         // #endregion
 
-        // Check if this is a titles endpoint
-        if (isTitlesEndpoint(url)) {
-            const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-            const titles = parseTitlesResponse(dataStr, url);
-            if (titles) {
-                // Merge into global cache
-                for (const [id, title] of titles) {
-                    conversationTitles.set(id, title);
-                }
-                logger.info(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
-            } else {
-                logger.info('[Blackiya/Grok/Titles] Failed to extract titles from this response');
-            }
-            // Don't return ConversationData for title endpoints
+        if (tryHandleGrokTitlesEndpoint(data, url)) {
             return null;
         }
 
-        // grok.com conversation metadata
-        if (isGrokComMetaEndpoint(url)) {
-            const conversationId = extractGrokComConversationIdFromUrl(url);
-            if (!conversationId) {
-                return null;
-            }
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokComConversationMeta(parsed, conversationId);
+        const grokComResult = tryParseGrokComRestEndpoint(data, url);
+        if (grokComResult !== undefined) {
+            return grokComResult;
         }
 
-        // grok.com response-node graph
-        if (isGrokComResponseNodesEndpoint(url)) {
-            const conversationId = extractGrokComConversationIdFromUrl(url);
-            if (!conversationId) {
-                return null;
-            }
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokComResponseNodes(parsed, conversationId);
-        }
-
-        // grok.com responses payload (may be NDJSON)
-        if (isGrokComLoadResponsesEndpoint(url)) {
-            const conversationId = extractGrokComConversationIdFromUrl(url);
-            if (!conversationId) {
-                return null;
-            }
-
-            // Handle NDJSON format (multiple JSON objects separated by newlines)
-            const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-            const lines = dataStr
-                .trim()
-                .split('\n')
-                .filter((line) => line.trim());
-
-            if (lines.length > 1) {
-                // NDJSON format - parse each line and merge
-                logger.info(`[Blackiya/Grok] Parsing NDJSON with ${lines.length} lines`);
-                let result: ConversationData | null = null;
-
-                for (const line of lines) {
-                    try {
-                        const parsed = JSON.parse(line);
-                        const lineResult = parseGrokComResponses(parsed, conversationId);
-                        if (lineResult) {
-                            result = lineResult; // Keep updating with latest
-                        }
-                    } catch (_e) {
-                        logger.warn(`[Blackiya/Grok] Failed to parse NDJSON line: ${line.slice(0, 100)}`);
-                    }
-                }
-
-                return result;
-            } else {
-                // Single JSON object
-                const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-                return parseGrokComResponses(parsed, conversationId);
-            }
-        }
-
-        // Otherwise, parse as conversation data (x.com GraphQL or grok.com NDJSON fallback)
-        try {
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-
-            // Extract restId from URL if possible to ensure we use the same ID as the cache
-            let conversationIdFromUrl: string | undefined;
-            if (url && isXGraphqlEndpoint(url)) {
-                const extracted = extractXConversationIdFromApiUrl(url);
-                if (extracted) {
-                    conversationIdFromUrl = extracted;
-                }
-            }
-
-            return parseGrokResponse(parsed, conversationIdFromUrl);
-        } catch (e) {
-            // JSON.parse failed — try NDJSON (newline-delimited JSON) as a resilient fallback.
-            // This handles any grok.com endpoint that returns streaming NDJSON
-            // (e.g., conversations/new, add_response.json, or future endpoints).
-            if (typeof data === 'string' && data.includes('\n')) {
-                return tryParseGrokNdjson(data, url);
-            }
-            logger.error('[Blackiya/Grok] Failed to parse data:', e);
-            return null;
-        }
+        return parseDefaultGrokPayload(data, url);
     },
 
     /**

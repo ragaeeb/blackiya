@@ -722,6 +722,31 @@ function trimGeminiDeltaHistory(emittedTextOrder: string[], emittedText: Set<str
     }
 }
 
+async function consumeReadableStreamChunks(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    decoder: TextDecoder,
+    attemptId: string,
+    onChunk: (chunkText: string, chunkBytes: number) => void | Promise<void>,
+): Promise<void> {
+    while (true) {
+        if (isAttemptDisposed(attemptId)) {
+            return;
+        }
+        const { value, done } = await reader.read();
+        if (done) {
+            return;
+        }
+        if (!value || value.length === 0) {
+            continue;
+        }
+        const chunkText = decoder.decode(value, { stream: true });
+        if (chunkText.length === 0) {
+            continue;
+        }
+        await onChunk(chunkText, value.length);
+    }
+}
+
 async function monitorGeminiResponseStream(
     response: Response,
     attemptId: string,
@@ -753,90 +778,157 @@ async function monitorGeminiResponseStream(
     }
 
     try {
-        while (true) {
-            if (isAttemptDisposed(attemptId)) {
-                break;
-            }
-            const { value, done } = await reader.read();
-            if (done) {
-                break;
-            }
-            if (!value || value.length === 0) {
-                continue;
-            }
-
-            const chunkText = decoder.decode(value, { stream: true });
-            if (chunkText.length === 0) {
-                continue;
-            }
-            if (shouldLogTransient(`gemini:fetch-stream:chunk:${attemptId}`, 8000)) {
-                log('info', 'Gemini fetch stream progress', {
-                    attemptId,
-                    chunkBytes: value.length,
-                    conversationId: conversationId ?? null,
-                });
-            }
-
-            buffer += chunkText;
-            if (buffer.length > 900_000) {
-                buffer = buffer.slice(-700_000);
-            }
-            emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, value.length, 'Gemini');
-
-            const {
-                conversationId: parsedConversationId,
-                textCandidates,
-                titleCandidates,
-            } = extractGeminiStreamSignalsFromBuffer(buffer, seenPayloads);
-            for (const payload of seenPayloads) {
-                if (seenPayloadOrder.includes(payload)) {
-                    continue;
-                }
-                seenPayloadOrder.push(payload);
-            }
-            trimGeminiPayloadHistory(seenPayloadOrder, seenPayloads);
-
-            if (!conversationId && parsedConversationId) {
-                conversationId = parsedConversationId;
-                emitConversationIdResolvedSignal(attemptId, conversationId, 'Gemini');
-                if (shouldLogTransient(`gemini:fetch-stream:resolved:${attemptId}`, 8000)) {
-                    log('info', 'Gemini conversation resolved from stream', {
-                        attemptId,
-                        conversationId,
-                    });
-                }
-            }
-
-            if (!emittedStreaming && (textCandidates.length > 0 || chunkText.trim().length > 0)) {
-                emittedStreaming = true;
-                emitLifecycleSignal(attemptId, 'streaming', conversationId, 'Gemini');
-            }
-
-            for (const candidate of textCandidates) {
-                if (emittedText.has(candidate)) {
-                    continue;
-                }
-                emittedText.add(candidate);
-                emittedTextOrder.push(candidate);
-                trimGeminiDeltaHistory(emittedTextOrder, emittedText);
-                emitStreamDeltaSignal(attemptId, conversationId, candidate, 'Gemini');
-                emitStreamDumpFrame(attemptId, conversationId, 'heuristic', candidate, candidate.length, 'Gemini');
-                if (shouldLogTransient(`gemini:fetch-stream:candidate:${attemptId}`, 6000)) {
-                    log('info', 'Gemini stream candidate emitted', {
-                        attemptId,
-                        conversationId: conversationId ?? null,
-                        length: candidate.length,
-                        preview: candidate.slice(0, 120),
-                    });
-                }
-            }
-
-            emitGeminiTitleCandidates(attemptId, conversationId, titleCandidates, emittedTitles);
-        }
+        await consumeReadableStreamChunks(reader, decoder, attemptId, (chunkText, chunkBytes) => {
+            const result = processGeminiFetchStreamChunk(
+                attemptId,
+                conversationId,
+                emittedStreaming,
+                buffer,
+                chunkText,
+                chunkBytes,
+                seenPayloads,
+                seenPayloadOrder,
+                emittedText,
+                emittedTextOrder,
+                emittedTitles,
+            );
+            conversationId = result.conversationId;
+            emittedStreaming = result.emittedStreaming;
+            buffer = result.buffer;
+        });
     } catch {
         // Ignore monitor read errors; completion + canonical capture path remains authoritative.
     } finally {
         reader.releaseLock();
+    }
+}
+
+function processGeminiFetchStreamChunk(
+    attemptId: string,
+    conversationId: string | undefined,
+    emittedStreaming: boolean,
+    buffer: string,
+    chunkText: string,
+    chunkBytes: number,
+    seenPayloads: Set<string>,
+    seenPayloadOrder: string[],
+    emittedText: Set<string>,
+    emittedTextOrder: string[],
+    emittedTitles: Set<string>,
+): { conversationId: string | undefined; emittedStreaming: boolean; buffer: string } {
+    logGeminiFetchChunkProgress(attemptId, conversationId, chunkBytes);
+    buffer = appendGeminiBufferChunk(buffer, chunkText);
+    emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, chunkBytes, 'Gemini');
+
+    const {
+        conversationId: parsedConversationId,
+        textCandidates,
+        titleCandidates,
+    } = extractGeminiStreamSignalsFromBuffer(buffer, seenPayloads);
+
+    syncGeminiSeenPayloadOrderFromSet(seenPayloadOrder, seenPayloads);
+    conversationId = resolveGeminiConversationFromFetchStream(attemptId, conversationId, parsedConversationId);
+    emittedStreaming = emitGeminiStreamingLifecycleFromFetch(
+        attemptId,
+        conversationId,
+        emittedStreaming,
+        textCandidates,
+        chunkText,
+    );
+
+    emitGeminiFetchTextCandidates(attemptId, conversationId, textCandidates, emittedText, emittedTextOrder);
+    emitGeminiTitleCandidates(attemptId, conversationId, titleCandidates, emittedTitles);
+
+    return { conversationId, emittedStreaming, buffer };
+}
+
+function logGeminiFetchChunkProgress(attemptId: string, conversationId: string | undefined, chunkBytes: number): void {
+    if (!shouldLogTransient(`gemini:fetch-stream:chunk:${attemptId}`, 8000)) {
+        return;
+    }
+    log('info', 'Gemini fetch stream progress', {
+        attemptId,
+        chunkBytes,
+        conversationId: conversationId ?? null,
+    });
+}
+
+function appendGeminiBufferChunk(buffer: string, chunkText: string): string {
+    const maxBufferBytes = 900_000;
+    const keepTailBytes = 700_000;
+    const next = buffer + chunkText;
+    if (next.length <= maxBufferBytes) {
+        return next;
+    }
+    return next.slice(-keepTailBytes);
+}
+
+function syncGeminiSeenPayloadOrderFromSet(seenPayloadOrder: string[], seenPayloads: Set<string>): void {
+    for (const payload of seenPayloads) {
+        if (seenPayloadOrder.includes(payload)) {
+            continue;
+        }
+        seenPayloadOrder.push(payload);
+    }
+    trimGeminiPayloadHistory(seenPayloadOrder, seenPayloads);
+}
+
+function resolveGeminiConversationFromFetchStream(
+    attemptId: string,
+    conversationId: string | undefined,
+    parsedConversationId: string | undefined,
+): string | undefined {
+    if (conversationId || !parsedConversationId) {
+        return conversationId;
+    }
+    emitConversationIdResolvedSignal(attemptId, parsedConversationId, 'Gemini');
+    if (shouldLogTransient(`gemini:fetch-stream:resolved:${attemptId}`, 8000)) {
+        log('info', 'Gemini conversation resolved from stream', {
+            attemptId,
+            conversationId: parsedConversationId,
+        });
+    }
+    return parsedConversationId;
+}
+
+function emitGeminiStreamingLifecycleFromFetch(
+    attemptId: string,
+    conversationId: string | undefined,
+    emittedStreaming: boolean,
+    textCandidates: string[],
+    chunkText: string,
+): boolean {
+    if (emittedStreaming || (textCandidates.length === 0 && chunkText.trim().length === 0)) {
+        return emittedStreaming;
+    }
+    emitLifecycleSignal(attemptId, 'streaming', conversationId, 'Gemini');
+    return true;
+}
+
+function emitGeminiFetchTextCandidates(
+    attemptId: string,
+    conversationId: string | undefined,
+    textCandidates: string[],
+    emittedText: Set<string>,
+    emittedTextOrder: string[],
+): void {
+    for (const candidate of textCandidates) {
+        if (emittedText.has(candidate)) {
+            continue;
+        }
+        emittedText.add(candidate);
+        emittedTextOrder.push(candidate);
+        trimGeminiDeltaHistory(emittedTextOrder, emittedText);
+        emitStreamDeltaSignal(attemptId, conversationId, candidate, 'Gemini');
+        emitStreamDumpFrame(attemptId, conversationId, 'heuristic', candidate, candidate.length, 'Gemini');
+        if (shouldLogTransient(`gemini:fetch-stream:candidate:${attemptId}`, 6000)) {
+            log('info', 'Gemini stream candidate emitted', {
+                attemptId,
+                conversationId: conversationId ?? null,
+                length: candidate.length,
+                preview: candidate.slice(0, 120),
+            });
+        }
     }
 }
 
@@ -1099,89 +1191,159 @@ async function monitorGrokResponseStream(
     }
 
     try {
-        while (true) {
-            if (isAttemptDisposed(attemptId)) {
-                break;
-            }
-            const { value, done } = await reader.read();
-            if (done) {
-                break;
-            }
-            if (!value || value.length === 0) {
-                continue;
-            }
-
-            const chunkText = decoder.decode(value, { stream: true });
-            if (chunkText.length === 0) {
-                continue;
-            }
-
-            if (shouldLogTransient(`grok:fetch-stream:chunk:${attemptId}`, 7000)) {
-                log('info', 'Grok fetch stream progress', {
-                    attemptId,
-                    chunkBytes: value.length,
-                    conversationId: conversationId ?? null,
-                });
-            }
-
-            emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, value.length, 'Grok');
-            buffer += chunkText;
-            if (buffer.length > 1_000_000) {
-                buffer = buffer.slice(-800_000);
-            }
-
-            const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
-            buffer = signals.remainingBuffer;
-            appendGrokSeenPayloads(seenPayloadOrder, seenPayloads, signals.seenPayloadKeys);
-
-            if (!conversationId && signals.conversationId) {
-                conversationId = signals.conversationId;
-                emitConversationIdResolvedSignal(attemptId, conversationId, 'Grok');
-                if (shouldLogTransient(`grok:fetch-stream:resolved:${attemptId}`, 7000)) {
-                    log('info', 'Grok conversation resolved from stream', {
-                        attemptId,
-                        conversationId,
-                    });
-                }
-            }
-
-            if (
-                emitLifecyclePhases &&
-                !emittedStreaming &&
-                (signals.textCandidates.length > 0 ||
-                    signals.reasoningCandidates.length > 0 ||
-                    chunkText.trim().length > 0)
-            ) {
-                emittedStreaming = true;
-                emitLifecycleSignal(attemptId, 'streaming', conversationId, 'Grok');
-            }
-
-            emitGrokStreamCandidates(
+        await consumeReadableStreamChunks(reader, decoder, attemptId, (chunkText, chunkBytes) => {
+            const result = processGrokFetchStreamChunk(
                 attemptId,
                 conversationId,
-                signals.textCandidates,
-                signals.reasoningCandidates,
+                emittedStreaming,
+                buffer,
+                chunkText,
+                chunkBytes,
+                emitLifecyclePhases,
+                seenPayloads,
+                seenPayloadOrder,
                 emittedSignals,
                 emittedSignalOrder,
             );
-
-            if (
-                shouldLogTransient(`grok:fetch-stream:signals:${attemptId}`, 7000) &&
-                (signals.textCandidates.length > 0 || signals.reasoningCandidates.length > 0)
-            ) {
-                log('info', 'Grok stream candidates emitted', {
-                    attemptId,
-                    conversationId: conversationId ?? null,
-                    textCandidates: signals.textCandidates.length,
-                    reasoningCandidates: signals.reasoningCandidates.length,
-                });
-            }
-        }
+            conversationId = result.conversationId;
+            emittedStreaming = result.emittedStreaming;
+            buffer = result.buffer;
+        });
     } catch {
         // Ignore stream monitor errors; canonical capture path remains authoritative.
     } finally {
         reader.releaseLock();
     }
+}
+
+function processGrokFetchStreamChunk(
+    attemptId: string,
+    conversationId: string | undefined,
+    emittedStreaming: boolean,
+    buffer: string,
+    chunkText: string,
+    chunkBytes: number,
+    emitLifecyclePhases: boolean,
+    seenPayloads: Set<string>,
+    seenPayloadOrder: string[],
+    emittedSignals: Set<string>,
+    emittedSignalOrder: string[],
+): { conversationId: string | undefined; emittedStreaming: boolean; buffer: string } {
+    logGrokFetchChunkProgress(attemptId, conversationId, chunkBytes);
+    emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, chunkBytes, 'Grok');
+    buffer = appendGrokBufferChunk(buffer, chunkText);
+
+    const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
+    buffer = signals.remainingBuffer;
+    appendGrokSeenPayloads(seenPayloadOrder, seenPayloads, signals.seenPayloadKeys);
+
+    conversationId = resolveGrokConversationFromFetchStream(attemptId, conversationId, signals.conversationId);
+    emittedStreaming = emitGrokStreamingLifecycleFromFetch(
+        attemptId,
+        conversationId,
+        emittedStreaming,
+        emitLifecyclePhases,
+        signals.textCandidates,
+        signals.reasoningCandidates,
+        chunkText,
+    );
+
+    emitGrokStreamCandidates(
+        attemptId,
+        conversationId,
+        signals.textCandidates,
+        signals.reasoningCandidates,
+        emittedSignals,
+        emittedSignalOrder,
+    );
+
+    logGrokFetchCandidateCounts(
+        attemptId,
+        conversationId,
+        signals.textCandidates.length,
+        signals.reasoningCandidates.length,
+    );
+
+    return { conversationId, emittedStreaming, buffer };
+}
+
+function logGrokFetchChunkProgress(attemptId: string, conversationId: string | undefined, chunkBytes: number): void {
+    if (!shouldLogTransient(`grok:fetch-stream:chunk:${attemptId}`, 7000)) {
+        return;
+    }
+    log('info', 'Grok fetch stream progress', {
+        attemptId,
+        chunkBytes,
+        conversationId: conversationId ?? null,
+    });
+}
+
+function appendGrokBufferChunk(buffer: string, chunkText: string): string {
+    const maxBufferBytes = 1_000_000;
+    const keepTailBytes = 800_000;
+    const next = buffer + chunkText;
+    if (next.length <= maxBufferBytes) {
+        return next;
+    }
+    return next.slice(-keepTailBytes);
+}
+
+function resolveGrokConversationFromFetchStream(
+    attemptId: string,
+    conversationId: string | undefined,
+    parsedConversationId: string | undefined,
+): string | undefined {
+    if (conversationId || !parsedConversationId) {
+        return conversationId;
+    }
+    emitConversationIdResolvedSignal(attemptId, parsedConversationId, 'Grok');
+    if (shouldLogTransient(`grok:fetch-stream:resolved:${attemptId}`, 7000)) {
+        log('info', 'Grok conversation resolved from stream', {
+            attemptId,
+            conversationId: parsedConversationId,
+        });
+    }
+    return parsedConversationId;
+}
+
+function emitGrokStreamingLifecycleFromFetch(
+    attemptId: string,
+    conversationId: string | undefined,
+    emittedStreaming: boolean,
+    emitLifecyclePhases: boolean,
+    textCandidates: string[],
+    reasoningCandidates: string[],
+    chunkText: string,
+): boolean {
+    if (
+        !emitLifecyclePhases ||
+        emittedStreaming ||
+        (textCandidates.length === 0 && reasoningCandidates.length === 0 && chunkText.trim().length === 0)
+    ) {
+        return emittedStreaming;
+    }
+    emitLifecycleSignal(attemptId, 'streaming', conversationId, 'Grok');
+    return true;
+}
+
+function logGrokFetchCandidateCounts(
+    attemptId: string,
+    conversationId: string | undefined,
+    textCount: number,
+    reasoningCount: number,
+): void {
+    if (!shouldLogTransient(`grok:fetch-stream:signals:${attemptId}`, 7000)) {
+        return;
+    }
+    if (textCount === 0 && reasoningCount === 0) {
+        return;
+    }
+    log('info', 'Grok stream candidates emitted', {
+        attemptId,
+        conversationId: conversationId ?? null,
+        textCandidates: textCount,
+        reasoningCandidates: reasoningCount,
+    });
 }
 
 function createGrokXhrStreamState(
@@ -1384,113 +1546,46 @@ async function monitorChatGptSseLifecycle(
     let sseBufferForAdapter = '';
     let lastDelta = '';
     let sampledFrames = 0;
+    const sampledFrameLimit = 3;
     const decoder = new TextDecoder();
     if (lifecycleConversationId) {
         emitConversationIdResolvedSignal(attemptId, lifecycleConversationId);
     }
 
     try {
-        while (true) {
-            if (isAttemptDisposed(attemptId)) {
-                break;
-            }
-            const { value, done } = await reader.read();
-            if (done) {
-                break;
-            }
-            if (!value || value.length === 0) {
-                continue;
-            }
-
-            const chunkText = decoder.decode(value, { stream: true });
-            if (!lifecycleConversationId) {
-                const idMatch = chunkText.match(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i);
-                if (idMatch?.[0]) {
-                    lifecycleConversationId = idMatch[0];
-                    emitConversationIdResolvedSignal(attemptId, lifecycleConversationId);
-                }
-            }
-            if (!sawContent && chunkText.trim().length > 0) {
-                sawContent = true;
-                emitLifecycleSignal(attemptId, 'streaming', lifecycleConversationId);
-            }
-
+        await consumeReadableStreamChunks(reader, decoder, attemptId, (chunkText) => {
+            lifecycleConversationId = resolveChatGptConversationIdFromChunk(
+                attemptId,
+                lifecycleConversationId,
+                chunkText,
+            );
+            sawContent = emitChatGptStreamingLifecycle(attemptId, lifecycleConversationId, sawContent, chunkText);
             streamBuffer += chunkText;
 
-            let delimiterIndex = streamBuffer.indexOf('\n\n');
-            while (delimiterIndex >= 0) {
-                const frame = streamBuffer.slice(0, delimiterIndex);
-                streamBuffer = streamBuffer.slice(delimiterIndex + 2);
-
-                const dataPayload = frame
-                    .split(/\r?\n/)
-                    .map((line) => line.trim())
-                    .filter((line) => line.startsWith('data:'))
-                    .map((line) => line.slice(5).trim())
-                    .join('\n')
-                    .trim();
-
-                if (dataPayload.length === 0) {
-                    delimiterIndex = streamBuffer.indexOf('\n\n');
+            const frames = extractChatGptSseFramesFromBuffer(streamBuffer);
+            streamBuffer = frames.remainingBuffer;
+            for (const frame of frames.frames) {
+                const dataPayload = extractChatGptSseDataPayload(frame);
+                if (!dataPayload) {
                     continue;
                 }
 
-                if (dataPayload === '[DONE]') {
-                    doneSignalSeen = true;
-                    emitLifecycleSignal(attemptId, 'completed', lifecycleConversationId);
-                    delimiterIndex = streamBuffer.indexOf('\n\n');
-                    continue;
-                }
+                const frameResult = processChatGptSseDataPayload({
+                    attemptId,
+                    dataPayload,
+                    conversationId: lifecycleConversationId,
+                    sseBufferForAdapter,
+                    lastDelta,
+                    sampledFrames,
+                    sampledFrameLimit,
+                });
 
-                // Extract title_generation events from the SSE stream
-                const resolvedTitle = extractTitleFromSsePayload(dataPayload);
-                if (resolvedTitle && lifecycleConversationId) {
-                    emitTitleResolvedSignal(attemptId, lifecycleConversationId, resolvedTitle);
-                }
-
-                // Reconstruct adapter-compatible SSE so we can extract the latest assistant text snapshot robustly.
-                sseBufferForAdapter += `data: ${dataPayload}\n\n`;
-                if (sseBufferForAdapter.length > 400_000) {
-                    sseBufferForAdapter = sseBufferForAdapter.slice(-250_000);
-                }
-
-                const snapshot = extractAssistantTextSnapshotFromSseBuffer(sseBufferForAdapter);
-                if (snapshot && snapshot !== lastDelta) {
-                    lastDelta = snapshot;
-                    emitStreamDeltaSignal(attemptId, lifecycleConversationId, snapshot);
-                    emitStreamDumpFrame(attemptId, lifecycleConversationId, 'snapshot', snapshot, dataPayload.length);
-                }
-
-                if (!snapshot) {
-                    const heuristics = extractLikelyTextFromSsePayload(dataPayload);
-                    for (const candidate of heuristics) {
-                        if (candidate === lastDelta) {
-                            continue;
-                        }
-                        lastDelta = candidate;
-                        emitStreamDeltaSignal(attemptId, lifecycleConversationId, candidate);
-                        emitStreamDumpFrame(
-                            attemptId,
-                            lifecycleConversationId,
-                            'heuristic',
-                            candidate,
-                            dataPayload.length,
-                        );
-                    }
-                }
-
-                if (sampledFrames < 3 && !snapshot) {
-                    sampledFrames += 1;
-                    log('info', 'stream frame sample', {
-                        conversationId: lifecycleConversationId ?? null,
-                        bytes: dataPayload.length,
-                        preview: dataPayload.slice(0, 220),
-                    });
-                }
-
-                delimiterIndex = streamBuffer.indexOf('\n\n');
+                doneSignalSeen = doneSignalSeen || frameResult.doneSignalSeen;
+                sseBufferForAdapter = frameResult.sseBufferForAdapter;
+                lastDelta = frameResult.lastDelta;
+                sampledFrames = frameResult.sampledFrames;
             }
-        }
+        });
     } catch {
         // Ignore stream read errors; fallback completion signals will handle final state.
     } finally {
@@ -1499,6 +1594,179 @@ async function monitorChatGptSseLifecycle(
         }
         reader.releaseLock();
     }
+}
+
+function resolveChatGptConversationIdFromChunk(
+    attemptId: string,
+    conversationId: string | undefined,
+    chunkText: string,
+): string | undefined {
+    if (conversationId) {
+        return conversationId;
+    }
+    const idMatch = chunkText.match(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i);
+    if (!idMatch?.[0]) {
+        return conversationId;
+    }
+    emitConversationIdResolvedSignal(attemptId, idMatch[0]);
+    return idMatch[0];
+}
+
+function emitChatGptStreamingLifecycle(
+    attemptId: string,
+    conversationId: string | undefined,
+    sawContent: boolean,
+    chunkText: string,
+): boolean {
+    if (sawContent || chunkText.trim().length === 0) {
+        return sawContent;
+    }
+    emitLifecycleSignal(attemptId, 'streaming', conversationId);
+    return true;
+}
+
+function extractChatGptSseFramesFromBuffer(buffer: string): { frames: string[]; remainingBuffer: string } {
+    const frames: string[] = [];
+    let remainingBuffer = buffer;
+    let delimiterIndex = remainingBuffer.indexOf('\n\n');
+    while (delimiterIndex >= 0) {
+        frames.push(remainingBuffer.slice(0, delimiterIndex));
+        remainingBuffer = remainingBuffer.slice(delimiterIndex + 2);
+        delimiterIndex = remainingBuffer.indexOf('\n\n');
+    }
+    return { frames, remainingBuffer };
+}
+
+function extractChatGptSseDataPayload(frame: string): string {
+    return frame
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+        .join('\n')
+        .trim();
+}
+
+type ChatGptSsePayloadContext = {
+    attemptId: string;
+    dataPayload: string;
+    conversationId: string | undefined;
+    sseBufferForAdapter: string;
+    lastDelta: string;
+    sampledFrames: number;
+    sampledFrameLimit: number;
+};
+
+type ChatGptSsePayloadResult = {
+    doneSignalSeen: boolean;
+    sseBufferForAdapter: string;
+    lastDelta: string;
+    sampledFrames: number;
+};
+
+function processChatGptSseDataPayload(context: ChatGptSsePayloadContext): ChatGptSsePayloadResult {
+    const { attemptId, dataPayload, conversationId } = context;
+    let { sseBufferForAdapter, lastDelta, sampledFrames } = context;
+
+    if (dataPayload === '[DONE]') {
+        emitLifecycleSignal(attemptId, 'completed', conversationId);
+        return {
+            doneSignalSeen: true,
+            sseBufferForAdapter,
+            lastDelta,
+            sampledFrames,
+        };
+    }
+
+    emitChatGptTitleFromPayload(attemptId, conversationId, dataPayload);
+    sseBufferForAdapter = appendChatGptSseAdapterBuffer(sseBufferForAdapter, dataPayload);
+
+    const emission = emitChatGptDeltaFromPayload(
+        attemptId,
+        conversationId,
+        dataPayload,
+        sseBufferForAdapter,
+        lastDelta,
+    );
+    lastDelta = emission.lastDelta;
+    if (!emission.hadSnapshot) {
+        sampledFrames = logChatGptStreamFrameSample(
+            conversationId,
+            dataPayload,
+            sampledFrames,
+            context.sampledFrameLimit,
+        );
+    }
+
+    return {
+        doneSignalSeen: false,
+        sseBufferForAdapter,
+        lastDelta,
+        sampledFrames,
+    };
+}
+
+function emitChatGptTitleFromPayload(attemptId: string, conversationId: string | undefined, dataPayload: string): void {
+    const resolvedTitle = extractTitleFromSsePayload(dataPayload);
+    if (!resolvedTitle || !conversationId) {
+        return;
+    }
+    emitTitleResolvedSignal(attemptId, conversationId, resolvedTitle);
+}
+
+function appendChatGptSseAdapterBuffer(sseBufferForAdapter: string, dataPayload: string): string {
+    const maxBufferBytes = 400_000;
+    const keepTailBytes = 250_000;
+    const next = `${sseBufferForAdapter}data: ${dataPayload}\n\n`;
+    if (next.length <= maxBufferBytes) {
+        return next;
+    }
+    return next.slice(-keepTailBytes);
+}
+
+function emitChatGptDeltaFromPayload(
+    attemptId: string,
+    conversationId: string | undefined,
+    dataPayload: string,
+    sseBufferForAdapter: string,
+    lastDelta: string,
+): { hadSnapshot: boolean; lastDelta: string } {
+    const snapshot = extractAssistantTextSnapshotFromSseBuffer(sseBufferForAdapter);
+    if (snapshot && snapshot !== lastDelta) {
+        emitStreamDeltaSignal(attemptId, conversationId, snapshot);
+        emitStreamDumpFrame(attemptId, conversationId, 'snapshot', snapshot, dataPayload.length);
+        return { hadSnapshot: true, lastDelta: snapshot };
+    }
+    if (snapshot) {
+        return { hadSnapshot: true, lastDelta };
+    }
+
+    for (const candidate of extractLikelyTextFromSsePayload(dataPayload)) {
+        if (candidate === lastDelta) {
+            continue;
+        }
+        lastDelta = candidate;
+        emitStreamDeltaSignal(attemptId, conversationId, candidate);
+        emitStreamDumpFrame(attemptId, conversationId, 'heuristic', candidate, dataPayload.length);
+    }
+    return { hadSnapshot: false, lastDelta };
+}
+
+function logChatGptStreamFrameSample(
+    conversationId: string | undefined,
+    dataPayload: string,
+    sampledFrames: number,
+    sampledFrameLimit: number,
+): number {
+    if (sampledFrames >= sampledFrameLimit) {
+        return sampledFrames;
+    }
+    log('info', 'stream frame sample', {
+        conversationId: conversationId ?? null,
+        bytes: dataPayload.length,
+        preview: dataPayload.slice(0, 220),
+    });
+    return sampledFrames + 1;
 }
 
 function isConversationLike(candidate: any, conversationId: string): boolean {
@@ -2225,6 +2493,54 @@ export default defineContentScript({
 
         const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+        const logFetchStatusFailure = (
+            conversationId: string,
+            apiUrl: string,
+            status: number,
+            attempt: number,
+        ): void => {
+            const path = safePathname(apiUrl);
+            if (!shouldLogTransient(`fetch:status:${conversationId}:${path}:${status}`, 5000)) {
+                return;
+            }
+            log('info', 'fetch response', {
+                conversationId,
+                ok: false,
+                status,
+                attempt,
+            });
+        };
+
+        const emitFetchedConversationPayload = (
+            adapter: LLMPlatform,
+            apiUrl: string,
+            conversationId: string,
+            text: string,
+            parsed: ConversationData,
+            attemptId: string,
+        ): void => {
+            const payload = JSON.stringify(parsed);
+            if (!shouldEmitCapturedPayload(adapter.name, apiUrl, payload, 3000)) {
+                return;
+            }
+            log('info', `fetched ${conversationId} ${text.length}b`, {
+                path: safePathname(apiUrl),
+            });
+            emitCapturePayload(apiUrl, payload, adapter.name, attemptId);
+        };
+
+        const parseFetchedConversation = (
+            adapter: LLMPlatform,
+            text: string,
+            apiUrl: string,
+        ): ConversationData | null => {
+            const parsed = adapter.parseInterceptedData(text, apiUrl);
+            if (!isCapturedConversationReady(adapter, parsed)) {
+                return null;
+            }
+            return parsed;
+        };
+
         const tryFetchConversation = async (
             adapter: LLMPlatform,
             conversationId: string,
@@ -2243,32 +2559,16 @@ export default defineContentScript({
                 });
 
                 if (!response.ok) {
-                    const path = safePathname(apiUrl);
-                    if (shouldLogTransient(`fetch:status:${conversationId}:${path}:${response.status}`, 5000)) {
-                        log('info', 'fetch response', {
-                            conversationId,
-                            ok: false,
-                            status: response.status,
-                            attempt,
-                        });
-                    }
+                    logFetchStatusFailure(conversationId, apiUrl, response.status, attempt);
                     return false;
                 }
 
                 const text = await response.text();
-                const parsed = adapter.parseInterceptedData(text, apiUrl);
-                const isComplete = isCapturedConversationReady(adapter, parsed);
-                if (!isComplete) {
+                const parsed = parseFetchedConversation(adapter, text, apiUrl);
+                if (!parsed) {
                     return false;
                 }
-
-                const payload = JSON.stringify(parsed);
-                if (shouldEmitCapturedPayload(adapter.name, apiUrl, payload, 3000)) {
-                    log('info', `fetched ${conversationId} ${text.length}b`, {
-                        path: safePathname(apiUrl),
-                    });
-                    emitCapturePayload(apiUrl, payload, adapter.name, attemptId);
-                }
+                emitFetchedConversationPayload(adapter, apiUrl, conversationId, text, parsed, attemptId);
                 return true;
             } catch (error) {
                 if (shouldLogTransient(`fetch:error:${conversationId}`, 5000)) {
@@ -2353,7 +2653,22 @@ export default defineContentScript({
             });
         };
 
-        window.fetch = (async (...args: Parameters<typeof fetch>) => {
+        type FetchInterceptorContext = {
+            args: Parameters<typeof fetch>;
+            outgoingUrl: string;
+            outgoingMethod: string;
+            outgoingPath: string;
+            fetchApiAdapter: LLMPlatform | null;
+            isNonChatGptApiRequest: boolean;
+            shouldEmitNonChatLifecycle: boolean;
+            nonChatConversationId: string | undefined;
+            nonChatAttemptId: string | undefined;
+            isChatGptPromptRequest: boolean;
+            lifecycleConversationId: string | undefined;
+            lifecycleAttemptId: string | undefined;
+        };
+
+        const createFetchInterceptorContext = (args: Parameters<typeof fetch>): FetchInterceptorContext => {
             const outgoingUrl = getRequestUrl(args[0]);
             const outgoingMethod = getRequestMethod(args).toUpperCase();
             const outgoingPath = safePathname(outgoingUrl);
@@ -2372,86 +2687,151 @@ export default defineContentScript({
                 outgoingMethod === 'POST' && /\/backend-api\/f\/conversation(?:\?.*)?$/i.test(outgoingPath);
             const lifecycleConversationId = isChatGptPromptRequest ? resolveLifecycleConversationId(args) : undefined;
             const lifecycleAttemptId = isChatGptPromptRequest ? createAttemptId('chatgpt') : undefined;
-            if (isChatGptPromptRequest) {
-                if (lifecycleAttemptId) {
-                    latestAttemptIdByPlatform.set(chatGPTAdapter.name, lifecycleAttemptId);
-                    disposedAttemptIds.delete(lifecycleAttemptId);
-                    bindAttemptToConversation(lifecycleAttemptId, lifecycleConversationId);
-                    if (lifecycleConversationId) {
-                        emitConversationIdResolvedSignal(lifecycleAttemptId, lifecycleConversationId);
-                    }
-                    emitLifecycleSignal(lifecycleAttemptId, 'prompt-sent', lifecycleConversationId);
+            return {
+                args,
+                outgoingUrl,
+                outgoingMethod,
+                outgoingPath,
+                fetchApiAdapter,
+                isNonChatGptApiRequest,
+                shouldEmitNonChatLifecycle,
+                nonChatConversationId,
+                nonChatAttemptId,
+                isChatGptPromptRequest,
+                lifecycleConversationId,
+                lifecycleAttemptId,
+            };
+        };
+
+        const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+            if (context.isChatGptPromptRequest && context.lifecycleAttemptId) {
+                latestAttemptIdByPlatform.set(chatGPTAdapter.name, context.lifecycleAttemptId);
+                disposedAttemptIds.delete(context.lifecycleAttemptId);
+                bindAttemptToConversation(context.lifecycleAttemptId, context.lifecycleConversationId);
+                if (context.lifecycleConversationId) {
+                    emitConversationIdResolvedSignal(context.lifecycleAttemptId, context.lifecycleConversationId);
                 }
-            }
-            if (shouldEmitNonChatLifecycle && fetchApiAdapter && nonChatAttemptId) {
-                emitLifecycleSignal(nonChatAttemptId, 'prompt-sent', nonChatConversationId, fetchApiAdapter.name);
-                if (fetchApiAdapter.name !== 'Gemini') {
-                    emitLifecycleSignal(nonChatAttemptId, 'streaming', nonChatConversationId, fetchApiAdapter.name);
-                }
-                if (
-                    fetchApiAdapter.name === 'Grok' &&
-                    shouldLogTransient(`grok:fetch:request:${nonChatAttemptId}`, 3000)
-                ) {
-                    log('info', 'Grok fetch request intercepted', {
-                        attemptId: nonChatAttemptId,
-                        conversationId: nonChatConversationId ?? null,
-                        method: outgoingMethod,
-                        path: outgoingPath,
-                    });
-                }
+                emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
             }
 
-            const response = await originalFetch(...args);
-            const url = outgoingUrl;
-            const contentType = response.headers.get('content-type') ?? '';
-            if (
-                isDiscoveryDiagnosticsEnabled() &&
-                window.location.hostname.includes('gemini.google.com') &&
-                outgoingMethod === 'POST' &&
-                response.ok
-            ) {
-                log('info', '[DISCOVERY] Gemini fetch POST', {
-                    path: safePathname(url),
-                    status: response.status,
-                    contentType,
-                });
+            if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter || !context.nonChatAttemptId) {
+                return;
             }
-            if (isChatGptPromptRequest && contentType.includes('text/event-stream')) {
-                void monitorChatGptSseLifecycle(
-                    response.clone(),
-                    lifecycleAttemptId ?? resolveAttemptIdForConversation(lifecycleConversationId, chatGPTAdapter.name),
-                    lifecycleConversationId,
+
+            emitLifecycleSignal(
+                context.nonChatAttemptId,
+                'prompt-sent',
+                context.nonChatConversationId,
+                context.fetchApiAdapter.name,
+            );
+            if (context.fetchApiAdapter.name !== 'Gemini') {
+                emitLifecycleSignal(
+                    context.nonChatAttemptId,
+                    'streaming',
+                    context.nonChatConversationId,
+                    context.fetchApiAdapter.name,
                 );
             }
-            if (isNonChatGptApiRequest && fetchApiAdapter?.name === 'Gemini' && nonChatAttemptId) {
-                void monitorGeminiResponseStream(response.clone(), nonChatAttemptId, nonChatConversationId);
+
+            if (
+                context.fetchApiAdapter.name === 'Grok' &&
+                shouldLogTransient(`grok:fetch:request:${context.nonChatAttemptId}`, 3000)
+            ) {
+                log('info', 'Grok fetch request intercepted', {
+                    attemptId: context.nonChatAttemptId,
+                    conversationId: context.nonChatConversationId ?? null,
+                    method: context.outgoingMethod,
+                    path: context.outgoingPath,
+                });
             }
-            if (isNonChatGptApiRequest && fetchApiAdapter?.name === 'Grok' && nonChatAttemptId) {
-                if (shouldLogTransient(`grok:fetch:response:${nonChatAttemptId}`, 3000)) {
+        };
+
+        const maybeLogGeminiFetchDiscovery = (context: FetchInterceptorContext, response: Response): void => {
+            if (
+                !isDiscoveryDiagnosticsEnabled() ||
+                !window.location.hostname.includes('gemini.google.com') ||
+                context.outgoingMethod !== 'POST' ||
+                !response.ok
+            ) {
+                return;
+            }
+            const contentType = response.headers.get('content-type') ?? '';
+            log('info', '[DISCOVERY] Gemini fetch POST', {
+                path: safePathname(context.outgoingUrl),
+                status: response.status,
+                contentType,
+            });
+        };
+
+        const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response): void => {
+            const contentType = response.headers.get('content-type') ?? '';
+            if (context.isChatGptPromptRequest && contentType.includes('text/event-stream')) {
+                void monitorChatGptSseLifecycle(
+                    response.clone(),
+                    context.lifecycleAttemptId ??
+                        resolveAttemptIdForConversation(context.lifecycleConversationId, chatGPTAdapter.name),
+                    context.lifecycleConversationId,
+                );
+            }
+
+            if (
+                context.isNonChatGptApiRequest &&
+                context.fetchApiAdapter?.name === 'Gemini' &&
+                context.nonChatAttemptId
+            ) {
+                void monitorGeminiResponseStream(
+                    response.clone(),
+                    context.nonChatAttemptId,
+                    context.nonChatConversationId,
+                );
+            }
+
+            if (
+                context.isNonChatGptApiRequest &&
+                context.fetchApiAdapter?.name === 'Grok' &&
+                context.nonChatAttemptId
+            ) {
+                if (shouldLogTransient(`grok:fetch:response:${context.nonChatAttemptId}`, 3000)) {
                     log('info', 'Grok fetch response intercepted', {
-                        attemptId: nonChatAttemptId,
-                        conversationId: nonChatConversationId ?? null,
+                        attemptId: context.nonChatAttemptId,
+                        conversationId: context.nonChatConversationId ?? null,
                         status: response.status,
                         contentType,
-                        path: safePathname(url),
+                        path: safePathname(context.outgoingUrl),
                     });
                 }
                 void monitorGrokResponseStream(
                     response.clone(),
-                    nonChatAttemptId,
-                    nonChatConversationId,
-                    url,
-                    shouldEmitNonChatLifecycle,
+                    context.nonChatAttemptId,
+                    context.nonChatConversationId,
+                    context.outgoingUrl,
+                    context.shouldEmitNonChatLifecycle,
                 );
             }
-            const completionAdapter = getPlatformAdapterByCompletionUrl(url);
-            if (completionAdapter) {
-                const requestHeaders = extractForwardableHeadersFromFetchArgs(args);
-                void fetchFullConversationWithBackoff(completionAdapter, url, requestHeaders);
+        };
+
+        const maybeRunCompletionFetchBackoff = (context: FetchInterceptorContext): void => {
+            const completionAdapter = getPlatformAdapterByCompletionUrl(context.outgoingUrl);
+            if (!completionAdapter) {
+                return;
             }
+            const requestHeaders = extractForwardableHeadersFromFetchArgs(context.args);
+            void fetchFullConversationWithBackoff(completionAdapter, context.outgoingUrl, requestHeaders);
+        };
+
+        const interceptFetchRequest = async (args: Parameters<typeof fetch>): Promise<Response> => {
+            const context = createFetchInterceptorContext(args);
+            emitFetchPromptLifecycle(context);
+
+            const response = await originalFetch(...args);
+            maybeLogGeminiFetchDiscovery(context, response);
+            maybeMonitorFetchStreams(context, response);
+            maybeRunCompletionFetchBackoff(context);
             handleFetchInterception(args, response);
             return response;
-        }) as any;
+        };
+
+        window.fetch = (async (...args: Parameters<typeof fetch>) => interceptFetchRequest(args)) as any;
 
         // XHR Interceptor
         const XHR = window.XMLHttpRequest;
@@ -2473,71 +2853,135 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
-        XHR.prototype.send = function (body?: any) {
-            const method = (this as any)._method || 'GET';
-            const requestUrl = ((this as any)._url as string | undefined) ?? '';
-            const requestAdapter = method.toUpperCase() === 'POST' ? getPlatformAdapterByApiUrl(requestUrl) : null;
+        type XhrLifecycleContext = {
+            methodUpper: string;
+            requestUrl: string;
+            requestAdapter: LLMPlatform | null;
+            shouldEmitNonChatLifecycle: boolean;
+            conversationId?: string;
+            attemptId?: string;
+        };
+
+        const buildXhrLifecycleContext = (xhr: XMLHttpRequest): XhrLifecycleContext => {
+            const method = ((xhr as any)._method as string | undefined) ?? 'GET';
+            const requestUrl = ((xhr as any)._url as string | undefined) ?? '';
+            const methodUpper = method.toUpperCase();
+            const requestAdapter = methodUpper === 'POST' ? getPlatformAdapterByApiUrl(requestUrl) : null;
             const shouldEmitNonChatLifecycle =
                 !!requestAdapter &&
                 requestAdapter.name !== chatGPTAdapter.name &&
                 shouldEmitNonChatLifecycleForRequest(requestAdapter, requestUrl);
-            if (shouldEmitNonChatLifecycle && requestAdapter) {
-                const conversationId = resolveRequestConversationId(requestAdapter, requestUrl);
-                const attemptId = resolveAttemptIdForConversation(conversationId, requestAdapter.name);
-                emitLifecycleSignal(attemptId, 'prompt-sent', conversationId, requestAdapter.name);
-                if (requestAdapter.name === 'Gemini') {
-                    wireGeminiXhrProgressMonitor(this as XMLHttpRequest, attemptId, conversationId);
-                } else if (requestAdapter.name === 'Grok') {
-                    wireGrokXhrProgressMonitor(this as XMLHttpRequest, attemptId, conversationId);
-                    if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
-                        log('info', 'Grok XHR request intercepted', {
-                            attemptId,
-                            conversationId: conversationId ?? null,
-                            method: method.toUpperCase(),
-                            path: safePathname(requestUrl),
-                        });
-                    }
-                } else {
-                    emitLifecycleSignal(attemptId, 'streaming', conversationId, requestAdapter.name);
-                }
+            const conversationId =
+                shouldEmitNonChatLifecycle && requestAdapter
+                    ? resolveRequestConversationId(requestAdapter, requestUrl)
+                    : undefined;
+            const attemptId =
+                shouldEmitNonChatLifecycle && requestAdapter
+                    ? resolveAttemptIdForConversation(conversationId, requestAdapter.name)
+                    : undefined;
+            return {
+                methodUpper,
+                requestUrl,
+                requestAdapter,
+                shouldEmitNonChatLifecycle,
+                conversationId,
+                attemptId,
+            };
+        };
+
+        const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext): void => {
+            if (
+                !context.shouldEmitNonChatLifecycle ||
+                !context.requestAdapter ||
+                !context.attemptId ||
+                !context.conversationId
+            ) {
+                return;
             }
-            this.addEventListener('load', function () {
-                const xhr = this as XMLHttpRequest;
-                const xhrAdapter =
-                    method.toUpperCase() === 'POST' ? getPlatformAdapterByApiUrl((xhr as any)._url) : null;
-                if (xhrAdapter?.name === 'Grok') {
-                    const conversationId = resolveRequestConversationId(xhrAdapter, (xhr as any)._url ?? '');
-                    const attemptId = resolveAttemptIdForConversation(conversationId, 'Grok');
-                    if (shouldLogTransient(`grok:xhr:response:${attemptId}`, 3000)) {
-                        log('info', 'Grok XHR response intercepted', {
-                            attemptId,
-                            conversationId: conversationId ?? null,
-                            status: xhr.status,
-                            size: xhr.responseText?.length ?? 0,
-                            path: safePathname((xhr as any)._url ?? ''),
-                        });
-                    }
-                }
-                if (
-                    isDiscoveryDiagnosticsEnabled() &&
-                    window.location.hostname.includes('gemini.google.com') &&
-                    method.toUpperCase() === 'POST' &&
-                    xhr.status === 200
-                ) {
-                    const xhrUrl = (xhr as any)._url ?? '';
-                    log('info', '[DISCOVERY] Gemini XHR POST', {
-                        path: safePathname(xhrUrl),
-                        status: xhr.status,
-                        size: xhr.responseText?.length ?? 0,
+
+            emitLifecycleSignal(context.attemptId, 'prompt-sent', context.conversationId, context.requestAdapter.name);
+
+            if (context.requestAdapter.name === 'Gemini') {
+                wireGeminiXhrProgressMonitor(xhr, context.attemptId, context.conversationId);
+                return;
+            }
+            if (context.requestAdapter.name === 'Grok') {
+                wireGrokXhrProgressMonitor(xhr, context.attemptId, context.conversationId);
+                if (shouldLogTransient(`grok:xhr:request:${context.attemptId}`, 3000)) {
+                    log('info', 'Grok XHR request intercepted', {
+                        attemptId: context.attemptId,
+                        conversationId: context.conversationId,
+                        method: context.methodUpper,
+                        path: safePathname(context.requestUrl),
                     });
                 }
-                const completionAdapter = getPlatformAdapterByCompletionUrl((xhr as any)._url);
-                if (completionAdapter) {
-                    const requestHeaders = toForwardableHeaderRecord((xhr as any)._headers);
-                    void fetchFullConversationWithBackoff(completionAdapter, (xhr as any)._url, requestHeaders);
-                }
-                handleXhrLoad(xhr, method);
+                return;
+            }
+            emitLifecycleSignal(context.attemptId, 'streaming', context.conversationId, context.requestAdapter.name);
+        };
+
+        const maybeLogGrokXhrResponse = (xhr: XMLHttpRequest, methodUpper: string): void => {
+            const xhrUrl = ((xhr as any)._url as string | undefined) ?? '';
+            const xhrAdapter = methodUpper === 'POST' ? getPlatformAdapterByApiUrl(xhrUrl) : null;
+            if (xhrAdapter?.name !== 'Grok') {
+                return;
+            }
+            const conversationId = resolveRequestConversationId(xhrAdapter, xhrUrl);
+            const attemptId = resolveAttemptIdForConversation(conversationId, 'Grok');
+            if (!shouldLogTransient(`grok:xhr:response:${attemptId}`, 3000)) {
+                return;
+            }
+            log('info', 'Grok XHR response intercepted', {
+                attemptId,
+                conversationId: conversationId ?? null,
+                status: xhr.status,
+                size: xhr.responseText?.length ?? 0,
+                path: safePathname(xhrUrl),
             });
+        };
+
+        const maybeLogGeminiXhrDiscovery = (xhr: XMLHttpRequest, methodUpper: string): void => {
+            if (
+                !isDiscoveryDiagnosticsEnabled() ||
+                !window.location.hostname.includes('gemini.google.com') ||
+                methodUpper !== 'POST' ||
+                xhr.status !== 200
+            ) {
+                return;
+            }
+            const xhrUrl = ((xhr as any)._url as string | undefined) ?? '';
+            log('info', '[DISCOVERY] Gemini XHR POST', {
+                path: safePathname(xhrUrl),
+                status: xhr.status,
+                size: xhr.responseText?.length ?? 0,
+            });
+        };
+
+        const maybeRunXhrCompletionFetch = (xhr: XMLHttpRequest): void => {
+            const xhrUrl = ((xhr as any)._url as string | undefined) ?? '';
+            const completionAdapter = getPlatformAdapterByCompletionUrl(xhrUrl);
+            if (!completionAdapter) {
+                return;
+            }
+            const requestHeaders = toForwardableHeaderRecord((xhr as any)._headers);
+            void fetchFullConversationWithBackoff(completionAdapter, xhrUrl, requestHeaders);
+        };
+
+        const registerXhrLoadHandler = (xhr: XMLHttpRequest, methodUpper: string): void => {
+            xhr.addEventListener('load', function () {
+                const currentXhr = this as XMLHttpRequest;
+                maybeLogGrokXhrResponse(currentXhr, methodUpper);
+                maybeLogGeminiXhrDiscovery(currentXhr, methodUpper);
+                maybeRunXhrCompletionFetch(currentXhr);
+                handleXhrLoad(currentXhr, methodUpper);
+            });
+        };
+
+        XHR.prototype.send = function (body?: any) {
+            const xhr = this as XMLHttpRequest;
+            const context = buildXhrLifecycleContext(xhr);
+            emitXhrRequestLifecycle(xhr, context);
+            registerXhrLoadHandler(xhr, context.methodUpper);
             return originalSend.call(this, body);
         };
 
@@ -2611,28 +3055,47 @@ export default defineContentScript({
                 window.postMessage(response, window.location.origin);
             };
 
-            const handleAttemptDisposed = (event: MessageEvent) => {
-                if (event.source !== window || event.origin !== window.location.origin) {
-                    return;
+            const isSameWindowOriginEvent = (event: MessageEvent): boolean =>
+                event.source === window && event.origin === window.location.origin;
+
+            const parseAttemptDisposedMessage = (event: MessageEvent): AttemptDisposedMessage | null => {
+                if (!isSameWindowOriginEvent(event)) {
+                    return null;
                 }
                 const message = event.data as AttemptDisposedMessage;
                 if (message?.type !== 'BLACKIYA_ATTEMPT_DISPOSED' || typeof message.attemptId !== 'string') {
+                    return null;
+                }
+                return message;
+            };
+
+            const removeAttemptFromLatestPlatformMap = (attemptIdToRemove: string): void => {
+                for (const [platform, attemptId] of latestAttemptIdByPlatform.entries()) {
+                    if (attemptId === attemptIdToRemove) {
+                        latestAttemptIdByPlatform.delete(platform);
+                    }
+                }
+            };
+
+            const removeAttemptFromConversationMap = (attemptIdToRemove: string): void => {
+                for (const [conversationId, attemptId] of attemptByConversationId.entries()) {
+                    if (attemptId === attemptIdToRemove) {
+                        attemptByConversationId.delete(conversationId);
+                    }
+                }
+            };
+
+            const handleAttemptDisposed = (event: MessageEvent) => {
+                const message = parseAttemptDisposedMessage(event);
+                if (!message) {
                     return;
                 }
 
                 disposedAttemptIds.add(message.attemptId);
                 streamDumpFrameCountByAttempt.delete(message.attemptId);
                 streamDumpLastTextByAttempt.delete(message.attemptId);
-                for (const [platform, attemptId] of latestAttemptIdByPlatform.entries()) {
-                    if (attemptId === message.attemptId) {
-                        latestAttemptIdByPlatform.delete(platform);
-                    }
-                }
-                for (const [conversationId, attemptId] of attemptByConversationId.entries()) {
-                    if (attemptId === message.attemptId) {
-                        attemptByConversationId.delete(conversationId);
-                    }
-                }
+                removeAttemptFromLatestPlatformMap(message.attemptId);
+                removeAttemptFromConversationMap(message.attemptId);
             };
 
             const handleStreamDumpConfig = (event: MessageEvent) => {

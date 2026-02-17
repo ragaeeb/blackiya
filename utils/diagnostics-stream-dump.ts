@@ -229,81 +229,114 @@ export class BufferedStreamDumpStorage {
         }, this.flushIntervalMs);
     }
 
-    private async flush(): Promise<void> {
+    private beginFlushBatch(): StreamDumpFrameInput[] | null {
         if (this.isFlushing || this.buffer.length === 0) {
-            return;
+            return null;
         }
-
         this.isFlushing = true;
         if (this.flushTimer) {
             clearTimeout(this.flushTimer);
             this.flushTimer = null;
         }
+        const batch = [...this.buffer];
+        this.buffer = [];
+        return batch;
+    }
+
+    private getSessionMap(store: StreamDumpStore): Map<string, StreamDumpSession> {
+        const byAttempt = new Map<string, StreamDumpSession>();
+        for (const session of store.sessions) {
+            byAttempt.set(session.attemptId, session);
+        }
+        return byAttempt;
+    }
+
+    private getOrCreateSession(
+        byAttempt: Map<string, StreamDumpSession>,
+        input: StreamDumpFrameInput,
+        nowIso: string,
+    ): StreamDumpSession {
+        let session = byAttempt.get(input.attemptId);
+        if (session) {
+            return session;
+        }
+        session = {
+            attemptId: input.attemptId,
+            platform: input.platform,
+            conversationId: typeof input.conversationId === 'string' ? input.conversationId : null,
+            startedAt: nowIso,
+            updatedAt: nowIso,
+            frameCount: 0,
+            truncated: false,
+            frames: [],
+        };
+        byAttempt.set(input.attemptId, session);
+        return session;
+    }
+
+    private pushFrameToSession(session: StreamDumpSession, input: StreamDumpFrameInput, nowIso: string): void {
+        const { text, truncated } = sanitizeFrameText(input.text, this.maxTextCharsPerFrame);
+        if (text.length === 0) {
+            return;
+        }
+        if (!session.conversationId && typeof input.conversationId === 'string') {
+            session.conversationId = input.conversationId;
+        }
+        session.updatedAt = nowIso;
+        session.frameCount += 1;
+        session.truncated = session.truncated || truncated;
+
+        if (session.frames.length >= this.maxFramesPerSession) {
+            session.frames.shift();
+            session.truncated = true;
+        }
+
+        session.frames.push({
+            timestamp: nowIso,
+            platform: input.platform,
+            attemptId: input.attemptId,
+            conversationId: typeof input.conversationId === 'string' ? input.conversationId : null,
+            kind: input.kind,
+            text,
+            ...(typeof input.chunkBytes === 'number' ? { chunkBytes: input.chunkBytes } : {}),
+            ...(typeof input.frameIndex === 'number' ? { frameIndex: input.frameIndex } : {}),
+        });
+    }
+
+    private mergeBatchIntoSessions(
+        byAttempt: Map<string, StreamDumpSession>,
+        batch: StreamDumpFrameInput[],
+    ): Map<string, StreamDumpSession> {
+        for (const input of batch) {
+            const nowIso = new Date(input.timestampMs ?? Date.now()).toISOString();
+            const session = this.getOrCreateSession(byAttempt, input, nowIso);
+            this.pushFrameToSession(session, input, nowIso);
+        }
+        return byAttempt;
+    }
+
+    private finalizeSessions(byAttempt: Map<string, StreamDumpSession>): StreamDumpSession[] {
+        const sessions = [...byAttempt.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        const pruned = sessions.slice(0, this.maxSessions);
+        const dropped = sessions.length - pruned.length;
+        if (dropped > 0) {
+            pruned[0].truncated = true;
+        }
+        return pruned;
+    }
+
+    private async flush(): Promise<void> {
+        const batch = this.beginFlushBatch();
+        if (!batch) {
+            return;
+        }
 
         try {
-            const batch = [...this.buffer];
-            this.buffer = [];
-
             const result = await this.storage.get(this.storageKey);
             const store = normalizeStore(result[this.storageKey]);
-            const byAttempt = new Map<string, StreamDumpSession>();
-            for (const session of store.sessions) {
-                byAttempt.set(session.attemptId, session);
-            }
-
-            for (const input of batch) {
-                const nowIso = new Date(input.timestampMs ?? Date.now()).toISOString();
-                const { text, truncated } = sanitizeFrameText(input.text, this.maxTextCharsPerFrame);
-                if (text.length === 0) {
-                    continue;
-                }
-
-                let session = byAttempt.get(input.attemptId);
-                if (!session) {
-                    session = {
-                        attemptId: input.attemptId,
-                        platform: input.platform,
-                        conversationId: typeof input.conversationId === 'string' ? input.conversationId : null,
-                        startedAt: nowIso,
-                        updatedAt: nowIso,
-                        frameCount: 0,
-                        truncated: false,
-                        frames: [],
-                    };
-                    byAttempt.set(input.attemptId, session);
-                }
-
-                if (!session.conversationId && typeof input.conversationId === 'string') {
-                    session.conversationId = input.conversationId;
-                }
-                session.updatedAt = nowIso;
-                session.frameCount += 1;
-                session.truncated = session.truncated || truncated;
-
-                if (session.frames.length >= this.maxFramesPerSession) {
-                    session.frames.shift();
-                    session.truncated = true;
-                }
-
-                session.frames.push({
-                    timestamp: nowIso,
-                    platform: input.platform,
-                    attemptId: input.attemptId,
-                    conversationId: typeof input.conversationId === 'string' ? input.conversationId : null,
-                    kind: input.kind,
-                    text,
-                    ...(typeof input.chunkBytes === 'number' ? { chunkBytes: input.chunkBytes } : {}),
-                    ...(typeof input.frameIndex === 'number' ? { frameIndex: input.frameIndex } : {}),
-                });
-            }
-
-            const sessions = [...byAttempt.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-            const pruned = sessions.slice(0, this.maxSessions);
-            const dropped = sessions.length - pruned.length;
-            if (dropped > 0) {
-                // Keep a small signal that trimming occurred by marking newest session as truncated.
-                pruned[0].truncated = true;
-            }
+            const byAttempt = this.getSessionMap(store);
+            this.mergeBatchIntoSessions(byAttempt, batch);
+            const pruned = this.finalizeSessions(byAttempt);
 
             const nextStore: StreamDumpStore = {
                 schemaVersion: 1,

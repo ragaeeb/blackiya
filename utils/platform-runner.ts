@@ -51,6 +51,7 @@ type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page
 type CalibrationMode = 'manual' | 'auto';
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
+type InterceptionCaptureMeta = { attemptId?: string; source?: string };
 const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
 const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
 const CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS = 400;
@@ -370,70 +371,96 @@ export function runPlatform(): void {
     // 1. UI Manager
     const buttonManager = new ButtonManager(handleSaveClick, handleCopyClick, handleCalibrationClick);
 
-    // 2. Data Manager
-    const interceptionManager = new InterceptionManager((capturedId, data, meta) => {
-        // Apply stream-resolved title if the cached data has a stale/placeholder title
-        const streamTitle = streamResolvedTitles.get(capturedId);
+    function applyStreamResolvedTitleIfNeeded(conversationId: string, data: ConversationData): void {
+        const streamTitle = streamResolvedTitles.get(conversationId);
         if (streamTitle && data.title !== streamTitle) {
             data.title = streamTitle;
         }
+    }
 
-        currentConversationId = capturedId;
-        if (meta?.attemptId) {
-            activeAttemptId = meta.attemptId;
-            bindAttempt(capturedId, meta.attemptId);
+    function updateActiveAttemptFromMeta(conversationId: string, meta?: InterceptionCaptureMeta): void {
+        if (!meta?.attemptId) {
+            return;
         }
+        activeAttemptId = meta.attemptId;
+        bindAttempt(conversationId, meta.attemptId);
+    }
+
+    function handleSnapshotSourceCapture(conversationId: string, source: string): void {
+        const existingDecision = resolveReadinessDecision(conversationId);
+        if (existingDecision.mode === 'canonical_ready') {
+            markCanonicalCaptureMeta(conversationId);
+        } else {
+            markSnapshotCaptureMeta(conversationId);
+        }
+        structuredLogger.emit(
+            resolveAttemptId(conversationId),
+            'info',
+            'snapshot_degraded_mode_used',
+            'Snapshot-based capture marked as degraded/manual-only',
+            { conversationId, source },
+            `snapshot-degraded:${conversationId}:${source}`,
+        );
+
+        const retryAttemptIdResolved = resolveAttemptId(conversationId);
+        logger.info('Snapshot retry decision', {
+            conversationId,
+            lifecycleState,
+            willSchedule: lifecycleState === 'completed',
+            attemptId: retryAttemptIdResolved,
+        });
+        if (lifecycleState === 'completed') {
+            scheduleCanonicalStabilizationRetry(conversationId, retryAttemptIdResolved);
+        }
+    }
+
+    function handleNetworkSourceCapture(
+        conversationId: string,
+        meta?: InterceptionCaptureMeta,
+        data?: ConversationData,
+    ): void {
+        if (!data) {
+            return;
+        }
+        const source = meta?.source ?? 'network';
+        const effectiveAttemptId = resolveAliasedAttemptId(meta?.attemptId ?? resolveAttemptId(conversationId));
+        maybeRestartCanonicalRecoveryAfterTimeout(conversationId, effectiveAttemptId);
+        logger.info('Network source: marking canonical fidelity', {
+            conversationId,
+            source,
+            effectiveAttemptId,
+            readinessReady: evaluateReadinessForData(data).ready,
+        });
+        markCanonicalCaptureMeta(conversationId);
+        ingestSfeCanonicalSample(data, effectiveAttemptId);
+    }
+
+    function processInterceptionCapture(
+        capturedId: string,
+        data: ConversationData,
+        meta?: InterceptionCaptureMeta,
+    ): void {
+        applyStreamResolvedTitleIfNeeded(capturedId, data);
+        currentConversationId = capturedId;
+        updateActiveAttemptFromMeta(capturedId, meta);
+
         const source = meta?.source ?? 'network';
         const isSnapshotSource = source.includes('snapshot') || source.includes('dom');
         if (isSnapshotSource) {
-            const existingDecision = resolveReadinessDecision(capturedId);
-            if (existingDecision.mode === 'canonical_ready') {
-                markCanonicalCaptureMeta(capturedId);
-            } else {
-                markSnapshotCaptureMeta(capturedId);
-            }
-            structuredLogger.emit(
-                resolveAttemptId(capturedId),
-                'info',
-                'snapshot_degraded_mode_used',
-                'Snapshot-based capture marked as degraded/manual-only',
-                { conversationId: capturedId, source },
-                `snapshot-degraded:${capturedId}:${source}`,
-            );
-            const retryAttemptIdResolved = resolveAttemptId(capturedId);
-            // #region agent log
-            logger.info('Snapshot retry decision', {
-                conversationId: capturedId,
-                lifecycleState,
-                willSchedule: lifecycleState === 'completed',
-                attemptId: retryAttemptIdResolved,
-            });
-            // #endregion
-            if (lifecycleState === 'completed') {
-                scheduleCanonicalStabilizationRetry(capturedId, retryAttemptIdResolved);
-            }
+            handleSnapshotSourceCapture(capturedId, source);
         } else {
-            const effectiveAttemptId = resolveAliasedAttemptId(meta?.attemptId ?? resolveAttemptId(capturedId));
-            maybeRestartCanonicalRecoveryAfterTimeout(capturedId, effectiveAttemptId);
-            // Canonical API data is high-fidelity by definition. Promote fidelity
-            // immediately so that stabilization retry can ingest second samples via
-            // shouldIngestAsCanonicalSample. Without this, a prior degraded snapshot
-            // capture blocks the retry loop and the SFE never reaches captured_ready.
-            // #region agent log
-            logger.info('Network source: marking canonical fidelity', {
-                conversationId: capturedId,
-                source,
-                effectiveAttemptId,
-                readinessReady: evaluateReadinessForData(data).ready,
-            });
-            // #endregion
-            markCanonicalCaptureMeta(capturedId);
-            ingestSfeCanonicalSample(data, effectiveAttemptId);
+            handleNetworkSourceCapture(capturedId, meta, data);
         }
+
         refreshButtonState(capturedId);
         if (evaluateReadinessForData(data).ready) {
             handleResponseFinished('network', capturedId);
         }
+    }
+
+    // 2. Data Manager
+    const interceptionManager = new InterceptionManager((capturedId, data, meta) => {
+        processInterceptionCapture(capturedId, data, meta);
     });
 
     // 3. Navigation Manager
@@ -772,14 +799,139 @@ export function runPlatform(): void {
         return elapsed >= timeoutMs;
     }
 
-    async function processCanonicalStabilizationRetryTick(
+    async function tryPromoteReadySnapshotAsCanonical(
         conversationId: string,
         attemptId: string,
         retries: number,
-    ): Promise<void> {
-        canonicalStabilizationRetryTimers.delete(attemptId);
-        canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
+        fetchSucceeded: boolean,
+        readinessResult: PlatformReadiness,
+    ): Promise<boolean> {
+        if (fetchSucceeded || !readinessResult.ready) {
+            return false;
+        }
+        logger.info('Promoting ready snapshot to canonical (API unreachable)', {
+            conversationId,
+            retries: retries + 1,
+        });
+        markCanonicalCaptureMeta(conversationId);
+        const cached = interceptionManager.getConversation(conversationId);
+        if (!cached) {
+            return false;
+        }
+        ingestSfeCanonicalSample(cached, attemptId);
+        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+        refreshButtonState(conversationId);
+        return true;
+    }
 
+    async function tryRefreshDegradedSnapshotAndPromote(
+        conversationId: string,
+        attemptId: string,
+        retries: number,
+        fetchSucceeded: boolean,
+        readinessResult: PlatformReadiness,
+    ): Promise<boolean> {
+        if (fetchSucceeded || readinessResult.ready) {
+            return false;
+        }
+        logger.info('Snapshot promotion skipped: readiness check failed, re-requesting snapshot', {
+            conversationId,
+            retries: retries + 1,
+            reason: readinessResult.reason,
+            terminal: readinessResult.terminal,
+        });
+
+        const freshSnapshot = await requestPageSnapshot(conversationId);
+        const freshData = freshSnapshot ?? resolveIsolatedSnapshotData(conversationId);
+        if (!freshData) {
+            return false;
+        }
+
+        ingestStabilizationRetrySnapshot(conversationId, freshData);
+
+        const recheckCached = getReadyCachedConversation(conversationId);
+        if (!recheckCached) {
+            return false;
+        }
+
+        logger.info('Fresh snapshot promoted to canonical after re-request', {
+            conversationId,
+            retries: retries + 1,
+        });
+        markCanonicalCaptureMeta(conversationId);
+        ingestSfeCanonicalSample(recheckCached, attemptId);
+        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+        refreshButtonState(conversationId);
+        return true;
+    }
+
+    function getReadyCachedConversation(conversationId: string): ConversationData | null {
+        const recheckCached = interceptionManager.getConversation(conversationId);
+        if (!recheckCached) {
+            return null;
+        }
+        return evaluateReadinessForData(recheckCached).ready ? recheckCached : null;
+    }
+
+    function resolveIsolatedSnapshotData(conversationId: string): ConversationData | null {
+        if (!currentAdapter) {
+            return null;
+        }
+        return buildIsolatedDomSnapshot(currentAdapter, conversationId);
+    }
+
+    function ingestStabilizationRetrySnapshot(
+        conversationId: string,
+        freshData: ConversationData | RawCaptureSnapshot | unknown,
+    ): void {
+        if (isConversationDataLike(freshData)) {
+            interceptionManager.ingestConversationData(freshData, 'stabilization-retry-snapshot');
+            return;
+        }
+        interceptionManager.ingestInterceptedData({
+            url: `stabilization-retry-snapshot://${currentAdapter?.name ?? 'unknown'}/${conversationId}`,
+            data: JSON.stringify(freshData),
+            platform: currentAdapter?.name ?? 'unknown',
+        });
+    }
+
+    async function handleDegradedCanonicalCandidate(
+        conversationId: string,
+        attemptId: string,
+        retries: number,
+        fetchSucceeded: boolean,
+        cached: ConversationData,
+    ): Promise<void> {
+        const readinessResult = evaluateReadinessForData(cached);
+        if (
+            await tryPromoteReadySnapshotAsCanonical(
+                conversationId,
+                attemptId,
+                retries,
+                fetchSucceeded,
+                readinessResult,
+            )
+        ) {
+            return;
+        }
+
+        if (
+            await tryRefreshDegradedSnapshotAndPromote(
+                conversationId,
+                attemptId,
+                retries,
+                fetchSucceeded,
+                readinessResult,
+            )
+        ) {
+            return;
+        }
+
+        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+        refreshButtonState(conversationId);
+    }
+
+    function shouldSkipCanonicalRetryTick(conversationId: string, attemptId: string, retries: number): boolean {
         const disposed = isAttemptDisposedOrSuperseded(attemptId);
         const mappedAttempt = attemptByConversation.get(conversationId);
         const mappedMismatch = !!mappedAttempt && mappedAttempt !== attemptId;
@@ -791,11 +943,17 @@ export function runPlatform(): void {
             mappedMismatch,
             sfePhase: sfe.resolve(attemptId).phase,
         });
-        if (disposed) {
-            return;
-        }
+        return disposed || mappedMismatch;
+    }
 
-        if (mappedMismatch) {
+    async function processCanonicalStabilizationRetryTick(
+        conversationId: string,
+        attemptId: string,
+        retries: number,
+    ): Promise<void> {
+        canonicalStabilizationRetryTimers.delete(attemptId);
+        canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
+        if (shouldSkipCanonicalRetryTick(conversationId, attemptId, retries)) {
             return;
         }
 
@@ -809,67 +967,7 @@ export function runPlatform(): void {
 
         const captureMeta = getCaptureMeta(conversationId);
         if (!shouldIngestAsCanonicalSample(captureMeta)) {
-            // The cached data is degraded (from a DOM snapshot) and the warm
-            // fetch failed — typically because the ChatGPT API returns 404 for
-            // requests made from the ISOLATED content script world (missing
-            // Authorization header). If the cached snapshot already passes
-            // readiness, promote it to canonical so the SFE can stabilize.
-            const readinessResult = evaluateReadinessForData(cached);
-            if (!fetchSucceeded && readinessResult.ready) {
-                // #region agent log
-                logger.info('Promoting ready snapshot to canonical (API unreachable)', {
-                    conversationId,
-                    retries: retries + 1,
-                });
-                // #endregion
-                markCanonicalCaptureMeta(conversationId);
-                ingestSfeCanonicalSample(cached, attemptId);
-                scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-                refreshButtonState(conversationId);
-                return;
-            }
-            // The cached snapshot is stale (e.g., assistant-missing for thinking
-            // models where the DOM hadn't rendered the response at initial capture
-            // time). Re-request a fresh DOM snapshot — the DOM has likely finished
-            // rendering by now.
-            if (!fetchSucceeded && !readinessResult.ready) {
-                logger.info('Snapshot promotion skipped: readiness check failed, re-requesting snapshot', {
-                    conversationId,
-                    retries: retries + 1,
-                    reason: readinessResult.reason,
-                    terminal: readinessResult.terminal,
-                });
-                const freshSnapshot = await requestPageSnapshot(conversationId);
-                const freshData =
-                    freshSnapshot ?? (currentAdapter ? buildIsolatedDomSnapshot(currentAdapter, conversationId) : null);
-                if (freshData) {
-                    if (isConversationDataLike(freshData)) {
-                        interceptionManager.ingestConversationData(freshData, 'stabilization-retry-snapshot');
-                    } else {
-                        interceptionManager.ingestInterceptedData({
-                            url: `stabilization-retry-snapshot://${currentAdapter?.name ?? 'unknown'}/${conversationId}`,
-                            data: JSON.stringify(freshData),
-                            platform: currentAdapter?.name ?? 'unknown',
-                        });
-                    }
-
-                    const recheckCached = interceptionManager.getConversation(conversationId);
-                    const recheckReadiness = recheckCached ? evaluateReadinessForData(recheckCached) : null;
-                    if (recheckReadiness?.ready) {
-                        logger.info('Fresh snapshot promoted to canonical after re-request', {
-                            conversationId,
-                            retries: retries + 1,
-                        });
-                        markCanonicalCaptureMeta(conversationId);
-                        ingestSfeCanonicalSample(recheckCached!, attemptId);
-                        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-                        refreshButtonState(conversationId);
-                        return;
-                    }
-                }
-            }
-            scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-            refreshButtonState(conversationId);
+            await handleDegradedCanonicalCandidate(conversationId, attemptId, retries, fetchSucceeded, cached);
             return;
         }
 
@@ -1219,36 +1317,49 @@ export function runPlatform(): void {
         return calibrationPreferenceLoading;
     }
 
+    function buildCalibrationTimings(step: CalibrationStep): CalibrationProfileV2['timingsMs'] {
+        if (step === 'passive-wait') {
+            return { passiveWait: 900, domQuietWindow: 500, maxStabilizationWait: 12_000 };
+        }
+        if (step === 'endpoint-retry') {
+            return { passiveWait: 1400, domQuietWindow: 800, maxStabilizationWait: 18_000 };
+        }
+        return { passiveWait: 2200, domQuietWindow: 800, maxStabilizationWait: 30_000 };
+    }
+
+    function buildCalibrationRetry(step: CalibrationStep): CalibrationProfileV2['retry'] {
+        if (step === 'passive-wait') {
+            return { maxAttempts: 3, backoffMs: [300, 800, 1300], hardTimeoutMs: 12_000 };
+        }
+        if (step === 'endpoint-retry') {
+            return { maxAttempts: 4, backoffMs: [400, 900, 1600, 2400], hardTimeoutMs: 20_000 };
+        }
+        return {
+            maxAttempts: 6,
+            backoffMs: [800, 1600, 2600, 3800, 5200, 7000],
+            hardTimeoutMs: 30_000,
+        };
+    }
+
+    function buildCalibrationProfile(platformName: string, step: CalibrationStep): CalibrationProfileV2 {
+        return {
+            schemaVersion: 2,
+            platform: platformName,
+            strategy: strategyFromPreferredStep(step),
+            disabledSources: ['dom_hint', 'snapshot_fallback'],
+            timingsMs: buildCalibrationTimings(step),
+            retry: buildCalibrationRetry(step),
+            updatedAt: new Date().toISOString(),
+            lastModifiedBy: 'manual',
+        };
+    }
+
     async function rememberCalibrationSuccess(platformName: string, step: CalibrationStep): Promise<void> {
         try {
             rememberedPreferredStep = step;
             rememberedCalibrationUpdatedAt = new Date().toISOString();
             calibrationPreferenceLoaded = true;
-
-            await saveCalibrationProfileV2({
-                schemaVersion: 2,
-                platform: platformName,
-                strategy: strategyFromPreferredStep(step),
-                disabledSources: ['dom_hint', 'snapshot_fallback'],
-                timingsMs: {
-                    passiveWait: step === 'passive-wait' ? 900 : step === 'endpoint-retry' ? 1400 : 2200,
-                    domQuietWindow: step === 'passive-wait' ? 500 : 800,
-                    maxStabilizationWait:
-                        step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 18_000 : 30_000,
-                },
-                retry: {
-                    maxAttempts: step === 'passive-wait' ? 3 : step === 'endpoint-retry' ? 4 : 6,
-                    backoffMs:
-                        step === 'passive-wait'
-                            ? [300, 800, 1300]
-                            : step === 'endpoint-retry'
-                              ? [400, 900, 1600, 2400]
-                              : [800, 1600, 2600, 3800, 5200, 7000],
-                    hardTimeoutMs: step === 'passive-wait' ? 12_000 : step === 'endpoint-retry' ? 20_000 : 30_000,
-                },
-                updatedAt: new Date().toISOString(),
-                lastModifiedBy: 'manual',
-            });
+            await saveCalibrationProfileV2(buildCalibrationProfile(platformName, step));
         } catch (error) {
             logger.warn('Failed to save calibration profile', error);
         }
@@ -1481,45 +1592,73 @@ export function runPlatform(): void {
         return assistantTexts.join('\n\n').trim();
     }
 
+    async function resolveStreamDoneFallbackSnapshot(
+        conversationId: string,
+    ): Promise<ConversationData | RawCaptureSnapshot | unknown | null> {
+        if (!currentAdapter) {
+            return null;
+        }
+        const snapshot = await requestPageSnapshot(conversationId);
+        return snapshot ?? buildIsolatedDomSnapshot(currentAdapter, conversationId);
+    }
+
+    function ingestStreamDoneSnapshot(
+        conversationId: string,
+        snapshot: ConversationData | RawCaptureSnapshot | unknown,
+    ): void {
+        if (!currentAdapter) {
+            return;
+        }
+        if (isConversationDataLike(snapshot)) {
+            interceptionManager.ingestConversationData(snapshot, 'stream-done-snapshot');
+            return;
+        }
+        if (isRawCaptureSnapshot(snapshot)) {
+            const replayUrls = getRawSnapshotReplayUrls(currentAdapter, conversationId, snapshot);
+            for (const replayUrl of replayUrls) {
+                interceptionManager.ingestInterceptedData({
+                    url: replayUrl,
+                    data: snapshot.data,
+                    platform: snapshot.platform ?? currentAdapter.name,
+                });
+                const cachedReplay = interceptionManager.getConversation(conversationId);
+                if (cachedReplay && evaluateReadinessForData(cachedReplay).ready) {
+                    break;
+                }
+            }
+            return;
+        }
+        interceptionManager.ingestInterceptedData({
+            url: `stream-snapshot://${currentAdapter.name}/${conversationId}`,
+            data: JSON.stringify(snapshot),
+            platform: currentAdapter.name,
+        });
+    }
+
+    function logStreamDoneSnapshotCaptured(conversationId: string): void {
+        if (!currentAdapter) {
+            return;
+        }
+        logger.info('Stream done snapshot fallback captured', {
+            platform: currentAdapter.name,
+            conversationId,
+        });
+    }
+
     async function tryStreamDoneSnapshotCapture(conversationId: string, attemptId: string): Promise<boolean> {
         if (!currentAdapter || isAttemptDisposedOrSuperseded(attemptId)) {
             return false;
         }
 
-        logger.info('Stream done snapshot fallback requested', {
-            platform: currentAdapter.name,
-            conversationId,
-        });
+        logStreamDoneSnapshotRequested(conversationId);
 
-        const snapshot = await requestPageSnapshot(conversationId);
-        const fallbackSnapshot = snapshot ?? buildIsolatedDomSnapshot(currentAdapter, conversationId);
+        const fallbackSnapshot = await resolveStreamDoneFallbackSnapshot(conversationId);
         if (!fallbackSnapshot) {
             return false;
         }
 
         try {
-            if (isConversationDataLike(fallbackSnapshot)) {
-                interceptionManager.ingestConversationData(fallbackSnapshot, 'stream-done-snapshot');
-            } else if (isRawCaptureSnapshot(fallbackSnapshot)) {
-                const replayUrls = getRawSnapshotReplayUrls(currentAdapter, conversationId, fallbackSnapshot);
-                for (const replayUrl of replayUrls) {
-                    interceptionManager.ingestInterceptedData({
-                        url: replayUrl,
-                        data: fallbackSnapshot.data,
-                        platform: fallbackSnapshot.platform ?? currentAdapter.name,
-                    });
-                    const cachedReplay = interceptionManager.getConversation(conversationId);
-                    if (cachedReplay && evaluateReadinessForData(cachedReplay).ready) {
-                        break;
-                    }
-                }
-            } else {
-                interceptionManager.ingestInterceptedData({
-                    url: `stream-snapshot://${currentAdapter.name}/${conversationId}`,
-                    data: JSON.stringify(fallbackSnapshot),
-                    platform: currentAdapter.name,
-                });
-            }
+            ingestStreamDoneSnapshot(conversationId, fallbackSnapshot);
         } catch {
             return false;
         }
@@ -1527,158 +1666,236 @@ export function runPlatform(): void {
         const cached = interceptionManager.getConversation(conversationId);
         const captured = !!cached && evaluateReadinessForData(cached).ready;
         if (captured) {
-            logger.info('Stream done snapshot fallback captured', {
-                platform: currentAdapter.name,
-                conversationId,
-            });
+            logStreamDoneSnapshotCaptured(conversationId);
         }
         return captured;
     }
 
-    async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
+    function logStreamDoneSnapshotRequested(conversationId: string): void {
         if (!currentAdapter) {
             return;
         }
+        logger.info('Stream done snapshot fallback requested', {
+            platform: currentAdapter.name,
+            conversationId,
+        });
+    }
 
+    type StreamDoneProbeContext = {
+        adapter: LLMPlatform;
+        conversationId: string;
+        attemptId: string;
+        probeKey: string;
+        controller: AbortController;
+    };
+
+    function createStreamDoneProbeContext(
+        conversationId: string,
+        hintedAttemptId?: string,
+    ): StreamDoneProbeContext | null {
+        if (!currentAdapter) {
+            return null;
+        }
         const attemptId = hintedAttemptId ?? resolveAttemptId(conversationId);
         if (isAttemptDisposedOrSuperseded(attemptId)) {
-            return;
+            return null;
         }
         if (!tryAcquireProbeLease(conversationId, attemptId)) {
-            return;
+            return null;
         }
+
         cancelStreamDoneProbe(attemptId, 'superseded');
         const controller = new AbortController();
         streamProbeControllers.set(attemptId, controller);
+        const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
+        return {
+            adapter: currentAdapter,
+            conversationId,
+            attemptId,
+            probeKey,
+            controller,
+        };
+    }
+
+    function registerStreamDoneProbeStart(context: StreamDoneProbeContext): void {
+        lastStreamProbeKey = context.probeKey;
+        lastStreamProbeConversationId = context.conversationId;
+        setStreamProbePanel('stream-done: fetching conversation', `conversationId=${context.conversationId}`);
+        logger.info('Stream done probe start', {
+            platform: context.adapter.name,
+            conversationId: context.conversationId,
+        });
+    }
+
+    function setStreamDonePanelWithMirror(conversationId: string, title: string, body: string): void {
+        setStreamProbePanel(title, withPreservedLiveMirrorSnapshot(conversationId, title, body));
+    }
+
+    async function handleStreamDoneNoCandidates(context: StreamDoneProbeContext): Promise<void> {
+        const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(context.conversationId, context.attemptId);
+        if (capturedFromSnapshot) {
+            const cached = interceptionManager.getConversation(context.conversationId);
+            const cachedText = cached ? extractResponseTextForProbe(cached) : '';
+            const body = cachedText.length > 0 ? cachedText : '(captured via snapshot fallback)';
+            setStreamDonePanelWithMirror(
+                context.conversationId,
+                'stream-done: degraded snapshot captured',
+                `${body}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
+            );
+            return;
+        }
+
+        setStreamDonePanelWithMirror(
+            context.conversationId,
+            'stream-done: no api url candidates',
+            `conversationId=${context.conversationId}`,
+        );
+        logger.warn('Stream done probe has no URL candidates', {
+            platform: context.adapter.name,
+            conversationId: context.conversationId,
+        });
+    }
+
+    function shouldAbortStreamDoneProbe(context: StreamDoneProbeContext): boolean {
+        return context.controller.signal.aborted || isAttemptDisposedOrSuperseded(context.attemptId);
+    }
+
+    async function fetchStreamDoneCandidate(
+        context: StreamDoneProbeContext,
+        apiUrl: string,
+    ): Promise<{ ok: boolean; parsed?: ConversationData; body?: string }> {
+        try {
+            const response = await fetch(apiUrl, { credentials: 'include', signal: context.controller.signal });
+            if (!response.ok) {
+                return { ok: false };
+            }
+            const text = await response.text();
+            const parsed = context.adapter.parseInterceptedData(text, apiUrl);
+            if (!parsed?.conversation_id || parsed.conversation_id !== context.conversationId) {
+                return { ok: false };
+            }
+            const body = extractResponseTextForProbe(parsed);
+            return {
+                ok: true,
+                parsed,
+                body: body.length > 0 ? body : '(empty response text)',
+            };
+        } catch {
+            return { ok: false };
+        }
+    }
+
+    function emitStreamDoneProbeSuccessPanel(context: StreamDoneProbeContext, body: string): void {
+        if (lastStreamProbeKey !== context.probeKey) {
+            return;
+        }
+        setStreamDonePanelWithMirror(context.conversationId, 'stream-done: fetched full text', body);
+    }
+
+    async function tryRunStreamDoneCandidateFetches(
+        context: StreamDoneProbeContext,
+        apiUrls: string[],
+    ): Promise<boolean> {
+        for (const apiUrl of apiUrls) {
+            if (shouldAbortStreamDoneProbe(context)) {
+                return true;
+            }
+            const result = await fetchStreamDoneCandidate(context, apiUrl);
+            if (!result.ok || !result.body) {
+                continue;
+            }
+            emitStreamDoneProbeSuccessPanel(context, result.body);
+            logger.info('Stream done probe success', {
+                platform: context.adapter.name,
+                conversationId: context.conversationId,
+                textLength: result.body.length,
+            });
+            return true;
+        }
+        return false;
+    }
+
+    async function tryShowStreamDoneFallbackPanel(context: StreamDoneProbeContext): Promise<void> {
+        if (isStreamProbeKeyStale(context.probeKey)) {
+            return;
+        }
+
+        if (showStreamDoneCachedReadyPanel(context.conversationId)) {
+            return;
+        }
+
+        const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(context.conversationId, context.attemptId);
+        if (capturedFromSnapshot) {
+            showStreamDoneSnapshotPanel(context.conversationId);
+            return;
+        }
+
+        setStreamDonePanelWithMirror(
+            context.conversationId,
+            'stream-done: awaiting canonical capture',
+            `Conversation stream completed for ${context.conversationId}. Waiting for canonical capture.`,
+        );
+    }
+
+    function isStreamProbeKeyStale(probeKey: string): boolean {
+        return lastStreamProbeKey !== probeKey;
+    }
+
+    function showStreamDoneCachedReadyPanel(conversationId: string): boolean {
+        const cached = interceptionManager.getConversation(conversationId);
+        if (!cached || !evaluateReadinessForData(cached).ready) {
+            return false;
+        }
+        const cachedText = extractResponseTextForProbe(cached);
+        const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
+        setStreamDonePanelWithMirror(conversationId, 'stream-done: using captured cache', body);
+        return true;
+    }
+
+    function showStreamDoneSnapshotPanel(conversationId: string): void {
+        const snapshotCached = interceptionManager.getConversation(conversationId);
+        const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
+        const snapshotBody = snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
+        setStreamDonePanelWithMirror(
+            conversationId,
+            'stream-done: degraded snapshot captured',
+            `${snapshotBody}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
+        );
+    }
+
+    function finalizeStreamDoneProbe(context: StreamDoneProbeContext): void {
+        streamProbeControllers.delete(context.attemptId);
+        if (probeLeaseEnabled) {
+            probeLease.release(context.conversationId, context.attemptId);
+        }
+    }
+
+    async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
+        const context = createStreamDoneProbeContext(conversationId, hintedAttemptId);
+        if (!context) {
+            return;
+        }
 
         try {
-            const probeKey = `${currentAdapter.name}:${conversationId}:${Date.now()}`;
-            lastStreamProbeKey = probeKey;
-            lastStreamProbeConversationId = conversationId;
-            setStreamProbePanel('stream-done: fetching conversation', `conversationId=${conversationId}`);
-            logger.info('Stream done probe start', {
-                platform: currentAdapter.name,
-                conversationId,
-            });
-
-            const apiUrls = getFetchUrlCandidates(currentAdapter, conversationId);
+            registerStreamDoneProbeStart(context);
+            const apiUrls = getFetchUrlCandidates(context.adapter, context.conversationId);
             if (apiUrls.length === 0) {
-                const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
-                if (capturedFromSnapshot) {
-                    const cached = interceptionManager.getConversation(conversationId);
-                    const cachedText = cached ? extractResponseTextForProbe(cached) : '';
-                    const body = cachedText.length > 0 ? cachedText : '(captured via snapshot fallback)';
-                    setStreamProbePanel(
-                        'stream-done: degraded snapshot captured',
-                        withPreservedLiveMirrorSnapshot(
-                            conversationId,
-                            'stream-done: degraded snapshot captured',
-                            `${body}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
-                        ),
-                    );
-                    return;
-                }
-                setStreamProbePanel(
-                    'stream-done: no api url candidates',
-                    withPreservedLiveMirrorSnapshot(
-                        conversationId,
-                        'stream-done: no api url candidates',
-                        `conversationId=${conversationId}`,
-                    ),
-                );
-                logger.warn('Stream done probe has no URL candidates', {
-                    platform: currentAdapter.name,
-                    conversationId,
-                });
+                await handleStreamDoneNoCandidates(context);
                 return;
             }
 
-            for (const apiUrl of apiUrls) {
-                if (controller.signal.aborted || isAttemptDisposedOrSuperseded(attemptId)) {
-                    return;
-                }
-                try {
-                    const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
-                    if (!response.ok) {
-                        continue;
-                    }
-                    const text = await response.text();
-                    const parsed = currentAdapter.parseInterceptedData(text, apiUrl);
-                    if (!parsed?.conversation_id) {
-                        continue;
-                    }
-                    if (parsed.conversation_id !== conversationId) {
-                        continue;
-                    }
-                    const body = extractResponseTextForProbe(parsed);
-                    const normalizedBody = body.length > 0 ? body : '(empty response text)';
-                    if (lastStreamProbeKey === probeKey) {
-                        setStreamProbePanel(
-                            'stream-done: fetched full text',
-                            withPreservedLiveMirrorSnapshot(
-                                conversationId,
-                                'stream-done: fetched full text',
-                                normalizedBody,
-                            ),
-                        );
-                    }
-                    logger.info('Stream done probe success', {
-                        platform: currentAdapter.name,
-                        conversationId,
-                        textLength: normalizedBody.length,
-                    });
-                    return;
-                } catch {
-                    // probe fetch failed; continue to next candidate
-                }
+            const succeeded = await tryRunStreamDoneCandidateFetches(context, apiUrls);
+            if (succeeded) {
+                return;
             }
 
-            if (lastStreamProbeKey === probeKey) {
-                const cached = interceptionManager.getConversation(conversationId);
-                if (cached && evaluateReadinessForData(cached).ready) {
-                    const cachedText = extractResponseTextForProbe(cached);
-                    const body =
-                        cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
-                    setStreamProbePanel(
-                        'stream-done: using captured cache',
-                        withPreservedLiveMirrorSnapshot(conversationId, 'stream-done: using captured cache', body),
-                    );
-                } else {
-                    const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(conversationId, attemptId);
-                    if (capturedFromSnapshot) {
-                        const snapshotCached = interceptionManager.getConversation(conversationId);
-                        const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
-                        const snapshotBody =
-                            snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
-                        setStreamProbePanel(
-                            'stream-done: degraded snapshot captured',
-                            withPreservedLiveMirrorSnapshot(
-                                conversationId,
-                                'stream-done: degraded snapshot captured',
-                                `${snapshotBody}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
-                            ),
-                        );
-                        return;
-                    }
-                    setStreamProbePanel(
-                        'stream-done: awaiting canonical capture',
-                        withPreservedLiveMirrorSnapshot(
-                            conversationId,
-                            'stream-done: awaiting canonical capture',
-                            `Conversation stream completed for ${conversationId}. Waiting for canonical capture.`,
-                        ),
-                    );
-                }
-            }
+            await tryShowStreamDoneFallbackPanel(context);
             logger.warn('Stream done probe failed', {
-                platform: currentAdapter.name,
-                conversationId,
+                platform: context.adapter.name,
+                conversationId: context.conversationId,
             });
         } finally {
-            streamProbeControllers.delete(attemptId);
-            if (probeLeaseEnabled) {
-                probeLease.release(conversationId, attemptId);
-            }
+            finalizeStreamDoneProbe(context);
         }
     }
 
@@ -1719,55 +1936,78 @@ export function runPlatform(): void {
         return attachExportMeta(payload, meta);
     }
 
+    function resolveSaveReadiness(
+        conversationId: string | null,
+    ): { conversationId: string; decision: ReadinessDecision; allowDegraded: boolean } | null {
+        if (!conversationId) {
+            return null;
+        }
+        const decision = resolveReadinessDecision(conversationId);
+        return {
+            conversationId,
+            decision,
+            allowDegraded: decision.mode === 'degraded_manual_only',
+        };
+    }
+
+    function maybeIngestFreshSnapshotForForceSave(conversationId: string, freshSnapshot: unknown): boolean {
+        if (!freshSnapshot || !isConversationDataLike(freshSnapshot)) {
+            return false;
+        }
+        interceptionManager.ingestConversationData(freshSnapshot, 'force-save-snapshot-recovery');
+        const cached = interceptionManager.getConversation(conversationId);
+        if (!cached) {
+            return false;
+        }
+        const freshReadiness = evaluateReadinessForData(cached);
+        if (!freshReadiness.ready) {
+            return false;
+        }
+        markCanonicalCaptureMeta(conversationId);
+        ingestSfeCanonicalSample(cached, resolveAttemptId(conversationId));
+        refreshButtonState(conversationId);
+        logger.info('Force Save recovered via fresh snapshot — using canonical path', {
+            conversationId,
+        });
+        return true;
+    }
+
+    async function recoverCanonicalBeforeForceSave(conversationId: string): Promise<boolean> {
+        const freshSnapshot = await requestPageSnapshot(conversationId);
+        if (maybeIngestFreshSnapshotForForceSave(conversationId, freshSnapshot)) {
+            return true;
+        }
+
+        await warmFetchConversationSnapshot(conversationId, 'force-save');
+        refreshButtonState(conversationId);
+        const nextDecision = resolveReadinessDecision(conversationId);
+        return nextDecision.mode !== 'degraded_manual_only';
+    }
+
+    function confirmDegradedForceSave(): boolean {
+        if (typeof window.confirm !== 'function') {
+            return true;
+        }
+        return window.confirm('Force Save may export partial data because canonical capture timed out. Continue?');
+    }
+
     async function handleSaveClick(): Promise<void> {
         if (!currentAdapter) {
             return;
         }
-        const conversationId = resolveConversationIdForUserAction();
-        let decision = conversationId ? resolveReadinessDecision(conversationId) : null;
-        let allowDegraded = decision?.mode === 'degraded_manual_only';
-
-        if (allowDegraded && conversationId) {
-            // V2.1-024: Attempt fresh snapshot before showing confirm dialog.
-            // The tab is visible now (user clicked the button), so DOM should be rendered.
-            const freshSnapshot = await requestPageSnapshot(conversationId);
-            if (freshSnapshot && isConversationDataLike(freshSnapshot)) {
-                interceptionManager.ingestConversationData(freshSnapshot, 'force-save-snapshot-recovery');
-                const freshReadiness = evaluateReadinessForData(interceptionManager.getConversation(conversationId)!);
-                if (freshReadiness.ready) {
-                    markCanonicalCaptureMeta(conversationId);
-                    const attemptId = resolveAttemptId(conversationId);
-                    ingestSfeCanonicalSample(interceptionManager.getConversation(conversationId)!, attemptId);
-                    refreshButtonState(conversationId);
-                    decision = resolveReadinessDecision(conversationId);
-                    allowDegraded = decision.mode === 'degraded_manual_only';
-                    if (!allowDegraded) {
-                        logger.info('Force Save recovered via fresh snapshot — using canonical path', {
-                            conversationId,
-                        });
-                    }
-                }
-            }
-
-            // Also try warm fetch
-            if (allowDegraded) {
-                await warmFetchConversationSnapshot(conversationId, 'force-save');
-                refreshButtonState(conversationId);
-                decision = resolveReadinessDecision(conversationId);
-                allowDegraded = decision.mode === 'degraded_manual_only';
-            }
+        const readiness = resolveSaveReadiness(resolveConversationIdForUserAction());
+        if (!readiness) {
+            return;
         }
 
+        let allowDegraded = readiness.allowDegraded;
         if (allowDegraded) {
-            const confirmed =
-                typeof window.confirm === 'function'
-                    ? window.confirm(
-                          'Force Save may export partial data because canonical capture timed out. Continue?',
-                      )
-                    : true;
-            if (!confirmed) {
-                return;
-            }
+            const recovered = await recoverCanonicalBeforeForceSave(readiness.conversationId);
+            allowDegraded = !recovered;
+        }
+
+        if (allowDegraded && !confirmDegradedForceSave()) {
+            return;
         }
 
         const data = await getConversationData({ allowDegraded });
@@ -1867,6 +2107,73 @@ export function runPlatform(): void {
         return [];
     }
 
+    async function tryWarmFetchCandidate(
+        conversationId: string,
+        reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
+        apiUrl: string,
+    ): Promise<boolean> {
+        try {
+            const response = await fetch(apiUrl, { credentials: 'include' });
+            if (!response.ok) {
+                logger.info('Warm fetch HTTP error', {
+                    conversationId,
+                    reason,
+                    status: response.status,
+                    path: new URL(apiUrl, window.location.origin).pathname,
+                });
+                return false;
+            }
+
+            const text = await response.text();
+            interceptionManager.ingestInterceptedData({
+                url: apiUrl,
+                data: text,
+                platform: currentAdapter?.name ?? 'Unknown',
+            });
+            if (!interceptionManager.getConversation(conversationId)) {
+                return false;
+            }
+            logger.info('Warm fetch captured conversation', {
+                conversationId,
+                platform: currentAdapter?.name ?? 'Unknown',
+                reason,
+                path: new URL(apiUrl, window.location.origin).pathname,
+            });
+            return true;
+        } catch (err) {
+            logger.info('Warm fetch network error', {
+                conversationId,
+                reason,
+                error: err instanceof Error ? err.message : String(err),
+            });
+            return false;
+        }
+    }
+
+    async function executeWarmFetchCandidates(
+        conversationId: string,
+        reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
+    ): Promise<boolean> {
+        if (!currentAdapter) {
+            return false;
+        }
+        const candidates = getFetchUrlCandidates(currentAdapter as LLMPlatform, conversationId);
+        if (candidates.length === 0) {
+            return false;
+        }
+
+        const prioritized = candidates.slice(0, 2);
+        for (const apiUrl of prioritized) {
+            const success = await tryWarmFetchCandidate(conversationId, reason, apiUrl);
+            if (success) {
+                return true;
+            }
+        }
+
+        logger.info('Warm fetch all candidates failed', { conversationId, reason });
+        return false;
+    }
+
     async function warmFetchConversationSnapshot(
         conversationId: string,
         reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
@@ -1893,57 +2200,7 @@ export function runPlatform(): void {
             return existing;
         }
 
-        const run = (async () => {
-            const candidates = getFetchUrlCandidates(currentAdapter as LLMPlatform, conversationId);
-            if (candidates.length === 0) {
-                return false;
-            }
-
-            const prioritized = candidates.slice(0, 2);
-            for (const apiUrl of prioritized) {
-                try {
-                    const response = await fetch(apiUrl, { credentials: 'include' });
-                    if (!response.ok) {
-                        // #region agent log
-                        logger.info('Warm fetch HTTP error', {
-                            conversationId,
-                            reason,
-                            status: response.status,
-                            path: new URL(apiUrl, window.location.origin).pathname,
-                        });
-                        // #endregion
-                        continue;
-                    }
-                    const text = await response.text();
-                    interceptionManager.ingestInterceptedData({
-                        url: apiUrl,
-                        data: text,
-                        platform: currentAdapter?.name ?? 'Unknown',
-                    });
-                    if (interceptionManager.getConversation(conversationId)) {
-                        logger.info('Warm fetch captured conversation', {
-                            conversationId,
-                            platform: currentAdapter?.name ?? 'Unknown',
-                            reason,
-                            path: new URL(apiUrl, window.location.origin).pathname,
-                        });
-                        return true;
-                    }
-                } catch (err) {
-                    // #region agent log
-                    logger.info('Warm fetch network error', {
-                        conversationId,
-                        reason,
-                        error: err instanceof Error ? err.message : String(err),
-                    });
-                    // #endregion
-                }
-            }
-            // #region agent log
-            logger.info('Warm fetch all candidates failed', { conversationId, reason });
-            // #endregion
-            return false;
-        })().finally(() => {
+        const run = executeWarmFetchCandidates(conversationId, reason).finally(() => {
             warmFetchInFlight.delete(key);
         });
 
@@ -2078,9 +2335,9 @@ export function runPlatform(): void {
         return hasCapturedConversation(conversationId);
     }
 
-    function isRawCaptureSnapshot(
-        value: unknown,
-    ): value is { __blackiyaSnapshotType: 'raw-capture'; data: string; url: string; platform?: string } {
+    type RawCaptureSnapshot = { __blackiyaSnapshotType: 'raw-capture'; data: string; url: string; platform?: string };
+
+    function isRawCaptureSnapshot(value: unknown): value is RawCaptureSnapshot {
         if (!value || typeof value !== 'object') {
             return false;
         }
@@ -2265,6 +2522,65 @@ export function runPlatform(): void {
         };
     }
 
+    function buildPrimarySnapshotFromRoot(
+        adapter: LLMPlatform,
+        conversationId: string,
+        root: ParentNode,
+    ): ConversationData | null {
+        const candidates = collectSnapshotMessageCandidates(root);
+        if (candidates.length < 2) {
+            return null;
+        }
+        logger.info('Calibration isolated DOM snapshot candidates found', {
+            conversationId,
+            platform: adapter.name,
+            count: candidates.length,
+        });
+        return buildConversationDataFromMessages(conversationId, adapter.name, candidates);
+    }
+
+    function buildGrokFallbackSnapshotFromRoot(
+        adapter: LLMPlatform,
+        conversationId: string,
+        root: ParentNode,
+    ): ConversationData | null {
+        const looseCandidates = collectLooseGrokCandidates(root);
+        if (looseCandidates.length >= 2) {
+            logger.info('Calibration isolated DOM Grok fallback candidates found', {
+                conversationId,
+                platform: adapter.name,
+                count: looseCandidates.length,
+            });
+            return buildConversationDataFromMessages(conversationId, adapter.name, looseCandidates);
+        }
+
+        const lastResortCandidates = collectLastResortTextCandidates(root);
+        if (lastResortCandidates.length < 2) {
+            return null;
+        }
+        logger.info('Calibration isolated DOM Grok last-resort candidates found', {
+            conversationId,
+            platform: adapter.name,
+            count: lastResortCandidates.length,
+        });
+        return buildConversationDataFromMessages(conversationId, adapter.name, lastResortCandidates);
+    }
+
+    function buildSnapshotFromRoot(
+        adapter: LLMPlatform,
+        conversationId: string,
+        root: ParentNode,
+    ): ConversationData | null {
+        const primarySnapshot = buildPrimarySnapshotFromRoot(adapter, conversationId, root);
+        if (primarySnapshot) {
+            return primarySnapshot;
+        }
+        if (adapter.name !== 'Grok') {
+            return null;
+        }
+        return buildGrokFallbackSnapshotFromRoot(adapter, conversationId, root);
+    }
+
     function buildIsolatedDomSnapshot(adapter: LLMPlatform, conversationId: string): ConversationData | null {
         const roots: ParentNode[] = [];
         const main = document.querySelector('main');
@@ -2274,36 +2590,9 @@ export function runPlatform(): void {
         roots.push(document.body);
 
         for (const root of roots) {
-            const candidates = collectSnapshotMessageCandidates(root);
-            if (candidates.length >= 2) {
-                logger.info('Calibration isolated DOM snapshot candidates found', {
-                    conversationId,
-                    platform: adapter.name,
-                    count: candidates.length,
-                });
-                return buildConversationDataFromMessages(conversationId, adapter.name, candidates);
-            }
-
-            if (adapter.name === 'Grok') {
-                const looseCandidates = collectLooseGrokCandidates(root);
-                if (looseCandidates.length >= 2) {
-                    logger.info('Calibration isolated DOM Grok fallback candidates found', {
-                        conversationId,
-                        platform: adapter.name,
-                        count: looseCandidates.length,
-                    });
-                    return buildConversationDataFromMessages(conversationId, adapter.name, looseCandidates);
-                }
-
-                const lastResortCandidates = collectLastResortTextCandidates(root);
-                if (lastResortCandidates.length >= 2) {
-                    logger.info('Calibration isolated DOM Grok last-resort candidates found', {
-                        conversationId,
-                        platform: adapter.name,
-                        count: lastResortCandidates.length,
-                    });
-                    return buildConversationDataFromMessages(conversationId, adapter.name, lastResortCandidates);
-                }
+            const snapshot = buildSnapshotFromRoot(adapter, conversationId, root);
+            if (snapshot) {
+                return snapshot;
             }
         }
 
@@ -2448,75 +2737,17 @@ export function runPlatform(): void {
         conversationId: string,
         mode: CalibrationMode,
     ): Promise<boolean> {
-        if (mode === 'auto' && (adapter.name === 'Gemini' || adapter.name === 'ChatGPT')) {
-            const quietSettled = await waitForDomQuietPeriod(adapter, conversationId, 1400, 20000);
-            if (!quietSettled) {
-                logger.info('Calibration snapshot deferred; DOM still active', {
-                    conversationId,
-                    platform: adapter.name,
-                    mode,
-                });
-                return false;
-            }
+        const mayProceed = await ensureSnapshotQuietPeriodIfNeeded(adapter, conversationId, mode);
+        if (!mayProceed) {
+            return false;
         }
 
-        logger.info('Calibration snapshot fallback requested', { conversationId });
-        const snapshot = await requestPageSnapshot(conversationId);
-        let isolatedSnapshot = snapshot ? null : buildIsolatedDomSnapshot(adapter, conversationId);
-        logger.info('Calibration snapshot fallback response', {
-            conversationId,
-            hasSnapshot: !!snapshot || !!isolatedSnapshot,
-            source: snapshot ? 'main-world' : isolatedSnapshot ? 'isolated-dom' : 'none',
-        });
-
-        const effectiveSnapshot = snapshot ?? isolatedSnapshot;
+        let { isolatedSnapshot, effectiveSnapshot } = await loadCalibrationSnapshot(adapter, conversationId);
         if (!effectiveSnapshot) {
             return false;
         }
 
-        try {
-            if (isConversationDataLike(effectiveSnapshot)) {
-                interceptionManager.ingestConversationData(effectiveSnapshot, 'calibration-snapshot');
-            } else if (isRawCaptureSnapshot(effectiveSnapshot)) {
-                const replayUrls = getRawSnapshotReplayUrls(adapter, conversationId, effectiveSnapshot);
-                logger.info('Calibration using raw capture snapshot', {
-                    conversationId,
-                    platform: adapter.name,
-                    replayCandidates: replayUrls.length,
-                });
-
-                for (const replayUrl of replayUrls) {
-                    logger.info('Calibration raw snapshot replay attempt', {
-                        conversationId,
-                        platform: adapter.name,
-                        replayUrl,
-                    });
-
-                    interceptionManager.ingestInterceptedData({
-                        url: replayUrl,
-                        data: effectiveSnapshot.data,
-                        platform: effectiveSnapshot.platform ?? adapter.name,
-                    });
-
-                    if (isCalibrationCaptureSatisfied(conversationId, mode)) {
-                        logger.info('Calibration raw snapshot replay captured', {
-                            conversationId,
-                            platform: adapter.name,
-                            replayUrl,
-                        });
-                        break;
-                    }
-                }
-            } else {
-                interceptionManager.ingestInterceptedData({
-                    url: `page-snapshot://${adapter.name}/${conversationId}`,
-                    data: JSON.stringify(effectiveSnapshot),
-                    platform: adapter.name,
-                });
-            }
-        } catch {
-            // Ignore ingestion errors; handled by cache check below.
-        }
+        ingestCalibrationSnapshot(adapter, conversationId, mode, effectiveSnapshot);
 
         if (!isCalibrationCaptureSatisfied(conversationId, mode) && isRawCaptureSnapshot(effectiveSnapshot)) {
             logger.info('Calibration snapshot replay did not capture conversation', {
@@ -2539,6 +2770,114 @@ export function runPlatform(): void {
         }
 
         return isCalibrationCaptureSatisfied(conversationId, mode);
+    }
+
+    async function ensureSnapshotQuietPeriodIfNeeded(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+    ): Promise<boolean> {
+        if (mode !== 'auto' || (adapter.name !== 'Gemini' && adapter.name !== 'ChatGPT')) {
+            return true;
+        }
+        const quietSettled = await waitForDomQuietPeriod(adapter, conversationId, 1400, 20000);
+        if (quietSettled) {
+            return true;
+        }
+        logger.info('Calibration snapshot deferred; DOM still active', {
+            conversationId,
+            platform: adapter.name,
+            mode,
+        });
+        return false;
+    }
+
+    async function loadCalibrationSnapshot(
+        adapter: LLMPlatform,
+        conversationId: string,
+    ): Promise<{
+        snapshot: unknown;
+        isolatedSnapshot: ConversationData | null;
+        effectiveSnapshot: unknown;
+    }> {
+        logger.info('Calibration snapshot fallback requested', { conversationId });
+        const snapshot = await requestPageSnapshot(conversationId);
+        const isolatedSnapshot = snapshot ? null : buildIsolatedDomSnapshot(adapter, conversationId);
+        logger.info('Calibration snapshot fallback response', {
+            conversationId,
+            hasSnapshot: !!snapshot || !!isolatedSnapshot,
+            source: snapshot ? 'main-world' : isolatedSnapshot ? 'isolated-dom' : 'none',
+        });
+        return {
+            snapshot,
+            isolatedSnapshot,
+            effectiveSnapshot: snapshot ?? isolatedSnapshot,
+        };
+    }
+
+    function ingestCalibrationSnapshot(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+        effectiveSnapshot: unknown,
+    ): void {
+        try {
+            if (isConversationDataLike(effectiveSnapshot)) {
+                interceptionManager.ingestConversationData(effectiveSnapshot, 'calibration-snapshot');
+                return;
+            }
+
+            if (isRawCaptureSnapshot(effectiveSnapshot)) {
+                replayRawCalibrationSnapshot(adapter, conversationId, mode, effectiveSnapshot);
+                return;
+            }
+
+            interceptionManager.ingestInterceptedData({
+                url: `page-snapshot://${adapter.name}/${conversationId}`,
+                data: JSON.stringify(effectiveSnapshot),
+                platform: adapter.name,
+            });
+        } catch {
+            // Ignore ingestion errors; handled by cache check below.
+        }
+    }
+
+    function replayRawCalibrationSnapshot(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+        snapshot: RawCaptureSnapshot,
+    ): void {
+        const replayUrls = getRawSnapshotReplayUrls(adapter, conversationId, snapshot);
+        logger.info('Calibration using raw capture snapshot', {
+            conversationId,
+            platform: adapter.name,
+            replayCandidates: replayUrls.length,
+        });
+
+        for (const replayUrl of replayUrls) {
+            logger.info('Calibration raw snapshot replay attempt', {
+                conversationId,
+                platform: adapter.name,
+                replayUrl,
+            });
+
+            interceptionManager.ingestInterceptedData({
+                url: replayUrl,
+                data: snapshot.data,
+                platform: snapshot.platform ?? adapter.name,
+            });
+
+            if (!isCalibrationCaptureSatisfied(conversationId, mode)) {
+                continue;
+            }
+            logger.info('Calibration raw snapshot replay captured', {
+                conversationId,
+                platform: adapter.name,
+                replayUrl,
+            });
+            break;
+        }
     }
 
     async function captureFromRetries(
@@ -2564,11 +2903,36 @@ export function runPlatform(): void {
         const { adapter } = context;
         const conversationId = hintedConversationId || context.conversationId;
 
+        enterCalibrationCaptureState(mode);
+        const strategyOrder = logCalibrationCaptureStart(adapter, conversationId, mode);
+
+        const successfulStep = await runCalibrationStrategySteps(adapter, conversationId, mode, strategyOrder);
+        if (successfulStep) {
+            applyCalibrationSuccess(mode, conversationId);
+            if (shouldPersistCalibrationProfile(mode)) {
+                await rememberCalibrationSuccess(adapter.name, successfulStep);
+            }
+            logger.info('Calibration capture succeeded', { conversationId, step: successfulStep, mode });
+            return;
+        }
+
+        applyCalibrationFailure(mode, conversationId);
+        logger.warn('Calibration capture failed after retries', { conversationId });
+    }
+
+    function enterCalibrationCaptureState(mode: CalibrationMode): void {
         if (mode === 'manual') {
             setCalibrationStatus('capturing');
-        } else {
-            calibrationState = 'capturing';
+            return;
         }
+        calibrationState = 'capturing';
+    }
+
+    function logCalibrationCaptureStart(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+    ): CalibrationStep[] {
         logger.info('Calibration capture started', { conversationId, platform: adapter.name });
         const strategyOrder = buildCalibrationOrderForMode(rememberedPreferredStep, mode, adapter.name);
         logger.info('Calibration strategy', {
@@ -2577,45 +2941,59 @@ export function runPlatform(): void {
             mode,
             remembered: rememberedPreferredStep,
         });
+        return strategyOrder;
+    }
 
+    async function runCalibrationStep(
+        step: CalibrationStep,
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+    ): Promise<boolean> {
+        if (step === 'queue-flush') {
+            interceptionManager.flushQueuedMessages();
+            return isCalibrationCaptureSatisfied(conversationId, mode);
+        }
+        if (step === 'passive-wait') {
+            return await waitForPassiveCapture(adapter, conversationId, mode);
+        }
+        if (step === 'endpoint-retry') {
+            return await captureFromRetries(adapter, conversationId, mode);
+        }
+        return await captureFromSnapshot(adapter, conversationId, mode);
+    }
+
+    async function runCalibrationStrategySteps(
+        adapter: LLMPlatform,
+        conversationId: string,
+        mode: CalibrationMode,
+        strategyOrder: CalibrationStep[],
+    ): Promise<CalibrationStep | null> {
         for (const step of strategyOrder) {
-            let captured = false;
-            if (step === 'queue-flush') {
-                interceptionManager.flushQueuedMessages();
-                captured = isCalibrationCaptureSatisfied(conversationId, mode);
-            } else if (step === 'passive-wait') {
-                captured = await waitForPassiveCapture(adapter, conversationId, mode);
-            } else if (step === 'endpoint-retry') {
-                captured = await captureFromRetries(adapter, conversationId, mode);
-            } else if (step === 'page-snapshot') {
-                captured = await captureFromSnapshot(adapter, conversationId, mode);
+            const captured = await runCalibrationStep(step, adapter, conversationId, mode);
+            if (captured) {
+                return step;
             }
+        }
+        return null;
+    }
 
-            if (!captured) {
-                continue;
-            }
-
-            if (mode === 'manual') {
-                markCalibrationSuccess(conversationId);
-            } else {
-                calibrationState = 'success';
-                refreshButtonState(conversationId);
-            }
-
-            if (shouldPersistCalibrationProfile(mode)) {
-                await rememberCalibrationSuccess(adapter.name, step);
-            }
-            logger.info('Calibration capture succeeded', { conversationId, step, mode });
+    function applyCalibrationSuccess(mode: CalibrationMode, conversationId: string): void {
+        if (mode === 'manual') {
+            markCalibrationSuccess(conversationId);
             return;
         }
+        calibrationState = 'success';
+        refreshButtonState(conversationId);
+    }
 
+    function applyCalibrationFailure(mode: CalibrationMode, conversationId: string): void {
         if (mode === 'manual') {
             setCalibrationStatus('error');
             refreshButtonState(conversationId);
-        } else {
-            calibrationState = 'idle';
+            return;
         }
-        logger.warn('Calibration capture failed after retries', { conversationId });
+        calibrationState = 'idle';
     }
 
     async function getConversationData(options: { silent?: boolean; allowDegraded?: boolean } = {}) {
@@ -2623,74 +3001,96 @@ export function runPlatform(): void {
             return null;
         }
 
-        const conversationId = resolveConversationIdForUserAction();
+        const conversationId = resolveConversationIdOrNotify(options.silent);
         if (!conversationId) {
-            logger.error('No conversation ID found in URL');
-            if (!options.silent) {
-                alert('Please select a conversation first.');
-            }
             return null;
         }
-
-        const data = interceptionManager.getConversation(conversationId);
+        const data = resolveCapturedConversationOrNotify(conversationId, options.silent);
         if (!data) {
-            logger.warn('No data captured for this conversation yet.');
-            if (!options.silent) {
-                alert(
-                    'Conversation data not yet captured. Please refresh the page or wait for the conversation to load.',
-                );
-            }
             return null;
         }
+        const canExport = canExportConversationData(conversationId, options.allowDegraded === true, options.silent);
+        if (!canExport) {
+            return null;
+        }
+        applyTitleDomFallbackIfNeeded(conversationId, data);
+        return data;
+    }
 
+    function resolveConversationIdOrNotify(silent?: boolean): string | null {
+        const conversationId = resolveConversationIdForUserAction();
+        if (conversationId) {
+            return conversationId;
+        }
+        logger.error('No conversation ID found in URL');
+        if (!silent) {
+            alert('Please select a conversation first.');
+        }
+        return null;
+    }
+
+    function resolveCapturedConversationOrNotify(conversationId: string, silent?: boolean): ConversationData | null {
+        const data = interceptionManager.getConversation(conversationId);
+        if (data) {
+            return data;
+        }
+        logger.warn('No data captured for this conversation yet.');
+        if (!silent) {
+            alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
+        }
+        return null;
+    }
+
+    function canExportConversationData(conversationId: string, allowDegraded: boolean, silent?: boolean): boolean {
         const decision = resolveReadinessDecision(conversationId);
-        const allowDegraded = options.allowDegraded === true;
         const canExportNow =
             decision.mode === 'canonical_ready' || (allowDegraded && decision.mode === 'degraded_manual_only');
-        if (!canExportNow || shouldBlockActionsForGeneration(conversationId)) {
-            logger.warn('Conversation is still generating; export blocked until completion.', {
-                conversationId,
-                platform: currentAdapter.name,
-                reason: decision.reason,
-            });
-            if (!options.silent) {
-                alert(
-                    decision.mode === 'degraded_manual_only'
-                        ? 'Canonical capture timed out. Use Force Save to export potentially incomplete data.'
-                        : 'Response is still generating. Please wait for completion, then try again.',
-                );
-            }
-            return null;
+        if (canExportNow && !shouldBlockActionsForGeneration(conversationId)) {
+            return true;
         }
-
-        // V2.1-037: If the cached title looks like a platform default (e.g., "New conversation"
-        // on Grok), try to extract the real title from the page DOM. Some platforms generate
-        // titles asynchronously after the AI responds, and the update is never intercepted.
-        if (currentAdapter.extractTitleFromDom && currentAdapter.defaultTitles) {
-            const isStaleTitle = currentAdapter.defaultTitles.some(
-                (d) => d.toLowerCase() === (data.title || '').toLowerCase(),
+        logger.warn('Conversation is still generating; export blocked until completion.', {
+            conversationId,
+            platform: currentAdapter?.name ?? 'Unknown',
+            reason: decision.reason,
+        });
+        if (!silent) {
+            alert(
+                decision.mode === 'degraded_manual_only'
+                    ? 'Canonical capture timed out. Use Force Save to export potentially incomplete data.'
+                    : 'Response is still generating. Please wait for completion, then try again.',
             );
-            if (isStaleTitle || !data.title) {
-                const domTitle = currentAdapter.extractTitleFromDom();
-                logger.info('Title fallback check', {
-                    conversationId,
-                    adapter: currentAdapter.name,
-                    cachedTitle: data.title ?? null,
-                    staleTitle: isStaleTitle,
-                    domTitle: domTitle ?? null,
-                });
-                if (domTitle) {
-                    logger.info('Title resolved from DOM fallback', {
-                        conversationId,
-                        oldTitle: data.title,
-                        newTitle: domTitle,
-                    });
-                    data.title = domTitle;
-                }
-            }
+        }
+        return false;
+    }
+
+    function applyTitleDomFallbackIfNeeded(conversationId: string, data: ConversationData): void {
+        if (!currentAdapter?.extractTitleFromDom || !currentAdapter.defaultTitles) {
+            return;
+        }
+        const isStaleTitle = currentAdapter.defaultTitles.some(
+            (d) => d.toLowerCase() === (data.title || '').toLowerCase(),
+        );
+        if (!isStaleTitle && data.title) {
+            return;
         }
 
-        return data;
+        const domTitle = currentAdapter.extractTitleFromDom();
+        logger.info('Title fallback check', {
+            conversationId,
+            adapter: currentAdapter.name,
+            cachedTitle: data.title ?? null,
+            staleTitle: isStaleTitle,
+            domTitle: domTitle ?? null,
+        });
+        if (!domTitle) {
+            return;
+        }
+        logger.info('Title resolved from DOM fallback', {
+            conversationId,
+            oldTitle: data.title,
+            newTitle: domTitle,
+        });
+        data.title = domTitle;
     }
 
     function handleError(action: 'save' | 'copy', error: unknown, silent?: boolean) {
@@ -2698,6 +3098,32 @@ export function runPlatform(): void {
         if (!silent) {
             alert(`Failed to ${action} conversation. Check console for details.`);
         }
+    }
+
+    function buildExportMetaForSave(conversationId: string, allowDegraded?: boolean): ExportMeta {
+        if (allowDegraded === true) {
+            return {
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            };
+        }
+        return getCaptureMeta(conversationId);
+    }
+
+    function emitForceSaveDegradedAudit(conversationId: string, allowDegraded?: boolean): void {
+        if (allowDegraded !== true) {
+            return;
+        }
+        const attemptId = resolveAttemptId(conversationId);
+        structuredLogger.emit(
+            attemptId,
+            'warn',
+            'force_save_degraded_export',
+            'Degraded manual export forced by user',
+            { conversationId },
+            `force-save-degraded:${conversationId}`,
+        );
     }
 
     async function saveConversation(
@@ -2725,28 +3151,11 @@ export function runPlatform(): void {
                 data.title = titleDecision.title;
             }
             const filename = currentAdapter.formatFilename(data);
-            const exportMeta: ExportMeta =
-                options.allowDegraded === true
-                    ? {
-                          captureSource: 'dom_snapshot_degraded',
-                          fidelity: 'degraded',
-                          completeness: 'partial',
-                      }
-                    : getCaptureMeta(data.conversation_id);
+            const exportMeta = buildExportMetaForSave(data.conversation_id, options.allowDegraded);
             const exportPayload = await buildExportPayload(data, exportMeta);
             downloadAsJSON(exportPayload, filename);
             logger.info(`Saved conversation: ${filename}.json`);
-            if (options.allowDegraded === true) {
-                const attemptId = resolveAttemptId(data.conversation_id);
-                structuredLogger.emit(
-                    attemptId,
-                    'warn',
-                    'force_save_degraded_export',
-                    'Degraded manual export forced by user',
-                    { conversationId: data.conversation_id },
-                    `force-save-degraded:${data.conversation_id}`,
-                );
-            }
+            emitForceSaveDegradedAudit(data.conversation_id, options.allowDegraded);
             if (buttonManager.exists()) {
                 buttonManager.setSuccess('save');
             }
@@ -2873,51 +3282,50 @@ export function runPlatform(): void {
         interceptionManager.updateAdapter(currentAdapter);
     }
 
-    function refreshButtonState(forConversationId?: string): void {
-        if (!buttonManager.exists() || !currentAdapter) {
-            return;
+    function resetButtonStateForNoConversation(): void {
+        currentConversationId = null;
+        if (lifecycleState !== 'idle') {
+            setLifecycleState('idle');
         }
-        const conversationId = forConversationId || currentAdapter.extractConversationId(window.location.href);
-        if (!conversationId) {
-            currentConversationId = null;
-            if (lifecycleState !== 'idle') {
-                setLifecycleState('idle');
-            }
-            buttonManager.setSaveButtonMode('default');
-            buttonManager.setActionButtonsEnabled(false);
-            buttonManager.setOpacity('0.6');
-            return;
-        }
+        buttonManager.setSaveButtonMode('default');
+        buttonManager.setActionButtonsEnabled(false);
+        buttonManager.setOpacity('0.6');
+    }
+
+    function shouldDisableActionsForActiveGeneration(conversationId: string): boolean {
         if (
             (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') &&
             (!currentConversationId || conversationId === currentConversationId)
         ) {
-            buttonManager.setSaveButtonMode('default');
-            buttonManager.setActionButtonsEnabled(false);
-            buttonManager.setOpacity('0.6');
-            logButtonStateIfChanged(conversationId, false, '0.6');
-            return;
+            return true;
         }
-
         if (lifecycleState !== 'completed' && shouldBlockActionsForGeneration(conversationId)) {
-            buttonManager.setSaveButtonMode('default');
-            buttonManager.setActionButtonsEnabled(false);
-            buttonManager.setOpacity('0.6');
-            logButtonStateIfChanged(conversationId, false, '0.6');
-            return;
+            return true;
         }
+        return false;
+    }
 
+    function applyDisabledButtonState(conversationId: string): void {
+        buttonManager.setSaveButtonMode('default');
+        buttonManager.setActionButtonsEnabled(false);
+        buttonManager.setOpacity('0.6');
+        logButtonStateIfChanged(conversationId, false, '0.6');
+    }
+
+    function ensureCanonicalSampleForConversation(conversationId: string): void {
         const cached = interceptionManager.getConversation(conversationId);
         const captureMeta = getCaptureMeta(conversationId);
         if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
             ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
         }
-        const decision = resolveReadinessDecision(conversationId);
-        buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
+    }
+
+    function applyReadyButtonState(conversationId: string, decision: ReadinessDecision): void {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         const isDegraded = decision.mode === 'degraded_manual_only';
         const hasData = isCanonicalReady || isDegraded;
 
+        buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
         buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
         if (isDegraded) {
             buttonManager.setButtonEnabled('save', true);
@@ -2925,9 +3333,10 @@ export function runPlatform(): void {
         } else {
             buttonManager.setActionButtonsEnabled(isCanonicalReady);
         }
+
         const opacity = hasData ? '1' : '0.6';
         buttonManager.setOpacity(opacity);
-        // #region agent log
+
         const prevKey = lastButtonStateLog;
         const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
         if (prevKey !== newKey && hasData) {
@@ -2937,22 +3346,47 @@ export function runPlatform(): void {
                 conversationId,
                 decisionMode: decision.mode,
                 decisionReason: decision.reason,
-                fidelity: captureMeta.fidelity,
+                fidelity: getCaptureMeta(conversationId).fidelity,
                 sfeEnabled,
                 lifecycleState,
                 retries,
                 hasPendingTimer,
             });
         }
-        // #endregion
         logButtonStateIfChanged(conversationId, hasData, opacity);
+    }
+
+    function syncCalibrationDisplayFromDecision(decision: ReadinessDecision): void {
+        const isCanonicalReady = decision.mode === 'canonical_ready';
         if (isCanonicalReady && calibrationState !== 'capturing') {
             calibrationState = 'success';
             syncCalibrationButtonDisplay();
-        } else if (!isCanonicalReady && calibrationState === 'success') {
+            return;
+        }
+        if (!isCanonicalReady && calibrationState === 'success') {
             calibrationState = 'idle';
             syncCalibrationButtonDisplay();
         }
+    }
+
+    function refreshButtonState(forConversationId?: string): void {
+        if (!buttonManager.exists() || !currentAdapter) {
+            return;
+        }
+        const conversationId = forConversationId || currentAdapter.extractConversationId(window.location.href);
+        if (!conversationId) {
+            resetButtonStateForNoConversation();
+            return;
+        }
+        if (shouldDisableActionsForActiveGeneration(conversationId)) {
+            applyDisabledButtonState(conversationId);
+            return;
+        }
+
+        ensureCanonicalSampleForConversation(conversationId);
+        const decision = resolveReadinessDecision(conversationId);
+        applyReadyButtonState(conversationId, decision);
+        syncCalibrationDisplayFromDecision(decision);
     }
 
     function scheduleButtonRefresh(conversationId: string): void {
@@ -3090,33 +3524,70 @@ export function runPlatform(): void {
         return false;
     }
 
+    function createMissingDataReadinessDecision(): ReadinessDecision {
+        return {
+            ready: false,
+            mode: 'awaiting_stabilization',
+            reason: 'no_canonical_data',
+        };
+    }
+
+    function createLegacyReadinessDecision(
+        conversationId: string,
+        readiness: PlatformReadiness,
+        captureMeta: ExportMeta,
+    ): ReadinessDecision {
+        const ready = readiness.ready;
+        if (ready) {
+            logger.debug('Readiness decision: SFE disabled, legacy ready', {
+                conversationId,
+                fidelity: captureMeta.fidelity,
+                readinessReason: readiness.reason,
+            });
+        }
+        return {
+            ready,
+            mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
+            reason: ready ? 'legacy_ready' : readiness.reason,
+        };
+    }
+
+    function createTimeoutReadinessDecision(
+        conversationId: string,
+        captureMeta: ExportMeta,
+        sfeResolution: ReturnType<typeof sfe.resolveByConversation>,
+    ): ReadinessDecision | null {
+        const attemptId = resolveAttemptId(conversationId);
+        const hasTimeout =
+            sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
+            (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
+        if (!hasTimeout) {
+            return null;
+        }
+        logger.debug('Readiness decision: degraded_manual_only (timeout)', {
+            conversationId,
+            attemptId,
+            fidelity: captureMeta.fidelity,
+        });
+        emitTimeoutWarningOnce(attemptId, conversationId);
+        return {
+            ready: false,
+            mode: 'degraded_manual_only',
+            reason: 'stabilization_timeout',
+        };
+    }
+
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
         const data = interceptionManager.getConversation(conversationId);
         if (!data) {
-            return {
-                ready: false,
-                mode: 'awaiting_stabilization',
-                reason: 'no_canonical_data',
-            };
+            return createMissingDataReadinessDecision();
         }
 
         const readiness = evaluateReadinessForData(data);
         const captureMeta = getCaptureMeta(conversationId);
 
         if (!sfeEnabled) {
-            const ready = readiness.ready;
-            if (ready) {
-                logger.debug('Readiness decision: SFE disabled, legacy ready', {
-                    conversationId,
-                    fidelity: captureMeta.fidelity,
-                    readinessReason: readiness.reason,
-                });
-            }
-            return {
-                ready,
-                mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
-                reason: ready ? 'legacy_ready' : readiness.reason,
-            };
+            return createLegacyReadinessDecision(conversationId, readiness, captureMeta);
         }
 
         const sfeResolution = sfe.resolveByConversation(conversationId);
@@ -3136,25 +3607,12 @@ export function runPlatform(): void {
             };
         }
 
-        const attemptId = resolveAttemptId(conversationId);
-        const hasTimeout =
-            sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
-            (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
-        if (hasTimeout) {
-            logger.debug('Readiness decision: degraded_manual_only (timeout)', {
-                conversationId,
-                attemptId,
-                fidelity: captureMeta.fidelity,
-            });
-            emitTimeoutWarningOnce(attemptId, conversationId);
-            return {
-                ready: false,
-                mode: 'degraded_manual_only',
-                reason: 'stabilization_timeout',
-            };
+        const timeoutDecision = createTimeoutReadinessDecision(conversationId, captureMeta, sfeResolution);
+        if (timeoutDecision) {
+            return timeoutDecision;
         }
 
-        timeoutWarningByAttempt.delete(attemptId);
+        timeoutWarningByAttempt.delete(resolveAttemptId(conversationId));
 
         if (captureMeta.fidelity === 'degraded') {
             return {
@@ -3256,57 +3714,57 @@ export function runPlatform(): void {
         return true;
     }
 
-    function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation'): void {
-        if (
+    function shouldSkipAutoCapture(conversationId: string): boolean {
+        return (
             !currentAdapter ||
             calibrationState !== 'idle' ||
             isConversationReadyForActions(conversationId, { includeDegraded: true })
-        ) {
+        );
+    }
+
+    function scheduleDeferredAutoCapture(
+        attemptKey: string,
+        conversationId: string,
+        reason: 'response-finished' | 'navigation',
+    ): void {
+        if (autoCaptureRetryTimers.has(attemptKey)) {
             return;
         }
-
-        const attemptKey = resolveAttemptId(conversationId);
-        const shouldDeferWhileGenerating = currentAdapter.name === 'ChatGPT';
-        if (shouldDeferWhileGenerating && isPlatformGenerating(currentAdapter)) {
-            if (!autoCaptureRetryTimers.has(attemptKey)) {
-                if (!autoCaptureDeferredLogged.has(attemptKey)) {
-                    logger.info('Auto calibration deferred: response still generating', {
-                        platform: currentAdapter.name,
-                        conversationId,
-                        reason,
-                    });
-                    addBoundedSetValue(autoCaptureDeferredLogged, attemptKey, MAX_AUTOCAPTURE_KEYS);
-                }
-                const timerId = window.setTimeout(() => {
-                    autoCaptureRetryTimers.delete(attemptKey);
-                    maybeRunAutoCapture(conversationId, reason);
-                }, 4000);
-                autoCaptureRetryTimers.set(attemptKey, timerId);
-            }
-            return;
+        if (!autoCaptureDeferredLogged.has(attemptKey)) {
+            logger.info('Auto calibration deferred: response still generating', {
+                platform: currentAdapter?.name ?? 'Unknown',
+                conversationId,
+                reason,
+            });
+            addBoundedSetValue(autoCaptureDeferredLogged, attemptKey, MAX_AUTOCAPTURE_KEYS);
         }
-        autoCaptureDeferredLogged.delete(attemptKey);
+        const timerId = window.setTimeout(() => {
+            autoCaptureRetryTimers.delete(attemptKey);
+            maybeRunAutoCapture(conversationId, reason);
+        }, 4000);
+        autoCaptureRetryTimers.set(attemptKey, timerId);
+    }
 
+    function shouldThrottleAutoCapture(attemptKey: string): boolean {
         const now = Date.now();
         const lastAttempt = autoCaptureAttempts.get(attemptKey) ?? 0;
         if (now - lastAttempt < 12000) {
-            return;
+            return true;
         }
         setBoundedMapValue(autoCaptureAttempts, attemptKey, now, MAX_AUTOCAPTURE_KEYS);
+        return false;
+    }
 
+    function runAutoCaptureFromPreference(conversationId: string, reason: 'response-finished' | 'navigation'): void {
         const run = () => {
-            if (
-                !currentAdapter ||
-                calibrationState !== 'idle' ||
-                isConversationReadyForActions(conversationId, { includeDegraded: true })
-            ) {
+            if (shouldSkipAutoCapture(conversationId)) {
                 return;
             }
             if (!rememberedPreferredStep) {
                 return;
             }
             logger.info('Auto calibration run from remembered strategy', {
-                platform: currentAdapter.name,
+                platform: currentAdapter?.name ?? 'Unknown',
                 conversationId,
                 preferredStep: rememberedPreferredStep,
                 reason,
@@ -3316,9 +3774,35 @@ export function runPlatform(): void {
 
         if (rememberedPreferredStep || calibrationPreferenceLoaded) {
             run();
-        } else {
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name).then(run);
+            return;
         }
+        if (!currentAdapter) {
+            return;
+        }
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name).then(run);
+    }
+
+    function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation'): void {
+        if (shouldSkipAutoCapture(conversationId)) {
+            return;
+        }
+
+        const adapter = currentAdapter;
+        if (!adapter) {
+            return;
+        }
+        const attemptKey = resolveAttemptId(conversationId);
+        const shouldDeferWhileGenerating = adapter.name === 'ChatGPT';
+        if (shouldDeferWhileGenerating && isPlatformGenerating(adapter)) {
+            scheduleDeferredAutoCapture(attemptKey, conversationId, reason);
+            return;
+        }
+        autoCaptureDeferredLogged.delete(attemptKey);
+
+        if (shouldThrottleAutoCapture(attemptKey)) {
+            return;
+        }
+        runAutoCaptureFromPreference(conversationId, reason);
     }
 
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
@@ -3450,36 +3934,38 @@ export function runPlatform(): void {
         if (isStaleAttemptMessage(attemptId, resolvedConversationId, 'finished')) {
             return true;
         }
-        activeAttemptId = attemptId;
-        bindAttempt(resolvedConversationId, attemptId);
-        // BLACKIYA_RESPONSE_FINISHED is an authoritative completion signal, but
-        // during thinking/reasoning phases the interceptor emits these for every
-        // stream_status poll. If the platform DOM still shows a generation
-        // indicator (e.g. stop button), the signal is spurious — promoting
-        // lifecycleState to 'completed' would corrupt the streaming guard and
-        // cause the save button to flicker.
-        if (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') {
-            const shouldRejectWhileGenerating = currentAdapter?.name === 'ChatGPT';
-            if (shouldRejectWhileGenerating && currentAdapter && isPlatformGenerating(currentAdapter)) {
-                // #region agent log
-                logger.info('RESPONSE_FINISHED rejected: platform still generating', {
-                    conversationId: resolvedConversationId,
-                    attemptId,
-                    lifecycleState,
-                });
-                // #endregion
-                return true;
-            }
-            // #region agent log
-            logger.info('RESPONSE_FINISHED promoted lifecycle to completed', {
-                conversationId: resolvedConversationId,
-                attemptId,
-                previousLifecycle: lifecycleState,
-            });
-            // #endregion
-            setLifecycleState('completed', resolvedConversationId);
+        attachFinishedAttemptContext(resolvedConversationId, attemptId);
+        if (!promoteLifecycleFromFinishedSignal(resolvedConversationId, attemptId)) {
+            return true;
         }
         handleResponseFinished('network', resolvedConversationId);
+        return true;
+    }
+
+    function attachFinishedAttemptContext(conversationId: string, attemptId: string): void {
+        activeAttemptId = attemptId;
+        bindAttempt(conversationId, attemptId);
+    }
+
+    function promoteLifecycleFromFinishedSignal(conversationId: string, attemptId: string): boolean {
+        if (lifecycleState !== 'prompt-sent' && lifecycleState !== 'streaming') {
+            return true;
+        }
+        const shouldRejectWhileGenerating = currentAdapter?.name === 'ChatGPT';
+        if (shouldRejectWhileGenerating && currentAdapter && isPlatformGenerating(currentAdapter)) {
+            logger.info('RESPONSE_FINISHED rejected: platform still generating', {
+                conversationId,
+                attemptId,
+                lifecycleState,
+            });
+            return false;
+        }
+        logger.info('RESPONSE_FINISHED promoted lifecycle to completed', {
+            conversationId,
+            attemptId,
+            previousLifecycle: lifecycleState,
+        });
+        setLifecycleState('completed', conversationId);
         return true;
     }
 
@@ -3562,51 +4048,95 @@ export function runPlatform(): void {
         applyLifecyclePhaseForConversation(pending.phase, pending.platform, attemptId, conversationId, 'replayed');
     }
 
-    function handleLifecycleMessage(message: any): boolean {
+    function parseLifecycleMessage(message: any): {
+        phase: 'prompt-sent' | 'streaming' | 'completed' | 'terminated';
+        platform: string;
+        conversationId?: string;
+        attemptId: string;
+        originalAttemptId: string;
+    } | null {
         if (
             (message as ResponseLifecycleMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_LIFECYCLE' ||
             typeof (message as ResponseLifecycleMessage).attemptId !== 'string'
         ) {
-            return false;
+            return null;
         }
 
         const typed = message as ResponseLifecycleMessage;
         const phase = typed.phase;
-        const platform = typed.platform;
-        const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
-        const attemptId = resolveAliasedAttemptId(typed.attemptId);
-        if (phase !== 'prompt-sent' && phase !== 'streaming' && phase !== 'completed' && phase !== 'terminated') {
-            return true;
+        if (!isSupportedLifecyclePhase(phase)) {
+            return null;
         }
 
-        if (!conversationId) {
-            cachePendingLifecycleSignal(attemptId, phase, platform);
-            ingestSfeLifecycleFromWirePhase(phase, attemptId, null);
-            logger.info('Lifecycle pending conversation resolution', {
-                phase,
-                platform,
-                attemptId: typed.attemptId,
-            });
-            return true;
-        }
+        return {
+            phase,
+            platform: typed.platform,
+            conversationId: typeof typed.conversationId === 'string' ? typed.conversationId : undefined,
+            attemptId: resolveAliasedAttemptId(typed.attemptId),
+            originalAttemptId: typed.attemptId,
+        };
+    }
 
-        if (phase === 'prompt-sent' && conversationId) {
+    function handleResolvedLifecycleConversation(
+        phase: 'prompt-sent' | 'streaming' | 'completed' | 'terminated',
+        platform: string,
+        attemptId: string,
+        conversationId: string,
+    ): void {
+        if (phase === 'prompt-sent') {
             bindAttempt(conversationId, attemptId);
         }
 
         if (isStaleAttemptMessage(attemptId, conversationId, 'lifecycle')) {
+            return;
+        }
+
+        currentConversationId = conversationId;
+        bindAttempt(conversationId, attemptId);
+        activeAttemptId = attemptId;
+        applyLifecyclePhaseForConversation(phase, platform, attemptId, conversationId, 'direct');
+    }
+
+    function handleLifecycleMessage(message: any): boolean {
+        const parsed = parseLifecycleMessage(message);
+        if (!parsed) {
+            return false;
+        }
+
+        if (!parsed.conversationId) {
+            handleLifecyclePendingConversation(
+                parsed.attemptId,
+                parsed.phase,
+                parsed.platform,
+                parsed.originalAttemptId,
+            );
             return true;
         }
 
-        if (conversationId) {
-            currentConversationId = conversationId;
-            bindAttempt(conversationId, attemptId);
-        }
-        activeAttemptId = attemptId;
-
-        applyLifecyclePhaseForConversation(phase, platform, attemptId, conversationId, 'direct');
+        handleResolvedLifecycleConversation(parsed.phase, parsed.platform, parsed.attemptId, parsed.conversationId);
 
         return true;
+    }
+
+    function isSupportedLifecyclePhase(
+        phase: ResponseLifecycleMessage['phase'],
+    ): phase is 'prompt-sent' | 'streaming' | 'completed' | 'terminated' {
+        return phase === 'prompt-sent' || phase === 'streaming' || phase === 'completed' || phase === 'terminated';
+    }
+
+    function handleLifecyclePendingConversation(
+        attemptId: string,
+        phase: 'prompt-sent' | 'streaming' | 'completed' | 'terminated',
+        platform: string,
+        originalAttemptId: string,
+    ): void {
+        cachePendingLifecycleSignal(attemptId, phase, platform);
+        ingestSfeLifecycleFromWirePhase(phase, attemptId, null);
+        logger.info('Lifecycle pending conversation resolution', {
+            phase,
+            platform,
+            attemptId: originalAttemptId,
+        });
     }
 
     function handleStreamDeltaMessage(message: any): boolean {
@@ -3772,35 +4302,37 @@ export function runPlatform(): void {
             });
     }
 
+    function dispatchWindowBridgeMessage(message: any): void {
+        if (handleAttemptDisposedMessage(message)) {
+            return;
+        }
+        if (handleConversationIdResolvedMessage(message)) {
+            return;
+        }
+        if (handleStreamDeltaMessage(message)) {
+            return;
+        }
+        if (handleStreamDumpFrameMessage(message)) {
+            return;
+        }
+        if (handleTitleResolvedMessage(message)) {
+            return;
+        }
+        if (handleLifecycleMessage(message)) {
+            return;
+        }
+        if (handleResponseFinishedMessage(message)) {
+            return;
+        }
+        handleJsonBridgeRequest(message);
+    }
+
     function registerWindowBridge(): () => void {
         const handler = (event: MessageEvent) => {
             if (!isSameWindowOrigin(event)) {
                 return;
             }
-
-            const message = event.data;
-            if (handleAttemptDisposedMessage(message)) {
-                return;
-            }
-            if (handleConversationIdResolvedMessage(message)) {
-                return;
-            }
-            if (handleStreamDeltaMessage(message)) {
-                return;
-            }
-            if (handleStreamDumpFrameMessage(message)) {
-                return;
-            }
-            if (handleTitleResolvedMessage(message)) {
-                return;
-            }
-            if (handleLifecycleMessage(message)) {
-                return;
-            }
-            if (handleResponseFinishedMessage(message)) {
-                return;
-            }
-            handleJsonBridgeRequest(message);
+            dispatchWindowBridgeMessage(event.data);
         };
 
         window.addEventListener('message', handler);
@@ -3977,6 +4509,56 @@ export function runPlatform(): void {
     let cleanedUp = false;
     let beforeUnloadHandler: (() => void) | null = null;
 
+    function disposeTeardownAttempts(): void {
+        const disposed = sfe.disposeAll();
+        for (const attemptId of disposed) {
+            cancelStreamDoneProbe(attemptId, 'teardown');
+            clearCanonicalStabilizationRetry(attemptId);
+            clearProbeLeaseRetry(attemptId);
+            emitAttemptDisposed(attemptId, 'teardown');
+        }
+    }
+
+    function clearRunnerRetryTimers(): void {
+        for (const timerId of autoCaptureRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        autoCaptureRetryTimers.clear();
+        for (const timerId of canonicalStabilizationRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        canonicalStabilizationRetryTimers.clear();
+        canonicalStabilizationRetryCounts.clear();
+        for (const timerId of probeLeaseRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        probeLeaseRetryTimers.clear();
+    }
+
+    function clearStartupRetryTimeouts(): void {
+        for (const timeoutId of retryTimeoutIds) {
+            clearTimeout(timeoutId);
+        }
+        retryTimeoutIds.length = 0;
+    }
+
+    function detachBeforeUnload(): void {
+        if (!beforeUnloadHandler) {
+            return;
+        }
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+        beforeUnloadHandler = null;
+    }
+
+    function clearRunnerControlHandle(): void {
+        const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
+            | RunnerControl
+            | undefined;
+        if (globalControl === runnerControl) {
+            delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
+        }
+    }
+
     const cleanupRuntime = () => {
         if (cleanedUp) {
             return;
@@ -3984,13 +4566,7 @@ export function runPlatform(): void {
         cleanedUp = true;
         try {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
-            const disposed = sfe.disposeAll();
-            for (const attemptId of disposed) {
-                cancelStreamDoneProbe(attemptId, 'teardown');
-                clearCanonicalStabilizationRetry(attemptId);
-                clearProbeLeaseRetry(attemptId);
-                emitAttemptDisposed(attemptId, 'teardown');
-            }
+            disposeTeardownAttempts();
             interceptionManager.stop();
             navigationManager.stop();
             buttonManager.remove();
@@ -3998,35 +4574,12 @@ export function runPlatform(): void {
             cleanupCompletionWatcher?.();
             cleanupButtonHealthCheck?.();
             browser.storage.onChanged.removeListener(storageChangeListener);
-            for (const timerId of autoCaptureRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            autoCaptureRetryTimers.clear();
-            for (const timerId of canonicalStabilizationRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            canonicalStabilizationRetryTimers.clear();
-            canonicalStabilizationRetryCounts.clear();
-            for (const timerId of probeLeaseRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            probeLeaseRetryTimers.clear();
+            clearRunnerRetryTimers();
             probeLease.dispose();
-            for (const timeoutId of retryTimeoutIds) {
-                clearTimeout(timeoutId);
-            }
-            retryTimeoutIds.length = 0;
+            clearStartupRetryTimeouts();
             autoCaptureDeferredLogged.clear();
-            if (beforeUnloadHandler) {
-                window.removeEventListener('beforeunload', beforeUnloadHandler);
-                beforeUnloadHandler = null;
-            }
-            const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
-                | RunnerControl
-                | undefined;
-            if (globalControl === runnerControl) {
-                delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
-            }
+            detachBeforeUnload();
+            clearRunnerControlHandle();
         } catch (error) {
             logger.debug('Error during cleanup:', error);
         }
