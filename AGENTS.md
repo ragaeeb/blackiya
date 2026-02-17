@@ -19,10 +19,8 @@ Core goals:
 
 Read these first:
 1. `docs/architecture.md`
-2. `docs/handoff.md`
-3. `docs/post-v2.1-regressions.md`
-4. `docs/debug-logs-guide.md`
-5. `docs/discovery-mode.md`
+2. `docs/debug-logs-guide.md`
+3. `docs/discovery-mode.md`
 
 ## 3) Runtime Architecture
 
@@ -129,12 +127,17 @@ When changing title handling:
 ## 10) Documentation Hygiene
 
 After meaningful behavior changes:
-- Update `docs/post-v2.1-regressions.md`
-- Update `docs/handoff.md`
 - Update `docs/architecture.md` if flow changed
 
-Keep these four docs synchronized:
+Keep these docs synchronized:
 - `README.md`
 - `AGENTS.md`
 - `docs/architecture.md`
-- `docs/handoff.md`
+
+## 11) Release Smoke Checklist
+
+Before shipping:
+1. ChatGPT: verify streaming updates are live, completion transitions to `completed`, and Save only enables at `canonical_ready`.
+2. Gemini: verify StreamGenerate lifecycle stability and correct title export without requiring refresh.
+3. Grok: verify long-thinking sessions do not regress `Completed -> Streaming` and Save stays readiness-gated.
+4. Export metadata: verify canonical vs degraded exports set `captureSource`, `fidelity`, and `completeness` correctly.

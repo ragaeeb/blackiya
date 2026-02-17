@@ -17,9 +17,10 @@ A high-performance Chrome extension for capturing and saving conversation JSON f
 
 ## 📚 Architecture Docs
 
-- Architecture source of truth: `/Users/rhaq/workspace/blackiya/docs/architecture.md`
-- Current engineering handoff: `/Users/rhaq/workspace/blackiya/docs/handoff.md`
-- Regression log: `/Users/rhaq/workspace/blackiya/docs/post-v2.1-regressions.md`
+- Architecture source of truth: `docs/architecture.md`
+- Debug logs guide: `docs/debug-logs-guide.md`
+- Discovery mode guide: `docs/discovery-mode.md`
+- Current PR summary (this branch): `docs/PR.md`
 
 ## 🚀 Quick Start
 
@@ -190,8 +191,7 @@ blackiya/
 │   └── diagnostics-stream-dump.ts # Stream dump persistence
 ├── docs/
 │   ├── architecture.md
-│   ├── handoff.md
-│   ├── post-v2.1-regressions.md
+│   ├── PR.md
 │   ├── debug-logs-guide.md
 │   └── discovery-mode.md
 ├── public/
@@ -315,8 +315,8 @@ For the full legal disclosure, please refer to our [Privacy Policy](./PRIVACY_PO
 
 1. Create platform adapter in `platforms/your-platform.ts`
 2. Implement the `LLMPlatform` interface
-3. Register adapter in `/Users/rhaq/workspace/blackiya/platforms/factory.ts`
-4. Add host URL pattern in `/Users/rhaq/workspace/blackiya/platforms/constants.ts`
+3. Register adapter in `platforms/factory.ts`
+4. Add host URL pattern in `platforms/constants.ts`
 5. Update `wxt.config.ts` host permissions if needed
 6. Add parser/readiness tests in `platforms/your-platform.test.ts`
 
@@ -383,8 +383,8 @@ The JSON file contains:
 6. Stream dump capture is bounded and redacted, and is disabled by default.
 
 Debugging references:
-- `/Users/rhaq/workspace/blackiya/docs/debug-logs-guide.md`
-- `/Users/rhaq/workspace/blackiya/docs/discovery-mode.md`
+- `docs/debug-logs-guide.md`
+- `docs/discovery-mode.md`
 
 ## 🐛 Troubleshooting
 

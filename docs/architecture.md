@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-17
+> Last updated: 2026-02-17 (PR finalization docs pass)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -81,7 +81,8 @@ Readiness decision modes:
 
 Critical invariant:
 - Completion hint alone never guarantees export readiness.
-- `Save JSON` requires canonical-ready data.
+- Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
+- Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 
 ## 5) End-to-End Flow (Generic)
 
@@ -200,6 +201,7 @@ Source of truth priority:
 
 The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
 On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
+Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 
 Key methods:
 - `utils/platform-runner.ts`:
@@ -228,6 +230,17 @@ Primary code:
 - `utils/platform-runner.ts`
 - `utils/common-export.ts`
 - `utils/download.ts`
+
+### 8.1 Title Consistency and Stickiness
+
+Title precedence (highest to lowest):
+1. Stream/API title signals (`BLACKIYA_TITLE_RESOLVED`, adapter-cached RPC titles).
+2. Cached specific-title preservation in interception cache (`InterceptionManager` remembers specific titles per conversation).
+3. Adapter DOM fallback only when the cached title is generic/placeholder.
+4. Export-time fallback (first-user-message derivation) as the final safety net.
+
+Invariant:
+- Generic late titles must not clobber specific resolved titles already seen for the same conversation.
 
 ## 9) Diagnostics and Debugging
 
