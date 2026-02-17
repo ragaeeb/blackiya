@@ -38,6 +38,29 @@ describe('AttemptTracker', () => {
         expect(disposed).not.toContain('a2');
     });
 
+    it('preserves in-flight attempts bound to destination conversation on route change', () => {
+        const tracker = new AttemptTracker();
+        tracker.create({
+            attemptId: 'a1',
+            platform: 'ChatGPT',
+            phase: 'streaming',
+            conversationId: 'c-target',
+        });
+        tracker.create({
+            attemptId: 'a2',
+            platform: 'ChatGPT',
+            phase: 'streaming',
+            conversationId: 'c-old',
+        });
+
+        const disposed = tracker.disposeAllForRouteChange(Date.now(), 'c-target');
+
+        expect(disposed).toContain('a2');
+        expect(disposed).not.toContain('a1');
+        expect(tracker.get('a1')?.phase).toBe('streaming');
+        expect(tracker.get('a2')?.phase).toBe('disposed');
+    });
+
     it('evicts completed attempts after TTL', () => {
         let now = 1000;
         const tracker = new AttemptTracker({

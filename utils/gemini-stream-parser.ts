@@ -2,7 +2,8 @@ import { parseBatchexecuteResponse } from '@/utils/google-rpc';
 
 const GEMINI_CONVERSATION_ID_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-const GENERIC_TITLE_RE = /^(gemini|google gemini|gemini conversation|new chat|new conversation|chats)$/i;
+const GENERIC_TITLE_RE =
+    /^(gemini|google gemini|gemini conversation|conversation with gemini|new chat|new conversation|chats)$/i;
 
 function isLikelyGeminiText(value: string): boolean {
     const trimmed = value.trim();

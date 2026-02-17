@@ -58,4 +58,18 @@ describe('gemini-stream-parser', () => {
         expect(signals.conversationId).toBe('d628c5373645e315');
         expect(signals.titleCandidates).toContain('Tafsir of Prayer of Fear Verse');
     });
+
+    it('should ignore generic title candidates such as "Conversation with Gemini"', () => {
+        const payload = JSON.stringify([
+            null,
+            ['c_d628c5373645e315', 'r_e474e3de4f4e8c85'],
+            { '11': ['Conversation with Gemini'], '44': false },
+        ]);
+        const buffer = `)]}'\n150\n[["wrb.fr",null,${JSON.stringify(payload)},null,null,null,"generic"]]`;
+        const seenPayloads = new Set<string>();
+
+        const signals = extractGeminiStreamSignalsFromBuffer(buffer, seenPayloads);
+        expect(signals.conversationId).toBe('d628c5373645e315');
+        expect(signals.titleCandidates).not.toContain('Conversation with Gemini');
+    });
 });

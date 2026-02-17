@@ -147,7 +147,9 @@ Flow:
 Title strategy:
 1. Stream-derived title (`BLACKIYA_TITLE_RESOLVED`) if available.
 2. Adapter-cached title from RPC parsing.
-3. DOM fallback at export time (`extractTitleFromDom`) if cached title is generic.
+3. DOM fallback at export time (`extractTitleFromDom`) if cached title is generic/stale:
+   - includes placeholders like `You said ...`
+   - checks heading and active sidebar conversation title nodes
 
 Primary code:
 - `platforms/gemini.ts`
@@ -197,6 +199,7 @@ Source of truth priority:
 4. Fallback stabilization probes
 
 The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
+On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
 
 Key methods:
 - `utils/platform-runner.ts`:
@@ -233,6 +236,8 @@ Debug artifacts:
 - Full logs JSON: persistent logs storage
 - Optional stream dump:
   - captures `delta`, `heuristic`, `snapshot`, `lifecycle` frames by attempt
+- Readiness debug logs:
+  - canonical-ready decisions are TTL-deduped per conversation to avoid health-check log floods
 
 Docs:
 - `docs/debug-logs-guide.md`

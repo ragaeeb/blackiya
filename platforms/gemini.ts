@@ -37,10 +37,13 @@ const GEMINI_GENERIC_TITLES = new Set([
     'gemini',
     'google gemini',
     'gemini conversation',
+    'conversation with gemini',
     'new chat',
     'new conversation',
     'chats',
 ]);
+
+const GEMINI_CONVERSATION_ID_IN_PAYLOAD_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 
 function normalizeGeminiDomTitle(rawTitle: string): string {
     return rawTitle
@@ -55,7 +58,145 @@ function isGenericGeminiTitle(rawTitle: string): boolean {
     if (!normalized) {
         return true;
     }
-    return GEMINI_GENERIC_TITLES.has(normalized);
+    return (
+        GEMINI_GENERIC_TITLES.has(normalized) ||
+        normalized.startsWith('you said ') ||
+        normalized.startsWith('you said:')
+    );
+}
+
+function normalizeGeminiTitleCandidate(rawTitle: unknown): string | null {
+    if (typeof rawTitle !== 'string') {
+        return null;
+    }
+    const normalized = normalizeGeminiDomTitle(rawTitle).replace(/\s+/g, ' ').trim();
+    if (normalized.length < 3 || normalized.length > 180) {
+        return null;
+    }
+    if (normalized.includes('\n')) {
+        return null;
+    }
+    if (isGenericGeminiTitle(normalized)) {
+        return null;
+    }
+    return normalized;
+}
+
+function collectGeminiTitleCandidates(node: unknown, out: string[], depth = 0): void {
+    if (depth > 8 || out.length >= 16 || !node || typeof node !== 'object') {
+        return;
+    }
+
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            collectGeminiTitleCandidates(child, out, depth + 1);
+        }
+        return;
+    }
+
+    const obj = node as Record<string, unknown>;
+    const candidateSlots: unknown[] = [];
+
+    if (Object.hasOwn(obj, '11')) {
+        const key11 = obj['11'];
+        if (Array.isArray(key11)) {
+            candidateSlots.push(...key11);
+        } else {
+            candidateSlots.push(key11);
+        }
+    }
+
+    if (Object.hasOwn(obj, 'title')) {
+        candidateSlots.push(obj.title);
+    }
+
+    for (const candidate of candidateSlots) {
+        const normalized = normalizeGeminiTitleCandidate(candidate);
+        if (normalized && !out.includes(normalized)) {
+            out.push(normalized);
+        }
+    }
+
+    for (const value of Object.values(obj)) {
+        collectGeminiTitleCandidates(value, out, depth + 1);
+    }
+}
+
+function extractGeminiTitleCandidatesFromPayload(payload: unknown): string[] {
+    const candidates: string[] = [];
+    collectGeminiTitleCandidates(payload, candidates);
+    return candidates;
+}
+
+function extractGeminiConversationIdFromSourcePath(url: string): string | null {
+    try {
+        const parsed = new URL(url, 'https://gemini.google.com');
+        const sourcePath = parsed.searchParams.get('source-path');
+        if (sourcePath) {
+            const match = sourcePath.match(/\/app\/([a-zA-Z0-9_-]+)/i);
+            if (match?.[1]) {
+                return match[1];
+            }
+        }
+    } catch {
+        // Fall back to regex parsing below.
+    }
+
+    const encodedMatch = url.match(/[?&]source-path=%2Fapp%2F([a-zA-Z0-9_-]+)/i);
+    return encodedMatch?.[1] ?? null;
+}
+
+function extractGeminiConversationIdFromRawPayload(rawPayload: string): string | null {
+    const match = rawPayload.match(GEMINI_CONVERSATION_ID_IN_PAYLOAD_REGEX);
+    return match?.[1] ?? null;
+}
+
+function hydrateGeminiTitleCandidatesFromRpcResults(
+    rpcResults: BatchexecuteResult[],
+    url: string,
+    titlesCache: LRUCache<string, string>,
+): void {
+    const sourcePathConversationId = extractGeminiConversationIdFromSourcePath(url);
+
+    for (const rpcResult of rpcResults) {
+        const rawPayload = rpcResult.payload;
+        if (typeof rawPayload !== 'string' || rawPayload.length === 0) {
+            continue;
+        }
+
+        let parsedPayload: unknown;
+        try {
+            parsedPayload = JSON.parse(rawPayload);
+        } catch {
+            continue;
+        }
+
+        const titleCandidates = extractGeminiTitleCandidatesFromPayload(parsedPayload);
+        if (titleCandidates.length === 0) {
+            continue;
+        }
+
+        const conversationId = extractGeminiConversationIdFromRawPayload(rawPayload) ?? sourcePathConversationId;
+        if (!conversationId) {
+            continue;
+        }
+
+        const title = titleCandidates[0];
+        const previousTitle = titlesCache.get(conversationId) ?? null;
+        if (previousTitle === title) {
+            continue;
+        }
+
+        titlesCache.set(conversationId, title);
+        maybeUpdateActiveGeminiConversationTitle(conversationId, title);
+        logger.info('[Blackiya/Gemini/Titles] Cached title candidate from RPC', {
+            conversationId,
+            rpcId: rpcResult.rpcId,
+            title,
+            previousTitle,
+            sourcePathMatched: sourcePathConversationId === conversationId,
+        });
+    }
 }
 
 function extractTitleFromGeminiDomHeadings(): string | null {
@@ -64,6 +205,34 @@ function extractTitleFromGeminiDomHeadings(): string | null {
     }
 
     const selectors = ['main h1', 'main [role="heading"][aria-level="1"]', 'main [role="heading"]', 'header h1', 'h1'];
+
+    for (const selector of selectors) {
+        const nodes = document.querySelectorAll(selector);
+        for (const node of nodes) {
+            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
+            if (!candidate || isGenericGeminiTitle(candidate)) {
+                continue;
+            }
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function extractTitleFromGeminiActiveConversationNav(): string | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+
+    const selectors = [
+        'nav a[aria-current="page"]',
+        'nav button[aria-current="page"]',
+        'aside a[aria-current="page"]',
+        'aside button[aria-current="page"]',
+        '[role="tab"][aria-selected="true"]',
+        'nav [aria-selected="true"]',
+    ];
 
     for (const selector of selectors) {
         const nodes = document.querySelectorAll(selector);
@@ -600,6 +769,7 @@ export const geminiAdapter: LLMPlatform = {
             logger.info('[Blackiya/Gemini] Attempting to parse response from:', url);
 
             const rpcResults = parseBatchexecuteResponse(data);
+            hydrateGeminiTitleCandidatesFromRpcResults(rpcResults, url, conversationTitles);
 
             const conversationRpc = findConversationRpc(rpcResults, this.isConversationPayload);
             if (!conversationRpc) {
@@ -661,7 +831,7 @@ export const geminiAdapter: LLMPlatform = {
         return evaluateGeminiReadiness(data);
     },
 
-    defaultTitles: ['Gemini Conversation', 'Google Gemini'],
+    defaultTitles: ['Gemini Conversation', 'Google Gemini', 'Conversation with Gemini'],
 
     extractTitleFromDom() {
         if (typeof document === 'undefined') {
@@ -676,6 +846,11 @@ export const geminiAdapter: LLMPlatform = {
         const headingTitle = extractTitleFromGeminiDomHeadings();
         if (headingTitle) {
             return headingTitle;
+        }
+
+        const sidebarTitle = extractTitleFromGeminiActiveConversationNav();
+        if (sidebarTitle) {
+            return sidebarTitle;
         }
 
         return null;

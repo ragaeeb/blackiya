@@ -112,12 +112,25 @@ mock.module('@/utils/download', () => ({
     },
 }));
 
+const loggerDebugCalls: Array<{ message: unknown; args: unknown[] }> = [];
+const loggerInfoCalls: Array<{ message: unknown; args: unknown[] }> = [];
+const loggerWarnCalls: Array<{ message: unknown; args: unknown[] }> = [];
+const loggerErrorCalls: Array<{ message: unknown; args: unknown[] }> = [];
+
 mock.module('@/utils/logger', () => ({
     logger: {
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
+        debug: (message: unknown, ...args: unknown[]) => {
+            loggerDebugCalls.push({ message, args });
+        },
+        info: (message: unknown, ...args: unknown[]) => {
+            loggerInfoCalls.push({ message, args });
+        },
+        warn: (message: unknown, ...args: unknown[]) => {
+            loggerWarnCalls.push({ message, args });
+        },
+        error: (message: unknown, ...args: unknown[]) => {
+            loggerErrorCalls.push({ message, args });
+        },
     },
 }));
 
@@ -153,6 +166,10 @@ describe('Platform Runner', () => {
         currentAdapterMock = createMockAdapter();
         storageDataMock = {};
         downloadCalls.length = 0;
+        loggerDebugCalls.length = 0;
+        loggerInfoCalls.length = 0;
+        loggerWarnCalls.length = 0;
+        loggerErrorCalls.length = 0;
 
         // Mock window.location properties
         const locationMock = {
@@ -325,6 +342,30 @@ describe('Platform Runner', () => {
         expect(resolved).toBe('Tafsir of Prayer of Fear Verse');
     });
 
+    it('should treat "Conversation with Gemini" as generic and derive export title', () => {
+        const conversation = buildConversation('gem-1c', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'Conversation with Gemini';
+        conversation.mapping.u1.message.content.parts = ['Vessels of Gold and Silver'];
+
+        const resolved = resolveExportConversationTitle(conversation as any);
+        expect(resolved).toBe('Vessels of Gold and Silver');
+    });
+
+    it('should treat Gemini "You said ..." placeholder title as generic and derive export title', () => {
+        const conversation = buildConversation('gem-1d', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'You said ROLE: Expert academic translator';
+        conversation.mapping.u1.message.content.parts = ['Discussion on Istinja Rulings'];
+
+        const resolved = resolveExportConversationTitle(conversation as any);
+        expect(resolved).toBe('Discussion on Istinja Rulings');
+    });
+
     it('should keep explicit non-generic export title', () => {
         const conversation = buildConversation('gem-2', 'Assistant response', {
             status: 'finished_successfully',
@@ -407,6 +448,80 @@ describe('Platform Runner', () => {
         const payload = downloadCalls.at(-1)?.data as Record<string, unknown>;
         expect(payload.title).toBe('Discussion on Quranic Verse Meanings');
         expect(downloadCalls.at(-1)?.filename).toContain('Discussion_on_Quranic_Verse_Meanings');
+    }, 10_000);
+
+    it('should use Gemini DOM title fallback on Save when cached title is a "You said ..." placeholder', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => 'gem-title-2',
+            evaluateReadiness: evaluateReadinessMock,
+            defaultTitles: ['Gemini Conversation', 'Google Gemini', 'Conversation with Gemini'],
+            extractTitleFromDom: () => "Discussion on Istinja' Rulings",
+            formatFilename: (data: { title: string }) => data.title.replace(/[^a-zA-Z0-9]/g, '_'),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const conversation = buildConversation('gem-title-2', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'You said ROLE: Expert academic translator';
+        conversation.mapping.u1.message.content.parts = ['You said ROLE: Expert academic translator'];
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-title-2',
+                phase: 'completed',
+                conversationId: 'gem-title-2',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(conversation),
+                attemptId: 'attempt:gem-title-2',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(conversation),
+                attemptId: 'attempt:gem-title-2',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+        expect(saveBtn?.disabled).toBe(false);
+
+        saveBtn?.click();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(downloadCalls.length).toBeGreaterThanOrEqual(1);
+        const payload = downloadCalls.at(-1)?.data as Record<string, unknown>;
+        expect(payload.title).toBe("Discussion on Istinja' Rulings");
+        expect(downloadCalls.at(-1)?.filename).toContain('Discussion_on_Istinja__Rulings');
     }, 10_000);
 
     it('should update lifecycle badge from network lifecycle messages', async () => {
@@ -782,6 +897,86 @@ describe('Platform Runner', () => {
         expect(saveAfter?.disabled).toBe(true);
         expect(lifecycle?.textContent).toContain('Idle');
     });
+
+    it('should not spam identical canonical_ready readiness logs during periodic health checks', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Gemini',
+            extractConversationId: () => 'gem-ready-log',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://gemini.google.com/app/gem-ready-log',
+            origin: 'https://gemini.google.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        const readyConversation = buildConversation('gem-ready-log', 'Assistant output', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Gemini',
+                attemptId: 'attempt:gem-ready-log',
+                phase: 'completed',
+                conversationId: 'gem-ready-log',
+            },
+            window.location.origin,
+        );
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(readyConversation),
+                attemptId: 'attempt:gem-ready-log',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        window.postMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Gemini',
+                url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                data: JSON.stringify(readyConversation),
+                attemptId: 'attempt:gem-ready-log',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        const canonicalReadyLogsBeforeWait = loggerDebugCalls.filter(
+            (entry) =>
+                entry.message === 'Readiness decision: canonical_ready' &&
+                (entry.args[0] as { conversationId?: string } | undefined)?.conversationId === 'gem-ready-log',
+        ).length;
+        expect(canonicalReadyLogsBeforeWait).toBeGreaterThan(0);
+
+        await new Promise((resolve) => setTimeout(resolve, 3900));
+
+        const canonicalReadyLogsAfterWait = loggerDebugCalls.filter(
+            (entry) =>
+                entry.message === 'Readiness decision: canonical_ready' &&
+                (entry.args[0] as { conversationId?: string } | undefined)?.conversationId === 'gem-ready-log',
+        ).length;
+
+        expect(canonicalReadyLogsAfterWait).toBe(canonicalReadyLogsBeforeWait);
+    }, 12_000);
 
     it('should append live stream delta text to stream probe panel', async () => {
         runPlatform();
@@ -2320,6 +2515,110 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).not.toContain('Completed');
+    });
+
+    it('should keep ChatGPT stream deltas after navigation into the same conversation route', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            extractConversationId: (url: string) => {
+                const match = url.match(/\/c\/([a-z0-9-]+)/i);
+                return match?.[1] ?? null;
+            },
+        };
+
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://chatgpt.com/',
+            origin: 'https://chatgpt.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:nav-preserve',
+                phase: 'streaming',
+                conversationId: 'conv-same-nav',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        (window as any).location.href = 'https://chatgpt.com/c/conv-same-nav';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:nav-preserve',
+                conversationId: 'conv-same-nav',
+                text: 'delta-after-same-conversation-navigation',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText.includes('delta-after-same-conversation-navigation')).toBe(true);
+    });
+
+    it('should dispose prior ChatGPT attempt when navigation switches to a different conversation route', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            extractConversationId: (url: string) => {
+                const match = url.match(/\/c\/([a-z0-9-]+)/i);
+                return match?.[1] ?? null;
+            },
+        };
+
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://chatgpt.com/c/conv-old',
+            origin: 'https://chatgpt.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:nav-dispose',
+                phase: 'streaming',
+                conversationId: 'conv-old',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        (window as any).location.href = 'https://chatgpt.com/c/conv-new';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        window.postMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:nav-dispose',
+                conversationId: 'conv-old',
+                text: 'delta-from-disposed-old-conversation',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText.includes('delta-from-disposed-old-conversation')).toBe(false);
     });
 
     it('should ignore stale stream delta from superseded attempt', async () => {

@@ -199,6 +199,78 @@ describe('Gemini Platform Adapter', () => {
             expect(convResult).not.toBeNull();
             expect(convResult?.title).toBe(expectedTitle);
         });
+
+        it('should cache title candidates from non-conversation batchexecute RPCs using source-path conversation id', () => {
+            const uniqueId = 'test_source_path_title';
+            const expectedTitle = "Discussion on Istinja' Rulings";
+            const titlePayload = JSON.stringify({
+                '11': [expectedTitle],
+                '44': false,
+            });
+            const chunk = JSON.stringify([['wrb.fr', 'ESY5D', titlePayload, null]]);
+            const nonConversationResponse = `)]}'\n\n${chunk.length}\n${chunk}\n`;
+            const sourcePathUrl = `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D&source-path=%2Fapp%2F${uniqueId}&rt=c`;
+
+            const titleOnlyResult = geminiAdapter.parseInterceptedData(nonConversationResponse, sourcePathUrl);
+            expect(titleOnlyResult).toBeNull();
+
+            const modifiedConvData = conversationResponseRaw.replace('9cf87bbddf79d497', uniqueId);
+            const convResult = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
+
+            expect(convResult).not.toBeNull();
+            expect(convResult?.title).toBe(expectedTitle);
+        });
+
+        it('should retroactively update title from non-conversation batchexecute RPCs', () => {
+            const uniqueId = 'test_source_path_title_after_data';
+            const expectedTitle = "Discussion on Istinja' Rulings";
+
+            const modifiedConvData = conversationResponseRaw.replace('9cf87bbddf79d497', uniqueId);
+            const convResult = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
+
+            expect(convResult).not.toBeNull();
+            expect(convResult?.title).toBe('Gemini Conversation');
+
+            const titlePayload = JSON.stringify({
+                '11': [expectedTitle],
+                '44': false,
+            });
+            const chunk = JSON.stringify([['wrb.fr', 'ESY5D', titlePayload, null]]);
+            const nonConversationResponse = `)]}'\n\n${chunk.length}\n${chunk}\n`;
+            const sourcePathUrl = `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D&source-path=%2Fapp%2F${uniqueId}&rt=c`;
+
+            const titleOnlyResult = geminiAdapter.parseInterceptedData(nonConversationResponse, sourcePathUrl);
+            expect(titleOnlyResult).toBeNull();
+            expect(convResult?.title).toBe(expectedTitle);
+        });
+
+        it('should ignore generic title candidates from non-conversation batchexecute RPCs', () => {
+            const uniqueId = 'test_source_path_generic_title';
+            const titlePayload = JSON.stringify({
+                '11': ['Google Gemini'],
+            });
+            const chunk = JSON.stringify([['wrb.fr', 'ESY5D', titlePayload, null]]);
+            const nonConversationResponse = `)]}'\n\n${chunk.length}\n${chunk}\n`;
+            const sourcePathUrl = `https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D&source-path=%2Fapp%2F${uniqueId}&rt=c`;
+
+            const titleOnlyResult = geminiAdapter.parseInterceptedData(nonConversationResponse, sourcePathUrl);
+            expect(titleOnlyResult).toBeNull();
+
+            const modifiedConvData = conversationResponseRaw.replace('9cf87bbddf79d497', uniqueId);
+            const convResult = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
+
+            expect(convResult).not.toBeNull();
+            expect(convResult?.title).toBe('Gemini Conversation');
+        });
     });
 
     describe('evaluateReadiness', () => {
@@ -594,6 +666,66 @@ describe('Gemini Platform Adapter', () => {
             (globalThis as any).document = doc;
             try {
                 expect(geminiAdapter.extractTitleFromDom()).toBeNull();
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
+
+        it('should treat "Conversation with Gemini" as generic and fall back to heading title', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Conversation with Gemini';
+            doc.body.innerHTML = `
+                <main>
+                    <h1>Vessels of Gold and Silver</h1>
+                </main>
+            `;
+
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = doc;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBe('Vessels of Gold and Silver');
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
+
+        it('should treat "You said ..." as generic and fall back to heading title', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'You said ROLE: Expert academic translator';
+            doc.body.innerHTML = `
+                <main>
+                    <h1>Discussion on Istinja Rulings</h1>
+                </main>
+            `;
+
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = doc;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBe('Discussion on Istinja Rulings');
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
+
+        it('should extract active sidebar conversation title when heading is unavailable', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'You said ROLE: Expert academic translator';
+            doc.body.innerHTML = `
+                <nav>
+                    <a aria-current="page">Discussion on Istinja' Rulings</a>
+                </nav>
+                <main>
+                    <div>No heading yet</div>
+                </main>
+            `;
+
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = doc;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBe("Discussion on Istinja' Rulings");
             } finally {
                 (globalThis as any).document = originalDocument;
             }

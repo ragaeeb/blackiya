@@ -148,10 +148,17 @@ export class AttemptTracker {
         return descriptor;
     }
 
-    public disposeAllForRouteChange(timestampMs = Date.now()): string[] {
+    public disposeAllForRouteChange(timestampMs = Date.now(), preserveConversationId?: string): string[] {
         const disposed: string[] = [];
         for (const descriptor of this.attempts.values()) {
             if (descriptor.disposed) {
+                continue;
+            }
+            if (
+                preserveConversationId &&
+                descriptor.conversationId &&
+                descriptor.conversationId === preserveConversationId
+            ) {
                 continue;
             }
             if (

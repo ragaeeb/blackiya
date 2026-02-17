@@ -148,4 +148,161 @@ describe('InterceptionManager', () => {
         expect(captured).toEqual(['snapshot-123']);
         expect(manager.getConversation('snapshot-123')).toBeDefined();
     });
+
+    it('should preserve existing non-generic title when snapshot ingest has generic title', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.ingestConversationData({
+            title: 'Wiping Over Splints and Travel',
+            create_time: 1,
+            update_time: 2,
+            mapping: {},
+            conversation_id: 'gemini-1',
+            current_node: 'node-1',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'gemini',
+            safe_urls: [],
+            blocked_urls: [],
+        });
+
+        manager.ingestConversationData(
+            {
+                title: 'Google Gemini',
+                create_time: 1,
+                update_time: 3,
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: [] },
+                },
+                conversation_id: 'gemini-1',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gemini',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            'stream-done-snapshot',
+        );
+
+        const cached = manager.getConversation('gemini-1');
+        expect(cached).toBeDefined();
+        expect(cached?.title).toBe('Wiping Over Splints and Travel');
+        expect(cached?.update_time).toBe(3);
+    });
+
+    it('should accept non-generic snapshot title when existing title is generic', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.ingestConversationData({
+            title: 'Google Gemini',
+            create_time: 1,
+            update_time: 2,
+            mapping: {},
+            conversation_id: 'gemini-2',
+            current_node: 'node-1',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'gemini',
+            safe_urls: [],
+            blocked_urls: [],
+        });
+
+        manager.ingestConversationData(
+            {
+                title: 'Discussion on Istinja Rulings',
+                create_time: 1,
+                update_time: 3,
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: [] },
+                },
+                conversation_id: 'gemini-2',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gemini',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            'stream-done-snapshot',
+        );
+
+        const cached = manager.getConversation('gemini-2');
+        expect(cached).toBeDefined();
+        expect(cached?.title).toBe('Discussion on Istinja Rulings');
+    });
+
+    it('should keep previously seen non-generic title when later network ingest is generic', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.ingestConversationData(
+            {
+                title: 'Wiping Over Splints and Travel',
+                create_time: 1,
+                update_time: 2,
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: [] },
+                },
+                conversation_id: 'gemini-3',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gemini',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            'network',
+        );
+
+        manager.ingestConversationData(
+            {
+                title: 'Google Gemini',
+                create_time: 1,
+                update_time: 3,
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: [] },
+                },
+                conversation_id: 'gemini-3',
+                current_node: 'root',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'gemini',
+                safe_urls: [],
+                blocked_urls: [],
+            },
+            'network',
+        );
+
+        const cached = manager.getConversation('gemini-3');
+        expect(cached).toBeDefined();
+        expect(cached?.title).toBe('Wiping Over Splints and Travel');
+        expect(cached?.update_time).toBe(3);
+    });
 });

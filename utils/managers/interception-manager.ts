@@ -13,7 +13,21 @@ import { LRUCache } from '@/utils/lru-cache';
 import type { ConversationData } from '@/utils/types';
 
 export class InterceptionManager {
+    private static readonly GENERIC_TITLES = new Set([
+        'gemini',
+        'gemini advanced',
+        'new chat',
+        'new conversation',
+        'chats',
+        'chatgpt',
+        'google gemini',
+        'gemini conversation',
+        'conversation with gemini',
+        'grok conversation',
+    ]);
+
     private readonly conversationCache: LRUCache<string, ConversationData>;
+    private readonly specificTitleCache: LRUCache<string, string>;
     private currentAdapter: LLMPlatform | null = null;
     private readonly windowRef: Window;
     private readonly globalRef: typeof globalThis;
@@ -34,6 +48,7 @@ export class InterceptionManager {
         options: { window?: Window; global?: typeof globalThis } = {},
     ) {
         this.conversationCache = new LRUCache<string, ConversationData>(10);
+        this.specificTitleCache = new LRUCache<string, string>(50);
         this.onDataCaptured = onDataCaptured;
         this.windowRef = options.window ?? window;
         this.globalRef = options.global ?? globalThis;
@@ -68,7 +83,12 @@ export class InterceptionManager {
     }
 
     public getConversation(id: string): ConversationData | undefined {
-        return this.conversationCache.get(id);
+        const cached = this.conversationCache.get(id);
+        if (!cached) {
+            return undefined;
+        }
+        this.preserveSpecificTitle(id, cached, 'cache-read');
+        return cached;
     }
 
     public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }): void {
@@ -99,6 +119,7 @@ export class InterceptionManager {
                 return;
             }
         }
+        this.preserveSpecificTitle(conversationId, data, source, existing);
         this.conversationCache.set(conversationId, data);
         logger.info(`Successfully captured/cached data for conversation: ${conversationId}`, {
             source,
@@ -177,13 +198,16 @@ export class InterceptionManager {
 
             if (data?.conversation_id) {
                 const conversationId = data.conversation_id;
+                const source = typeof message?.source === 'string' ? message.source : 'network';
+                const existing = this.conversationCache.get(conversationId);
+                this.preserveSpecificTitle(conversationId, data, source, existing);
                 this.conversationCache.set(conversationId, data);
 
                 logger.info(`Successfully captured/cached data for conversation: ${conversationId}`);
 
                 // Notify runner to update UI if this matches current view
                 this.onDataCaptured(conversationId, data, {
-                    source: 'network',
+                    source,
                     attemptId: typeof message?.attemptId === 'string' ? message.attemptId : undefined,
                 });
             } else {
@@ -227,6 +251,64 @@ export class InterceptionManager {
             (url.includes('/rest/app-chat/conversations/') && url.includes('/response-node'));
 
         return isExpectedAuxMiss ? 'info' : 'warn';
+    }
+
+    private normalizeTitle(title: string | undefined | null): string {
+        return typeof title === 'string' ? title.replace(/\s+/g, ' ').trim().toLowerCase() : '';
+    }
+
+    private isGenericConversationTitle(title: string | undefined | null): boolean {
+        const normalized = this.normalizeTitle(title);
+        if (!normalized) {
+            return true;
+        }
+        return (
+            InterceptionManager.GENERIC_TITLES.has(normalized) ||
+            normalized.startsWith('you said ') ||
+            normalized.startsWith('you said:')
+        );
+    }
+
+    private rememberSpecificTitle(conversationId: string, title: string, source: string): void {
+        const previousTitle = this.specificTitleCache.get(conversationId) ?? null;
+        if (previousTitle === title) {
+            return;
+        }
+        this.specificTitleCache.set(conversationId, title);
+        logger.info('Updated remembered specific title', {
+            conversationId,
+            source,
+            previousTitle,
+            nextTitle: title,
+        });
+    }
+
+    private preserveSpecificTitle(
+        conversationId: string,
+        incoming: ConversationData,
+        source: string,
+        existing?: ConversationData,
+    ): void {
+        const existingSpecificTitle =
+            existing && !this.isGenericConversationTitle(existing.title) ? existing.title : null;
+        const rememberedSpecificTitle = this.specificTitleCache.get(conversationId) ?? null;
+        const fallbackSpecificTitle = existingSpecificTitle ?? rememberedSpecificTitle;
+
+        if (fallbackSpecificTitle && this.isGenericConversationTitle(incoming.title)) {
+            const previousIncomingTitle = incoming.title;
+            incoming.title = fallbackSpecificTitle;
+            logger.info('Preserved specific title over generic incoming title', {
+                conversationId,
+                source,
+                preservationSource: existingSpecificTitle ? 'existing-cache' : 'specific-title-cache',
+                preservedTitle: fallbackSpecificTitle,
+                incomingTitle: previousIncomingTitle,
+            });
+        }
+
+        if (!this.isGenericConversationTitle(incoming.title)) {
+            this.rememberSpecificTitle(conversationId, incoming.title, source);
+        }
     }
 
     private processQueuedMessages(): void {

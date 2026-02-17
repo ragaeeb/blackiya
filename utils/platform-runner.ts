@@ -61,6 +61,7 @@ const PROBE_LEASE_RETRY_GRACE_MS = 500;
 const MAX_CONVERSATION_ATTEMPTS = 250;
 const MAX_STREAM_PREVIEWS = 150;
 const MAX_AUTOCAPTURE_KEYS = 400;
+const CANONICAL_READY_LOG_TTL_MS = 15_000;
 const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
 
 type RunnerControl = {
@@ -136,8 +137,11 @@ function isGenericConversationTitle(title: string | undefined | null): boolean {
         normalized === 'chats' ||
         normalized === 'chatgpt' ||
         normalized === 'google gemini' ||
+        normalized === 'conversation with gemini' ||
         normalized === 'gemini conversation' ||
-        normalized === 'grok conversation'
+        normalized === 'grok conversation' ||
+        normalized.startsWith('you said ') ||
+        normalized.startsWith('you said:')
     );
 }
 
@@ -250,6 +254,7 @@ export function runPlatform(): void {
     const captureMetaByConversation = new Map<string, ExportMeta>();
     const probeLease = new CrossTabProbeLease();
     const streamResolvedTitles = new Map<string, string>();
+    const lastCanonicalReadyLogAtByConversation = new Map<string, number>();
     let activeAttemptId: string | null = null;
 
     function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number): void {
@@ -3070,9 +3075,21 @@ export function runPlatform(): void {
         if (!currentAdapter?.extractTitleFromDom || !currentAdapter.defaultTitles) {
             return;
         }
-        const isStaleTitle = currentAdapter.defaultTitles.some(
-            (d) => d.toLowerCase() === (data.title || '').toLowerCase(),
+        const normalizedTitle = (data.title ?? '').trim();
+        const promptDerivedTitle = deriveConversationTitleFromFirstUserMessage(data);
+        const isGeminiPromptDerivedTitle =
+            currentAdapter.name === 'Gemini' &&
+            normalizedTitle.length > 0 &&
+            !!promptDerivedTitle &&
+            normalizedTitle === promptDerivedTitle;
+        const isAdapterDefaultTitle = currentAdapter.defaultTitles.some(
+            (defaultTitle) => defaultTitle.toLowerCase() === normalizedTitle.toLowerCase(),
         );
+        const isStaleTitle =
+            normalizedTitle.length === 0 ||
+            isAdapterDefaultTitle ||
+            isGeminiPromptDerivedTitle ||
+            (currentAdapter.name === 'Gemini' && isGenericConversationTitle(normalizedTitle));
         if (!isStaleTitle && data.title) {
             return;
         }
@@ -3229,12 +3246,15 @@ export function runPlatform(): void {
         }
     }
 
-    function disposeInFlightAttemptsOnNavigation(): void {
-        const disposedAttemptIds = sfe.getAttemptTracker().disposeAllForRouteChange();
+    function disposeInFlightAttemptsOnNavigation(preserveConversationId?: string | null): void {
+        const disposedAttemptIds = sfe
+            .getAttemptTracker()
+            .disposeAllForRouteChange(Date.now(), preserveConversationId ?? undefined);
         if (disposedAttemptIds.length > 0) {
             logger.info('Navigation disposing attempts', {
                 count: disposedAttemptIds.length,
                 attemptIds: disposedAttemptIds,
+                preserveConversationId: preserveConversationId ?? null,
             });
         }
         for (const attemptId of disposedAttemptIds) {
@@ -3246,7 +3266,7 @@ export function runPlatform(): void {
     }
 
     function handleConversationSwitch(newId: string | null): void {
-        disposeInFlightAttemptsOnNavigation();
+        disposeInFlightAttemptsOnNavigation(newId);
         if (!newId) {
             currentConversationId = null;
             setLifecycleState('idle');
@@ -3580,9 +3600,20 @@ export function runPlatform(): void {
         };
     }
 
+    function shouldLogCanonicalReadyDecision(conversationId: string): boolean {
+        const now = Date.now();
+        const lastLoggedAt = lastCanonicalReadyLogAtByConversation.get(conversationId);
+        if (lastLoggedAt !== undefined && now - lastLoggedAt < CANONICAL_READY_LOG_TTL_MS) {
+            return false;
+        }
+        setBoundedMapValue(lastCanonicalReadyLogAtByConversation, conversationId, now, MAX_CONVERSATION_ATTEMPTS);
+        return true;
+    }
+
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
         const data = interceptionManager.getConversation(conversationId);
         if (!data) {
+            lastCanonicalReadyLogAtByConversation.delete(conversationId);
             return createMissingDataReadinessDecision();
         }
 
@@ -3597,18 +3628,22 @@ export function runPlatform(): void {
         const sfeReady = !!sfeResolution?.ready;
         logSfeMismatchIfNeeded(conversationId, readiness.ready);
         if (sfeReady && readiness.ready && captureMeta.fidelity === 'high') {
-            logger.debug('Readiness decision: canonical_ready', {
-                conversationId,
-                fidelity: captureMeta.fidelity,
-                sfeReady,
-                legacyReady: readiness.ready,
-            });
+            if (shouldLogCanonicalReadyDecision(conversationId)) {
+                logger.debug('Readiness decision: canonical_ready', {
+                    conversationId,
+                    fidelity: captureMeta.fidelity,
+                    sfeReady,
+                    legacyReady: readiness.ready,
+                });
+            }
             return {
                 ready: true,
                 mode: 'canonical_ready',
                 reason: 'canonical_ready',
             };
         }
+
+        lastCanonicalReadyLogAtByConversation.delete(conversationId);
 
         const timeoutDecision = createTimeoutReadinessDecision(conversationId, captureMeta, sfeResolution);
         if (timeoutDecision) {
