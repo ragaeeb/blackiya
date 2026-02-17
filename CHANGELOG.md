@@ -1,3 +1,15 @@
+# [2.0.0](https://github.com/ragaeeb/blackiya/compare/v1.6.0...v2.0.0) (2026-02-17)
+
+
+### Features
+
+* **calibrate:** Add calibration for the various platforms ([#5](https://github.com/ragaeeb/blackiya/issues/5)) ([398f714](https://github.com/ragaeeb/blackiya/commit/398f714d1a1ba1f60a6a33f2c34079d9e46c74b7)), closes [hi#fidelity](https://github.com/hi/issues/fidelity) [hi#complexity](https://github.com/hi/issues/complexity) [#7](https://github.com/ragaeeb/blackiya/issues/7) [#8](https://github.com/ragaeeb/blackiya/issues/8)
+
+
+### BREAKING CHANGES
+
+* **calibrate:** v2.0 release
+
 # [1.6.0](https://github.com/ragaeeb/blackiya/compare/v1.5.0...v1.6.0) (2026-02-10)
 
 
