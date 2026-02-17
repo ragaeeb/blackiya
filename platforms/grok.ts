@@ -8,8 +8,9 @@
  * 4. Retroactively updates active conversations when titles arrive
  */
 
-import type { LLMPlatform } from '@/platforms/types';
+import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { hashText } from '@/utils/hash';
 import { logger } from '@/utils/logger';
 import { LRUCache } from '@/utils/lru-cache';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
@@ -69,6 +70,7 @@ const createGrokComConversation = (conversationId: string) => {
 };
 
 const getOrCreateGrokComConversation = (conversationId: string) => {
+    _lastActiveGrokComConversationId = conversationId;
     const existing = activeConversations.get(conversationId);
     if (existing) {
         return existing;
@@ -254,8 +256,58 @@ const parseGrokComResponseItem = (response: any, rootId: string) => {
     };
 };
 
+const normalizeFromGrokComObject = (data: any): any[] | null => {
+    if (typeof data.responseId === 'string') {
+        return [data];
+    }
+    if (data.response && typeof data.response === 'object') {
+        return [data.response];
+    }
+
+    const resultResponse = data.result?.response;
+    if (!resultResponse || typeof resultResponse !== 'object') {
+        return null;
+    }
+    const modelResp = resultResponse.modelResponse;
+    const userResp = resultResponse.userResponse;
+    if (modelResp && typeof modelResp.responseId === 'string') {
+        return [modelResp];
+    }
+    if (userResp && typeof userResp.responseId === 'string') {
+        return [userResp];
+    }
+    return null;
+};
+
+const normalizeFromGrokComArray = (data: any[]): any[] | null => {
+    const directResponses = data.filter((item) => item && typeof item?.responseId === 'string');
+    return directResponses.length > 0 ? directResponses : null;
+};
+
+const normalizeGrokComResponses = (data: any): any[] | null => {
+    if (Array.isArray(data?.responses)) {
+        return data.responses;
+    }
+
+    if (data && typeof data === 'object') {
+        const normalizedObject = normalizeFromGrokComObject(data);
+        if (normalizedObject) {
+            return normalizedObject;
+        }
+    }
+
+    if (Array.isArray(data)) {
+        const normalizedArray = normalizeFromGrokComArray(data);
+        if (normalizedArray) {
+            return normalizedArray;
+        }
+    }
+
+    return null;
+};
+
 const parseGrokComResponses = (data: any, conversationId: string) => {
-    const responses = Array.isArray(data?.responses) ? data.responses : null;
+    const responses = normalizeGrokComResponses(data);
     if (!responses) {
         return null;
     }
@@ -293,6 +345,114 @@ const parseGrokComResponses = (data: any, conversationId: string) => {
     return conversation;
 };
 
+/**
+ * Resilient NDJSON parser for Grok streaming endpoints.
+ *
+ * Design: Instead of matching specific endpoint paths, this function handles
+ * ANY Grok endpoint that returns newline-delimited JSON. It:
+ * 1. Parses each line independently (one bad line doesn't break the rest)
+ * 2. Extracts conversationId from any line that has one
+ * 3. Uses the existing grok.com response parsers for message extraction
+ * 4. Falls back to activeConversations cache when URL lacks conversation ID
+ *
+ * This makes the adapter resilient to endpoint URL changes — as long as the
+ * response payload structure is similar, it will work.
+ */
+const tryParseGrokNdjson = (data: string, url: string): ConversationData | null => {
+    const lines = data.split('\n').filter((line) => line.trim());
+    if (lines.length < 2) {
+        return null;
+    }
+
+    logger.info(`[Blackiya/Grok] Parsing NDJSON fallback (${lines.length} lines)`, {
+        url: url.slice(0, 120),
+    });
+
+    const parsedLines = parseGrokNdjsonLines(lines);
+    if (parsedLines.length === 0) {
+        return null;
+    }
+
+    const conversationId = resolveGrokNdjsonConversationId(url, parsedLines);
+    if (!conversationId) {
+        logger.info('[Blackiya/Grok] NDJSON could not determine conversation ID');
+        return null;
+    }
+
+    return parseGrokNdjsonConversation(parsedLines, conversationId);
+};
+
+const parseGrokNdjsonLines = (lines: string[]): any[] => {
+    const parsedLines: any[] = [];
+    for (const line of lines) {
+        try {
+            parsedLines.push(JSON.parse(line));
+        } catch {
+            // Skip unparseable lines — don't let one bad line break everything.
+        }
+    }
+    return parsedLines;
+};
+
+const extractGrokNdjsonConversationIdFromPayload = (parsed: any): string | null => {
+    const directCandidate = parsed?.conversationId;
+    if (typeof directCandidate === 'string' && GROK_COM_CONVERSATION_ID_PATTERN.test(directCandidate)) {
+        return directCandidate;
+    }
+    const nestedCandidate = parsed?.result?.conversation?.conversationId;
+    if (typeof nestedCandidate === 'string' && GROK_COM_CONVERSATION_ID_PATTERN.test(nestedCandidate)) {
+        return nestedCandidate;
+    }
+    return null;
+};
+
+const resolveGrokNdjsonConversationId = (url: string, parsedLines: any[]): string | null => {
+    let conversationId = extractGrokComConversationIdFromUrl(url);
+    if (!conversationId) {
+        for (const parsed of parsedLines) {
+            conversationId = extractGrokNdjsonConversationIdFromPayload(parsed);
+            if (conversationId) {
+                break;
+            }
+        }
+    }
+    if (conversationId) {
+        return conversationId;
+    }
+
+    const lastActive = getLastActiveGrokComConversationId();
+    if (lastActive) {
+        logger.info('[Blackiya/Grok] NDJSON using last-active conversation ID', {
+            conversationId: lastActive,
+        });
+        return lastActive;
+    }
+    return null;
+};
+
+const parseGrokNdjsonConversation = (parsedLines: any[], conversationId: string): ConversationData | null => {
+    const conversation = getOrCreateGrokComConversation(conversationId);
+    let foundMessages = false;
+    for (const parsed of parsedLines) {
+        const result = parseGrokComResponses(parsed, conversationId);
+        if (result && hasGrokComMessages(result)) {
+            foundMessages = true;
+        }
+    }
+    return foundMessages ? conversation : null;
+};
+
+/**
+ * Get the most recently active grok.com conversation ID from the cache.
+ * Used as a last-resort fallback when the NDJSON URL doesn't contain an ID.
+ */
+const getLastActiveGrokComConversationId = (): string | null => {
+    // LRUCache doesn't expose iteration, so we use a separate tracking variable
+    return _lastActiveGrokComConversationId;
+};
+
+let _lastActiveGrokComConversationId: string | null = null;
+
 const isGrokComMetaEndpoint = (url: string) => url.includes('/rest/app-chat/conversations_v2/');
 
 const isGrokComResponseNodesEndpoint = (url: string) =>
@@ -300,6 +460,8 @@ const isGrokComResponseNodesEndpoint = (url: string) =>
 
 const isGrokComLoadResponsesEndpoint = (url: string) =>
     url.includes('/rest/app-chat/conversations/') && url.includes('/load-responses');
+
+const isXGraphqlEndpoint = (url: string) => url.includes('/i/api/graphql/');
 
 const extractGrokComConversationIdFromUrl = (url: string) => {
     try {
@@ -314,6 +476,33 @@ const extractGrokComConversationIdFromUrl = (url: string) => {
         return GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
     } catch {
         return null;
+    }
+};
+
+const extractRestIdFromVariables = (variablesStr: string | null): string | null => {
+    if (!variablesStr) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(variablesStr);
+        const restId = parsed?.restId;
+        return typeof restId === 'string' ? restId : null;
+    } catch {
+        const decoded = decodeURIComponent(variablesStr);
+        const match = decoded.match(/restId["\\]*\s*:\s*["\\]*(\d+)/);
+        return match?.[1] ?? null;
+    }
+};
+
+const extractXConversationIdFromApiUrl = (url: string): string | null => {
+    try {
+        const urlObj = new URL(url);
+        const variablesStr = urlObj.searchParams.get('variables');
+        return extractRestIdFromVariables(variablesStr);
+    } catch {
+        const match = url.match(/%22restId%22%3A%22(\d+)%22/);
+        return match?.[1] ?? null;
     }
 };
 
@@ -642,6 +831,168 @@ const parseGrokResponse = (data: any, conversationIdOverride?: string) => {
     }
 };
 
+const evaluateGrokReadiness = (data: ConversationData): PlatformReadiness => {
+    const messages = Object.values(data.mapping)
+        .map((node) => node.message)
+        .filter(
+            (message): message is NonNullable<MessageNode['message']> =>
+                !!message && message.author.role === 'assistant',
+        )
+        .sort((left, right) => {
+            const leftTs = left.update_time ?? left.create_time ?? 0;
+            const rightTs = right.update_time ?? right.create_time ?? 0;
+            return leftTs - rightTs;
+        });
+
+    if (messages.length === 0) {
+        return {
+            ready: false,
+            terminal: false,
+            reason: 'assistant-missing',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
+
+    if (messages.some((message) => message.status === 'in_progress')) {
+        return {
+            ready: false,
+            terminal: false,
+            reason: 'assistant-in-progress',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
+
+    const latest = messages[messages.length - 1];
+    const latestText = (latest.content.parts ?? []).filter((part): part is string => typeof part === 'string').join('');
+    const normalized = latestText.trim().normalize('NFC');
+
+    if (normalized.length === 0) {
+        return {
+            ready: false,
+            terminal: true,
+            reason: 'assistant-text-missing',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
+
+    if (latest.status !== 'finished_successfully' || latest.end_turn !== true) {
+        return {
+            ready: false,
+            terminal: true,
+            reason: 'assistant-latest-text-not-terminal-turn',
+            contentHash: null,
+            latestAssistantTextLength: normalized.length,
+        };
+    }
+
+    return {
+        ready: true,
+        terminal: true,
+        reason: 'terminal',
+        contentHash: hashText(normalized),
+        latestAssistantTextLength: normalized.length,
+    };
+};
+
+const parseJsonIfNeeded = (data: string | any): any => (typeof data === 'string' ? JSON.parse(data) : data);
+
+const tryHandleGrokTitlesEndpoint = (data: string | any, url: string): boolean => {
+    if (!isTitlesEndpoint(url)) {
+        return false;
+    }
+
+    const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    const titles = parseTitlesResponse(dataStr, url);
+    if (titles) {
+        for (const [id, title] of titles) {
+            conversationTitles.set(id, title);
+        }
+        logger.info(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
+    } else {
+        logger.info('[Blackiya/Grok/Titles] Failed to extract titles from this response');
+    }
+    return true;
+};
+
+const parseGrokComLoadResponsesPayload = (data: string | any, conversationId: string): ConversationData | null => {
+    const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    const lines = dataStr
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim());
+
+    if (lines.length <= 1) {
+        return parseGrokComResponses(parseJsonIfNeeded(data), conversationId);
+    }
+
+    logger.info(`[Blackiya/Grok] Parsing NDJSON with ${lines.length} lines`);
+    let result: ConversationData | null = null;
+    for (const line of lines) {
+        try {
+            const parsed = JSON.parse(line);
+            const lineResult = parseGrokComResponses(parsed, conversationId);
+            if (lineResult) {
+                result = lineResult;
+            }
+        } catch (_e) {
+            logger.warn(`[Blackiya/Grok] Failed to parse NDJSON line: ${line.slice(0, 100)}`);
+        }
+    }
+    return result;
+};
+
+const tryParseGrokComRestEndpoint = (data: string | any, url: string): ConversationData | null | undefined => {
+    if (isGrokComMetaEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url);
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComConversationMeta(parseJsonIfNeeded(data), conversationId);
+    }
+
+    if (isGrokComResponseNodesEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url);
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComResponseNodes(parseJsonIfNeeded(data), conversationId);
+    }
+
+    if (isGrokComLoadResponsesEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url);
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComLoadResponsesPayload(data, conversationId);
+    }
+
+    return undefined;
+};
+
+const resolveXGraphqlConversationId = (url: string): string | undefined => {
+    if (!url || !isXGraphqlEndpoint(url)) {
+        return undefined;
+    }
+    const extracted = extractXConversationIdFromApiUrl(url);
+    return extracted || undefined;
+};
+
+const parseDefaultGrokPayload = (data: string | any, url: string): ConversationData | null => {
+    try {
+        const parsed = parseJsonIfNeeded(data);
+        return parseGrokResponse(parsed, resolveXGraphqlConversationId(url));
+    } catch (e) {
+        if (typeof data === 'string' && data.includes('\n')) {
+            return tryParseGrokNdjson(data, url);
+        }
+        logger.error('[Blackiya/Grok] Failed to parse data:', e);
+        return null;
+    }
+};
+
 /**
  * Grok Platform Adapter
  *
@@ -654,13 +1005,23 @@ export const grokAdapter: LLMPlatform = {
 
     // Match BOTH the conversation endpoint AND the history endpoint
     apiEndpointPattern:
-        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
+        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
+    completionTriggerPattern:
+        /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/,
 
     /**
      * Check if a URL belongs to Grok
      */
     isPlatformUrl(url: string) {
-        return url.includes('x.com/i/grok') || url.includes('grok.com/c/');
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.hostname === 'grok.com' || urlObj.hostname === 'www.grok.com') {
+                return true;
+            }
+            return urlObj.hostname === 'x.com' && urlObj.pathname.startsWith('/i/grok');
+        } catch {
+            return false;
+        }
     },
 
     /**
@@ -689,7 +1050,8 @@ export const grokAdapter: LLMPlatform = {
                     return null;
                 }
 
-                return GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
+                const isValid = GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId);
+                return isValid ? conversationId : null;
             }
 
             if (urlObj.hostname !== 'x.com') {
@@ -718,91 +1080,61 @@ export const grokAdapter: LLMPlatform = {
         }
     },
 
+    extractConversationIdFromUrl(url: string): string | null {
+        const grokComId = extractGrokComConversationIdFromUrl(url);
+        if (grokComId) {
+            return grokComId;
+        }
+        return extractXConversationIdFromApiUrl(url);
+    },
+
+    buildApiUrls(conversationId: string): string[] {
+        if (!GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId)) {
+            return [];
+        }
+
+        return [
+            `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`,
+            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
+            `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
+        ];
+    },
+
     /**
      * Parse intercepted Grok API response
      *
      * @param data - Raw text or parsed object
      * @param url - The API endpoint URL
      */
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Centralized logic for parsing Grok data
     parseInterceptedData(data: string | any, url: string) {
-        // Check if this is a titles endpoint
-        if (isTitlesEndpoint(url)) {
-            const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-            const titles = parseTitlesResponse(dataStr, url);
-            if (titles) {
-                // Merge into global cache
-                for (const [id, title] of titles) {
-                    conversationTitles.set(id, title);
-                }
-                logger.info(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
-            } else {
-                logger.info('[Blackiya/Grok/Titles] Failed to extract titles from this response');
+        // #region agent log — debug: log parse entry with URL routing
+        const _dbgPath = (() => {
+            try {
+                return new URL(url).pathname;
+            } catch {
+                return url.slice(0, 120);
             }
-            // Don't return ConversationData for title endpoints
+        })();
+        logger.info('[Blackiya/Grok] parseInterceptedData entry', {
+            path: _dbgPath,
+            dataLen: typeof data === 'string' ? data.length : -1,
+            isGrokComMeta: isGrokComMetaEndpoint(url),
+            isResponseNodes: isGrokComResponseNodesEndpoint(url),
+            isLoadResponses: isGrokComLoadResponsesEndpoint(url),
+            isXGraphql: isXGraphqlEndpoint(url),
+        });
+        // #endregion
+
+        if (tryHandleGrokTitlesEndpoint(data, url)) {
             return null;
         }
 
-        // grok.com conversation metadata
-        if (isGrokComMetaEndpoint(url)) {
-            const conversationId = extractGrokComConversationIdFromUrl(url);
-            if (!conversationId) {
-                return null;
-            }
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokComConversationMeta(parsed, conversationId);
+        const grokComResult = tryParseGrokComRestEndpoint(data, url);
+        if (grokComResult !== undefined) {
+            return grokComResult;
         }
 
-        // grok.com response-node graph
-        if (isGrokComResponseNodesEndpoint(url)) {
-            const conversationId = extractGrokComConversationIdFromUrl(url);
-            if (!conversationId) {
-                return null;
-            }
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokComResponseNodes(parsed, conversationId);
-        }
-
-        // grok.com responses payload
-        if (isGrokComLoadResponsesEndpoint(url)) {
-            const conversationId = extractGrokComConversationIdFromUrl(url);
-            if (!conversationId) {
-                return null;
-            }
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            return parseGrokComResponses(parsed, conversationId);
-        }
-
-        // Otherwise, parse as conversation data (x.com GraphQL)
-        try {
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-
-            // Extract restId from URL if possible to ensure we use the same ID as the cache
-            let conversationIdFromUrl: string | undefined;
-            if (url) {
-                try {
-                    const urlObj = new URL(url);
-                    const variablesStr = urlObj.searchParams.get('variables');
-                    if (variablesStr) {
-                        const variables = JSON.parse(variablesStr);
-                        if (variables?.restId) {
-                            conversationIdFromUrl = variables.restId;
-                        }
-                    }
-                } catch {
-                    // Fallback to regex
-                    const match = url.match(/%22restId%22%3A%22(\d+)%22/);
-                    if (match?.[1]) {
-                        conversationIdFromUrl = match[1];
-                    }
-                }
-            }
-
-            return parseGrokResponse(parsed, conversationIdFromUrl);
-        } catch (e) {
-            logger.error('[Blackiya/Grok] Failed to parse data:', e);
-            return null;
-        }
+        return parseDefaultGrokPayload(data, url);
     },
 
     /**
@@ -850,5 +1182,31 @@ export const grokAdapter: LLMPlatform = {
             }
         }
         return null;
+    },
+
+    evaluateReadiness(data: ConversationData) {
+        return evaluateGrokReadiness(data);
+    },
+
+    defaultTitles: ['New conversation', 'Grok Conversation'],
+
+    extractTitleFromDom() {
+        const raw = document.title?.trim();
+        if (!raw) {
+            return null;
+        }
+
+        // Strip common Grok page title suffixes (e.g., "My Chat - Grok")
+        const cleaned = raw.replace(/\s*-\s*Grok$/i, '').trim();
+        if (!cleaned || cleaned.toLowerCase() === 'grok') {
+            return null;
+        }
+
+        // Ignore known defaults
+        if (this.defaultTitles?.some((d: string) => d.toLowerCase() === cleaned.toLowerCase())) {
+            return null;
+        }
+
+        return cleaned;
     },
 };

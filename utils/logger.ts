@@ -1,6 +1,7 @@
 import { type ILogObj, Logger } from 'tslog';
 import { browser } from 'wxt/browser';
 import { type LogEntry, logsStorage } from './logs-storage';
+import { STORAGE_KEYS } from './settings';
 
 /**
  * Log levels supported by the extension
@@ -35,6 +36,7 @@ class ExtensionLogger {
     private logger: Logger<ILogObj>;
     private static instance: ExtensionLogger;
     private context: 'background' | 'content' | 'popup';
+    private storageListenerAttached = false;
 
     private constructor() {
         this.context = getContext();
@@ -50,6 +52,9 @@ class ExtensionLogger {
         this.logger.attachTransport((logObj) => {
             this.handleTransport(logObj);
         });
+
+        this.hydrateLogLevelFromStorage();
+        this.attachStorageListener();
     }
 
     private handleTransport(logObj: ILogObj) {
@@ -133,6 +138,51 @@ class ExtensionLogger {
                 break;
         }
         this.logger.settings.minLevel = minLevel;
+    }
+
+    private async hydrateLogLevelFromStorage(): Promise<void> {
+        if (!browser?.storage?.local?.get) {
+            return;
+        }
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.LOG_LEVEL);
+            const storedLevel = result[STORAGE_KEYS.LOG_LEVEL];
+            if (
+                storedLevel === 'debug' ||
+                storedLevel === 'info' ||
+                storedLevel === 'warn' ||
+                storedLevel === 'error'
+            ) {
+                this.setLevel(storedLevel);
+            }
+        } catch {
+            // Ignore; logger should continue with default level.
+        }
+    }
+
+    private attachStorageListener(): void {
+        if (this.storageListenerAttached) {
+            return;
+        }
+        if (!browser?.storage?.onChanged?.addListener) {
+            return;
+        }
+        this.storageListenerAttached = true;
+
+        browser.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName !== 'local') {
+                return;
+            }
+            const changedLevel = changes[STORAGE_KEYS.LOG_LEVEL]?.newValue;
+            if (
+                changedLevel === 'debug' ||
+                changedLevel === 'info' ||
+                changedLevel === 'warn' ||
+                changedLevel === 'error'
+            ) {
+                this.setLevel(changedLevel);
+            }
+        });
     }
 }
 

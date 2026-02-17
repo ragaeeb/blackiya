@@ -15,6 +15,13 @@
 
 A high-performance Chrome extension for capturing and saving conversation JSON from popular LLM platforms (ChatGPT, Gemini, Grok).
 
+## 📚 Architecture Docs
+
+- Architecture source of truth: `docs/architecture.md`
+- Debug logs guide: `docs/debug-logs-guide.md`
+- Discovery mode guide: `docs/discovery-mode.md`
+- Current PR summary (this branch): `docs/PR.md`
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -80,14 +87,14 @@ Create the following directory structure:
 
 ```bash
 # Create directories
-mkdir -p entrypoints/content entrypoints/popup public/icon utils platforms
+mkdir -p entrypoints/popup public/icon platforms utils docs
 
 # Create necessary files
 touch wxt.config.ts biome.json tsconfig.json
 touch entrypoints/background.ts
-touch entrypoints/content/chatgpt.ts
-touch utils/storage.ts utils/capture.ts utils/types.ts
-touch platforms/chatgpt.ts
+touch entrypoints/main.content.ts entrypoints/interceptor.content.ts
+touch platforms/chatgpt.ts platforms/gemini.ts platforms/grok.ts
+touch utils/platform-runner.ts utils/protocol/messages.ts
 ```
 
 #### Step 5: Configure Project Files
@@ -175,10 +182,18 @@ blackiya/
 │   ├── grok.ts               # Grok platform adapter
 │   └── types.ts              # Platform interface definitions
 ├── utils/
-│   ├── storage.ts            # Chrome storage utilities
-│   ├── capture.ts            # Core capture logic
+│   ├── platform-runner.ts    # Main orchestration + readiness gating
+│   ├── managers/             # Interception/navigation managers
+│   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities
-│   └── types.ts              # TypeScript type definitions
+│   ├── protocol/             # Cross-world message protocol
+│   ├── minimal-logs.ts       # Debug report generator
+│   └── diagnostics-stream-dump.ts # Stream dump persistence
+├── docs/
+│   ├── architecture.md
+│   ├── PR.md
+│   ├── debug-logs-guide.md
+│   └── discovery-mode.md
 ├── public/
 │   └── icon/                 # Extension icons
 │       ├── 16.png
@@ -186,7 +201,7 @@ blackiya/
 │       └── 128.png
 ├── .gitignore
 ├── biome.json                # Biome configuration
-├── bun.lockb                 # Bun lock file
+├── bun.lock                  # Bun lock file
 ├── package.json              # Project dependencies
 ├── tsconfig.json             # TypeScript configuration
 ├── wxt.config.ts             # WXT framework configuration
@@ -206,7 +221,7 @@ blackiya/
 - ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
 - ✅ **Robust UI**: Seamless button injection into ChatGPT, Gemini, and Grok interfaces.
 - ✅ **Message Tree**: Preserves complete nested message structure.
-- ✅ **Extensive Testing**: 100% test coverage for platform adapters (Gemini/ChatGPT/Grok).
+- ✅ **Extensive Testing**: Large regression-focused unit/integration test suite for adapters and runtime orchestration.
 - ✅ **Absolute Imports**: Cleaner codebase using `@/` path aliases.
 - ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 - ✅ **Advanced Logging**: Structured, exportable debug logs with privacy-focused persistent storage.
@@ -300,9 +315,10 @@ For the full legal disclosure, please refer to our [Privacy Policy](./PRIVACY_PO
 
 1. Create platform adapter in `platforms/your-platform.ts`
 2. Implement the `LLMPlatform` interface
-3. Create content script in `entrypoints/content/your-platform.ts`
-4. Register in `wxt.config.ts` host permissions
-5. Update background script to handle the new platform
+3. Register adapter in `platforms/factory.ts`
+4. Add host URL pattern in `platforms/constants.ts`
+5. Update `wxt.config.ts` host permissions if needed
+6. Add parser/readiness tests in `platforms/your-platform.test.ts`
 
 ### Code Quality
 
@@ -338,13 +354,15 @@ The ZIP file will be in `.output/` directory.
 3. The conversation JSON will download or be copied automatically.
 4. Download format: `{conversation-title}_{timestamp}.json`
 
-### Manual Capture
+### Popup Tools
 
-If the auto-inject button doesn't appear:
-
-1. Open the extension popup (click extension icon)
-2. Click "Capture Current Conversation"
-3. The JSON will download
+From the extension popup you can:
+1. Set log level (`Debug`, `Info`, `Warn`, `Error`)
+2. Export full logs JSON
+3. Export a token-lean debug report TXT
+4. Enable/disable diagnostics stream dump
+5. Export/clear stream dump data
+6. Clear logs
 
 ### Viewing Saved Conversations
 
@@ -359,8 +377,14 @@ The JSON file contains:
 
 1. Click the extension icon to open the Popup UI.
 2. View current log count and adjust the **Log Level** (Debug/Info/Warn/Error).
-3. Click "Export Debug Logs" to download a JSON file containing internal extension logs.
-4. Useful for bug reporting and troubleshooting.
+3. Click **Export Full Logs (JSON)** to download the raw extension log buffer.
+4. Click **Export Debug Report (TXT)** for a token-lean troubleshooting summary.
+5. Optional forensic mode: enable **Diagnostics Stream Dump**, reproduce the issue, then click **Export Stream Dump (JSON)**.
+6. Stream dump capture is bounded and redacted, and is disabled by default.
+
+Debugging references:
+- `docs/debug-logs-guide.md`
+- `docs/discovery-mode.md`
 
 ## 🐛 Troubleshooting
 
@@ -372,7 +396,7 @@ The JSON file contains:
 
 ### Button Not Appearing
 
-1. Check if you're on a supported platform (chatgpt.com)
+1. Check if you're on a supported platform (`chatgpt.com`, `gemini.google.com`, `grok.com`, `x.com/i/grok/*`)
 2. Open browser console and check for errors
 3. Reload the extension: `chrome://extensions/` > Reload
 4. Refresh the webpage
@@ -380,7 +404,7 @@ The JSON file contains:
 ### Build Errors
 
 1. Clear output: `rm -rf .output/`
-2. Clear cache: `rm -rf node_modules/ bun.lockb`
+2. Clear cache: `rm -rf node_modules/ bun.lock`
 3. Reinstall: `bun install`
 4. Rebuild: `bun run dev`
 
