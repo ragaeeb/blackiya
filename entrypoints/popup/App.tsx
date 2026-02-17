@@ -170,7 +170,7 @@ function App() {
             </button>
 
             <div className="section">
-                <label htmlFor="streamDumpEnabled">Diagnostics Stream Dump</label>
+                <strong>Diagnostics Stream Dump</strong>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
                     Opt-in bounded capture of streaming frame text for forensic debugging.
                 </div>
