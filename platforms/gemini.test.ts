@@ -598,5 +598,27 @@ describe('Gemini Platform Adapter', () => {
                 (globalThis as any).document = originalDocument;
             }
         });
+
+        it('should ignore sidebar navigation label titles such as Chats', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <nav>
+                    <button aria-selected="true">Chats</button>
+                </nav>
+                <main>
+                    <div>No heading yet</div>
+                </main>
+            `;
+
+            const originalDocument = (globalThis as any).document;
+            (globalThis as any).document = doc;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBeNull();
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
+        });
     });
 });

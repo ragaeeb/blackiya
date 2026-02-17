@@ -227,6 +227,79 @@ describe('Minimal Debug Report', () => {
         expect(report).toContain('Gemini endpoint unmatched by adapter');
     });
 
+    it('should include title resolution diagnostics for Gemini exports', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] API match Gemini',
+                context: 'content',
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] Gemini stream title emitted',
+                context: 'content',
+                data: [{ conversationId: 'd628c5373645e315', title: 'Tafsir of Prayer of Fear Verse' }],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: 'Export title decision',
+                context: 'content',
+                data: [
+                    {
+                        conversationId: 'd628c5373645e315',
+                        source: 'stream-title',
+                        resolvedTitle: 'Tafsir of Prayer of Fear Verse',
+                    },
+                ],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('Gemini stream title emitted');
+        expect(report).toContain('Export title decision');
+    });
+
+    it('should synthesize sessions when start markers are missing but conversation IDs exist', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message: 'Lifecycle phase',
+                context: 'content',
+                data: [{ platform: 'Gemini', conversationId: 'ecedf1fbeb94a2df', phase: 'streaming' }],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: 'Successfully captured/cached data for conversation: ecedf1fbeb94a2df',
+                context: 'content',
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: 'Button state',
+                context: 'content',
+                data: [{ conversationId: 'e1c018e80918c489', hasData: true }],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] Gemini stream title emitted',
+                context: 'content',
+                data: [{ conversationId: 'e1c018e80918c489', title: 'Tafsir of Quranic Verses' }],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('Sessions: 2');
+        expect(report).toContain('Gemini ecedf1fb');
+        expect(report).toContain('Gemini e1c018e8');
+        expect(report).not.toContain('No interception sessions');
+    });
+
     it('should support legacy [interceptor] prefix', () => {
         const logs: LogEntry[] = [
             {

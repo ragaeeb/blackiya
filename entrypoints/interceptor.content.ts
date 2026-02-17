@@ -5,6 +5,8 @@ import type { LLMPlatform } from '@/platforms/types';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
+import { shouldEmitGrokCompletion, shouldEmitGrokLifecycle } from '@/utils/grok-request-classifier';
+import { extractGrokStreamSignalsFromBuffer } from '@/utils/grok-stream-parser';
 import {
     extractForwardableHeadersFromFetchArgs,
     type HeaderRecord,
@@ -58,7 +60,7 @@ const streamDumpFrameCountByAttempt = new Map<string, number>();
 const streamDumpLastTextByAttempt = new Map<string, string>();
 const latestAttemptIdByPlatform = new Map<string, string>();
 let streamDumpEnabled = false;
-const INTERCEPTOR_RUNTIME_TAG = 'v2.1.1-gemini-stream';
+const INTERCEPTOR_RUNTIME_TAG = 'v2.1.1-grok-stream';
 type GeminiXhrStreamState = {
     attemptId: string;
     seedConversationId?: string;
@@ -68,6 +70,20 @@ type GeminiXhrStreamState = {
     seenPayloadOrder: string[];
     emittedText: Set<string>;
     emittedTextOrder: string[];
+    emittedTitles: Set<string>;
+    emittedStreaming: boolean;
+};
+
+type GrokXhrStreamState = {
+    attemptId: string;
+    requestUrl: string;
+    seedConversationId?: string;
+    lastLength: number;
+    buffer: string;
+    seenPayloads: Set<string>;
+    seenPayloadOrder: string[];
+    emittedSignals: Set<string>;
+    emittedSignalOrder: string[];
     emittedStreaming: boolean;
 };
 
@@ -377,26 +393,38 @@ function isGeminiTitlesEndpoint(url: string): boolean {
 }
 
 function shouldEmitNonChatLifecycleForRequest(adapter: LLMPlatform, url: string): boolean {
-    if (adapter.name !== 'Gemini') {
-        return true;
+    if (adapter.name === 'Gemini') {
+        const allowed = shouldEmitGeminiLifecycle(url);
+        if (!allowed && shouldLogTransient(`gemini:lifecycle-suppressed:${safePathname(url)}`, 8000)) {
+            log('info', 'Gemini lifecycle suppressed for non-generation endpoint', {
+                path: safePathname(url),
+            });
+        }
+        return allowed;
     }
-    const allowed = shouldEmitGeminiLifecycle(url);
-    if (!allowed && shouldLogTransient(`gemini:lifecycle-suppressed:${safePathname(url)}`, 8000)) {
-        log('info', 'Gemini lifecycle suppressed for non-generation endpoint', {
-            path: safePathname(url),
-        });
+    if (adapter.name === 'Grok') {
+        const allowed = shouldEmitGrokLifecycle(url);
+        if (!allowed && shouldLogTransient(`grok:lifecycle-suppressed:${safePathname(url)}`, 8000)) {
+            log('info', 'Grok lifecycle suppressed for non-generation endpoint', {
+                path: safePathname(url),
+            });
+        }
+        return allowed;
     }
-    return allowed;
+    return true;
 }
 
 function shouldEmitCompletionSignalForUrl(adapter: LLMPlatform, url: string): boolean {
-    if (adapter.name !== 'Gemini') {
-        return true;
+    if (adapter.name === 'Gemini') {
+        if (isGeminiTitlesEndpoint(url)) {
+            return false;
+        }
+        return shouldEmitGeminiCompletion(url);
     }
-    if (isGeminiTitlesEndpoint(url)) {
-        return false;
+    if (adapter.name === 'Grok') {
+        return shouldEmitGrokCompletion(url);
     }
-    return shouldEmitGeminiCompletion(url);
+    return true;
 }
 
 function shouldSuppressCompletionSignal(adapter: LLMPlatform, url: string): boolean {
@@ -445,13 +473,18 @@ function emitLifecycleSignal(
     });
 }
 
-function emitTitleResolvedSignal(attemptId: string, conversationId: string, title: string): void {
+function emitTitleResolvedSignal(
+    attemptId: string,
+    conversationId: string,
+    title: string,
+    platformOverride?: string,
+): void {
     if (isAttemptDisposed(attemptId)) {
         return;
     }
     const payload = {
         type: 'BLACKIYA_TITLE_RESOLVED' as const,
-        platform: chatGPTAdapter.name,
+        platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
         title,
@@ -707,6 +740,7 @@ async function monitorGeminiResponseStream(
     const seenPayloadOrder: string[] = [];
     const emittedText = new Set<string>();
     const emittedTextOrder: string[] = [];
+    const emittedTitles = new Set<string>();
 
     if (conversationId) {
         emitConversationIdResolvedSignal(attemptId, conversationId, 'Gemini');
@@ -749,10 +783,11 @@ async function monitorGeminiResponseStream(
             }
             emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, value.length, 'Gemini');
 
-            const { conversationId: parsedConversationId, textCandidates } = extractGeminiStreamSignalsFromBuffer(
-                buffer,
-                seenPayloads,
-            );
+            const {
+                conversationId: parsedConversationId,
+                textCandidates,
+                titleCandidates,
+            } = extractGeminiStreamSignalsFromBuffer(buffer, seenPayloads);
             for (const payload of seenPayloads) {
                 if (seenPayloadOrder.includes(payload)) {
                     continue;
@@ -795,6 +830,8 @@ async function monitorGeminiResponseStream(
                     });
                 }
             }
+
+            emitGeminiTitleCandidates(attemptId, conversationId, titleCandidates, emittedTitles);
         }
     } catch {
         // Ignore monitor read errors; completion + canonical capture path remains authoritative.
@@ -813,6 +850,7 @@ function createGeminiXhrStreamState(attemptId: string, seedConversationId?: stri
         seenPayloadOrder: [],
         emittedText: new Set<string>(),
         emittedTextOrder: [],
+        emittedTitles: new Set<string>(),
         emittedStreaming: false,
     };
 }
@@ -841,6 +879,32 @@ function emitGeminiTextCandidates(
         trimGeminiDeltaHistory(state.emittedTextOrder, state.emittedText);
         emitStreamDeltaSignal(state.attemptId, conversationId, candidate, 'Gemini');
         emitStreamDumpFrame(state.attemptId, conversationId, 'heuristic', candidate, candidate.length, 'Gemini');
+    }
+}
+
+function emitGeminiTitleCandidates(
+    attemptId: string,
+    conversationId: string | undefined,
+    titleCandidates: string[],
+    emittedTitles: Set<string>,
+): void {
+    if (!conversationId) {
+        return;
+    }
+    for (const title of titleCandidates) {
+        const normalized = title.trim();
+        if (normalized.length === 0 || emittedTitles.has(normalized)) {
+            continue;
+        }
+        emittedTitles.add(normalized);
+        emitTitleResolvedSignal(attemptId, conversationId, normalized, 'Gemini');
+        if (shouldLogTransient(`gemini:title:emitted:${attemptId}`, 6000)) {
+            log('info', 'Gemini stream title emitted', {
+                attemptId,
+                conversationId,
+                title: normalized,
+            });
+        }
     }
 }
 
@@ -887,6 +951,7 @@ function processGeminiXhrProgressChunk(state: GeminiXhrStreamState, chunkText: s
     }
 
     emitGeminiTextCandidates(state, resolvedConversationId, signals.textCandidates);
+    emitGeminiTitleCandidates(state.attemptId, resolvedConversationId, signals.titleCandidates, state.emittedTitles);
 }
 
 function wireGeminiXhrProgressMonitor(
@@ -930,6 +995,308 @@ function wireGeminiXhrProgressMonitor(
             (state.emittedStreaming || !!state.seedConversationId)
         ) {
             emitLifecycleSignal(state.attemptId, 'completed', state.seedConversationId, 'Gemini');
+        }
+        xhr.removeEventListener('progress', handleProgress);
+        xhr.removeEventListener('loadend', handleLoadEnd);
+    };
+
+    xhr.addEventListener('progress', handleProgress);
+    xhr.addEventListener('loadend', handleLoadEnd);
+}
+
+function trimGrokPayloadHistory(seenPayloadOrder: string[], seenPayloads: Set<string>): void {
+    const maxEntries = 260;
+    while (seenPayloadOrder.length > maxEntries) {
+        const oldest = seenPayloadOrder.shift();
+        if (oldest) {
+            seenPayloads.delete(oldest);
+        }
+    }
+}
+
+function trimGrokSignalHistory(emittedSignalOrder: string[], emittedSignals: Set<string>): void {
+    const maxEntries = 360;
+    while (emittedSignalOrder.length > maxEntries) {
+        const oldest = emittedSignalOrder.shift();
+        if (oldest) {
+            emittedSignals.delete(oldest);
+        }
+    }
+}
+
+function emitGrokStreamCandidates(
+    attemptId: string,
+    conversationId: string | undefined,
+    textCandidates: string[],
+    reasoningCandidates: string[],
+    emittedSignals: Set<string>,
+    emittedSignalOrder: string[],
+): void {
+    const emitCandidate = (candidate: string, kind: 'text' | 'thinking') => {
+        const normalized = candidate.trim();
+        if (normalized.length === 0) {
+            return;
+        }
+        const signalKey = `${kind}:${normalized}`;
+        if (emittedSignals.has(signalKey)) {
+            return;
+        }
+        emittedSignals.add(signalKey);
+        emittedSignalOrder.push(signalKey);
+        trimGrokSignalHistory(emittedSignalOrder, emittedSignals);
+
+        const text = kind === 'thinking' ? `[Thinking] ${normalized}` : normalized;
+        emitStreamDeltaSignal(attemptId, conversationId, text, 'Grok');
+        emitStreamDumpFrame(attemptId, conversationId, 'heuristic', text, text.length, 'Grok');
+    };
+
+    for (const candidate of textCandidates) {
+        emitCandidate(candidate, 'text');
+    }
+    for (const candidate of reasoningCandidates) {
+        emitCandidate(candidate, 'thinking');
+    }
+}
+
+function appendGrokSeenPayloads(seenPayloadOrder: string[], seenPayloads: Set<string>, payloads: string[]): void {
+    for (const payload of payloads) {
+        seenPayloadOrder.push(payload);
+    }
+    trimGrokPayloadHistory(seenPayloadOrder, seenPayloads);
+}
+
+async function monitorGrokResponseStream(
+    response: Response,
+    attemptId: string,
+    seedConversationId: string | undefined,
+    requestUrl: string,
+    emitLifecyclePhases: boolean,
+): Promise<void> {
+    if (!response.body || isAttemptDisposed(attemptId)) {
+        return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let conversationId = seedConversationId;
+    let emittedStreaming = false;
+    const seenPayloads = new Set<string>();
+    const seenPayloadOrder: string[] = [];
+    const emittedSignals = new Set<string>();
+    const emittedSignalOrder: string[] = [];
+
+    if (conversationId) {
+        emitConversationIdResolvedSignal(attemptId, conversationId, 'Grok');
+    }
+
+    if (shouldLogTransient(`grok:fetch-stream:start:${attemptId}`, 8000)) {
+        log('info', 'Grok fetch stream monitor start', {
+            attemptId,
+            conversationId: conversationId ?? null,
+            path: safePathname(requestUrl),
+        });
+    }
+
+    try {
+        while (true) {
+            if (isAttemptDisposed(attemptId)) {
+                break;
+            }
+            const { value, done } = await reader.read();
+            if (done) {
+                break;
+            }
+            if (!value || value.length === 0) {
+                continue;
+            }
+
+            const chunkText = decoder.decode(value, { stream: true });
+            if (chunkText.length === 0) {
+                continue;
+            }
+
+            if (shouldLogTransient(`grok:fetch-stream:chunk:${attemptId}`, 7000)) {
+                log('info', 'Grok fetch stream progress', {
+                    attemptId,
+                    chunkBytes: value.length,
+                    conversationId: conversationId ?? null,
+                });
+            }
+
+            emitStreamDumpFrame(attemptId, conversationId, 'delta', chunkText, value.length, 'Grok');
+            buffer += chunkText;
+            if (buffer.length > 1_000_000) {
+                buffer = buffer.slice(-800_000);
+            }
+
+            const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
+            buffer = signals.remainingBuffer;
+            appendGrokSeenPayloads(seenPayloadOrder, seenPayloads, signals.seenPayloadKeys);
+
+            if (!conversationId && signals.conversationId) {
+                conversationId = signals.conversationId;
+                emitConversationIdResolvedSignal(attemptId, conversationId, 'Grok');
+                if (shouldLogTransient(`grok:fetch-stream:resolved:${attemptId}`, 7000)) {
+                    log('info', 'Grok conversation resolved from stream', {
+                        attemptId,
+                        conversationId,
+                    });
+                }
+            }
+
+            if (
+                emitLifecyclePhases &&
+                !emittedStreaming &&
+                (signals.textCandidates.length > 0 ||
+                    signals.reasoningCandidates.length > 0 ||
+                    chunkText.trim().length > 0)
+            ) {
+                emittedStreaming = true;
+                emitLifecycleSignal(attemptId, 'streaming', conversationId, 'Grok');
+            }
+
+            emitGrokStreamCandidates(
+                attemptId,
+                conversationId,
+                signals.textCandidates,
+                signals.reasoningCandidates,
+                emittedSignals,
+                emittedSignalOrder,
+            );
+
+            if (
+                shouldLogTransient(`grok:fetch-stream:signals:${attemptId}`, 7000) &&
+                (signals.textCandidates.length > 0 || signals.reasoningCandidates.length > 0)
+            ) {
+                log('info', 'Grok stream candidates emitted', {
+                    attemptId,
+                    conversationId: conversationId ?? null,
+                    textCandidates: signals.textCandidates.length,
+                    reasoningCandidates: signals.reasoningCandidates.length,
+                });
+            }
+        }
+    } catch {
+        // Ignore stream monitor errors; canonical capture path remains authoritative.
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+function createGrokXhrStreamState(
+    attemptId: string,
+    requestUrl: string,
+    seedConversationId?: string,
+): GrokXhrStreamState {
+    return {
+        attemptId,
+        requestUrl,
+        seedConversationId,
+        lastLength: 0,
+        buffer: '',
+        seenPayloads: new Set<string>(),
+        seenPayloadOrder: [],
+        emittedSignals: new Set<string>(),
+        emittedSignalOrder: [],
+        emittedStreaming: false,
+    };
+}
+
+function processGrokXhrProgressChunk(state: GrokXhrStreamState, chunkText: string): void {
+    if (chunkText.length === 0 || isAttemptDisposed(state.attemptId)) {
+        return;
+    }
+
+    if (shouldLogTransient(`grok:xhr-stream:chunk:${state.attemptId}`, 7000)) {
+        log('info', 'Grok XHR stream progress', {
+            attemptId: state.attemptId,
+            chunkBytes: chunkText.length,
+            conversationId: state.seedConversationId ?? null,
+        });
+    }
+
+    emitStreamDumpFrame(state.attemptId, state.seedConversationId, 'delta', chunkText, chunkText.length, 'Grok');
+    state.buffer += chunkText;
+    if (state.buffer.length > 1_000_000) {
+        state.buffer = state.buffer.slice(-800_000);
+    }
+
+    const signals = extractGrokStreamSignalsFromBuffer(state.buffer, state.seenPayloads);
+    state.buffer = signals.remainingBuffer;
+    appendGrokSeenPayloads(state.seenPayloadOrder, state.seenPayloads, signals.seenPayloadKeys);
+
+    const resolvedConversationId = signals.conversationId ?? state.seedConversationId;
+    if (!state.seedConversationId && resolvedConversationId) {
+        state.seedConversationId = resolvedConversationId;
+        emitConversationIdResolvedSignal(state.attemptId, resolvedConversationId, 'Grok');
+        if (shouldLogTransient(`grok:xhr-stream:resolved:${state.attemptId}`, 7000)) {
+            log('info', 'Grok XHR conversation resolved from stream', {
+                attemptId: state.attemptId,
+                conversationId: resolvedConversationId,
+            });
+        }
+    }
+
+    if (
+        !state.emittedStreaming &&
+        (signals.textCandidates.length > 0 || signals.reasoningCandidates.length > 0 || chunkText.trim().length > 0)
+    ) {
+        state.emittedStreaming = true;
+        emitLifecycleSignal(state.attemptId, 'streaming', resolvedConversationId, 'Grok');
+    }
+
+    emitGrokStreamCandidates(
+        state.attemptId,
+        resolvedConversationId,
+        signals.textCandidates,
+        signals.reasoningCandidates,
+        state.emittedSignals,
+        state.emittedSignalOrder,
+    );
+}
+
+function wireGrokXhrProgressMonitor(
+    xhr: XMLHttpRequest,
+    attemptId: string,
+    seedConversationId: string | undefined,
+): void {
+    if (shouldLogTransient(`grok:xhr-stream:start:${attemptId}`, 7000)) {
+        log('info', 'Grok XHR stream monitor start', {
+            attemptId,
+            conversationId: seedConversationId ?? null,
+        });
+    }
+    const state = createGrokXhrStreamState(
+        attemptId,
+        ((xhr as any)._url as string | undefined) ?? '',
+        seedConversationId,
+    );
+
+    const flushProgress = () => {
+        if (typeof xhr.responseText !== 'string') {
+            return;
+        }
+        if (xhr.responseText.length <= state.lastLength) {
+            return;
+        }
+        const chunkText = xhr.responseText.slice(state.lastLength);
+        state.lastLength = xhr.responseText.length;
+        processGrokXhrProgressChunk(state, chunkText);
+    };
+
+    const handleProgress = () => {
+        flushProgress();
+    };
+
+    const handleLoadEnd = () => {
+        flushProgress();
+        if (shouldLogTransient(`grok:xhr-stream:end:${state.attemptId}`, 7000)) {
+            log('info', 'Grok XHR stream monitor complete', {
+                attemptId: state.attemptId,
+                conversationId: state.seedConversationId ?? null,
+                path: safePathname(state.requestUrl),
+            });
         }
         xhr.removeEventListener('progress', handleProgress);
         xhr.removeEventListener('loadend', handleLoadEnd);
@@ -1473,29 +1840,33 @@ function handleApiMatchFromFetch(
     clonedResponse
         .text()
         .then((text) => {
-            if (!shouldEmitCapturedPayload(adapterName, url, text)) {
-                // Even if we skip the capture, emit the deferred completion signal
-                // so the SFE can transition — the body is now fully read.
-                if (deferredCompletionAdapter && !shouldSuppressCompletionSignal(deferredCompletionAdapter, url)) {
-                    emitResponseFinishedSignal(deferredCompletionAdapter, url);
-                }
-                return;
+            const shouldCapturePayload = shouldEmitCapturedPayload(adapterName, url, text);
+            if (shouldCapturePayload) {
+                log('info', `API ${text.length}b ${adapterName}`);
             }
-            log('info', `API ${text.length}b ${adapterName}`);
             const parsed = parseConversationData(adapter, text, url);
             const conversationId = resolveParsedConversationId(adapter, parsed, url);
             const attemptId = resolveAttemptIdForConversation(conversationId, adapterName);
-            emitApiResponseDumpFrame(adapterName, url, text, attemptId, conversationId);
-            emitCapturePayload(url, text, adapterName, attemptId);
-            emitNonChatGptStreamSnapshot(adapter, attemptId, conversationId, parsed);
+            if (shouldCapturePayload) {
+                emitApiResponseDumpFrame(adapterName, url, text, attemptId, conversationId);
+                emitCapturePayload(url, text, adapterName, attemptId);
+                emitNonChatGptStreamSnapshot(adapter, attemptId, conversationId, parsed);
+            }
             // Emit completion signal AFTER the body is fully read and data is captured.
             // This ensures SFE transitions only after data is available in the cache,
             // preventing premature completed_hint → stabilization retry flickering.
-            if (deferredCompletionAdapter && !shouldSuppressCompletionSignal(deferredCompletionAdapter, url)) {
+            if (
+                deferredCompletionAdapter &&
+                shouldEmitCompletionSignalForParsedData(deferredCompletionAdapter, url, parsed)
+            ) {
                 emitResponseFinishedSignal(deferredCompletionAdapter, url);
                 return;
             }
-            if (adapterName !== chatGPTAdapter.name && parsed?.conversation_id) {
+            if (
+                adapterName !== chatGPTAdapter.name &&
+                parsed?.conversation_id &&
+                shouldEmitCompletionSignalForParsedData(adapter, url, parsed)
+            ) {
                 emitResponseFinishedSignal(adapter, url);
             }
         })
@@ -1523,7 +1894,7 @@ function tryParseAndEmitConversation(adapter: LLMPlatform, url: string, text: st
         const attemptId = resolveAttemptIdForConversation(parsed.conversation_id, adapter.name);
         emitCapturePayload(url, payload, adapter.name, attemptId);
         emitNonChatGptStreamSnapshot(adapter, attemptId, parsed.conversation_id, parsed);
-        if (adapter.name !== chatGPTAdapter.name && !shouldSuppressCompletionSignal(adapter, url)) {
+        if (adapter.name !== chatGPTAdapter.name && shouldEmitCompletionSignalForParsedData(adapter, url, parsed)) {
             emitResponseFinishedSignal(adapter, url);
         }
         return true;
@@ -1675,9 +2046,6 @@ function handleXhrLoad(xhr: XMLHttpRequest, method: string): void {
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
 
     if (processXhrApiMatch(url, xhr, adapter)) {
-        if (completionAdapter && !shouldSuppressCompletionSignal(completionAdapter, url)) {
-            emitResponseFinishedSignal(completionAdapter, url);
-        }
         return;
     }
 
@@ -1736,7 +2104,7 @@ function processXhrApiMatch(url: string, xhr: XMLHttpRequest, adapter: LLMPlatfo
         if (
             adapter.name !== chatGPTAdapter.name &&
             parsed?.conversation_id &&
-            !shouldSuppressCompletionSignal(adapter, url)
+            shouldEmitCompletionSignalForParsedData(adapter, url, parsed)
         ) {
             emitResponseFinishedSignal(adapter, url);
         }
@@ -1809,6 +2177,20 @@ function isCapturedConversationReady(adapter: LLMPlatform, parsed: unknown): boo
         return adapter.evaluateReadiness(conversation).ready;
     }
     return isConversationReady(conversation);
+}
+
+function shouldEmitCompletionSignalForParsedData(
+    adapter: LLMPlatform,
+    url: string,
+    parsed: ConversationData | null,
+): boolean {
+    if (!shouldEmitCompletionSignalForUrl(adapter, url)) {
+        return false;
+    }
+    if (adapter.name === 'Grok') {
+        return isCapturedConversationReady(adapter, parsed);
+    }
+    return true;
 }
 
 export default defineContentScript({
@@ -1976,10 +2358,9 @@ export default defineContentScript({
             const outgoingMethod = getRequestMethod(args).toUpperCase();
             const outgoingPath = safePathname(outgoingUrl);
             const fetchApiAdapter = outgoingMethod === 'POST' ? getPlatformAdapterByApiUrl(outgoingUrl) : null;
-            const isNonChatGptApiRequest =
-                !!fetchApiAdapter &&
-                fetchApiAdapter.name !== chatGPTAdapter.name &&
-                shouldEmitNonChatLifecycleForRequest(fetchApiAdapter, outgoingUrl);
+            const isNonChatGptApiRequest = !!fetchApiAdapter && fetchApiAdapter.name !== chatGPTAdapter.name;
+            const shouldEmitNonChatLifecycle =
+                isNonChatGptApiRequest && shouldEmitNonChatLifecycleForRequest(fetchApiAdapter, outgoingUrl);
             const nonChatConversationId = isNonChatGptApiRequest
                 ? resolveRequestConversationId(fetchApiAdapter, outgoingUrl)
                 : undefined;
@@ -2002,10 +2383,21 @@ export default defineContentScript({
                     emitLifecycleSignal(lifecycleAttemptId, 'prompt-sent', lifecycleConversationId);
                 }
             }
-            if (isNonChatGptApiRequest && fetchApiAdapter && nonChatAttemptId) {
+            if (shouldEmitNonChatLifecycle && fetchApiAdapter && nonChatAttemptId) {
                 emitLifecycleSignal(nonChatAttemptId, 'prompt-sent', nonChatConversationId, fetchApiAdapter.name);
                 if (fetchApiAdapter.name !== 'Gemini') {
                     emitLifecycleSignal(nonChatAttemptId, 'streaming', nonChatConversationId, fetchApiAdapter.name);
+                }
+                if (
+                    fetchApiAdapter.name === 'Grok' &&
+                    shouldLogTransient(`grok:fetch:request:${nonChatAttemptId}`, 3000)
+                ) {
+                    log('info', 'Grok fetch request intercepted', {
+                        attemptId: nonChatAttemptId,
+                        conversationId: nonChatConversationId ?? null,
+                        method: outgoingMethod,
+                        path: outgoingPath,
+                    });
                 }
             }
 
@@ -2033,6 +2425,24 @@ export default defineContentScript({
             }
             if (isNonChatGptApiRequest && fetchApiAdapter?.name === 'Gemini' && nonChatAttemptId) {
                 void monitorGeminiResponseStream(response.clone(), nonChatAttemptId, nonChatConversationId);
+            }
+            if (isNonChatGptApiRequest && fetchApiAdapter?.name === 'Grok' && nonChatAttemptId) {
+                if (shouldLogTransient(`grok:fetch:response:${nonChatAttemptId}`, 3000)) {
+                    log('info', 'Grok fetch response intercepted', {
+                        attemptId: nonChatAttemptId,
+                        conversationId: nonChatConversationId ?? null,
+                        status: response.status,
+                        contentType,
+                        path: safePathname(url),
+                    });
+                }
+                void monitorGrokResponseStream(
+                    response.clone(),
+                    nonChatAttemptId,
+                    nonChatConversationId,
+                    url,
+                    shouldEmitNonChatLifecycle,
+                );
             }
             const completionAdapter = getPlatformAdapterByCompletionUrl(url);
             if (completionAdapter) {
@@ -2077,12 +2487,37 @@ export default defineContentScript({
                 emitLifecycleSignal(attemptId, 'prompt-sent', conversationId, requestAdapter.name);
                 if (requestAdapter.name === 'Gemini') {
                     wireGeminiXhrProgressMonitor(this as XMLHttpRequest, attemptId, conversationId);
+                } else if (requestAdapter.name === 'Grok') {
+                    wireGrokXhrProgressMonitor(this as XMLHttpRequest, attemptId, conversationId);
+                    if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
+                        log('info', 'Grok XHR request intercepted', {
+                            attemptId,
+                            conversationId: conversationId ?? null,
+                            method: method.toUpperCase(),
+                            path: safePathname(requestUrl),
+                        });
+                    }
                 } else {
                     emitLifecycleSignal(attemptId, 'streaming', conversationId, requestAdapter.name);
                 }
             }
             this.addEventListener('load', function () {
                 const xhr = this as XMLHttpRequest;
+                const xhrAdapter =
+                    method.toUpperCase() === 'POST' ? getPlatformAdapterByApiUrl((xhr as any)._url) : null;
+                if (xhrAdapter?.name === 'Grok') {
+                    const conversationId = resolveRequestConversationId(xhrAdapter, (xhr as any)._url ?? '');
+                    const attemptId = resolveAttemptIdForConversation(conversationId, 'Grok');
+                    if (shouldLogTransient(`grok:xhr:response:${attemptId}`, 3000)) {
+                        log('info', 'Grok XHR response intercepted', {
+                            attemptId,
+                            conversationId: conversationId ?? null,
+                            status: xhr.status,
+                            size: xhr.responseText?.length ?? 0,
+                            path: safePathname((xhr as any)._url ?? ''),
+                        });
+                    }
+                }
                 if (
                     isDiscoveryDiagnosticsEnabled() &&
                     window.location.hostname.includes('gemini.google.com') &&

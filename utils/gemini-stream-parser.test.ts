@@ -44,4 +44,18 @@ describe('gemini-stream-parser', () => {
         expect(signals.textCandidates).toContain('Readable sentence candidate');
         expect(signals.textCandidates.some((value) => value.includes('2026-02-16T00:26:14.436Z'))).toBe(false);
     });
+
+    it('should extract title candidates from StreamGenerate metadata payloads', () => {
+        const payload = JSON.stringify([
+            null,
+            ['c_d628c5373645e315', 'r_e474e3de4f4e8c85'],
+            { '11': ['Tafsir of Prayer of Fear Verse'], '44': false },
+        ]);
+        const buffer = `)]}'\n150\n[["wrb.fr",null,${JSON.stringify(payload)},null,null,null,"generic"]]`;
+        const seenPayloads = new Set<string>();
+
+        const signals = extractGeminiStreamSignalsFromBuffer(buffer, seenPayloads);
+        expect(signals.conversationId).toBe('d628c5373645e315');
+        expect(signals.titleCandidates).toContain('Tafsir of Prayer of Fear Verse');
+    });
 });

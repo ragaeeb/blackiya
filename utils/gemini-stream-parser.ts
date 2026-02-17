@@ -2,6 +2,7 @@ import { parseBatchexecuteResponse } from '@/utils/google-rpc';
 
 const GEMINI_CONVERSATION_ID_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+const GENERIC_TITLE_RE = /^(gemini|google gemini|gemini conversation|new chat|new conversation|chats)$/i;
 
 function isLikelyGeminiText(value: string): boolean {
     const trimmed = value.trim();
@@ -86,14 +87,64 @@ function dedupeText(values: string[]): string[] {
     return out;
 }
 
+function isLikelyGeminiTitle(value: string): boolean {
+    const trimmed = value.trim().replace(/\s+/g, ' ');
+    if (trimmed.length < 3 || trimmed.length > 180) {
+        return false;
+    }
+    if (!/[A-Za-z]/.test(trimmed)) {
+        return false;
+    }
+    if (ISO_DATE_REGEX.test(trimmed)) {
+        return false;
+    }
+    if (/^v\d+$/i.test(trimmed)) {
+        return false;
+    }
+    if (GENERIC_TITLE_RE.test(trimmed)) {
+        return false;
+    }
+    return true;
+}
+
+function collectGeminiTitleCandidates(node: unknown, out: string[], depth = 0): void {
+    if (depth > 8 || out.length > 20) {
+        return;
+    }
+    if (!node || typeof node !== 'object') {
+        return;
+    }
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            collectGeminiTitleCandidates(child, out, depth + 1);
+        }
+        return;
+    }
+
+    const obj = node as Record<string, unknown>;
+    const key11 = obj['11'];
+    if (Array.isArray(key11)) {
+        const first = key11.find((item): item is string => typeof item === 'string');
+        if (first && isLikelyGeminiTitle(first)) {
+            out.push(first.trim().replace(/\s+/g, ' '));
+        }
+    }
+
+    for (const value of Object.values(obj)) {
+        collectGeminiTitleCandidates(value, out, depth + 1);
+    }
+}
+
 export type GeminiStreamSignals = {
     conversationId?: string;
     textCandidates: string[];
+    titleCandidates: string[];
 };
 
 export function extractGeminiStreamSignalsFromBuffer(buffer: string, seenPayloads: Set<string>): GeminiStreamSignals {
     const results = parseBatchexecuteResponse(buffer);
     const textCandidates: string[] = [];
+    const titleCandidates: string[] = [];
     let conversationId: string | undefined;
 
     for (const result of results) {
@@ -111,6 +162,7 @@ export function extractGeminiStreamSignalsFromBuffer(buffer: string, seenPayload
         try {
             const parsed = JSON.parse(payload);
             collectLikelyTextValues(parsed, textCandidates);
+            collectGeminiTitleCandidates(parsed, titleCandidates);
         } catch {
             // Ignore partial payloads that are not valid JSON yet.
         }
@@ -119,5 +171,6 @@ export function extractGeminiStreamSignalsFromBuffer(buffer: string, seenPayload
     return {
         conversationId,
         textCandidates: dedupeText(textCandidates),
+        titleCandidates: dedupeText(titleCandidates),
     };
 }

@@ -132,6 +132,7 @@ function isGenericConversationTitle(title: string | undefined | null): boolean {
     }
     return (
         normalized === 'new chat' ||
+        normalized === 'chats' ||
         normalized === 'chatgpt' ||
         normalized === 'google gemini' ||
         normalized === 'gemini conversation' ||
@@ -166,10 +167,20 @@ function deriveConversationTitleFromFirstUserMessage(data: ConversationData): st
 }
 
 export function resolveExportConversationTitle(data: ConversationData): string {
+    return resolveExportConversationTitleDecision(data).title;
+}
+
+type ExportTitleSource = 'existing' | 'first-user-message' | 'fallback';
+
+function resolveExportConversationTitleDecision(data: ConversationData): { title: string; source: ExportTitleSource } {
     if (!isGenericConversationTitle(data.title)) {
-        return data.title;
+        return { title: data.title, source: 'existing' };
     }
-    return deriveConversationTitleFromFirstUserMessage(data) ?? data.title ?? 'Conversation';
+    const fromPrompt = deriveConversationTitleFromFirstUserMessage(data);
+    if (fromPrompt) {
+        return { title: fromPrompt, source: 'first-user-message' };
+    }
+    return { title: data.title ?? 'Conversation', source: 'fallback' };
 }
 
 export function runPlatform(): void {
@@ -2661,6 +2672,13 @@ export function runPlatform(): void {
             );
             if (isStaleTitle || !data.title) {
                 const domTitle = currentAdapter.extractTitleFromDom();
+                logger.info('Title fallback check', {
+                    conversationId,
+                    adapter: currentAdapter.name,
+                    cachedTitle: data.title ?? null,
+                    staleTitle: isStaleTitle,
+                    domTitle: domTitle ?? null,
+                });
                 if (domTitle) {
                     logger.info('Title resolved from DOM fallback', {
                         conversationId,
@@ -2695,9 +2713,16 @@ export function runPlatform(): void {
         }
 
         try {
-            const resolvedTitle = resolveExportConversationTitle(data);
-            if (resolvedTitle !== data.title) {
-                data.title = resolvedTitle;
+            const titleDecision = resolveExportConversationTitleDecision(data);
+            logger.info('Export title decision', {
+                conversationId: data.conversation_id,
+                adapter: currentAdapter.name,
+                source: titleDecision.source,
+                cachedTitle: data.title ?? null,
+                resolvedTitle: titleDecision.title,
+            });
+            if (titleDecision.title !== data.title) {
+                data.title = titleDecision.title;
             }
             const filename = currentAdapter.formatFilename(data);
             const exportMeta: ExportMeta =

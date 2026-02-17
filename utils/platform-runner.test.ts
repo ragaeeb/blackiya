@@ -313,6 +313,18 @@ describe('Platform Runner', () => {
         expect(resolved).toContain('Tafsir of Quranic Verses on Gender');
     });
 
+    it('should treat generic Gemini sidebar title as non-exportable and derive from first user message', () => {
+        const conversation = buildConversation('gem-1b', 'Assistant response', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        conversation.title = 'Chats';
+        conversation.mapping.u1.message.content.parts = ['Tafsir of Prayer of Fear Verse'];
+
+        const resolved = resolveExportConversationTitle(conversation as any);
+        expect(resolved).toBe('Tafsir of Prayer of Fear Verse');
+    });
+
     it('should keep explicit non-generic export title', () => {
         const conversation = buildConversation('gem-2', 'Assistant response', {
             status: 'finished_successfully',

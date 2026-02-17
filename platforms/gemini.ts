@@ -39,6 +39,7 @@ const GEMINI_GENERIC_TITLES = new Set([
     'gemini conversation',
     'new chat',
     'new conversation',
+    'chats',
 ]);
 
 function normalizeGeminiDomTitle(rawTitle: string): string {
@@ -62,15 +63,7 @@ function extractTitleFromGeminiDomHeadings(): string | null {
         return null;
     }
 
-    const selectors = [
-        'main h1',
-        'main [role="heading"][aria-level="1"]',
-        'main [role="heading"]',
-        'header h1',
-        'h1',
-        'a[aria-current="page"]',
-        '[aria-selected="true"]',
-    ];
+    const selectors = ['main h1', 'main [role="heading"][aria-level="1"]', 'main [role="heading"]', 'header h1', 'h1'];
 
     for (const selector of selectors) {
         const nodes = document.querySelectorAll(selector);

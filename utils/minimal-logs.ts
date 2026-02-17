@@ -148,7 +148,12 @@ function isCriticalLine(line: string): boolean {
         line.includes('Gemini conversation resolved from stream') ||
         line.includes('Gemini XHR stream monitor start') ||
         line.includes('Gemini XHR stream progress') ||
-        line.includes('Gemini XHR conversation resolved from stream')
+        line.includes('Gemini XHR conversation resolved from stream') ||
+        line.includes('Gemini stream title emitted') ||
+        line.includes('title resolved from stream') ||
+        line.includes('Title fallback check') ||
+        line.includes('Title resolved from DOM fallback') ||
+        line.includes('Export title decision')
     );
 }
 
@@ -181,6 +186,11 @@ function pickFallbackDiagnosticLines(logs: LogEntry[]): string[] {
         'Gemini XHR stream monitor start',
         'Gemini XHR stream progress',
         'Gemini XHR conversation resolved from stream',
+        'Gemini stream title emitted',
+        'title resolved from stream',
+        'Title fallback check',
+        'Title resolved from DOM fallback',
+        'Export title decision',
     ];
 
     const picked = logs
@@ -262,6 +272,44 @@ function dedupeByPlatformConvId(sessions: RawSession[]): SessionGroup[] {
     return [...map.values()];
 }
 
+function inferPlatformFromLine(line: string, entry: LogEntry): string {
+    if (line.includes('Gemini')) {
+        return 'Gemini';
+    }
+    if (line.includes('ChatGPT')) {
+        return 'ChatGPT';
+    }
+    if (line.includes('Grok')) {
+        return 'Grok';
+    }
+    const data = entry.data?.[0];
+    if (data && typeof data === 'object') {
+        const maybePlatform = (data as Record<string, unknown>).platform;
+        if (typeof maybePlatform === 'string' && maybePlatform.trim().length > 0) {
+            return maybePlatform;
+        }
+    }
+    return 'Unknown';
+}
+
+function isSyntheticSessionAnchor(line: string): boolean {
+    return (
+        line.includes('Successfully captured') ||
+        line.includes('captured/cached') ||
+        line.includes('Lifecycle phase') ||
+        line.includes('response finished hint') ||
+        line.includes('Response finished signal') ||
+        line.includes('RESPONSE_FINISHED') ||
+        line.includes('Gemini conversation resolved from stream') ||
+        line.includes('Gemini XHR conversation resolved from stream') ||
+        line.includes('Gemini fetch stream progress') ||
+        line.includes('Gemini XHR stream progress') ||
+        line.includes('Gemini stream candidate emitted') ||
+        line.includes('Gemini stream title emitted') ||
+        line.includes('title resolved from stream')
+    );
+}
+
 function appendEntryData(line: string, entry: LogEntry): string {
     if (!entry.data || entry.data.length === 0 || !entry.data[0]) {
         return line;
@@ -315,6 +363,49 @@ function buildSessionGroups(logs: LogEntry[]): SessionGroup[] {
     }
 
     return dedupeByPlatformConvId(rawSessions);
+}
+
+function buildSyntheticSessionGroups(logs: LogEntry[]): SessionGroup[] {
+    const groupsByConvId = new Map<string, SessionGroup>();
+    const convOrder: string[] = [];
+
+    for (const entry of logs) {
+        const line = normalizeLine(entry.message);
+        if (!isSyntheticSessionAnchor(line)) {
+            continue;
+        }
+
+        const convId =
+            extractConvId(entry.message) ||
+            (entry.data
+                ? entry.data.map((item) => extractConvIdFromData(item)).find((id): id is string => !!id)
+                : null);
+        if (!convId) {
+            continue;
+        }
+
+        const fullLine = appendEntryData(line, entry);
+        const platform = inferPlatformFromLine(line, entry);
+        const existing = groupsByConvId.get(convId);
+        if (!existing) {
+            groupsByConvId.set(convId, {
+                platform,
+                convId,
+                events: [fullLine],
+                count: 1,
+            });
+            convOrder.push(convId);
+            continue;
+        }
+        if (existing.platform === 'Unknown' && platform !== 'Unknown') {
+            existing.platform = platform;
+        }
+        if (!existing.events.includes(fullLine)) {
+            existing.events.push(fullLine);
+        }
+    }
+
+    return convOrder.map((convId) => groupsByConvId.get(convId)).filter((group): group is SessionGroup => !!group);
 }
 
 function buildEmptyReport(logs: LogEntry[]): string {
@@ -385,7 +476,10 @@ function appendErrorSection(lines: string[], logs: LogEntry[]): void {
  * Includes compact timestamps (seconds from start) for timing analysis.
  */
 export function generateMinimalDebugReport(logs: LogEntry[]): string {
-    const groups = buildSessionGroups(logs);
+    let groups = buildSessionGroups(logs);
+    if (groups.length === 0) {
+        groups = buildSyntheticSessionGroups(logs);
+    }
 
     if (groups.length === 0) {
         return buildEmptyReport(logs);
