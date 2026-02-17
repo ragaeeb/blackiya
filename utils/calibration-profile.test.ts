@@ -114,4 +114,9 @@ describe('calibration-profile', () => {
         const loaded = await loadCalibrationProfileV2IfPresent('ChatGPT');
         expect(loaded).toBeNull();
     });
+
+    +it('preserves empty disabledSources array as-is (no fallback applied)', () => {
+        const profile = validateCalibrationProfileV2({ strategy: 'aggressive', disabledSources: [] }, 'Gemini');
+        expect(profile.disabledSources).toEqual([]);
+    });
 });

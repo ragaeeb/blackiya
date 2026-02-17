@@ -127,18 +127,33 @@ describe('diagnostics-stream-dump', () => {
             flushThreshold: 1,
             maxTextCharsPerFrame: 14,
         });
-
         await storage.saveFrame({
             platform: 'Gemini',
             attemptId: 'a1',
             kind: 'delta',
             text: 'abcdefghijklmnopqrstuvwxyz',
         });
-
         const dump = await storage.getStore();
         const text = dump.sessions[0]?.frames[0]?.text ?? '';
         expect(text.length).toBeLessThanOrEqual(14);
         expect(text.endsWith('...<truncated>')).toBe(true);
+    });
+    it('preserves leading content before suffix when maxTextCharsPerFrame exceeds suffix length', async () => {
+        const backend = createMemoryStorage();
+        const storage = new BufferedStreamDumpStorage(backend, {
+            flushThreshold: 1,
+            maxTextCharsPerFrame: 20, // 6 chars of content + 14-char suffix
+        });
+        await storage.saveFrame({
+            platform: 'Gemini',
+            attemptId: 'a1',
+            kind: 'delta',
+            text: 'abcdefghijklmnopqrstuvwxyz',
+        });
+        const dump = await storage.getStore();
+        const text = dump.sessions[0]?.frames[0]?.text ?? '';
+        expect(text.length).toBeLessThanOrEqual(20);
+        expect(text).toBe('abcdef...<truncated>');
     });
 
     it('restores buffered frames when flush storage write fails', async () => {

@@ -80,6 +80,8 @@ const DEFAULT_MAX_SESSIONS = 10;
 const DEFAULT_MAX_FRAMES_PER_SESSION = 150;
 const DEFAULT_MAX_TEXT_CHARS_PER_FRAME = 900;
 
+const FRAME_TRUNCATION_SUFFIX = '...<truncated>';
+
 function createEmptyStore(): StreamDumpStore {
     const now = new Date().toISOString();
     return {
@@ -154,15 +156,14 @@ function sanitizeFrameText(text: string, maxChars: number): { text: string; trun
     if (normalized.length <= maxChars) {
         return { text: normalized, truncated: false };
     }
-    const suffix = '...<truncated>';
-    if (maxChars <= suffix.length) {
+    if (maxChars <= FRAME_TRUNCATION_SUFFIX.length) {
         return {
-            text: suffix.slice(0, maxChars),
+            text: FRAME_TRUNCATION_SUFFIX.slice(0, maxChars),
             truncated: true,
         };
     }
     return {
-        text: `${normalized.slice(0, maxChars - suffix.length)}${suffix}`,
+        text: `${normalized.slice(0, maxChars - FRAME_TRUNCATION_SUFFIX.length)}${FRAME_TRUNCATION_SUFFIX}`,
         truncated: true,
     };
 }

@@ -392,7 +392,6 @@ describe('buildCommonExport', () => {
             blocked_urls: [],
         } as unknown as ConversationData;
 
-        expect(() => buildCommonExport(conversation, 'ChatGPT')).not.toThrow();
         const result = buildCommonExport(conversation, 'ChatGPT');
         expect(result.prompt).toBe('');
         expect(result.response).toBe('');

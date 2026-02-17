@@ -20,13 +20,6 @@ describe('Gemini Platform Adapter', () => {
     let titlesResponseRaw: string;
     let geminiAdapter: any;
 
-    beforeEach(() => {
-        loggerSpies.info.mockClear();
-        loggerSpies.warn.mockClear();
-        loggerSpies.error.mockClear();
-        loggerSpies.debug.mockClear();
-    });
-
     beforeAll(async () => {
         // Dynamic import to ensure mocks apply
         const module = await import('@/platforms/gemini');
@@ -39,6 +32,13 @@ describe('Gemini Platform Adapter', () => {
         titlesResponseRaw = await Bun.file(
             join(import.meta.dir, '..', 'data', 'gemini', 'sample_gemini_titles.txt'),
         ).text();
+    });
+
+    beforeEach(() => {
+        loggerSpies.info.mockClear();
+        loggerSpies.warn.mockClear();
+        loggerSpies.error.mockClear();
+        loggerSpies.debug.mockClear();
     });
 
     describe('URL Handling', () => {
