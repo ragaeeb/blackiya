@@ -966,6 +966,293 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
     });
 
+    it('should preserve lifecycle state when Grok SPA navigates from null to new conversation (V2.2-001)', async () => {
+        // Start with null conversationId (Grok home or pre-navigation state)
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-nav-1',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-nav-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        // Step 2: Grok SPA navigates to /c/<convId> — this triggers handleConversationSwitch
+        currentAdapterMock.extractConversationId = () => 'grok-nav-conv-1';
+        (window as any).location.href = 'https://grok.com/c/grok-nav-conv-1?rid=some-response-id';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // The lifecycle badge should STILL show "Streaming" — not be reset to "Idle"
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should render stream delta text in probe during Grok streaming after SPA navigation (V2.2-002)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-delta-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        // Step 2: SPA navigation to conversation
+        currentAdapterMock.extractConversationId = () => 'grok-delta-conv';
+        (window as any).location.href = 'https://grok.com/c/grok-delta-conv?rid=rid-1';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Step 3: Stream delta arrives AFTER navigation
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                source: 'network',
+                attemptId: 'attempt:grok-delta-1',
+                conversationId: 'grok-delta-conv',
+                text: 'grok-thinking-reasoning-text',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Lifecycle should still be streaming
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+        // Stream probe MUST contain the actual delta text (not just badge state)
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('grok-thinking-reasoning-text');
+    });
+
+    it('should reset lifecycle to idle when navigating to a different existing Grok conversation (V2.2-003)', async () => {
+        // Start on an existing Grok conversation that has already completed
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => 'grok-old-conv',
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/c/grok-old-conv',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Complete a lifecycle on the old conversation
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-cross-1',
+                phase: 'streaming',
+                conversationId: 'grok-old-conv',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        // Step 2: Navigate to a DIFFERENT conversation (not a null→new transition)
+        currentAdapterMock.extractConversationId = () => 'grok-other-conv';
+        (window as any).location.href = 'https://grok.com/c/grok-other-conv';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        // Wait for both the popstate handler and the 500ms setTimeout(injectSaveButton) to fire
+        await new Promise((resolve) => setTimeout(resolve, 650));
+
+        // When switching between existing conversations, lifecycle SHOULD reset to idle
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+    });
+
+    it('should not emit BLACKIYA_ATTEMPT_DISPOSED for active attempt during Grok null-to-new SPA navigation (V2.2-004)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-nodispose-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        // Step 2: Spy on postMessage to capture ATTEMPT_DISPOSED emissions
+        const postedMessages: any[] = [];
+        const originalPostMessage = window.postMessage.bind(window);
+        (window as any).postMessage = (payload: any, targetOrigin: string) => {
+            postedMessages.push(payload);
+            return originalPostMessage(payload, targetOrigin);
+        };
+
+        try {
+            // Step 3: SPA navigation to conversation (null → new)
+            currentAdapterMock.extractConversationId = () => 'grok-nodispose-conv';
+            (window as any).location.href = 'https://grok.com/c/grok-nodispose-conv?rid=rid-1';
+            window.dispatchEvent(new (window as any).Event('popstate'));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        } finally {
+            (window as any).postMessage = originalPostMessage;
+        }
+
+        // No ATTEMPT_DISPOSED should have been emitted for the active streaming attempt
+        const disposals = postedMessages
+            .filter((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED')
+            .map((p) => p.attemptId);
+        expect(disposals).not.toContain('attempt:grok-nodispose-1');
+        // Lifecycle should still be streaming
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should not clobber active Grok lifecycle when refreshButtonState fires with null conversation (V2.2-005)', async () => {
+        // Simulates the MutationObserver/health-check refreshButtonState path that
+        // was the root cause of the first lifecycle reset at 16:59:31.356
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-healthcheck-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        // Step 2: Simulate DOM mutation triggering handleNavigationChange with unchanged null ID
+        // This triggers refreshButtonState(undefined) → resetButtonStateForNoConversation
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Lifecycle MUST remain streaming — the health-check must not reset it
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should not clobber active Grok lifecycle when injectSaveButton retries with null conversation (V2.2-006)', async () => {
+        // Simulates the injectSaveButton retry path (setTimeout at 1000/2000/5000ms)
+        // that fires while lifecycle is active on a null-conversation Grok page
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-inject-retry-1',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+
+        // Step 2: Wait past the first injectSaveButton retry at 1000ms
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+
+        // Lifecycle MUST still be prompt-sent — the retry must not reset it
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+    });
+
     it('should promote Grok to completed when lifecycle attempt is disposed and canonical capture arrives on new attempt', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),

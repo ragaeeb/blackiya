@@ -3181,6 +3181,16 @@ export function runPlatform(): void {
         }
     }
 
+    /**
+     * Returns true when the lifecycle is in an active generation phase
+     * (prompt-sent or streaming). Used to gate code paths that would
+     * otherwise reset lifecycle to idle when conversationId is null —
+     * a legitimate state during Grok's new-conversation flow.
+     */
+    function isLifecycleActiveGeneration(): boolean {
+        return lifecycleState === 'prompt-sent' || lifecycleState === 'streaming';
+    }
+
     function injectSaveButton(): void {
         const conversationId = extractConversationIdFromLocation();
         const target = currentAdapter?.getButtonInjectionTarget();
@@ -3203,7 +3213,9 @@ export function runPlatform(): void {
         if (!conversationId) {
             logger.info('No conversation ID yet; showing calibration only');
             setCurrentConversation(null);
-            if (lifecycleState !== 'idle') {
+            // Do not clobber active lifecycle — Grok emits lifecycle signals
+            // before the conversation ID is resolved via SPA navigation.
+            if (!isLifecycleActiveGeneration() && lifecycleState !== 'idle') {
                 setLifecycleState('idle');
             }
             buttonManager.setSaveButtonMode('default');
@@ -3258,15 +3270,25 @@ export function runPlatform(): void {
     }
 
     function handleConversationSwitch(newId: string | null): void {
-        disposeInFlightAttemptsOnNavigation(newId);
+        const isNewConversationNavigation = !currentConversationId && isLifecycleActiveGeneration() && !!newId;
+        // For null→new-conversation SPA nav during active generation,
+        // skip disposal so the interceptor stream monitor keeps running.
+        if (!isNewConversationNavigation) {
+            disposeInFlightAttemptsOnNavigation(newId);
+        }
         if (!newId) {
             setCurrentConversation(null);
-            setLifecycleState('idle');
+            if (!isLifecycleActiveGeneration()) {
+                setLifecycleState('idle');
+            }
             setTimeout(injectSaveButton, 300);
             return;
         }
 
-        buttonManager.remove();
+        if (!isNewConversationNavigation) {
+            buttonManager.remove();
+        }
+
         setCurrentConversation(newId);
 
         // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
@@ -3280,12 +3302,23 @@ export function runPlatform(): void {
             void ensureCalibrationPreferenceLoaded(currentAdapter.name);
         }
 
-        setTimeout(injectSaveButton, 500);
-        logger.info('Conversation switch → idle', {
-            newId,
-            previousState: lifecycleState,
-        });
-        setLifecycleState('idle', newId);
+        if (isNewConversationNavigation) {
+            logger.info('Conversation switch → preserving active lifecycle', {
+                newId,
+                preservedState: lifecycleState,
+            });
+            // Re-associate the preserved lifecycle state with the new conversation ID
+            // so downstream systems (SFE, readiness) bind to the correct conversation.
+            setLifecycleState(lifecycleState, newId);
+        } else {
+            setTimeout(injectSaveButton, 500);
+            logger.info('Conversation switch → idle', {
+                newId,
+                previousState: lifecycleState,
+            });
+            setLifecycleState('idle', newId);
+        }
+
         void warmFetchConversationSnapshot(newId, 'conversation-switch');
         setTimeout(() => {
             if (newId) {
@@ -3300,7 +3333,9 @@ export function runPlatform(): void {
 
     function resetButtonStateForNoConversation(): void {
         setCurrentConversation(null);
-        if (lifecycleState !== 'idle') {
+        // Do not clobber active lifecycle — Grok emits lifecycle signals
+        // before the conversation ID is resolved via SPA navigation.
+        if (!isLifecycleActiveGeneration() && lifecycleState !== 'idle') {
             setLifecycleState('idle');
         }
         buttonManager.setSaveButtonMode('default');
