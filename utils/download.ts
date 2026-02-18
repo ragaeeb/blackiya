@@ -6,35 +6,8 @@
  * @module utils/download
  */
 
+import { downloadStringAsJsonFile } from '@/utils/dom-download';
 import { logger } from '@/utils/logger';
-
-type DownloadAnchorLike = {
-    href: string;
-    download: string;
-    click: () => void;
-    parentNode?: {
-        removeChild: (node: unknown) => void;
-    } | null;
-};
-
-type DownloadDocumentLike = {
-    body: {
-        appendChild: (node: unknown) => void;
-        removeChild: (node: unknown) => void;
-    };
-    createElement: (tagName: string) => DownloadAnchorLike;
-};
-
-type DownloadUrlLike = {
-    createObjectURL: (blob: Blob) => string;
-    revokeObjectURL: (url: string) => void;
-};
-
-type DownloadBrowserApis = {
-    document?: DownloadDocumentLike;
-    URL?: DownloadUrlLike;
-    createBlob?: (parts: BlobPart[], options?: BlobPropertyBag) => Blob;
-};
 
 /**
  * Sanitize a string for use as a filename
@@ -48,7 +21,7 @@ type DownloadBrowserApis = {
  * @param filename - The raw filename string
  * @returns A sanitized filename safe for use on all major file systems
  */
-export function sanitizeFilename(filename: string): string {
+export const sanitizeFilename = (filename: string): string => {
     if (!filename || filename.trim().length === 0) {
         return 'untitled';
     }
@@ -70,7 +43,7 @@ export function sanitizeFilename(filename: string): string {
     }
 
     return sanitized;
-}
+};
 
 /**
  * Generate a timestamp string for filenames
@@ -78,7 +51,7 @@ export function sanitizeFilename(filename: string): string {
  * @param unixTime - Optional Unix timestamp (seconds since epoch). If not provided, uses current time.
  * @returns A timestamp string in format: YYYY-MM-DD_HH-MM-SS
  */
-export function generateTimestamp(unixTime?: number): string {
+export const generateTimestamp = (unixTime?: number): string => {
     const date = typeof unixTime === 'number' ? new Date(unixTime * 1000) : new Date();
 
     const year = date.getFullYear();
@@ -89,52 +62,19 @@ export function generateTimestamp(unixTime?: number): string {
     const seconds = String(date.getSeconds()).padStart(2, '0');
 
     return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
-}
+};
 
 /**
  * Download data as a JSON file using blob URL
  *
  * @param data - The data to download as JSON
  * @param filename - The filename (without .json extension)
- * @param browserApis - Optional browser APIs override (used for deterministic tests)
  */
-export function downloadAsJSON(data: unknown, filename: string, browserApis?: DownloadBrowserApis): void {
-    const doc =
-        browserApis?.document ??
-        (typeof document !== 'undefined' ? (document as unknown as DownloadDocumentLike) : undefined);
-    const urlApi =
-        browserApis?.URL ??
-        (typeof URL !== 'undefined'
-            ? (URL as unknown as DownloadUrlLike)
-            : undefined);
-
-    let url: string | null = null;
-    let link: DownloadAnchorLike | null = null;
-
+export const downloadAsJSON = (data: unknown, filename: string): void => {
     try {
-        if (!doc || !urlApi) {
-            logger.error('Download failed: browser APIs are unavailable');
-            return;
-        }
-
         const jsonString = JSON.stringify(data, null, 2);
-        const makeBob = browserApis?.createBlob ?? ((parts, opts) => new Blob(parts, opts));
-        const blob = makeBob([jsonString], { type: 'application/json' });
-        url = urlApi.createObjectURL(blob);
-
-        link = doc.createElement('a');
-        link.href = url;
-        link.download = `${filename}.json`;
-        doc.body.appendChild(link);
-        link.click();
+        downloadStringAsJsonFile(jsonString, `${filename}.json`);
     } catch (error) {
         logger.error('Download failed:', error);
-    } finally {
-        if (link?.parentNode) {
-            link.parentNode.removeChild(link);
-        }
-        if (url) {
-            urlApi?.revokeObjectURL(url);
-        }
     }
-}
+};

@@ -4,17 +4,23 @@
  * TDD tests for filename sanitization and timestamp generation
  */
 
-import { describe, expect, it } from 'bun:test';
-import { downloadAsJSON, generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import type { downloadStringAsJsonFile as DownloadFn } from '@/utils/dom-download';
 
-type MockAnchor = {
-    href: string;
-    download: string;
-    click: () => void;
-    parentNode: {
-        removeChild: (node: unknown) => void;
-    } | null;
-};
+let downloadCalls: Array<{ jsonString: string; filename: string }> = [];
+let downloadShouldThrow: Error | null = null;
+
+mock.module('@/utils/dom-download', () => ({
+    downloadStringAsJsonFile: ((jsonString: string, filename: string) => {
+        if (downloadShouldThrow) {
+            throw downloadShouldThrow;
+        }
+        downloadCalls.push({ jsonString, filename });
+    }) satisfies typeof DownloadFn,
+}));
+
+// Must be imported AFTER the mock.module call
+const { downloadAsJSON, generateTimestamp, sanitizeFilename } = await import('@/utils/download');
 
 describe('Download Utilities', () => {
     describe('sanitizeFilename', () => {
@@ -93,125 +99,33 @@ describe('Download Utilities', () => {
     });
 
     describe('downloadAsJSON', () => {
+        beforeEach(() => {
+            downloadCalls = [];
+            downloadShouldThrow = null;
+        });
+
         it('should not throw when JSON serialization fails', () => {
             const circular: Record<string, unknown> = {};
             circular.self = circular;
 
-            const appended: unknown[] = [];
-            const removed: unknown[] = [];
-            const link: MockAnchor = {
-                href: '',
-                download: '',
-                click: () => {},
-                parentNode: null,
-            };
-            const browserApis = {
-                document: {
-                    body: {
-                        appendChild: (node: unknown) => {
-                            appended.push(node);
-                        },
-                        removeChild: (node: unknown) => {
-                            removed.push(node);
-                        },
-                    },
-                    createElement: () => link,
-                },
-                URL: {
-                    createObjectURL: () => 'blob:mock',
-                    revokeObjectURL: () => {},
-                },
-                createBlob: () => ({}) as Blob,
-            };
-
-            expect(() => downloadAsJSON(circular, 'test', browserApis)).not.toThrow();
-            expect(appended).toEqual([]);
-            expect(removed).toEqual([]);
+            expect(() => downloadAsJSON(circular, 'test')).not.toThrow();
+            expect(downloadCalls).toEqual([]);
         });
 
-        it('should remove link and revoke URL on successful download', () => {
-            const appended: unknown[] = [];
-            const removed: unknown[] = [];
-            const revokedUrls: string[] = [];
-            let clicked = false;
+        it('should serialize data and trigger download with correct filename', () => {
+            const data = { ok: true };
 
-            const body = {
-                appendChild: (node: unknown) => {
-                    const anchor = node as MockAnchor;
-                    anchor.parentNode = body;
-                    appended.push(node);
-                },
-                removeChild: (node: unknown) => {
-                    removed.push(node);
-                },
-            };
-
-            const link: MockAnchor = {
-                href: '',
-                download: '',
-                parentNode: null,
-                click: () => {
-                    clicked = true;
-                },
-            };
-
-            const browserApis = {
-                document: {
-                    body,
-                    createElement: () => link,
-                },
-                URL: {
-                    createObjectURL: () => 'blob:success',
-                    revokeObjectURL: (url: string) => {
-                        revokedUrls.push(url);
-                    },
-                },
-                createBlob: () => ({}) as Blob,
-            };
-
-            expect(() => downloadAsJSON({ ok: true }, 'test', browserApis)).not.toThrow();
-            expect(clicked).toBe(true);
-            expect(link.download).toBe('test.json');
-            expect(link.href).toBe('blob:success');
-            expect(appended).toEqual([link]);
-            expect(removed).toEqual([link]);
-            expect(revokedUrls).toEqual(['blob:success']);
+            expect(() => downloadAsJSON(data, 'test')).not.toThrow();
+            expect(downloadCalls).toHaveLength(1);
+            expect(downloadCalls[0].filename).toBe('test.json');
+            expect(JSON.parse(downloadCalls[0].jsonString)).toEqual({ ok: true });
         });
 
-        it('should not throw when createObjectURL fails', () => {
-            const appended: unknown[] = [];
-            const removed: unknown[] = [];
-            const link: MockAnchor = {
-                href: '',
-                download: '',
-                click: () => {},
-                parentNode: null,
-            };
+        it('should not throw when the DOM download throws', () => {
+            downloadShouldThrow = new Error('blob-failure');
 
-            const browserApis = {
-                document: {
-                    body: {
-                        appendChild: (node: unknown) => {
-                            appended.push(node);
-                        },
-                        removeChild: (node: unknown) => {
-                            removed.push(node);
-                        },
-                    },
-                    createElement: () => link,
-                },
-                URL: {
-                    createObjectURL: () => {
-                        throw new Error('blob-failure');
-                    },
-                    revokeObjectURL: () => {},
-                },
-                createBlob: () => ({}) as Blob,
-            };
-
-            expect(() => downloadAsJSON({ ok: true }, 'test', browserApis)).not.toThrow();
-            expect(appended).toEqual([]);
-            expect(removed).toEqual([]);
+            expect(() => downloadAsJSON({ ok: true }, 'test')).not.toThrow();
+            expect(downloadCalls).toEqual([]);
         });
     });
 });
