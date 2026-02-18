@@ -2090,7 +2090,7 @@ function getPageConversationSnapshot(conversationId: string): unknown | null {
     return buildRawCaptureSnapshot(conversationId);
 }
 
-function isSnapshotRequestEvent(event: MessageEvent): PageSnapshotRequest | null {
+function isSnapshotRequestEvent(event: MessageEvent) {
     if (event.source !== window || event.origin !== window.location.origin) {
         return null;
     }
@@ -2876,7 +2876,7 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
-        const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext): void => {
+        const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext) => {
             if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter) {
                 return;
             }
@@ -3010,6 +3010,9 @@ export default defineContentScript({
                 window.postMessage(stampToken(response), window.location.origin);
             };
 
+            const isSameWindowOriginEvent = (event: MessageEvent) =>
+                event.source === window && event.origin === window.location.origin;
+
             const handleSessionInit = (event: MessageEvent) => {
                 if (!isSameWindowOriginEvent(event)) {
                     return;
@@ -3020,9 +3023,6 @@ export default defineContentScript({
                 }
                 setSessionToken(message.token);
             };
-
-            const isSameWindowOriginEvent = (event: MessageEvent): boolean =>
-                event.source === window && event.origin === window.location.origin;
 
             const parseAttemptDisposedMessage = (event: MessageEvent): AttemptDisposedMessage | null => {
                 if (!isSameWindowOriginEvent(event)) {

@@ -2,56 +2,56 @@ export type LifecyclePhaseWire = 'prompt-sent' | 'streaming' | 'completed' | 'te
 
 export type LogLevelWire = 'debug' | 'info' | 'warn' | 'error';
 
-export interface ResponseLifecycleMessage {
+export type ResponseLifecycleMessage = {
     type: 'BLACKIYA_RESPONSE_LIFECYCLE';
     platform: string;
     attemptId: string;
     phase: LifecyclePhaseWire;
     conversationId?: string;
-}
+};
 
-export interface ResponseFinishedMessage {
+export type ResponseFinishedMessage = {
     type: 'BLACKIYA_RESPONSE_FINISHED';
     platform: string;
     attemptId: string;
     conversationId?: string;
-}
+};
 
-export interface StreamDeltaMessage {
+export type StreamDeltaMessage = {
     type: 'BLACKIYA_STREAM_DELTA';
     platform: string;
     attemptId: string;
     conversationId?: string;
     text: string;
-}
+};
 
-export interface ConversationIdResolvedMessage {
+export type ConversationIdResolvedMessage = {
     type: 'BLACKIYA_CONVERSATION_ID_RESOLVED';
     platform: string;
     attemptId: string;
     conversationId: string;
-}
+};
 
-export interface AttemptDisposedMessage {
+export type AttemptDisposedMessage = {
     type: 'BLACKIYA_ATTEMPT_DISPOSED';
     attemptId: string;
     reason: 'navigation' | 'superseded' | 'timeout' | 'teardown';
-}
+};
 
-export interface StreamDumpConfigMessage {
+export type StreamDumpConfigMessage = {
     type: 'BLACKIYA_STREAM_DUMP_CONFIG';
     enabled: boolean;
-}
+};
 
-export interface TitleResolvedMessage {
+export type TitleResolvedMessage = {
     type: 'BLACKIYA_TITLE_RESOLVED';
     platform: string;
     attemptId: string;
     conversationId: string;
     title: string;
-}
+};
 
-export interface StreamDumpFrameMessage {
+export type StreamDumpFrameMessage = {
     type: 'BLACKIYA_STREAM_DUMP_FRAME';
     platform: string;
     attemptId: string;
@@ -61,17 +61,17 @@ export interface StreamDumpFrameMessage {
     chunkBytes?: number;
     frameIndex?: number;
     timestampMs?: number;
-}
+};
 
-export interface CaptureInterceptedMessage {
+export type CaptureInterceptedMessage = {
     type: 'LLM_CAPTURE_DATA_INTERCEPTED';
     platform: string;
     url: string;
     data: string;
     attemptId?: string;
-}
+};
 
-export interface LogEntryMessage {
+export type LogEntryMessage = {
     type: 'LLM_LOG_ENTRY';
     payload: {
         level: LogLevelWire;
@@ -79,7 +79,12 @@ export interface LogEntryMessage {
         data?: unknown[];
         context?: string;
     };
-}
+};
+
+export type SessionInitMessage = {
+    type: 'BLACKIYA_SESSION_INIT';
+    token: string;
+};
 
 export type BlackiyaMessage =
     | ResponseLifecycleMessage
@@ -93,11 +98,6 @@ export type BlackiyaMessage =
     | CaptureInterceptedMessage
     | LogEntryMessage
     | SessionInitMessage;
-
-export interface SessionInitMessage {
-    type: 'BLACKIYA_SESSION_INIT';
-    token: string;
-}
 
 function hasString(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0;
