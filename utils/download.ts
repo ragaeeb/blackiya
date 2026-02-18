@@ -8,6 +8,33 @@
 
 import { logger } from '@/utils/logger';
 
+type DownloadAnchorLike = {
+    href: string;
+    download: string;
+    click: () => void;
+    parentNode?: {
+        removeChild: (node: unknown) => void;
+    } | null;
+};
+
+type DownloadDocumentLike = {
+    body: {
+        appendChild: (node: unknown) => void;
+        removeChild: (node: unknown) => void;
+    };
+    createElement: (tagName: string) => DownloadAnchorLike;
+};
+
+type DownloadUrlLike = {
+    createObjectURL: (blob: Blob) => string;
+    revokeObjectURL: (url: string) => void;
+};
+
+type DownloadBrowserApis = {
+    document?: DownloadDocumentLike;
+    URL?: DownloadUrlLike;
+};
+
 /**
  * Sanitize a string for use as a filename
  *
@@ -68,25 +95,35 @@ export function generateTimestamp(unixTime?: number): string {
  *
  * @param data - The data to download as JSON
  * @param filename - The filename (without .json extension)
+ * @param browserApis - Optional browser APIs override (used for deterministic tests)
  */
-export function downloadAsJSON(data: unknown, filename: string): void {
+export function downloadAsJSON(data: unknown, filename: string, browserApis?: DownloadBrowserApis): void {
+    const doc =
+        browserApis?.document ??
+        (typeof document !== 'undefined' ? (document as unknown as DownloadDocumentLike) : undefined);
+    const urlApi =
+        browserApis?.URL ??
+        (typeof URL !== 'undefined'
+            ? (URL as unknown as DownloadUrlLike)
+            : undefined);
+
     let url: string | null = null;
-    let link: HTMLAnchorElement | null = null;
+    let link: DownloadAnchorLike | null = null;
 
     try {
-        if (typeof document === 'undefined' || typeof URL === 'undefined') {
+        if (!doc || !urlApi) {
             logger.error('Download failed: browser APIs are unavailable');
             return;
         }
 
         const jsonString = JSON.stringify(data, null, 2);
         const blob = new Blob([jsonString], { type: 'application/json' });
-        url = URL.createObjectURL(blob);
+        url = urlApi.createObjectURL(blob);
 
-        link = document.createElement('a');
+        link = doc.createElement('a');
         link.href = url;
         link.download = `${filename}.json`;
-        document.body.appendChild(link);
+        doc.body.appendChild(link);
         link.click();
     } catch (error) {
         logger.error('Download failed:', error);
@@ -95,7 +132,7 @@ export function downloadAsJSON(data: unknown, filename: string): void {
             link.parentNode.removeChild(link);
         }
         if (url) {
-            URL.revokeObjectURL(url);
+            urlApi?.revokeObjectURL(url);
         }
     }
 }
