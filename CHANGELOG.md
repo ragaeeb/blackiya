@@ -1,3 +1,10 @@
+## [2.0.5](https://github.com/ragaeeb/blackiya/compare/v2.0.4...v2.0.5) (2026-02-18)
+
+
+### Bug Fixes
+
+* **h01:** H-01: Split attempt-id read vs write semantics ([#25](https://github.com/ragaeeb/blackiya/issues/25)) ([c0f768b](https://github.com/ragaeeb/blackiya/commit/c0f768bc79a0e1ddcfd374d25865864e2db9496f))
+
 ## [2.0.4](https://github.com/ragaeeb/blackiya/compare/v2.0.3...v2.0.4) (2026-02-18)
 
 
