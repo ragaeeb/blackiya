@@ -12,6 +12,7 @@
 import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import { addBoundedSetValue, setBoundedMapValue } from '@/utils/bounded-collections';
 import { loadCalibrationProfileV2IfPresent, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
 import { buildCommonExport } from '@/utils/common-export';
 import { isConversationReady } from '@/utils/conversation-readiness';
@@ -267,34 +268,6 @@ export function runPlatform(): void {
     const streamResolvedTitles = new Map<string, string>();
     const lastCanonicalReadyLogAtByConversation = new Map<string, number>();
     let activeAttemptId: string | null = null;
-
-    function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number): void {
-        if (map.has(key)) {
-            map.delete(key);
-        }
-        map.set(key, value);
-        while (map.size > maxEntries) {
-            const oldest = map.keys().next().value as K | undefined;
-            if (oldest === undefined) {
-                break;
-            }
-            map.delete(oldest);
-        }
-    }
-
-    function addBoundedSetValue<T>(set: Set<T>, value: T, maxEntries: number): void {
-        if (set.has(value)) {
-            return;
-        }
-        set.add(value);
-        while (set.size > maxEntries) {
-            const oldest = set.values().next().value as T | undefined;
-            if (oldest === undefined) {
-                break;
-            }
-            set.delete(oldest);
-        }
-    }
 
     function cachePendingLifecycleSignal(
         attemptId: string,

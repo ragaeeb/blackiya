@@ -115,11 +115,11 @@ export function resolveExportConversationTitleDecision(data: ConversationData): 
     source: ExportTitleSource;
 } {
     if (!isGenericConversationTitle(data.title)) {
-        return { title: data.title, source: 'existing' };
+        return { title: normalizeTitle(data.title), source: 'existing' };
     }
     const firstUserMessageTitle = deriveConversationTitleFromFirstUserMessage(data);
     if (firstUserMessageTitle) {
         return { title: firstUserMessageTitle, source: 'first-user-message' };
     }
-    return { title: data.title ?? 'Conversation', source: 'fallback' };
+    return { title: normalizeTitle(data.title) || 'Conversation', source: 'fallback' };
 }

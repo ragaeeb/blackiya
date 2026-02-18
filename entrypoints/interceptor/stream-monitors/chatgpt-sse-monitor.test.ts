@@ -12,4 +12,18 @@ describe('chatgpt-sse-monitor', () => {
         });
         expect(chunks).toEqual(['delta']);
     });
+
+    it('suppresses whitespace-only keep-alive chunks', () => {
+        const chunks: string[] = [];
+        monitorChatgptSseChunk('\n', (chunk) => {
+            chunks.push(chunk);
+        });
+        monitorChatgptSseChunk('   ', (chunk) => {
+            chunks.push(chunk);
+        });
+        monitorChatgptSseChunk('\t', (chunk) => {
+            chunks.push(chunk);
+        });
+        expect(chunks).toEqual([]);
+    });
 });

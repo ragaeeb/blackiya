@@ -8,6 +8,7 @@ import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
+import { addBoundedSetValue, setBoundedMapValue } from '@/utils/bounded-collections';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
@@ -101,33 +102,7 @@ type GrokXhrStreamState = {
     emittedStreaming: boolean;
 };
 
-export function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number): void {
-    if (map.has(key)) {
-        map.delete(key);
-    }
-    map.set(key, value);
-    while (map.size > maxEntries) {
-        const oldest = map.keys().next().value as K | undefined;
-        if (oldest === undefined) {
-            break;
-        }
-        map.delete(oldest);
-    }
-}
-
-function addBoundedSetValue<T>(set: Set<T>, value: T, maxEntries: number): void {
-    if (set.has(value)) {
-        return;
-    }
-    set.add(value);
-    while (set.size > maxEntries) {
-        const oldest = set.values().next().value as T | undefined;
-        if (oldest === undefined) {
-            break;
-        }
-        set.delete(oldest);
-    }
-}
+export { setBoundedMapValue };
 
 export function pruneTimestampCache(map: Map<string, number>, ttlMs: number, nowMs = Date.now()): number {
     let removed = 0;
@@ -508,6 +483,23 @@ function shouldEmitNonChatLifecycleForRequest(adapter: LLMPlatform, url: string)
         return allowed;
     }
     return true;
+}
+
+export function shouldEmitXhrRequestLifecycle(context: {
+    shouldEmitNonChatLifecycle: boolean;
+    requestAdapter: LLMPlatform | null;
+    attemptId?: string;
+    conversationId?: string;
+}): boolean {
+    if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter || !context.attemptId) {
+        return false;
+    }
+    // Gemini StreamGenerate requests can start before a conversation id is available.
+    // Emit prompt-sent and wire stream monitoring so the id can resolve from stream payloads.
+    if (context.requestAdapter.name === 'Gemini') {
+        return true;
+    }
+    return typeof context.conversationId === 'string' && context.conversationId.length > 0;
 }
 
 function shouldEmitCompletionSignalForUrl(adapter: LLMPlatform, url: string): boolean {
@@ -2759,17 +2751,11 @@ export default defineContentScript({
                 proactiveHeadersByKey.set(key, mergedHeaders);
             }
 
-            if (!proactiveFetcher.markInFlight(key)) {
-                return;
-            }
-
-            log('info', `trigger ${adapter.name} ${conversationId}`);
-
-            const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
-            const run = runProactiveFetch(adapter, conversationId, key, attemptId);
-            run.finally(() => {
+            await proactiveFetcher.withInFlight(key, async () => {
+                log('info', `trigger ${adapter.name} ${conversationId}`);
+                const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
+                await runProactiveFetch(adapter, conversationId, key, attemptId);
                 proactiveHeadersByKey.delete(key);
-                proactiveFetcher.clearInFlight(key);
             });
         };
 
@@ -3020,26 +3006,31 @@ export default defineContentScript({
         };
 
         const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext): void => {
-            if (
-                !context.shouldEmitNonChatLifecycle ||
-                !context.requestAdapter ||
-                !context.attemptId ||
-                !context.conversationId
-            ) {
+            if (!shouldEmitXhrRequestLifecycle(context)) {
                 return;
             }
 
-            emitLifecycleSignal(context.attemptId, 'prompt-sent', context.conversationId, context.requestAdapter.name);
+            emitLifecycleSignal(
+                context.attemptId as string,
+                'prompt-sent',
+                context.conversationId,
+                context.requestAdapter?.name,
+            );
 
-            if (context.requestAdapter.name === 'Gemini') {
-                wireGeminiXhrProgressMonitor(xhr, context.attemptId, context.conversationId, context.requestUrl);
+            if (context.requestAdapter?.name === 'Gemini') {
+                wireGeminiXhrProgressMonitor(
+                    xhr,
+                    context.attemptId as string,
+                    context.conversationId,
+                    context.requestUrl,
+                );
                 return;
             }
-            if (context.requestAdapter.name === 'Grok') {
-                wireGrokXhrProgressMonitor(xhr, context.attemptId, context.conversationId);
-                if (shouldLogTransient(`grok:xhr:request:${context.attemptId}`, 3000)) {
+            if (context.requestAdapter?.name === 'Grok' && context.conversationId) {
+                wireGrokXhrProgressMonitor(xhr, context.attemptId as string, context.conversationId);
+                if (shouldLogTransient(`grok:xhr:request:${context.attemptId as string}`, 3000)) {
                     log('info', 'Grok XHR request intercepted', {
-                        attemptId: context.attemptId,
+                        attemptId: context.attemptId as string,
                         conversationId: context.conversationId,
                         method: context.methodUpper,
                         path: safePathname(context.requestUrl),
@@ -3047,7 +3038,15 @@ export default defineContentScript({
                 }
                 return;
             }
-            emitLifecycleSignal(context.attemptId, 'streaming', context.conversationId, context.requestAdapter.name);
+            if (!context.conversationId) {
+                return;
+            }
+            emitLifecycleSignal(
+                context.attemptId as string,
+                'streaming',
+                context.conversationId,
+                context.requestAdapter?.name,
+            );
         };
 
         const maybeLogGrokXhrResponse = (xhr: XMLHttpRequest, methodUpper: string): void => {

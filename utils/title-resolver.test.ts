@@ -133,4 +133,37 @@ describe('title-resolver', () => {
         const specificDecision = resolveExportConversationTitleDecision(specificConversation);
         expect(specificDecision).toEqual({ title: 'Specific title', source: 'existing' });
     });
+
+    it('normalizes export title decision for existing and fallback branches', () => {
+        const specificConversation = buildConversation('   Specific    title   ');
+        const specificDecision = resolveExportConversationTitleDecision(specificConversation);
+        expect(specificDecision).toEqual({ title: 'Specific title', source: 'existing' });
+
+        const fallbackConversation: ConversationData = {
+            ...buildConversation('   New    chat   '),
+            mapping: {},
+        };
+        const fallbackDecision = resolveExportConversationTitleDecision(fallbackConversation);
+        expect(fallbackDecision).toEqual({ title: 'New chat', source: 'fallback' });
+    });
+
+    it('resolveConversationTitleByPrecedence falls back to fallbackTitle when all other sources are generic/absent', () => {
+        const resolved = resolveConversationTitleByPrecedence({
+            streamTitle: 'Conversation with Gemini',
+            cachedTitle: 'You said: hi',
+            domTitle: 'Conversation with Gemini',
+            firstUserMessageTitle: null,
+            fallbackTitle: 'My fallback',
+        });
+        expect(resolved).toEqual({ title: 'My fallback', source: 'fallback' });
+    });
+
+    it('resolveExportConversationTitleDecision falls back when title is generic and no user messages exist', () => {
+        const emptyConversation: ConversationData = {
+            ...buildConversation('New chat'),
+            mapping: {},
+        };
+        const decision = resolveExportConversationTitleDecision(emptyConversation);
+        expect(decision).toEqual({ title: 'New chat', source: 'fallback' });
+    });
 });

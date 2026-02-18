@@ -20,35 +20,63 @@ type BrowserApiOverrides = {
 };
 
 function withMockedBrowserAPIs(overrides: BrowserApiOverrides, fn: () => void): void {
-    const originalDocument = (globalThis as any).document;
-    const originalCreateObjectURL = globalThis.URL.createObjectURL;
-    const originalRevokeObjectURL = globalThis.URL.revokeObjectURL;
+    const globalAny = globalThis as any;
+    const originalDocument = globalAny.document;
+    const originalDocumentDescriptor = Object.getOwnPropertyDescriptor(globalAny, 'document');
+    const originalCreateObjectURLDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL');
+    const originalRevokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL');
 
     const body = {
         appendChild: overrides.document?.body?.appendChild ?? (() => {}),
         removeChild: overrides.document?.body?.removeChild ?? (() => {}),
     };
 
-    (globalThis as any).document = {
-        body,
-        createElement:
-            overrides.document?.createElement ??
-            (() => ({
-                href: '',
-                download: '',
-                click: () => {},
-            })),
-    };
+    Object.defineProperty(globalAny, 'document', {
+        configurable: true,
+        writable: true,
+        value: {
+            body,
+            createElement:
+                overrides.document?.createElement ??
+                (() => ({
+                    href: '',
+                    download: '',
+                    click: () => {},
+                })),
+        },
+    });
 
-    (globalThis.URL as any).createObjectURL = overrides.createObjectURL ?? (() => 'blob:mock');
-    (globalThis.URL as any).revokeObjectURL = overrides.revokeObjectURL ?? (() => {});
+    Object.defineProperty(globalThis.URL, 'createObjectURL', {
+        configurable: true,
+        writable: true,
+        value: overrides.createObjectURL ?? (() => 'blob:mock'),
+    });
+    Object.defineProperty(globalThis.URL, 'revokeObjectURL', {
+        configurable: true,
+        writable: true,
+        value: overrides.revokeObjectURL ?? (() => {}),
+    });
 
     try {
         fn();
     } finally {
-        (globalThis as any).document = originalDocument;
-        (globalThis.URL as any).createObjectURL = originalCreateObjectURL;
-        (globalThis.URL as any).revokeObjectURL = originalRevokeObjectURL;
+        if (originalDocumentDescriptor) {
+            Object.defineProperty(globalAny, 'document', originalDocumentDescriptor);
+        } else {
+            globalAny.document = originalDocument;
+        }
+
+        if (originalCreateObjectURLDescriptor) {
+            Object.defineProperty(globalThis.URL, 'createObjectURL', originalCreateObjectURLDescriptor);
+        } else {
+            (globalThis.URL as any).createObjectURL = undefined;
+        }
+
+        if (originalRevokeObjectURLDescriptor) {
+            Object.defineProperty(globalThis.URL, 'revokeObjectURL', originalRevokeObjectURLDescriptor);
+        } else {
+            (globalThis.URL as any).revokeObjectURL = undefined;
+        }
     }
 }
 

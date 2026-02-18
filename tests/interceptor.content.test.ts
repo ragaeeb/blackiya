@@ -17,12 +17,19 @@ type CleanupDisposedAttemptState = (
     },
     maxDisposedAttempts?: number,
 ) => void;
+type ShouldEmitXhrRequestLifecycle = (context: {
+    shouldEmitNonChatLifecycle: boolean;
+    requestAdapter: { name: string } | null;
+    attemptId?: string;
+    conversationId?: string;
+}) => boolean;
 
-describe('interceptor.content Gemini XHR completion guard', () => {
+describe('interceptor.content utilities', () => {
     let shouldEmitGeminiXhrLoadendCompletion: GeminiLoadendGuard;
     let setBoundedMapValue: SetBoundedMapValue;
     let pruneTimestampCache: PruneTimestampCache;
     let cleanupDisposedAttemptState: CleanupDisposedAttemptState;
+    let shouldEmitXhrRequestLifecycle: ShouldEmitXhrRequestLifecycle;
 
     beforeAll(async () => {
         (globalThis as any).defineContentScript = (config: unknown) => config;
@@ -31,6 +38,7 @@ describe('interceptor.content Gemini XHR completion guard', () => {
         setBoundedMapValue = mod.setBoundedMapValue as SetBoundedMapValue;
         pruneTimestampCache = mod.pruneTimestampCache as PruneTimestampCache;
         cleanupDisposedAttemptState = mod.cleanupDisposedAttemptState as CleanupDisposedAttemptState;
+        shouldEmitXhrRequestLifecycle = mod.shouldEmitXhrRequestLifecycle as ShouldEmitXhrRequestLifecycle;
     });
 
     it('emits completed once for the same Gemini XHR state', () => {
@@ -55,6 +63,26 @@ describe('interceptor.content Gemini XHR completion guard', () => {
         const streamGenerateUrl =
             'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
         expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBe(false);
+    });
+
+    it('allows Gemini XHR lifecycle emission without an initial conversation id', () => {
+        expect(
+            shouldEmitXhrRequestLifecycle({
+                shouldEmitNonChatLifecycle: true,
+                requestAdapter: { name: 'Gemini' },
+                attemptId: 'gemini:attempt-1',
+                conversationId: undefined,
+            }),
+        ).toBe(true);
+
+        expect(
+            shouldEmitXhrRequestLifecycle({
+                shouldEmitNonChatLifecycle: true,
+                requestAdapter: { name: 'Grok' },
+                attemptId: 'grok:attempt-1',
+                conversationId: undefined,
+            }),
+        ).toBe(false);
     });
 
     it('bounds map size and evicts oldest entries', () => {

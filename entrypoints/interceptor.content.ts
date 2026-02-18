@@ -4,4 +4,5 @@ export {
     pruneTimestampCache,
     setBoundedMapValue,
     shouldEmitGeminiXhrLoadendCompletion,
+    shouldEmitXhrRequestLifecycle,
 } from '@/entrypoints/interceptor/bootstrap';

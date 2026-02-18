@@ -56,6 +56,9 @@ describe('runner helper modules', () => {
 
         const capped = appendStreamProbePreview('12345', '67890', 8);
         expect(capped).toBe('...67890');
+
+        const cappedWithoutDelta = appendStreamProbePreview('1234567890', '', 8);
+        expect(cappedWithoutDelta).toBe('...67890');
     });
 
     it('builds conversation snapshot data from message candidates', () => {
@@ -90,6 +93,19 @@ describe('runner helper modules', () => {
         expect(snapshot.title).toBe('Document title');
         expect(snapshot.default_model_slug).toBe('snapshot');
         expect(snapshot.mapping['snapshot-2']?.message?.author.role).toBe('assistant');
+    });
+
+    it('returns null for runner snapshot data when conversation id is empty', () => {
+        const snapshot = buildRunnerSnapshotConversationData(
+            '',
+            'Gemini',
+            [
+                { role: 'user', text: 'hi' },
+                { role: 'assistant', text: 'hello' },
+            ],
+            'Document title',
+        );
+        expect(snapshot).toBeNull();
     });
 
     it('applies shared export title policy for generic placeholder titles', () => {
@@ -151,5 +167,13 @@ describe('runner helper modules', () => {
         const decision = applyResolvedExportTitle(data);
         expect(decision.source).toBe('first-user-message');
         expect(data.title).toContain('A very specific prompt title');
+    });
+
+    it('appends unknown calibration step to the tail when step is missing from default order', () => {
+        const order = prioritizeCalibrationStep(
+            'missing-step' as unknown as Parameters<typeof prioritizeCalibrationStep>[0],
+            ['a', 'b', 'c'] as unknown as Parameters<typeof prioritizeCalibrationStep>[1],
+        );
+        expect(order).toEqual(['a', 'b', 'c', 'missing-step'] as unknown as typeof order);
     });
 });

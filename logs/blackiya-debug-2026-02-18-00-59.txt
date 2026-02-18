@@ -1,0 +1,11 @@
+# Blackiya Debug Report
+
+Sessions: 2 (deduped by platform+convId)
+
+## 1. Unknown affbc21b
+
+  Successfully captured/cached data for conversation: affbc21b19836f70
+
+## 2. Unknown f5261330
+
+  Response finished signal {"attemptId":"gemini:f5261330-46cc-440e-ab7f-6a60a59d27bd","calibrationState":"idle","conversationId":"affbc21b19836f70","source":"network"}

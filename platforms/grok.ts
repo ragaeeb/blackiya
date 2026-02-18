@@ -1216,6 +1216,7 @@ export const grokAdapter: LLMPlatform = {
     },
 
     isPlatformGenerating() {
+        // TODO(v2.0.x): Implement Grok DOM generation detection once stable selectors are identified.
         return false;
     },
 

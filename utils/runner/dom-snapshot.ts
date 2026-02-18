@@ -5,6 +5,11 @@ export type SnapshotMessageCandidate = {
     text: string;
 };
 
+/**
+ * Build a lightweight root-anchored chain snapshot used by targeted probe helpers.
+ * This shape intentionally keeps a synthetic `root` node and zero-based `snapshot-0` IDs.
+ * The runner calibration fallback uses `buildRunnerSnapshotConversationData` below.
+ */
 export function buildConversationSnapshotFromMessages(
     conversationId: string,
     title: string,
@@ -68,7 +73,7 @@ export function buildRunnerSnapshotConversationData(
     messages: SnapshotMessageCandidate[],
     documentTitle?: string,
 ): ConversationData | null {
-    if (messages.length === 0) {
+    if (!conversationId || messages.length === 0) {
         return null;
     }
 

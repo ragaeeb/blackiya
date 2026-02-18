@@ -374,6 +374,9 @@ function resolveGeminiStreamShape(payload: any): { idIndex: number; assistantSlo
     if (!Array.isArray(payload) || payload.length < 5) {
         return null;
     }
+    // StreamGenerate envelopes often resemble:
+    // [null, [conversationId, ...], ?, ?, [assistant slot, ...], ...]
+    // The assistant payload is typically 4 positions after the null sentinel.
     for (let i = 0; i <= payload.length - 5; i++) {
         if (payload[i] !== null) {
             continue;
@@ -849,6 +852,7 @@ export const geminiAdapter: LLMPlatform = {
     },
 
     isPlatformGenerating() {
+        // TODO(v2.0.x): Implement Gemini DOM generation detection once selectors are stable.
         return false;
     },
 

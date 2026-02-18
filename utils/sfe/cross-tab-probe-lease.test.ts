@@ -132,9 +132,6 @@ describe('CrossTabProbeLease', () => {
 
     it('does not throw when storage write fails and reports lease as not acquired', () => {
         const storage = new ThrowingWriteStorage();
-        storage.setItem = () => {
-            throw new Error('quota-exceeded');
-        };
         const lease = new CrossTabProbeLease({
             storage,
             now: () => 2_000,

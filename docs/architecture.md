@@ -207,6 +207,7 @@ Source of truth priority:
 
 The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
 For the same attempt/conversation, regressive lifecycle transitions are rejected (`completed` remains terminal).
+Gemini XHR prompt lifecycle can be emitted before conversation ID resolution; the runner caches pending lifecycle by attempt and replays once `BLACKIYA_CONVERSATION_ID_RESOLVED` is received.
 On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 
