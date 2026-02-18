@@ -96,4 +96,27 @@ describe('grok-stream-parser', () => {
         expect(signals.conversationId).toBe('40b7c6bb-120d-4cf9-951a-0ae33345d07c');
         expect(signals.textCandidates).toEqual(['Data prefix line']);
     });
+
+    it('should extract tool usage card thinking notes as reasoning candidates', () => {
+        const seenPayloads = new Set<string>();
+        const toolUsagePayload = [
+            '<xai:tool_usage_card>',
+            '<xai:tool_args><![CDATA[{"message":"I have the full text broken into segments P101391 to P101395a.","to":"Grok"}]]></xai:tool_args>',
+            '</xai:tool_usage_card>',
+        ].join('\n');
+        const buffer = `${JSON.stringify({
+            result: {
+                response: {
+                    token: toolUsagePayload,
+                    isThinking: true,
+                    messageTag: 'tool_usage_card',
+                },
+            },
+        })}\n`;
+
+        const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
+
+        expect(signals.reasoningCandidates).toContain('I have the full text broken into segments P101391 to P101395a.');
+        expect(signals.textCandidates).toEqual([]);
+    });
 });

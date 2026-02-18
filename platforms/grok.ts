@@ -1032,7 +1032,7 @@ export const grokAdapter: LLMPlatform = {
 
     // Match BOTH the conversation endpoint AND the history endpoint
     apiEndpointPattern:
-        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/[^/]+(\/(response-node|load-responses))?/,
+        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/(?:new|reconnect-response-v2\/[^/?#]+|[^/]+(?:\/(response-node|load-responses))?)/,
     completionTriggerPattern:
         /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/,
 

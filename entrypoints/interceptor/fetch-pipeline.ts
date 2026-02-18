@@ -1,5 +1,6 @@
 import { CHATGPT_PROMPT_REQUEST_PATH_PATTERN } from '@/platforms/chatgpt';
 import type { LLMPlatform } from '@/platforms/types';
+import { isGrokStreamingEndpoint } from '@/utils/grok-request-classifier';
 import { createAttemptId } from '@/utils/protocol/messages';
 
 export type FetchInterceptorContext = {
@@ -25,6 +26,7 @@ export interface CreateFetchInterceptorContextDeps {
     shouldEmitNonChatLifecycleForRequest: (adapter: LLMPlatform, url: string) => boolean;
     resolveRequestConversationId: (adapter: LLMPlatform, requestUrl: string) => string | undefined;
     peekAttemptIdForConversation: (conversationId?: string, platformName?: string) => string | undefined;
+    resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string;
     resolveLifecycleConversationId: (args: Parameters<typeof fetch>) => string | undefined;
     safePathname: (url: string) => string;
 }
@@ -36,19 +38,29 @@ export function createFetchInterceptorContext(
     const outgoingUrl = deps.getRequestUrl(args[0]);
     const outgoingMethod = deps.getRequestMethod(args).toUpperCase();
     const outgoingPath = deps.safePathname(outgoingUrl);
-    const fetchApiAdapter = outgoingMethod === 'POST' ? deps.getPlatformAdapterByApiUrl(outgoingUrl) : null;
+    const detectedAdapter = deps.getPlatformAdapterByApiUrl(outgoingUrl);
+    const shouldKeepAdapterForRequest =
+        !!detectedAdapter &&
+        (outgoingMethod === 'POST' || (detectedAdapter.name === 'Grok' && isGrokStreamingEndpoint(outgoingUrl)));
+    const fetchApiAdapter = shouldKeepAdapterForRequest ? detectedAdapter : null;
     const isNonChatGptApiRequest = !!fetchApiAdapter && fetchApiAdapter.name !== deps.chatGptPlatformName;
     const shouldEmitNonChatLifecycle =
-        isNonChatGptApiRequest && fetchApiAdapter
+        outgoingMethod === 'POST' && isNonChatGptApiRequest && fetchApiAdapter
             ? deps.shouldEmitNonChatLifecycleForRequest(fetchApiAdapter, outgoingUrl)
             : false;
     const nonChatConversationId =
         isNonChatGptApiRequest && fetchApiAdapter
             ? deps.resolveRequestConversationId(fetchApiAdapter, outgoingUrl)
             : undefined;
+    const shouldResolveAttemptForRequest =
+        !!fetchApiAdapter &&
+        (outgoingMethod === 'POST' || (fetchApiAdapter.name === 'Grok' && isGrokStreamingEndpoint(outgoingUrl)));
     const nonChatAttemptId =
         isNonChatGptApiRequest && fetchApiAdapter
-            ? deps.peekAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
+            ? (deps.peekAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name) ??
+              (shouldResolveAttemptForRequest
+                  ? deps.resolveAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
+                  : undefined))
             : undefined;
     const isChatGptPromptRequest = outgoingMethod === 'POST' && CHATGPT_PROMPT_REQUEST_PATH_PATTERN.test(outgoingPath);
     const lifecycleConversationId = isChatGptPromptRequest ? deps.resolveLifecycleConversationId(args) : undefined;

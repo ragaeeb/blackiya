@@ -156,6 +156,13 @@ describe('Grok Platform Adapter', () => {
             expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
+        it('should match grok.com reconnect-response-v2 streaming endpoint', () => {
+            const endpoint =
+                'https://grok.com/rest/app-chat/conversations/reconnect-response-v2/5b128365-2fed-4339-a2b6-8a85a62ad182';
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeTrue();
+            expect(grokAdapter.completionTriggerPattern.test(endpoint)).toBeFalse();
+        });
+
         it('should match completion trigger for add_response.json (V2.1-027)', () => {
             const pattern = grokAdapter.completionTriggerPattern;
             expect(pattern.test('https://x.com/2/grok/add_response.json')).toBeTrue();

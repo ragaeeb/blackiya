@@ -174,12 +174,10 @@ export function createBackgroundMessageHandler(deps: BackgroundMessageHandlerDep
                 deps.saveLog(payload).catch((error) => {
                     deps.logger.error('Failed to save log from content script', error);
                 });
-                sendResponse({ success: true });
             } else {
                 deps.logger.warn('Discarding malformed LOG_ENTRY payload');
-                sendResponse({ success: false, error: 'Malformed LOG_ENTRY payload' });
             }
-            return true;
+            return;
         }
 
         return handleGenericBackgroundMessage(message, sender, sendResponse, deps.logger);

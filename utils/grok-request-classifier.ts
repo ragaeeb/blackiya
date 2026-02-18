@@ -11,6 +11,11 @@ export function isGrokGenerationEndpoint(url: string): boolean {
     return path.includes('/rest/app-chat/conversations/new') || path.includes('/2/grok/add_response.json');
 }
 
+export function isGrokStreamingEndpoint(url: string): boolean {
+    const path = getNormalizedPath(url);
+    return isGrokGenerationEndpoint(url) || path.includes('/rest/app-chat/conversations/reconnect-response-v2/');
+}
+
 export function isGrokCompletionCandidateEndpoint(url: string): boolean {
     const path = getNormalizedPath(url);
     if (path.includes('/rest/app-chat/conversations/new')) {

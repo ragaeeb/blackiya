@@ -156,6 +156,7 @@ mock.module('wxt/browser', () => ({
     browser: browserMock,
 }));
 
+import { getSessionToken } from '@/utils/protocol/session-token';
 // Import subject under test AFTER mocking
 import {
     beginCanonicalStabilizationTick,
@@ -165,6 +166,12 @@ import {
     runPlatform,
     shouldRemoveDisposedAttemptBinding,
 } from './platform-runner';
+
+/** Stamps the session token onto a test message before posting via window.postMessage */
+const postStampedMessage = (data: Record<string, unknown>, origin: string) => {
+    const token = getSessionToken();
+    window.postMessage(token ? { ...data, __blackiyaToken: token } : data, origin);
+};
 
 describe('Platform Runner', () => {
     beforeEach(() => {
@@ -414,7 +421,7 @@ describe('Platform Runner', () => {
         });
         conversation.title = 'Gemini Conversation';
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -424,7 +431,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -435,7 +442,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -488,7 +495,7 @@ describe('Platform Runner', () => {
         conversation.title = 'You said ROLE: Expert academic translator';
         conversation.mapping.u1.message.content.parts = ['You said ROLE: Expert academic translator'];
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -498,7 +505,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -509,7 +516,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -540,7 +547,7 @@ describe('Platform Runner', () => {
         const idleBadge = document.getElementById('blackiya-lifecycle-badge');
         expect(idleBadge?.textContent).toContain('Idle');
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -553,7 +560,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -566,7 +573,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -584,7 +591,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -597,7 +604,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -611,13 +618,13 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
-    it('should ignore lifecycle messages without conversation context', async () => {
+    it('should update lifecycle badge but keep save disabled for lifecycle messages without conversation context', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -627,7 +634,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -640,7 +647,8 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+        // Badge should reflect the lifecycle phase, even without conversation context
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
         expect(saveBtn?.disabled).toBeTrue();
     });
 
@@ -660,7 +668,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 120));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -670,7 +678,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -682,7 +690,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 30));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
                 platform: 'Gemini',
@@ -723,7 +731,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 120));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -733,7 +741,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -743,7 +751,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
                 platform: 'Gemini',
@@ -758,7 +766,7 @@ describe('Platform Runner', () => {
             status: 'finished_successfully',
             endTurn: true,
         });
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -769,7 +777,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 950));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -785,7 +793,7 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
         expect(saveDuringStream?.disabled).toBeTrue();
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'Gemini',
@@ -817,7 +825,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 120));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -834,7 +842,7 @@ describe('Platform Runner', () => {
         marker.className = 'still-generating streaming-marker';
         document.body.appendChild(marker);
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'Gemini',
@@ -872,7 +880,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 120));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Grok',
@@ -882,7 +890,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Grok',
@@ -899,13 +907,420 @@ describe('Platform Runner', () => {
             status: 'finished_successfully',
             endTurn: true,
         });
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Grok',
                 url: 'https://grok.com/rest/app-chat/conversations/new',
                 data: JSON.stringify(canonicalConversation),
                 attemptId: 'attempt:grok-canonical-finish',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
+    it('should update lifecycle badge for pending signals with null conversationId (Grok regression)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Emit lifecycle with null conversationId (Grok pattern for /conversations/new)
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-1',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should preserve lifecycle state when Grok SPA navigates from null to new conversation (V2.2-001)', async () => {
+        // Start with null conversationId (Grok home or pre-navigation state)
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-nav-1',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-nav-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        // Step 2: Grok SPA navigates to /c/<convId> — this triggers handleConversationSwitch
+        currentAdapterMock.extractConversationId = () => 'grok-nav-conv-1';
+        (window as any).location.href = 'https://grok.com/c/grok-nav-conv-1?rid=some-response-id';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // The lifecycle badge should STILL show "Streaming" — not be reset to "Idle"
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should render stream delta text in probe during Grok streaming after SPA navigation (V2.2-002)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-delta-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        // Step 2: SPA navigation to conversation
+        currentAdapterMock.extractConversationId = () => 'grok-delta-conv';
+        (window as any).location.href = 'https://grok.com/c/grok-delta-conv?rid=rid-1';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Step 3: Stream delta arrives AFTER navigation
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                source: 'network',
+                attemptId: 'attempt:grok-delta-1',
+                conversationId: 'grok-delta-conv',
+                text: 'grok-thinking-reasoning-text',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Lifecycle should still be streaming
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+        // Stream probe MUST contain the actual delta text (not just badge state)
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('grok-thinking-reasoning-text');
+    });
+
+    it('should reset lifecycle to idle when navigating to a different existing Grok conversation (V2.2-003)', async () => {
+        // Start on an existing Grok conversation that has already completed
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => 'grok-old-conv',
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/c/grok-old-conv',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Complete a lifecycle on the old conversation
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-cross-1',
+                phase: 'streaming',
+                conversationId: 'grok-old-conv',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        // Step 2: Navigate to a DIFFERENT conversation (not a null→new transition)
+        currentAdapterMock.extractConversationId = () => 'grok-other-conv';
+        (window as any).location.href = 'https://grok.com/c/grok-other-conv';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        // Wait for both the popstate handler and the 500ms setTimeout(injectSaveButton) to fire
+        await new Promise((resolve) => setTimeout(resolve, 650));
+
+        // When switching between existing conversations, lifecycle SHOULD reset to idle
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+    });
+
+    it('should not emit BLACKIYA_ATTEMPT_DISPOSED for active attempt during Grok null-to-new SPA navigation (V2.2-004)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-nodispose-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        // Step 2: Spy on postMessage to capture ATTEMPT_DISPOSED emissions
+        const postedMessages: any[] = [];
+        const originalPostMessage = window.postMessage.bind(window);
+        (window as any).postMessage = (payload: any, targetOrigin: string) => {
+            postedMessages.push(payload);
+            return originalPostMessage(payload, targetOrigin);
+        };
+
+        try {
+            // Step 3: SPA navigation to conversation (null → new)
+            currentAdapterMock.extractConversationId = () => 'grok-nodispose-conv';
+            (window as any).location.href = 'https://grok.com/c/grok-nodispose-conv?rid=rid-1';
+            window.dispatchEvent(new (window as any).Event('popstate'));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        } finally {
+            (window as any).postMessage = originalPostMessage;
+        }
+
+        // No ATTEMPT_DISPOSED should have been emitted for the active streaming attempt
+        const disposals = postedMessages.filter((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED').map((p) => p.attemptId);
+        expect(disposals).not.toContain('attempt:grok-nodispose-1');
+        // Lifecycle should still be streaming
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should not clobber active Grok lifecycle when refreshButtonState fires with null conversation (V2.2-005)', async () => {
+        // Simulates the MutationObserver/health-check refreshButtonState path that
+        // was the root cause of the first lifecycle reset at 16:59:31.356
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-healthcheck-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        // Step 2: Simulate DOM mutation triggering handleNavigationChange with unchanged null ID
+        // This triggers refreshButtonState(undefined) → resetButtonStateForNoConversation
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Lifecycle MUST remain streaming — the health-check must not reset it
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should not clobber active Grok lifecycle when injectSaveButton retries with null conversation (V2.2-006)', async () => {
+        // Simulates the injectSaveButton retry path (setTimeout at 1000/2000/5000ms)
+        // that fires while lifecycle is active on a null-conversation Grok page
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-inject-retry-1',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+
+        // Step 2: Wait past the first injectSaveButton retry at 1000ms
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+
+        // Lifecycle MUST still be prompt-sent — the retry must not reset it
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+    });
+
+    it('should promote Grok to completed when lifecycle attempt is disposed and canonical capture arrives on new attempt', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => 'grok-disposed-conv',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/c/grok-disposed-conv',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-old',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-old',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Step 2: Attempt is disposed by navigation (Grok SPA URL change)
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_ATTEMPT_DISPOSED',
+                attemptId: 'attempt:grok-old',
+                reason: 'navigation',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Step 3: Late canonical capture arrives with a NEW attempt ID
+        const canonicalConversation = buildConversation('grok-disposed-conv', 'Grok final answer', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        postStampedMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Grok',
+                url: 'https://grok.com/rest/app-chat/conversations/new',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:grok-new',
             },
             window.location.origin,
         );
@@ -929,7 +1344,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 120));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'Gemini',
@@ -965,7 +1380,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 120));
 
         // Put the lifecycle into a terminal state for the conversation route.
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -975,7 +1390,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'Gemini',
@@ -1033,7 +1448,7 @@ describe('Platform Runner', () => {
             endTurn: true,
         });
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'Gemini',
@@ -1043,7 +1458,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -1054,7 +1469,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 1200));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'Gemini',
@@ -1088,7 +1503,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1099,7 +1514,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1122,7 +1537,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'Gemini',
@@ -1140,11 +1555,98 @@ describe('Platform Runner', () => {
         expect(panel?.textContent).toContain('Gemini response chunk');
     });
 
+    it('should surface Grok stream delta when conversation ID is unresolved', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-1',
+                text: '[Thinking] Agents thinking chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('stream: awaiting conversation id');
+        expect(panelText).toContain('Agents thinking chunk');
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should preserve unresolved Grok stream delta after conversation resolves', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-2',
+                text: '[Thinking] first chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-2',
+                conversationId: 'grok-conv-pending-2',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-2',
+                text: 'second chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('first chunk');
+        expect(panelText).toContain('second chunk');
+    });
+
     it('should preserve word boundaries when concatenating stream deltas', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1155,7 +1657,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1176,7 +1678,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1187,7 +1689,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1209,7 +1711,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1220,7 +1722,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1270,7 +1772,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -1304,7 +1806,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'TestPlatform',
@@ -1316,7 +1818,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 40));
         await new Promise((resolve) => setTimeout(resolve, 950));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'TestPlatform',
@@ -1327,7 +1829,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 40));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'TestPlatform',
@@ -1342,7 +1844,7 @@ describe('Platform Runner', () => {
         const saveBeforeStreaming = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveBeforeStreaming?.disabled).toBeFalse();
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'TestPlatform',
@@ -1354,7 +1856,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 20));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'TestPlatform',
@@ -1366,7 +1868,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 20));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'TestPlatform',
@@ -1399,7 +1901,7 @@ describe('Platform Runner', () => {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -1456,7 +1958,7 @@ describe('Platform Runner', () => {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -1543,7 +2045,7 @@ describe('Platform Runner', () => {
         expect(saveBefore).not.toBeNull();
         expect(saveBefore?.disabled).toBeTrue();
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 url: 'https://test.com/backend-api/conversation/123',
@@ -1552,7 +2054,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -1646,7 +2148,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 url: 'https://test.com/backend-api/conversation/123',
@@ -1655,7 +2157,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -1751,7 +2253,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 url: 'https://test.com/backend-api/conversation/123',
@@ -1770,7 +2272,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1781,7 +2283,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -1809,7 +2311,7 @@ describe('Platform Runner', () => {
             if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
                 return;
             }
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
                     requestId: msg.requestId,
@@ -1821,7 +2323,7 @@ describe('Platform Runner', () => {
         };
         window.addEventListener('message', snapshotFailureHandler as any);
         try {
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -1871,7 +2373,7 @@ describe('Platform Runner', () => {
                 return;
             }
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
                     requestId: msg.requestId,
@@ -1940,7 +2442,7 @@ describe('Platform Runner', () => {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -1952,7 +2454,7 @@ describe('Platform Runner', () => {
             );
             await new Promise((resolve) => setTimeout(resolve, 20));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2013,7 +2515,7 @@ describe('Platform Runner', () => {
             if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
                 return;
             }
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
                     requestId: msg.requestId,
@@ -2032,7 +2534,7 @@ describe('Platform Runner', () => {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2044,7 +2546,7 @@ describe('Platform Runner', () => {
             );
             await new Promise((resolve) => setTimeout(resolve, 30));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2060,7 +2562,7 @@ describe('Platform Runner', () => {
             expect(degradedSaveButton?.disabled).toBeTrue();
             expect(degradedSaveButton?.textContent?.includes('Force Save')).toBeFalse();
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                     platform: 'ChatGPT',
@@ -2071,7 +2573,7 @@ describe('Platform Runner', () => {
                 window.location.origin,
             );
             await new Promise((resolve) => setTimeout(resolve, 1050));
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                     platform: 'ChatGPT',
@@ -2123,7 +2625,7 @@ describe('Platform Runner', () => {
             if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
                 return;
             }
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
                     requestId: msg.requestId,
@@ -2143,7 +2645,7 @@ describe('Platform Runner', () => {
             await new Promise((resolve) => setTimeout(resolve, 80));
 
             // 1. Send prompt-sent
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2156,7 +2658,7 @@ describe('Platform Runner', () => {
             await new Promise((resolve) => setTimeout(resolve, 30));
 
             // 2. Send completed — triggers snapshot fallback (degraded fidelity)
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2175,7 +2677,7 @@ describe('Platform Runner', () => {
             expect(degradedSaveButton?.disabled).toBeTrue();
 
             // 3. Send ONE canonical API capture (simulates the interceptor's proactive fetch)
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                     platform: 'ChatGPT',
@@ -2223,7 +2725,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2234,7 +2736,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2245,7 +2747,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2256,7 +2758,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2269,7 +2771,7 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 1050));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2292,7 +2794,7 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 1700));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
@@ -2339,7 +2841,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         // 1. prompt-sent WITHOUT conversationId (new conversation, ID not yet resolved)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2351,7 +2853,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         // 2. streaming WITHOUT conversationId
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2364,7 +2866,7 @@ describe('Platform Runner', () => {
 
         // 3. The SSE stream never sends "completed" (tab was backgrounded).
         //    Instead, the RESPONSE_FINISHED signal arrives (from DOM watcher).
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
@@ -2376,7 +2878,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         // 4. Canonical data arrives from interceptor's proactive fetch (first sample)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2391,7 +2893,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 1200));
 
         // 5. Second canonical sample for stability confirmation
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2431,7 +2933,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2442,7 +2944,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 1050));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2463,7 +2965,7 @@ describe('Platform Runner', () => {
         document.body.appendChild(stopButton);
 
         for (let i = 0; i < 5; i += 1) {
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_FINISHED',
                     platform: 'ChatGPT',
@@ -2511,7 +3013,7 @@ describe('Platform Runner', () => {
             if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST') {
                 return;
             }
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
                     requestId: msg.requestId,
@@ -2527,7 +3029,7 @@ describe('Platform Runner', () => {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2539,7 +3041,7 @@ describe('Platform Runner', () => {
             );
             await new Promise((resolve) => setTimeout(resolve, 20));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                     platform: 'ChatGPT',
@@ -2550,7 +3052,7 @@ describe('Platform Runner', () => {
                 window.location.origin,
             );
             await new Promise((resolve) => setTimeout(resolve, 1050));
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                     platform: 'ChatGPT',
@@ -2562,7 +3064,7 @@ describe('Platform Runner', () => {
             );
             await new Promise((resolve) => setTimeout(resolve, 150));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2587,7 +3089,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2600,7 +3102,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_ATTEMPT_DISPOSED',
                 attemptId: 'attempt:stale-1',
@@ -2610,7 +3112,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 10));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2641,7 +3143,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         const postLifecycle = async (attemptId: string, conversationId: string) => {
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -2662,7 +3164,7 @@ describe('Platform Runner', () => {
             status: 'in_progress',
             endTurn: false,
         });
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -2697,6 +3199,77 @@ describe('Platform Runner', () => {
         expect(supersededDisposals).not.toContain('attempt:chain-c');
     });
 
+    it('should not supersede when rebinding a conversation with an aliased attempt that resolves to same canonical id', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const postLifecycle = async (attemptId: string, conversationId: string) => {
+            postStampedMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId,
+                    phase: 'prompt-sent',
+                    conversationId,
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 15));
+        };
+
+        // Establish alias mapping attempt:alias-a -> attempt:canon-a via supersede.
+        await postLifecycle('attempt:alias-a', 'conv-1');
+        await postLifecycle('attempt:canon-a', 'conv-1');
+
+        // Bind conv-2 using the upstream alias id.
+        const captureForConv2 = buildConversation('conv-2', 'Partial response', {
+            status: 'in_progress',
+            endTurn: false,
+        });
+        postStampedMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/conv-2',
+                data: JSON.stringify(captureForConv2),
+                attemptId: 'attempt:alias-a',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        const postedMessages: any[] = [];
+        const originalPostMessage = window.postMessage.bind(window);
+        (window as any).postMessage = (payload: any, targetOrigin: string) => {
+            postedMessages.push(payload);
+            return originalPostMessage(payload, targetOrigin);
+        };
+
+        try {
+            // Rebinding conv-2 with the alias should resolve to the same canonical attempt and not supersede.
+            await postLifecycle('attempt:alias-a', 'conv-2');
+            await new Promise((resolve) => setTimeout(resolve, 30));
+        } finally {
+            (window as any).postMessage = originalPostMessage;
+        }
+
+        const supersededDisposals = postedMessages
+            .filter((payload) => payload?.type === 'BLACKIYA_ATTEMPT_DISPOSED' && payload?.reason === 'superseded')
+            .map((payload) => payload.attemptId);
+        expect(supersededDisposals).not.toContain('attempt:canon-a');
+    });
+
     it('should keep ChatGPT stream deltas after navigation into the same conversation route', async () => {
         currentAdapterMock = {
             ...createMockAdapter(),
@@ -2716,7 +3289,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2732,7 +3305,7 @@ describe('Platform Runner', () => {
         window.dispatchEvent(new (window as any).Event('popstate'));
         await new Promise((resolve) => setTimeout(resolve, 30));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -2768,7 +3341,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2784,7 +3357,7 @@ describe('Platform Runner', () => {
         window.dispatchEvent(new (window as any).Event('popstate'));
         await new Promise((resolve) => setTimeout(resolve, 30));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -2805,7 +3378,7 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -2817,7 +3390,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 10));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
@@ -2903,7 +3476,12 @@ describe('Platform Runner', () => {
         };
         currentAdapterMock.parseInterceptedData = () => data;
         const message = new (window as any).MessageEvent('message', {
-            data: { type: 'LLM_CAPTURE_DATA_INTERCEPTED', url: 'https://test.com/api', data: '{}' },
+            data: {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://test.com/api',
+                data: '{}',
+                __blackiyaToken: getSessionToken(),
+            },
             origin: window.location.origin,
             source: window,
         });
@@ -2924,10 +3502,10 @@ describe('Platform Runner', () => {
             window.addEventListener('message', handler as any);
         });
 
-        window.postMessage({ type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-1' }, window.location.origin);
+        postStampedMessage({ type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-1' }, window.location.origin);
 
         const responsePayload = await responsePromise;
-        expect(responsePayload).toEqual({
+        expect(responsePayload).toMatchObject({
             type: 'BLACKIYA_GET_JSON_RESPONSE',
             requestId: 'request-1',
             success: true,
@@ -2939,7 +3517,12 @@ describe('Platform Runner', () => {
         runPlatform();
 
         const message = new (window as any).MessageEvent('message', {
-            data: { type: 'LLM_CAPTURE_DATA_INTERCEPTED', url: 'https://test.com/api', data: '{}' },
+            data: {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://test.com/api',
+                data: '{}',
+                __blackiyaToken: getSessionToken(),
+            },
             origin: window.location.origin,
             source: window,
         });
@@ -2957,13 +3540,13 @@ describe('Platform Runner', () => {
             window.addEventListener('message', handler as any);
         });
 
-        window.postMessage(
+        postStampedMessage(
             { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-incomplete' },
             window.location.origin,
         );
 
         const responsePayload = await responsePromise;
-        expect(responsePayload).toEqual({
+        expect(responsePayload).toMatchObject({
             type: 'BLACKIYA_GET_JSON_RESPONSE',
             requestId: 'request-incomplete',
             success: false,
@@ -3031,7 +3614,12 @@ describe('Platform Runner', () => {
         };
         currentAdapterMock.parseInterceptedData = () => data;
         const message = new (window as any).MessageEvent('message', {
-            data: { type: 'LLM_CAPTURE_DATA_INTERCEPTED', url: 'https://test.com/api', data: '{}' },
+            data: {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://test.com/api',
+                data: '{}',
+                __blackiyaToken: getSessionToken(),
+            },
             origin: window.location.origin,
             source: window,
         });
@@ -3052,7 +3640,7 @@ describe('Platform Runner', () => {
             window.addEventListener('message', handler as any);
         });
 
-        window.postMessage(
+        postStampedMessage(
             { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'request-2', format: 'common' },
             window.location.origin,
         );
@@ -3094,7 +3682,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         // 1. Lifecycle: prompt-sent → streaming (mimic real SSE flow)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -3106,7 +3694,7 @@ describe('Platform Runner', () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 30));
 
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -3119,7 +3707,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         // 2. Title arrives mid-stream via BLACKIYA_TITLE_RESOLVED
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_TITLE_RESOLVED',
                 platform: 'ChatGPT',
@@ -3132,7 +3720,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         // 3. Ingest canonical data (with stale title, as would happen from proactive fetch)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -3145,7 +3733,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         // 4. Lifecycle completed + response finished
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -3155,7 +3743,7 @@ describe('Platform Runner', () => {
             },
             window.location.origin,
         );
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
@@ -3169,7 +3757,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Second canonical sample for stability
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -3236,7 +3824,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         // 1. Streaming lifecycle (tab backgrounded, SSE stalls)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -3246,7 +3834,7 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 20));
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -3259,7 +3847,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         // 2. RESPONSE_FINISHED sets lifecycleState = 'completed'
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
@@ -3273,7 +3861,7 @@ describe('Platform Runner', () => {
         // 3. Degraded snapshot arrives (what tryStreamDoneSnapshotCapture produces).
         //    This triggers onConversationCaptured with a snapshot source, which
         //    schedules the stabilization retry.
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -3293,7 +3881,7 @@ describe('Platform Runner', () => {
         //    Then deliver canonical data as if from the warm fetch.
 
         // First canonical sample (first stabilization retry / warm fetch result)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -3306,7 +3894,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 1200));
 
         // Second canonical sample (second stabilization retry)
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',
@@ -3422,7 +4010,7 @@ describe('Platform Runner', () => {
                       },
                   };
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
                     requestId: msg.requestId,
@@ -3453,7 +4041,7 @@ describe('Platform Runner', () => {
             runPlatform();
             await new Promise((resolve) => setTimeout(resolve, 80));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -3465,7 +4053,7 @@ describe('Platform Runner', () => {
             );
             await new Promise((resolve) => setTimeout(resolve, 20));
 
-            window.postMessage(
+            postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                     platform: 'ChatGPT',
@@ -3522,7 +4110,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         // Enter streaming phase
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
                 platform: 'ChatGPT',
@@ -3542,7 +4130,7 @@ describe('Platform Runner', () => {
         // Send RESPONSE_FINISHED while stop button is visible.
         // Without fix: lifecycleState is corrupted to 'completed'.
         // With fix: lifecycleState stays 'prompt-sent' (signal rejected).
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
@@ -3558,7 +4146,7 @@ describe('Platform Runner', () => {
         // call scheduleButtonRefresh, start probes, etc. — eventually enabling
         // the button. If lifecycle stayed 'prompt-sent', the streaming guard
         // in refreshButtonState blocks button enabling.
-        window.postMessage(
+        postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 platform: 'ChatGPT',

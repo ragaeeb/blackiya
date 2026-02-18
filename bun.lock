@@ -16,6 +16,7 @@
         "@semantic-release/github": "latest",
         "@semantic-release/npm": "latest",
         "@types/bun": "latest",
+        "@types/har-format": "latest",
         "happy-dom": "latest",
         "semantic-release": "latest",
         "typescript": "latest",

@@ -22,6 +22,22 @@ A high-performance Chrome extension for capturing and saving conversation JSON f
 - Discovery mode guide: `docs/discovery-mode.md`
 - Current PR summary (this branch): `docs/PR.md`
 
+## 🔎 HAR Discovery Triage
+
+When platform network behavior drifts (new endpoints, changed payloads), run HAR analysis on a DevTools export:
+
+```bash
+bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"
+```
+
+Outputs are written to `logs/har-analysis/` by default:
+- `*.analysis.json` for machine/agent workflows
+- `*.analysis.md` for human triage
+
+See related docs:
+- `docs/discovery-mode.md` for end-to-end discovery workflow
+- `docs/debug-logs-guide.md` for artifact selection and log interpretation
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -163,6 +179,7 @@ bun run zip              # Create distributable ZIP file
 
 # Testing
 bun test                 # Run tests (when added)
+bun test utils/har-analysis.integration.test.ts
 ```
 
 ## 🏗️ Project Structure

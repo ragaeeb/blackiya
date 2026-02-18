@@ -25,7 +25,11 @@ import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
-import { shouldEmitGrokCompletion, shouldEmitGrokLifecycle } from '@/utils/grok-request-classifier';
+import {
+    isGrokStreamingEndpoint,
+    shouldEmitGrokCompletion,
+    shouldEmitGrokLifecycle,
+} from '@/utils/grok-request-classifier';
 import { extractGrokStreamSignalsFromBuffer } from '@/utils/grok-stream-parser';
 import {
     extractForwardableHeadersFromFetchArgs,
@@ -42,14 +46,16 @@ import {
     type ResponseFinishedMessage as ResponseFinishedSignal,
     type ResponseLifecycleMessage as ResponseLifecycleSignal,
     type StreamDeltaMessage as ResponseStreamDeltaSignal,
+    type SessionInitMessage,
     type StreamDumpConfigMessage,
     type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
+import { getSessionToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 import type { ConversationData } from '@/utils/types';
 
 export {
-    tryEmitGeminiXhrLoadendCompletion,
     shouldEmitXhrRequestLifecycle,
+    tryEmitGeminiXhrLoadendCompletion,
     tryMarkGeminiXhrLoadendCompleted,
 } from '@/entrypoints/interceptor/signal-emitter';
 export { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
@@ -160,7 +166,7 @@ function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
     };
 
     queueLogMessage(payload);
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
 }
 
 function queueInterceptedMessage(payload: CapturePayload) {
@@ -319,10 +325,7 @@ function resolveAttemptIdForConversation(conversationId?: string, platformName =
     return created;
 }
 
-function peekAttemptIdForConversation(
-    conversationId?: string,
-    platformName = chatGPTAdapter.name,
-): string | undefined {
+function peekAttemptIdForConversation(conversationId?: string, platformName = chatGPTAdapter.name): string | undefined {
     const platformKey = platformName || chatGPTAdapter.name;
     if (conversationId) {
         const bound = attemptByConversationId.get(conversationId);
@@ -354,7 +357,7 @@ function emitConversationIdResolvedSignal(attemptId: string, conversationId: str
         attemptId,
         conversationId,
     };
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
 }
 
 function isAttemptDisposed(attemptId: string | undefined): boolean {
@@ -379,7 +382,7 @@ function emitResponseFinishedSignal(adapter: LLMPlatform, url: string): void {
         attemptId,
         conversationId,
     };
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
     log('info', 'response finished hint', {
         platform: adapter.name,
         conversationId: conversationId ?? null,
@@ -510,7 +513,7 @@ function emitLifecycleSignal(
         phase,
         conversationId,
     };
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
     log('info', 'lifecycle signal', {
         platform,
         phase,
@@ -534,7 +537,7 @@ function emitTitleResolvedSignal(
         conversationId,
         title,
     };
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
     log('info', 'title resolved from stream', { conversationId, title });
 }
 
@@ -576,7 +579,7 @@ function emitStreamDeltaSignal(
         conversationId,
         text: normalized,
     };
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
 }
 
 function emitStreamDumpFrame(
@@ -618,7 +621,7 @@ function emitStreamDumpFrame(
         ...(typeof chunkBytes === 'number' ? { chunkBytes } : {}),
     };
 
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
 }
 
 /**
@@ -2087,7 +2090,7 @@ function getPageConversationSnapshot(conversationId: string): unknown | null {
     return buildRawCaptureSnapshot(conversationId);
 }
 
-function isSnapshotRequestEvent(event: MessageEvent): PageSnapshotRequest | null {
+function isSnapshotRequestEvent(event: MessageEvent) {
     if (event.source !== window || event.origin !== window.location.origin) {
         return null;
     }
@@ -2143,7 +2146,7 @@ function emitCapturePayload(url: string, data: string, platform: string, attempt
         ...(attemptId ? { attemptId } : {}),
     };
     queueInterceptedMessage(payload);
-    window.postMessage(payload, window.location.origin);
+    window.postMessage(stampToken(payload), window.location.origin);
 }
 
 function handleApiMatchFromFetch(
@@ -2792,7 +2795,8 @@ export default defineContentScript({
             if (
                 context.isNonChatGptApiRequest &&
                 context.fetchApiAdapter?.name === 'Grok' &&
-                context.nonChatAttemptId
+                context.nonChatAttemptId &&
+                isGrokStreamingEndpoint(context.outgoingUrl)
             ) {
                 if (shouldLogTransient(`grok:fetch:response:${context.nonChatAttemptId}`, 3000)) {
                     log('info', 'Grok fetch response intercepted', {
@@ -2831,6 +2835,7 @@ export default defineContentScript({
                 shouldEmitNonChatLifecycleForRequest,
                 resolveRequestConversationId,
                 peekAttemptIdForConversation,
+                resolveAttemptIdForConversation,
                 resolveLifecycleConversationId,
                 safePathname,
             });
@@ -2871,31 +2876,22 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
-        const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext): void => {
+        const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext) => {
             if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter) {
                 return;
             }
             const attemptId =
-                context.attemptId ?? resolveAttemptIdForConversation(context.conversationId, context.requestAdapter.name);
+                context.attemptId ??
+                resolveAttemptIdForConversation(context.conversationId, context.requestAdapter.name);
             const lifecycleContext = { ...context, attemptId };
             if (!shouldEmitXhrRequestLifecycle(lifecycleContext)) {
                 return;
             }
 
-            emitLifecycleSignal(
-                attemptId,
-                'prompt-sent',
-                context.conversationId,
-                context.requestAdapter?.name,
-            );
+            emitLifecycleSignal(attemptId, 'prompt-sent', context.conversationId, context.requestAdapter?.name);
 
             if (context.requestAdapter?.name === 'Gemini') {
-                wireGeminiXhrProgressMonitor(
-                    xhr,
-                    attemptId,
-                    context.conversationId,
-                    context.requestUrl,
-                );
+                wireGeminiXhrProgressMonitor(xhr, attemptId, context.conversationId, context.requestUrl);
                 return;
             }
             if (context.requestAdapter?.name === 'Grok' && context.conversationId) {
@@ -2913,12 +2909,7 @@ export default defineContentScript({
             if (!context.conversationId) {
                 return;
             }
-            emitLifecycleSignal(
-                attemptId,
-                'streaming',
-                context.conversationId,
-                context.requestAdapter?.name,
-            );
+            emitLifecycleSignal(attemptId, 'streaming', context.conversationId, context.requestAdapter?.name);
         };
 
         const maybeLogGrokXhrResponse = (xhr: XMLHttpRequest, methodUpper: string): void => {
@@ -3009,21 +3000,40 @@ export default defineContentScript({
                 if (!message) {
                     return;
                 }
+                const sessionToken = getSessionToken();
+                if (sessionToken && (message as any).__blackiyaToken !== sessionToken) {
+                    return;
+                }
                 const conversationId = typeof message.conversationId === 'string' ? message.conversationId : '';
                 const snapshot = conversationId ? getPageConversationSnapshot(conversationId) : null;
                 const response = buildSnapshotResponse(message.requestId, snapshot);
-                window.postMessage(response, window.location.origin);
+                window.postMessage(stampToken(response), window.location.origin);
             };
 
-            const isSameWindowOriginEvent = (event: MessageEvent): boolean =>
+            const isSameWindowOriginEvent = (event: MessageEvent) =>
                 event.source === window && event.origin === window.location.origin;
+
+            const handleSessionInit = (event: MessageEvent) => {
+                if (!isSameWindowOriginEvent(event)) {
+                    return;
+                }
+                const message = event.data as SessionInitMessage;
+                if (message?.type !== 'BLACKIYA_SESSION_INIT' || typeof message.token !== 'string') {
+                    return;
+                }
+                setSessionToken(message.token);
+            };
 
             const parseAttemptDisposedMessage = (event: MessageEvent): AttemptDisposedMessage | null => {
                 if (!isSameWindowOriginEvent(event)) {
                     return null;
                 }
-                const message = event.data as AttemptDisposedMessage;
+                const message = event.data as AttemptDisposedMessage & { __blackiyaToken?: string };
                 if (message?.type !== 'BLACKIYA_ATTEMPT_DISPOSED' || typeof message.attemptId !== 'string') {
+                    return null;
+                }
+                const sessionToken = getSessionToken();
+                if (sessionToken && message.__blackiyaToken !== sessionToken) {
                     return null;
                 }
                 return message;
@@ -3048,8 +3058,12 @@ export default defineContentScript({
                 if (event.source !== window || event.origin !== window.location.origin) {
                     return;
                 }
-                const message = event.data as StreamDumpConfigMessage;
+                const message = event.data as StreamDumpConfigMessage & { __blackiyaToken?: string };
                 if (message?.type !== 'BLACKIYA_STREAM_DUMP_CONFIG' || typeof message.enabled !== 'boolean') {
+                    return;
+                }
+                const sessionToken = getSessionToken();
+                if (sessionToken && message.__blackiyaToken !== sessionToken) {
                     return;
                 }
 
@@ -3063,6 +3077,7 @@ export default defineContentScript({
             window.addEventListener('message', handlePageSnapshotRequest);
             window.addEventListener('message', handleAttemptDisposed);
             window.addEventListener('message', handleStreamDumpConfig);
+            window.addEventListener('message', handleSessionInit);
 
             (window as any).__blackiya = {
                 getJSON: () => requestJson(JSON_FORMAT_ORIGINAL),

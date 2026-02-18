@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
     isGrokCompletionCandidateEndpoint,
     isGrokGenerationEndpoint,
+    isGrokStreamingEndpoint,
     shouldEmitGrokCompletion,
     shouldEmitGrokLifecycle,
 } from '@/utils/grok-request-classifier';
@@ -19,12 +20,21 @@ describe('grok-request-classifier', () => {
     it('should classify x.com add_response as generation endpoint', () => {
         const url = 'https://x.com/2/grok/add_response.json';
         expect(isGrokGenerationEndpoint(url)).toBeTrue();
+        expect(isGrokStreamingEndpoint(url)).toBeTrue();
         expect(shouldEmitGrokLifecycle(url)).toBeTrue();
+    });
+
+    it('should classify reconnect-response-v2 as streaming-only endpoint', () => {
+        const url = 'https://grok.com/rest/app-chat/conversations/reconnect-response-v2/uuid';
+        expect(isGrokGenerationEndpoint(url)).toBeFalse();
+        expect(isGrokStreamingEndpoint(url)).toBeTrue();
+        expect(shouldEmitGrokLifecycle(url)).toBeFalse();
     });
 
     it('should classify response-node as completion candidate', () => {
         const url = 'https://grok.com/rest/app-chat/conversations/abc123/response-node?includeThreads=true';
         expect(isGrokCompletionCandidateEndpoint(url)).toBeTrue();
+        expect(isGrokStreamingEndpoint(url)).toBeFalse();
         expect(shouldEmitGrokCompletion(url)).toBeTrue();
         expect(shouldEmitGrokLifecycle(url)).toBeFalse();
     });
@@ -32,6 +42,7 @@ describe('grok-request-classifier', () => {
     it('should classify load-responses as completion candidate', () => {
         const url = 'https://grok.com/rest/app-chat/conversations/abc123/load-responses';
         expect(isGrokCompletionCandidateEndpoint(url)).toBeTrue();
+        expect(isGrokStreamingEndpoint(url)).toBeFalse();
         expect(shouldEmitGrokCompletion(url)).toBeTrue();
         expect(shouldEmitGrokLifecycle(url)).toBeFalse();
     });

@@ -169,7 +169,7 @@ function App() {
                 Export Debug Report (TXT)
             </button>
 
-            <div className="section">
+            <div className="section diagnostics-section">
                 <strong>Diagnostics Stream Dump</strong>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
                     Opt-in bounded capture of streaming frame text for forensic debugging.

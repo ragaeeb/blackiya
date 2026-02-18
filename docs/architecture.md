@@ -220,7 +220,14 @@ Source of truth priority:
 
 The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
 For the same attempt/conversation, regressive lifecycle transitions are rejected (`completed` remains terminal).
-Gemini XHR prompt lifecycle can be emitted before conversation ID resolution; the runner caches pending lifecycle by attempt and replays once `BLACKIYA_CONVERSATION_ID_RESOLVED` is received.
+When lifecycle signals arrive before conversation ID resolution (common for Gemini XHR and Grok `/conversations/new`), the runner caches them as pending by attempt and replays once `BLACKIYA_CONVERSATION_ID_RESOLVED` is received. **The UI badge is updated immediately** for pending `prompt-sent` and `streaming` signals — callers see the lifecycle phase even before the conversation ID resolves.
+For Grok specifically, the original lifecycle attempt may be disposed by SPA navigation before the conversation ID resolves. When canonical capture data arrives on a new attempt with ready data, `shouldPromoteGrokFromCanonicalCapture` promotes the lifecycle to `completed` — this promotion accepts `idle`, `prompt-sent`, and `streaming` states.
+When Grok SPA navigates from a null conversation ID to the new conversation URL (e.g., `/` → `/c/<id>`), the runner **preserves the active lifecycle state** (`prompt-sent`/`streaming`) via `isLifecycleActiveGeneration()` guard. This guard protects three code paths that would otherwise reset lifecycle to `idle`:
+1. `handleConversationSwitch` — skips `setLifecycleState('idle')` and `buttonManager.remove()` when transitioning from null → new conversation during active generation.
+2. `resetButtonStateForNoConversation` — called by `refreshButtonState`/health-check when conversation ID is null; now skips the idle reset during active generation.
+3. `injectSaveButton` no-conversation path — called during initial load retries; now skips the idle reset during active generation.
+Additionally, `handleConversationSwitch` skips `disposeInFlightAttemptsOnNavigation` during null→new-conversation active generation to prevent the interceptor stream monitor from exiting early, ensuring streaming data continues to flow.
+Cross-conversation navigation (from one existing conversation to another) continues to reset lifecycle to `idle` and dispose attempts as expected.
 On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 
@@ -297,7 +304,8 @@ Docs:
 
 ## 10) Current Gaps / Ongoing Verification
 
-- Grok runtime smoke verification still ongoing after lifecycle gating fixes.
+- ✅ Grok lifecycle regression fixed: pending signals now update UI badge immediately; canonical capture promotes from idle.
 - Need continued multi-tab validation for Grok and Gemini under long reasoning sessions.
 - Keep regression suite expanding where smoke tests find platform-specific edge cases.
 - Remaining post-v2.0.3 backlog: deeper runner/interceptor subsystem extraction and logging/type-hygiene follow-ups.
+- P4 defense-in-depth: token validation for InterceptionManager, snapshot response path, queue stamping, JSON bridge restoration, SESSION_INIT first-in-wins lock.

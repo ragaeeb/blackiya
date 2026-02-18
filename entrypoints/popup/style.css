@@ -52,6 +52,10 @@ button.secondary:hover {
     margin-bottom: 20px;
 }
 
+.diagnostics-section {
+    margin-top: 14px;
+}
+
 label {
     display: block;
     margin-bottom: 8px;

@@ -33,6 +33,7 @@ import type {
     StreamDumpFrameMessage,
     TitleResolvedMessage,
 } from '@/utils/protocol/messages';
+import { generateSessionToken, isValidToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 import {
     getConversationAttemptMismatch as getConversationAttemptMismatchForRegistry,
     resolveRunnerAttemptId,
@@ -217,6 +218,14 @@ export function runPlatform(): void {
 
     const runnerControl: RunnerControl = {};
     (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] = runnerControl;
+
+    // S-01: Generate per-session token for postMessage authentication
+    const sessionToken = generateSessionToken();
+    setSessionToken(sessionToken);
+
+    // Share session token with MAIN world (interceptor) via handshake
+    window.postMessage({ type: 'BLACKIYA_SESSION_INIT', token: sessionToken }, window.location.origin);
+
     const runnerState = new RunnerState();
 
     let currentAdapter: LLMPlatform | null = null;
@@ -233,6 +242,7 @@ export function runPlatform(): void {
     let lastStreamProbeKey = '';
     let lastStreamProbeConversationId: string | null = null;
     const liveStreamPreviewByConversation = runnerState.streamPreviewByConversation;
+    const liveStreamPreviewByAttemptWithoutConversation = new Map<string, string>();
     const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
@@ -489,9 +499,10 @@ export function runPlatform(): void {
         if (!conversationId) {
             return;
         }
+        const canonicalAttemptId = resolveAliasedAttemptId(attemptId);
         const isNewBinding = !attemptByConversation.has(conversationId);
         const previous = attemptByConversation.get(conversationId);
-        if (previous && previous !== attemptId) {
+        if (previous && previous !== canonicalAttemptId) {
             const canonicalPrevious = resolveAliasedAttemptId(previous);
             sfe.getAttemptTracker().markSuperseded(canonicalPrevious, attemptId);
             cancelStreamDoneProbe(canonicalPrevious, 'superseded');
@@ -508,8 +519,9 @@ export function runPlatform(): void {
                 `supersede:${conversationId}:${attemptId}`,
             );
         }
-        setBoundedMapValue(attemptByConversation, conversationId, attemptId, MAX_CONVERSATION_ATTEMPTS);
-        if (isNewBinding || previous !== attemptId) {
+        setBoundedMapValue(attemptByConversation, conversationId, canonicalAttemptId, MAX_CONVERSATION_ATTEMPTS);
+        migratePendingStreamProbeText(conversationId, canonicalAttemptId);
+        if (isNewBinding || previous !== canonicalAttemptId) {
             structuredLogger.emit(
                 attemptId,
                 'debug',
@@ -1266,7 +1278,7 @@ export function runPlatform(): void {
             attemptId,
             reason,
         };
-        window.postMessage(payload, window.location.origin);
+        window.postMessage(stampToken(payload), window.location.origin);
     }
 
     function emitStreamDumpConfig(): void {
@@ -1274,7 +1286,7 @@ export function runPlatform(): void {
             type: 'BLACKIYA_STREAM_DUMP_CONFIG',
             enabled: streamDumpEnabled,
         };
-        window.postMessage(payload, window.location.origin);
+        window.postMessage(stampToken(payload), window.location.origin);
     }
 
     async function loadStreamDumpSetting(): Promise<void> {
@@ -1562,6 +1574,28 @@ export function runPlatform(): void {
         return `${primaryBody}\n\n--- Preserved live mirror snapshot (pre-final) ---\n${boundedSnapshot}`;
     }
 
+    function mergeLiveStreamProbeText(current: string, text: string): string {
+        if (text.startsWith(current)) {
+            return text; // Snapshot-style update (preferred)
+        }
+        if (current.startsWith(text)) {
+            return current; // Stale/shorter snapshot, ignore
+        }
+        // Delta-style fallback with conservative boundary guard.
+        // Only inject a space when next chunk begins with uppercase (word boundary signal),
+        // to avoid corrupting lowercase continuations like "Glass" + "es" or "W" + "earing".
+        const needsSpaceJoin =
+            current.length > 0 &&
+            text.length > 0 &&
+            !current.endsWith(' ') &&
+            !current.endsWith('\n') &&
+            !text.startsWith(' ') &&
+            !text.startsWith('\n') &&
+            /[A-Za-z0-9]$/.test(current) &&
+            /^[A-Z]/.test(text);
+        return needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
+    }
+
     function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData): void {
         const panel = document.getElementById('blackiya-stream-probe');
         if (!panel) {
@@ -1583,28 +1617,35 @@ export function runPlatform(): void {
         );
     }
 
+    function appendPendingStreamProbeText(canonicalAttemptId: string, text: string): void {
+        const current = liveStreamPreviewByAttemptWithoutConversation.get(canonicalAttemptId) ?? '';
+        const next = mergeLiveStreamProbeText(current, text);
+        const capped = appendStreamProbePreview('', next, 15_503);
+        setBoundedMapValue(
+            liveStreamPreviewByAttemptWithoutConversation,
+            canonicalAttemptId,
+            capped,
+            MAX_STREAM_PREVIEWS,
+        );
+        setStreamProbePanel('stream: awaiting conversation id', capped);
+    }
+
+    function migratePendingStreamProbeText(conversationId: string, canonicalAttemptId: string): void {
+        const pending = liveStreamPreviewByAttemptWithoutConversation.get(canonicalAttemptId);
+        if (!pending) {
+            return;
+        }
+        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalAttemptId);
+        const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
+        const merged = mergeLiveStreamProbeText(current, pending);
+        const capped = appendStreamProbePreview('', merged, 15_503);
+        setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
+        setStreamProbePanel('stream: live mirror', capped);
+    }
+
     function appendLiveStreamProbeText(conversationId: string, text: string): void {
         const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
-        let next = '';
-        if (text.startsWith(current)) {
-            next = text; // Snapshot-style update (preferred)
-        } else if (current.startsWith(text)) {
-            next = current; // Stale/shorter snapshot, ignore
-        } else {
-            // Delta-style fallback with conservative boundary guard.
-            // Only inject a space when next chunk begins with uppercase (word boundary signal),
-            // to avoid corrupting lowercase continuations like "Glass" + "es" or "W" + "earing".
-            const needsSpaceJoin =
-                current.length > 0 &&
-                text.length > 0 &&
-                !current.endsWith(' ') &&
-                !current.endsWith('\n') &&
-                !text.startsWith(' ') &&
-                !text.startsWith('\n') &&
-                /[A-Za-z0-9]$/.test(current) &&
-                /^[A-Z]/.test(text);
-            next = needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
-        }
+        const next = mergeLiveStreamProbeText(current, text);
         const capped = appendStreamProbePreview('', next, 15_503);
         setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
         setStreamProbePanel('stream: live mirror', capped);
@@ -2364,11 +2405,11 @@ export function runPlatform(): void {
 
             window.addEventListener('message', onMessage);
             window.postMessage(
-                {
+                stampToken({
                     type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST',
                     requestId,
                     conversationId,
-                },
+                }),
                 window.location.origin,
             );
         });
@@ -3172,6 +3213,16 @@ export function runPlatform(): void {
         }
     }
 
+    /**
+     * Returns true when the lifecycle is in an active generation phase
+     * (prompt-sent or streaming). Used to gate code paths that would
+     * otherwise reset lifecycle to idle when conversationId is null —
+     * a legitimate state during Grok's new-conversation flow.
+     */
+    function isLifecycleActiveGeneration(): boolean {
+        return lifecycleState === 'prompt-sent' || lifecycleState === 'streaming';
+    }
+
     function injectSaveButton(): void {
         const conversationId = extractConversationIdFromLocation();
         const target = currentAdapter?.getButtonInjectionTarget();
@@ -3194,7 +3245,9 @@ export function runPlatform(): void {
         if (!conversationId) {
             logger.info('No conversation ID yet; showing calibration only');
             setCurrentConversation(null);
-            if (lifecycleState !== 'idle') {
+            // Do not clobber active lifecycle — Grok emits lifecycle signals
+            // before the conversation ID is resolved via SPA navigation.
+            if (!isLifecycleActiveGeneration() && lifecycleState !== 'idle') {
                 setLifecycleState('idle');
             }
             buttonManager.setSaveButtonMode('default');
@@ -3249,15 +3302,25 @@ export function runPlatform(): void {
     }
 
     function handleConversationSwitch(newId: string | null): void {
-        disposeInFlightAttemptsOnNavigation(newId);
+        const isNewConversationNavigation = !currentConversationId && isLifecycleActiveGeneration() && !!newId;
+        // For null→new-conversation SPA nav during active generation,
+        // skip disposal so the interceptor stream monitor keeps running.
+        if (!isNewConversationNavigation) {
+            disposeInFlightAttemptsOnNavigation(newId);
+        }
         if (!newId) {
             setCurrentConversation(null);
-            setLifecycleState('idle');
+            if (!isLifecycleActiveGeneration()) {
+                setLifecycleState('idle');
+            }
             setTimeout(injectSaveButton, 300);
             return;
         }
 
-        buttonManager.remove();
+        if (!isNewConversationNavigation) {
+            buttonManager.remove();
+        }
+
         setCurrentConversation(newId);
 
         // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
@@ -3271,12 +3334,23 @@ export function runPlatform(): void {
             void ensureCalibrationPreferenceLoaded(currentAdapter.name);
         }
 
-        setTimeout(injectSaveButton, 500);
-        logger.info('Conversation switch → idle', {
-            newId,
-            previousState: lifecycleState,
-        });
-        setLifecycleState('idle', newId);
+        if (isNewConversationNavigation) {
+            logger.info('Conversation switch → preserving active lifecycle', {
+                newId,
+                preservedState: lifecycleState,
+            });
+            // Re-associate the preserved lifecycle state with the new conversation ID
+            // so downstream systems (SFE, readiness) bind to the correct conversation.
+            setLifecycleState(lifecycleState, newId);
+        } else {
+            setTimeout(injectSaveButton, 500);
+            logger.info('Conversation switch → idle', {
+                newId,
+                previousState: lifecycleState,
+            });
+            setLifecycleState('idle', newId);
+        }
+
         void warmFetchConversationSnapshot(newId, 'conversation-switch');
         setTimeout(() => {
             if (newId) {
@@ -3291,7 +3365,9 @@ export function runPlatform(): void {
 
     function resetButtonStateForNoConversation(): void {
         setCurrentConversation(null);
-        if (lifecycleState !== 'idle') {
+        // Do not clobber active lifecycle — Grok emits lifecycle signals
+        // before the conversation ID is resolved via SPA navigation.
+        if (!isLifecycleActiveGeneration() && lifecycleState !== 'idle') {
             setLifecycleState('idle');
         }
         buttonManager.setSaveButtonMode('default');
@@ -3707,7 +3783,10 @@ export function runPlatform(): void {
         if (source !== 'network' || currentAdapter?.name !== 'Grok' || !cachedReady) {
             return false;
         }
-        return lifecycle === 'prompt-sent' || lifecycle === 'streaming';
+        // Also accept 'idle': when the original lifecycle attempt was disposed by Grok SPA
+        // navigation before conversation ID resolution, the lifecycle resets to idle.
+        // The canonical capture arriving on a fresh attempt is the only remaining signal.
+        return lifecycle === 'idle' || lifecycle === 'prompt-sent' || lifecycle === 'streaming';
     }
 
     function handleFinishedConversation(conversationId: string, attemptId: string, source: 'network' | 'dom'): void {
@@ -4115,6 +4194,14 @@ export function runPlatform(): void {
             platform,
             attemptId: originalAttemptId,
         });
+
+        // Update UI badge immediately for pending lifecycle signals
+        // so users see "Prompt Sent" / "Streaming" instead of "Idle"
+        // even before the conversation ID is resolved.
+        if (phase === 'prompt-sent' || phase === 'streaming') {
+            lifecycleAttemptId = attemptId;
+            setLifecycleState(phase);
+        }
     }
 
     function handleStreamDeltaMessage(message: unknown): boolean {
@@ -4140,11 +4227,19 @@ export function runPlatform(): void {
             return true;
         }
 
+        setActiveAttempt(attemptId);
+
         if (!conversationId) {
+            // Grok reconnect streams can emit deltas before a conversation ID is known.
+            // Surface live text immediately and promote lifecycle so the UI does not stay idle.
+            if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
+                lifecycleAttemptId = attemptId;
+                setLifecycleState('streaming');
+            }
+            appendPendingStreamProbeText(attemptId, text);
             return true;
         }
 
-        setActiveAttempt(attemptId);
         bindAttempt(conversationId, attemptId);
         appendLiveStreamProbeText(conversationId, text);
         return true;
@@ -4226,6 +4321,7 @@ export function runPlatform(): void {
         clearCanonicalStabilizationRetry(canonicalDisposedId);
         sfe.dispose(canonicalDisposedId);
         pendingLifecycleByAttempt.delete(canonicalDisposedId);
+        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalDisposedId);
         for (const [conversationId, mappedAttemptId] of attemptByConversation.entries()) {
             if (shouldRemoveDisposedAttemptBinding(mappedAttemptId, canonicalDisposedId, resolveAliasedAttemptId)) {
                 attemptByConversation.delete(conversationId);
@@ -4246,13 +4342,13 @@ export function runPlatform(): void {
         options?: { data?: unknown; error?: string },
     ): void {
         window.postMessage(
-            {
+            stampToken({
                 type: 'BLACKIYA_GET_JSON_RESPONSE',
                 requestId,
                 success,
                 data: options?.data,
                 error: options?.error,
-            },
+            }),
             window.location.origin,
         );
     }
@@ -4302,6 +4398,10 @@ export function runPlatform(): void {
     function registerWindowBridge(): () => void {
         const handler = (event: MessageEvent) => {
             if (!isSameWindowOrigin(event)) {
+                return;
+            }
+            if (!isValidToken(event.data)) {
+                logger.debug('Dropped message with invalid session token');
                 return;
             }
             dispatchWindowBridgeMessage(event.data);

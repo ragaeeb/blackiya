@@ -106,11 +106,18 @@ Debug artifacts:
 - Debug report TXT (token-lean summary)
 - Full logs JSON
 - Stream dump JSON (optional, bounded)
+- HAR analysis JSON/MD (`bun run har:analyze --input <file.har> ...`)
 
 Guidance:
 - Prefer high-signal logs.
 - Add dedupe/TTL for frequently emitted lines.
 - Keep noisy exploratory logging behind explicit diagnostic modes.
+- For endpoint drift, run HAR analysis first, then patch classifier/parser code with tests.
+- Use fixture-backed tests for HAR tooling updates (for example `tests/fixtures/grok.minimal.har.json` + `utils/har-analysis.integration.test.ts`).
+
+Related docs:
+- `docs/debug-logs-guide.md`
+- `docs/discovery-mode.md`
 
 ## 8) Safe Change Patterns
 
@@ -163,4 +170,4 @@ When processing external PR review comments:
    - Unrealistic edge cases without evidence
    - Pure style changes with no reliability benefit
 4. For accepted findings: implement test-first, then minimal fix, then rerun targeted tests + `bun run tsc --noEmit`.
-5. For rejected/deferred findings in review docs: add a concise rationale directly under the point and sign as `GPT-5.3 Codex`.
+5. For rejected/deferred findings in review docs: add a concise rationale directly under the point and sign with the reviewing agent's name.

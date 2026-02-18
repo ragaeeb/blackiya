@@ -119,6 +119,12 @@ These are often benign:
 - Enable before repro.
 - Bounded/redacted by default.
 
+4. HAR + HAR analysis (JSON/MD):
+- Use when endpoint families changed or stream payload paths are unclear.
+- Export `.har` from DevTools, then run:
+- `bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"`
+- Analyzer writes redacted endpoint/timeline summaries plus hint matches for faster adapter updates.
+
 ## Multi-Tab Note
 In multi-tab runs, one debug TXT may not represent all tabs equally. For cross-tab bugs, include:
 
