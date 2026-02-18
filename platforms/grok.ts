@@ -1215,6 +1215,11 @@ export const grokAdapter: LLMPlatform = {
         return evaluateGrokReadiness(data);
     },
 
+    isPlatformGenerating() {
+        // TODO(v2.0.x): Implement Grok DOM generation detection once stable selectors are identified.
+        return false;
+    },
+
     defaultTitles: ['New conversation', 'Grok Conversation'],
 
     extractTitleFromDom() {

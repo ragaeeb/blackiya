@@ -10,22 +10,10 @@ import type { LLMPlatform } from '@/platforms/types';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { logger } from '@/utils/logger';
 import { LRUCache } from '@/utils/lru-cache';
+import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
 export class InterceptionManager {
-    private static readonly GENERIC_TITLES = new Set([
-        'gemini',
-        'gemini advanced',
-        'new chat',
-        'new conversation',
-        'chats',
-        'chatgpt',
-        'google gemini',
-        'gemini conversation',
-        'conversation with gemini',
-        'grok conversation',
-    ]);
-
     private readonly conversationCache: LRUCache<string, ConversationData>;
     private readonly specificTitleCache: LRUCache<string, string>;
     private currentAdapter: LLMPlatform | null = null;
@@ -253,22 +241,6 @@ export class InterceptionManager {
         return isExpectedAuxMiss ? 'info' : 'warn';
     }
 
-    private normalizeTitle(title: string | undefined | null): string {
-        return typeof title === 'string' ? title.replace(/\s+/g, ' ').trim().toLowerCase() : '';
-    }
-
-    private isGenericConversationTitle(title: string | undefined | null): boolean {
-        const normalized = this.normalizeTitle(title);
-        if (!normalized) {
-            return true;
-        }
-        return (
-            InterceptionManager.GENERIC_TITLES.has(normalized) ||
-            normalized.startsWith('you said ') ||
-            normalized.startsWith('you said:')
-        );
-    }
-
     private rememberSpecificTitle(conversationId: string, title: string, source: string): void {
         const previousTitle = this.specificTitleCache.get(conversationId) ?? null;
         if (previousTitle === title) {
@@ -289,12 +261,13 @@ export class InterceptionManager {
         source: string,
         existing?: ConversationData,
     ): void {
+        const platformDefaultTitles = this.currentAdapter?.defaultTitles;
         const existingSpecificTitle =
-            existing && !this.isGenericConversationTitle(existing.title) ? existing.title : null;
+            existing && !isGenericConversationTitle(existing.title, { platformDefaultTitles }) ? existing.title : null;
         const rememberedSpecificTitle = this.specificTitleCache.get(conversationId) ?? null;
         const fallbackSpecificTitle = existingSpecificTitle ?? rememberedSpecificTitle;
 
-        if (fallbackSpecificTitle && this.isGenericConversationTitle(incoming.title)) {
+        if (fallbackSpecificTitle && isGenericConversationTitle(incoming.title, { platformDefaultTitles })) {
             const previousIncomingTitle = incoming.title;
             incoming.title = fallbackSpecificTitle;
             logger.info('Preserved specific title over generic incoming title', {
@@ -306,7 +279,7 @@ export class InterceptionManager {
             });
         }
 
-        if (!this.isGenericConversationTitle(incoming.title)) {
+        if (!isGenericConversationTitle(incoming.title, { platformDefaultTitles })) {
             this.rememberSpecificTitle(conversationId, incoming.title, source);
         }
     }

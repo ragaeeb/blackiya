@@ -6,7 +6,10 @@
  * @module utils/download
  */
 
+import { downloadStringAsJsonFile } from '@/utils/dom-download';
 import { logger } from '@/utils/logger';
+
+export type DownloadStringAsJsonFileFn = (jsonString: string, filename: string) => void;
 
 /**
  * Sanitize a string for use as a filename
@@ -20,7 +23,7 @@ import { logger } from '@/utils/logger';
  * @param filename - The raw filename string
  * @returns A sanitized filename safe for use on all major file systems
  */
-export function sanitizeFilename(filename: string): string {
+export const sanitizeFilename = (filename: string): string => {
     if (!filename || filename.trim().length === 0) {
         return 'untitled';
     }
@@ -42,7 +45,7 @@ export function sanitizeFilename(filename: string): string {
     }
 
     return sanitized;
-}
+};
 
 /**
  * Generate a timestamp string for filenames
@@ -50,7 +53,7 @@ export function sanitizeFilename(filename: string): string {
  * @param unixTime - Optional Unix timestamp (seconds since epoch). If not provided, uses current time.
  * @returns A timestamp string in format: YYYY-MM-DD_HH-MM-SS
  */
-export function generateTimestamp(unixTime?: number): string {
+export const generateTimestamp = (unixTime?: number): string => {
     const date = typeof unixTime === 'number' ? new Date(unixTime * 1000) : new Date();
 
     const year = date.getFullYear();
@@ -61,41 +64,24 @@ export function generateTimestamp(unixTime?: number): string {
     const seconds = String(date.getSeconds()).padStart(2, '0');
 
     return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
-}
+};
 
 /**
  * Download data as a JSON file using blob URL
  *
  * @param data - The data to download as JSON
  * @param filename - The filename (without .json extension)
+ * @param downloadImpl - Optional injectable download implementation for deterministic testing
  */
-export function downloadAsJSON(data: unknown, filename: string): void {
-    let url: string | null = null;
-    let link: HTMLAnchorElement | null = null;
-
+export const downloadAsJSON = (
+    data: unknown,
+    filename: string,
+    downloadImpl: DownloadStringAsJsonFileFn = downloadStringAsJsonFile,
+): void => {
     try {
-        if (typeof document === 'undefined' || typeof URL === 'undefined') {
-            logger.error('Download failed: browser APIs are unavailable');
-            return;
-        }
-
         const jsonString = JSON.stringify(data, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        url = URL.createObjectURL(blob);
-
-        link = document.createElement('a');
-        link.href = url;
-        link.download = `${filename}.json`;
-        document.body.appendChild(link);
-        link.click();
+        downloadImpl(jsonString, `${filename}.json`);
     } catch (error) {
         logger.error('Download failed:', error);
-    } finally {
-        if (link?.parentNode) {
-            link.parentNode.removeChild(link);
-        }
-        if (url) {
-            URL.revokeObjectURL(url);
-        }
     }
-}
+};

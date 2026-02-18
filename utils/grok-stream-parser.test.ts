@@ -84,4 +84,16 @@ describe('grok-stream-parser', () => {
         const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
         expect(signals.conversationId).toBe('6992adb8-6b80-8332-a2fb-c8d2b407b6bb');
     });
+
+    it('should parse data-prefixed NDJSON lines safely', () => {
+        const seenPayloads = new Set<string>();
+        const buffer = `data: ${JSON.stringify({
+            conversationId: '40b7c6bb-120d-4cf9-951a-0ae33345d07c',
+            message: 'Data prefix line',
+        })}\n`;
+
+        const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
+        expect(signals.conversationId).toBe('40b7c6bb-120d-4cf9-951a-0ae33345d07c');
+        expect(signals.textCandidates).toEqual(['Data prefix line']);
+    });
 });

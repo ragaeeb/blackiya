@@ -15,11 +15,17 @@ function getContext(): 'background' | 'content' | 'popup' {
     if (typeof window === 'undefined') {
         return 'background';
     }
-    if (location.protocol === 'chrome-extension:' && location.pathname.includes('popup')) {
+
+    const locationObj = typeof location !== 'undefined' ? location : null;
+    if (!locationObj) {
+        return 'background';
+    }
+
+    if (locationObj.protocol === 'chrome-extension:' && locationObj.pathname.includes('popup')) {
         return 'popup';
     }
     // Content scripts run in a tab
-    if (location.protocol.startsWith('http')) {
+    if (locationObj.protocol.startsWith('http')) {
         return 'content';
     }
 

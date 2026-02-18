@@ -1,3 +1,5 @@
+import { dedupePreserveOrder } from '@/utils/text-utils';
+
 const GROK_CONVERSATION_ID_REGEX = /^[a-zA-Z0-9-]{8,128}$/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
@@ -25,19 +27,6 @@ function isLikelyGrokText(value: string): boolean {
         return false;
     }
     return true;
-}
-
-function dedupeText(values: string[]): string[] {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const value of values) {
-        if (seen.has(value)) {
-            continue;
-        }
-        seen.add(value);
-        out.push(value);
-    }
-    return out;
 }
 
 function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void {
@@ -176,6 +165,17 @@ function extractConversationIdFromNode(node: unknown): string | undefined {
     return undefined;
 }
 
+function normalizeNdjsonLine(rawLine: string): string {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (trimmed.startsWith('data:')) {
+        return trimmed.slice('data:'.length).trim();
+    }
+    return trimmed;
+}
+
 export type GrokStreamSignals = {
     conversationId?: string;
     textCandidates: string[];
@@ -194,7 +194,7 @@ export function extractGrokStreamSignalsFromBuffer(buffer: string, seenPayloads:
     let conversationId: string | undefined;
 
     for (const rawLine of lines) {
-        const line = rawLine.trim();
+        const line = normalizeNdjsonLine(rawLine);
         if (!line || seenPayloads.has(line)) {
             continue;
         }
@@ -219,8 +219,8 @@ export function extractGrokStreamSignalsFromBuffer(buffer: string, seenPayloads:
 
     return {
         conversationId,
-        textCandidates: dedupeText(textCandidates),
-        reasoningCandidates: dedupeText(reasoningCandidates),
+        textCandidates: dedupePreserveOrder(textCandidates),
+        reasoningCandidates: dedupePreserveOrder(reasoningCandidates),
         remainingBuffer,
         seenPayloadKeys,
     };

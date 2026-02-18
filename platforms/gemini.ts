@@ -15,6 +15,7 @@ import type { BatchexecuteResult } from '@/utils/google-rpc';
 import { parseBatchexecuteResponse } from '@/utils/google-rpc';
 import { hashText } from '@/utils/hash';
 import { logger } from '@/utils/logger';
+import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { ConversationData, MessageNode } from '@/utils/types';
 
 const MAX_TITLE_LENGTH = 80;
@@ -33,15 +34,7 @@ const conversationTitles = new LRUCache<string, string>(50);
  */
 const activeConversations = new LRUCache<string, ConversationData>(50);
 
-const GEMINI_GENERIC_TITLES = new Set([
-    'gemini',
-    'google gemini',
-    'gemini conversation',
-    'conversation with gemini',
-    'new chat',
-    'new conversation',
-    'chats',
-]);
+const GEMINI_DEFAULT_TITLES = ['Gemini Conversation', 'Google Gemini', 'Conversation with Gemini'];
 
 const GEMINI_CONVERSATION_ID_IN_PAYLOAD_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 
@@ -54,15 +47,9 @@ function normalizeGeminiDomTitle(rawTitle: string): string {
 }
 
 function isGenericGeminiTitle(rawTitle: string): boolean {
-    const normalized = normalizeGeminiDomTitle(rawTitle).toLowerCase();
-    if (!normalized) {
-        return true;
-    }
-    return (
-        GEMINI_GENERIC_TITLES.has(normalized) ||
-        normalized.startsWith('you said ') ||
-        normalized.startsWith('you said:')
-    );
+    return isGenericConversationTitle(normalizeGeminiDomTitle(rawTitle), {
+        platformDefaultTitles: GEMINI_DEFAULT_TITLES,
+    });
 }
 
 function normalizeGeminiTitleCandidate(rawTitle: unknown): string | null {
@@ -383,14 +370,47 @@ type GeminiConversationEnvelope = {
     isStreamFormat: boolean;
 };
 
+function resolveGeminiStreamShape(payload: any): { idIndex: number; assistantSlotIndex: number } | null {
+    if (!Array.isArray(payload) || payload.length < 5) {
+        return null;
+    }
+    // StreamGenerate envelopes follow this layout:
+    // [null, [conversationId, ...], <ignored>, <ignored>, [assistant slot, ...], ...]
+    // i+2 and i+3 are intermediate envelope fields whose structure varies by API
+    // version; only the assistant slot at i+4 is consumed downstream.
+    for (let i = 0; i <= payload.length - 5; i++) {
+        if (payload[i] !== null) {
+            continue;
+        }
+        const idCandidate = payload[i + 1];
+        if (!Array.isArray(idCandidate) || !isGeminiConversationIdCandidate(idCandidate[0])) {
+            continue;
+        }
+        const assistantSlot = payload[i + 4];
+        if (!Array.isArray(assistantSlot)) {
+            continue;
+        }
+        return { idIndex: i + 1, assistantSlotIndex: i + 4 };
+    }
+    return null;
+}
+
 function resolveGeminiConversationEnvelope(payload: any): GeminiConversationEnvelope | null {
     const batchexecuteRoot = payload?.[0]?.[0];
     if (Array.isArray(batchexecuteRoot)) {
         return { conversationRoot: batchexecuteRoot, isStreamFormat: false };
     }
 
-    if (Array.isArray(payload) && payload[0] === null && Array.isArray(payload[1])) {
-        return { conversationRoot: payload, isStreamFormat: true };
+    const streamShape = resolveGeminiStreamShape(payload);
+    if (streamShape) {
+        const normalizedRoot = [
+            null,
+            payload[streamShape.idIndex],
+            null,
+            null,
+            payload[streamShape.assistantSlotIndex],
+        ];
+        return { conversationRoot: normalizedRoot, isStreamFormat: true };
     }
 
     return null;
@@ -700,13 +720,7 @@ function hasGeminiBatchexecuteConversationShape(payload: any): boolean {
 }
 
 function hasGeminiStreamGenerateConversationShape(payload: any): boolean {
-    if (!Array.isArray(payload) || payload.length === 0) {
-        return false;
-    }
-    if (payload[0] !== null || !Array.isArray(payload[1]) || payload[1].length < 1) {
-        return false;
-    }
-    return isGeminiConversationIdCandidate(payload[1][0]);
+    return !!resolveGeminiStreamShape(payload);
 }
 
 export const geminiAdapter: LLMPlatform = {
@@ -838,7 +852,12 @@ export const geminiAdapter: LLMPlatform = {
         return evaluateGeminiReadiness(data);
     },
 
-    defaultTitles: ['Gemini Conversation', 'Google Gemini', 'Conversation with Gemini'],
+    isPlatformGenerating() {
+        // TODO(v2.0.x): Implement Gemini DOM generation detection once selectors are stable.
+        return false;
+    },
+
+    defaultTitles: GEMINI_DEFAULT_TITLES,
 
     extractTitleFromDom() {
         if (typeof document === 'undefined') {

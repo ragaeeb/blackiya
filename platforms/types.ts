@@ -121,6 +121,12 @@ export interface LLMPlatform {
     evaluateReadiness?: (data: ConversationData) => PlatformReadiness;
 
     /**
+     * Optional DOM-based signal for whether the platform is actively generating.
+     * Used by runner guardrails for save/readiness transitions.
+     */
+    isPlatformGenerating?: () => boolean;
+
+    /**
      * Optional DOM-based title extraction fallback.
      * Called at save/copy time when the cached title appears to be a
      * platform default (e.g., "New conversation") because the real title

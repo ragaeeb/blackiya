@@ -38,8 +38,8 @@ export class CrossTabProbeLease {
             };
         }
 
-        const current = this.read(conversationId);
         const now = this.now();
+        const current = this.read(conversationId);
         if (current && current.expiresAtMs > now && current.attemptId !== attemptId) {
             return {
                 acquired: false,
@@ -53,7 +53,13 @@ export class CrossTabProbeLease {
             expiresAtMs: now + Math.max(ttlMs, 1),
             updatedAtMs: now,
         };
-        this.write(conversationId, next);
+        if (!this.write(conversationId, next)) {
+            return {
+                acquired: false,
+                ownerAttemptId: null,
+                expiresAtMs: null,
+            };
+        }
 
         const verify = this.read(conversationId);
         if (!verify || verify.attemptId !== attemptId) {
@@ -82,7 +88,11 @@ export class CrossTabProbeLease {
         if (current.attemptId !== attemptId) {
             return;
         }
-        this.storage.removeItem(this.keyFor(conversationId));
+        try {
+            this.storage.removeItem(this.keyFor(conversationId));
+        } catch {
+            // Ignore storage removal errors; lease will naturally expire.
+        }
     }
 
     public dispose(): void {
@@ -108,11 +118,11 @@ export class CrossTabProbeLease {
         if (!this.storage) {
             return null;
         }
-        const raw = this.storage.getItem(this.keyFor(conversationId));
-        if (!raw) {
-            return null;
-        }
         try {
+            const raw = this.storage.getItem(this.keyFor(conversationId));
+            if (!raw) {
+                return null;
+            }
             const parsed = JSON.parse(raw) as Partial<ProbeLeaseRecord>;
             if (typeof parsed.attemptId !== 'string') {
                 return null;
@@ -130,10 +140,15 @@ export class CrossTabProbeLease {
         }
     }
 
-    private write(conversationId: string, record: ProbeLeaseRecord): void {
+    private write(conversationId: string, record: ProbeLeaseRecord): boolean {
         if (!this.storage) {
-            return;
+            return false;
         }
-        this.storage.setItem(this.keyFor(conversationId), JSON.stringify(record));
+        try {
+            this.storage.setItem(this.keyFor(conversationId), JSON.stringify(record));
+            return true;
+        } catch {
+            return false;
+        }
     }
 }
