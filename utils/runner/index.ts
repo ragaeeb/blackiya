@@ -1911,7 +1911,13 @@ export function runPlatform(): void {
 
     function finalizeStreamDoneProbe(context: StreamDoneProbeContext): void {
         streamProbeControllers.delete(context.attemptId);
-        void probeLease.release(context.conversationId, context.attemptId);
+        void probeLease.release(context.conversationId, context.attemptId).catch((error) => {
+            logger.debug('Probe lease release failed after stream-done probe finalize', {
+                conversationId: context.conversationId,
+                attemptId: context.attemptId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
     }
 
     async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
@@ -2091,9 +2097,7 @@ export function runPlatform(): void {
             return;
         }
 
-        calibrationState = 'waiting';
-        runnerState.calibrationState = calibrationState;
-        buttonManager.setCalibrationState('waiting');
+        setCalibrationStatus('waiting');
         logger.info('Calibration armed. Click Done when response is complete.');
     }
 
@@ -2919,8 +2923,7 @@ export function runPlatform(): void {
             setCalibrationStatus('capturing');
             return;
         }
-        calibrationState = 'capturing';
-        runnerState.calibrationState = calibrationState;
+        setCalibrationStatus('capturing');
     }
 
     function logCalibrationCaptureStart(
@@ -2978,8 +2981,7 @@ export function runPlatform(): void {
             markCalibrationSuccess(conversationId);
             return;
         }
-        calibrationState = 'success';
-        runnerState.calibrationState = calibrationState;
+        setCalibrationStatus('success');
         refreshButtonState(conversationId);
     }
 
@@ -2989,8 +2991,7 @@ export function runPlatform(): void {
             refreshButtonState(conversationId);
             return;
         }
-        calibrationState = 'idle';
-        runnerState.calibrationState = calibrationState;
+        setCalibrationStatus('idle');
     }
 
     async function getConversationData(options: { silent?: boolean; allowDegraded?: boolean } = {}) {
@@ -3365,14 +3366,12 @@ export function runPlatform(): void {
     function syncCalibrationDisplayFromDecision(decision: ReadinessDecision): void {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         if (isCanonicalReady && calibrationState !== 'capturing') {
-            calibrationState = 'success';
-            runnerState.calibrationState = calibrationState;
+            setCalibrationStatus('success');
             syncCalibrationButtonDisplay();
             return;
         }
         if (!isCanonicalReady && calibrationState === 'success') {
-            calibrationState = 'idle';
-            runnerState.calibrationState = calibrationState;
+            setCalibrationStatus('idle');
             syncCalibrationButtonDisplay();
         }
     }

@@ -42,7 +42,7 @@ describe('gemini-stream-parser', () => {
 
         const signals = extractGeminiStreamSignalsFromBuffer(buffer, seenPayloads);
         expect(signals.textCandidates).toContain('Readable sentence candidate');
-        expect(signals.textCandidates.some((value) => value.includes('2026-02-16T00:26:14.436Z'))).toBe(false);
+        expect(signals.textCandidates.some((value) => value.includes('2026-02-16T00:26:14.436Z'))).toBeFalse();
     });
 
     it('should extract title candidates from StreamGenerate metadata payloads', () => {

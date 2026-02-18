@@ -7,8 +7,8 @@ import { createFetchInterceptorContext, type FetchInterceptorContext } from '@/e
 import { createFetchInterceptor } from '@/entrypoints/interceptor/fetch-wrapper';
 import { ProactiveFetcher } from '@/entrypoints/interceptor/proactive-fetcher';
 import {
-    shouldEmitGeminiXhrLoadendCompletion,
     shouldEmitXhrRequestLifecycle,
+    tryMarkGeminiXhrLoadendCompleted,
 } from '@/entrypoints/interceptor/signal-emitter';
 import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-bridge';
 import { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
@@ -50,6 +50,7 @@ import type { ConversationData } from '@/utils/types';
 export {
     shouldEmitGeminiXhrLoadendCompletion,
     shouldEmitXhrRequestLifecycle,
+    tryMarkGeminiXhrLoadendCompleted,
 } from '@/entrypoints/interceptor/signal-emitter';
 export { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
 
@@ -1111,7 +1112,7 @@ function wireGeminiXhrProgressMonitor(
             xhr.readyState === XMLHttpRequest.DONE &&
             xhr.status >= 200 &&
             xhr.status < 300 &&
-            shouldEmitGeminiXhrLoadendCompletion(state, requestUrl)
+            tryMarkGeminiXhrLoadendCompleted(state, requestUrl)
         ) {
             emitLifecycleSignal(state.attemptId, 'completed', state.seedConversationId, 'Gemini');
         }

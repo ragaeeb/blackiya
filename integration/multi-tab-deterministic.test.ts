@@ -81,7 +81,7 @@ describe('integration: multi-tab deterministic', () => {
         for (let i = 1; i <= 8; i++) {
             const conversationId = `c${i}`;
             const resolved = sfe.resolveByConversation(conversationId);
-            expect(resolved?.ready).toBe(true);
+            expect(resolved?.ready).toBeTrue();
             expect(resolved?.phase).toBe('captured_ready');
             expect(resolved?.attemptId).toBe(`a${i}`);
         }

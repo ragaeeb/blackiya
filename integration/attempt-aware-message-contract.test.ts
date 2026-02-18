@@ -24,9 +24,9 @@ describe('integration: strict protocol message contracts', () => {
             attemptId: 'chatgpt:a1',
         };
 
-        expect(protocol.isBlackiyaMessage(lifecycle)).toBe(true);
-        expect(protocol.isBlackiyaMessage(finished)).toBe(true);
-        expect(protocol.isBlackiyaMessage(delta)).toBe(true);
+        expect(protocol.isBlackiyaMessage(lifecycle)).toBeTrue();
+        expect(protocol.isBlackiyaMessage(finished)).toBeTrue();
+        expect(protocol.isBlackiyaMessage(delta)).toBeTrue();
     });
 
     it('rejects attempt-less lifecycle and completion events', () => {
@@ -36,14 +36,14 @@ describe('integration: strict protocol message contracts', () => {
                 platform: 'ChatGPT',
                 phase: 'streaming',
             }),
-        ).toBe(false);
+        ).toBeFalse();
 
         expect(
             protocol.isBlackiyaMessage({
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
             }),
-        ).toBe(false);
+        ).toBeFalse();
 
         expect(
             protocol.isBlackiyaMessage({
@@ -51,6 +51,6 @@ describe('integration: strict protocol message contracts', () => {
                 platform: 'ChatGPT',
                 text: 'hello',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 });

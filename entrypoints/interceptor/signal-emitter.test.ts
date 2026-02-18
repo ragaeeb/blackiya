@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
     shouldEmitGeminiXhrLoadendCompletion,
     shouldEmitXhrRequestLifecycle,
+    tryMarkGeminiXhrLoadendCompleted,
 } from '@/entrypoints/interceptor/signal-emitter';
 
 describe('interceptor signal emitter guards', () => {
@@ -13,7 +14,7 @@ describe('interceptor signal emitter guards', () => {
                 attemptId: 'gemini:attempt-1',
                 conversationId: undefined,
             }),
-        ).toBe(true);
+        ).toBeTrue();
         expect(
             shouldEmitXhrRequestLifecycle({
                 shouldEmitNonChatLifecycle: true,
@@ -21,10 +22,10 @@ describe('interceptor signal emitter guards', () => {
                 attemptId: 'grok:attempt-1',
                 conversationId: undefined,
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
-    it('emits Gemini loadend completion once and requires generation context', () => {
+    it('tryMarkGeminiXhrLoadendCompleted emits Gemini loadend completion once and requires generation context', () => {
         const state = {
             emittedCompleted: false,
             emittedStreaming: true,
@@ -32,9 +33,29 @@ describe('interceptor signal emitter guards', () => {
         };
         const url =
             'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, url)).toBe(true);
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, url)).toBe(false);
+        expect(tryMarkGeminiXhrLoadendCompleted(state, url)).toBeTrue();
+        expect(tryMarkGeminiXhrLoadendCompleted(state, url)).toBeFalse();
         const noContextState = { emittedCompleted: false, emittedStreaming: false };
-        expect(shouldEmitGeminiXhrLoadendCompletion(noContextState, url)).toBe(false);
+        expect(tryMarkGeminiXhrLoadendCompleted(noContextState, url)).toBeFalse();
+
+        // only streaming active, no seedConversationId
+        const streamingOnlyState = { emittedCompleted: false, emittedStreaming: true };
+        expect(shouldEmitGeminiXhrLoadendCompletion(streamingOnlyState, url)).toBeTrue();
+
+        // only seedConversationId present, streaming not yet observed
+        const seedOnlyState = { emittedCompleted: false, emittedStreaming: false, seedConversationId: 'conv-seed' };
+        expect(shouldEmitGeminiXhrLoadendCompletion(seedOnlyState, url)).toBeTrue();
+    });
+
+    it('keeps shouldEmitGeminiXhrLoadendCompletion backward-compatible as an alias', () => {
+        const state = {
+            emittedCompleted: false,
+            emittedStreaming: true,
+            seedConversationId: 'conv-2',
+        };
+        const url =
+            'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
+        expect(shouldEmitGeminiXhrLoadendCompletion(state, url)).toBeTrue();
+        expect(shouldEmitGeminiXhrLoadendCompletion(state, url)).toBeFalse();
     });
 });

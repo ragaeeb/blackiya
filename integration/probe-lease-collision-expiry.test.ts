@@ -29,30 +29,30 @@ describe('integration: probe lease collision + expiry', () => {
         const coordinator = new ProbeLeaseCoordinator({ store: storage, now: () => now });
 
         const first = await coordinator.claim('conv-lease', 'attempt-a', 5_000);
-        expect(first.acquired).toBe(true);
+        expect(first.acquired).toBeTrue();
         expect(first.ownerAttemptId).toBe('attempt-a');
 
         const blocked = await coordinator.claim('conv-lease', 'attempt-b', 5_000);
-        expect(blocked.acquired).toBe(false);
+        expect(blocked.acquired).toBeFalse();
         expect(blocked.ownerAttemptId).toBe('attempt-a');
 
         now = 7_000;
         const takeover = await coordinator.claim('conv-lease', 'attempt-b', 3_000);
-        expect(takeover.acquired).toBe(true);
+        expect(takeover.acquired).toBeTrue();
         expect(takeover.ownerAttemptId).toBe('attempt-b');
 
         const staleRelease = await coordinator.release('conv-lease', 'attempt-a');
-        expect(staleRelease).toBe(false);
+        expect(staleRelease).toBeFalse();
 
         const stillOwned = await coordinator.claim('conv-lease', 'attempt-c', 3_000);
-        expect(stillOwned.acquired).toBe(false);
+        expect(stillOwned.acquired).toBeFalse();
         expect(stillOwned.ownerAttemptId).toBe('attempt-b');
 
         const released = await coordinator.release('conv-lease', 'attempt-b');
-        expect(released).toBe(true);
+        expect(released).toBeTrue();
 
         const freeClaim = await coordinator.claim('conv-lease', 'attempt-c', 2_000);
-        expect(freeClaim.acquired).toBe(true);
+        expect(freeClaim.acquired).toBeTrue();
         expect(freeClaim.ownerAttemptId).toBe('attempt-c');
     });
 });

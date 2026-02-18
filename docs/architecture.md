@@ -279,6 +279,7 @@ Invariants:
 - Lease arbitration is always-on (no user setting gate).
 - Non-owner release cannot clear an active lease.
 - Expired leases are pruned and can be deterministically taken over.
+- Coordinator hydration is single-flight (concurrent claims share one hydration pass), and failed hydration attempts are retried on subsequent operations.
 
 ## 9) Diagnostics and Debugging
 

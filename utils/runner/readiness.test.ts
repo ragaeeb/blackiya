@@ -68,7 +68,7 @@ describe('runner readiness resolver', () => {
             mode: 'awaiting_stabilization',
             reason: 'no_canonical_data',
         });
-        expect(cleared).toBe(true);
+        expect(cleared).toBeTrue();
     });
 
     it('returns canonical_ready when SFE and legacy readiness are both ready at high fidelity', () => {
@@ -111,7 +111,7 @@ describe('runner readiness resolver', () => {
             mode: 'degraded_manual_only',
             reason: 'stabilization_timeout',
         });
-        expect(warned).toBe(true);
+        expect(warned).toBeTrue();
     });
 
     it('falls back to awaiting stabilization with SFE reason when canonical capture is not ready', () => {
@@ -136,5 +136,45 @@ describe('runner readiness resolver', () => {
             mode: 'awaiting_stabilization',
             reason: 'awaiting_second_sample',
         });
+    });
+
+    it('resolves attemptId once when evaluating timeout-ready fallback paths', () => {
+        let resolveAttemptIdCalls = 0;
+        let clearedAttemptId = '';
+        const decision = resolveRunnerReadinessDecision(
+            createInput({
+                sfeResolution: {
+                    ready: false,
+                    reason: 'awaiting_second_sample',
+                    blockingConditions: [],
+                },
+                captureMeta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                evaluateReadinessForData: () => ({
+                    ready: false,
+                    terminal: true,
+                    reason: 'legacy_not_ready',
+                    contentHash: null,
+                    latestAssistantTextLength: 0,
+                }),
+                resolveAttemptId: () => {
+                    resolveAttemptIdCalls += 1;
+                    return 'attempt-single-call';
+                },
+                clearTimeoutWarningByAttempt: (attemptId) => {
+                    clearedAttemptId = attemptId;
+                },
+            }),
+        );
+        expect(decision).toEqual({
+            ready: false,
+            mode: 'awaiting_stabilization',
+            reason: 'awaiting_second_sample',
+        });
+        expect(resolveAttemptIdCalls).toBe(1);
+        expect(clearedAttemptId).toBe('attempt-single-call');
     });
 });

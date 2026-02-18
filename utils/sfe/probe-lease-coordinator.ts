@@ -30,6 +30,7 @@ export class ProbeLeaseCoordinator {
     private readonly maxEntries: number;
     private readonly cache = new Map<string, ProbeLeaseRecord>();
     private hydrated = false;
+    private hydrationPromise: Promise<void> | null = null;
 
     public constructor(options: ProbeLeaseCoordinatorOptions) {
         this.store = options.store;
@@ -104,30 +105,46 @@ export class ProbeLeaseCoordinator {
         if (this.hydrated) {
             return;
         }
-        this.hydrated = true;
-        if (!this.store.getAll) {
+        if (this.hydrationPromise) {
+            await this.hydrationPromise;
             return;
         }
 
-        let rawEntries: Record<string, string>;
+        const hydrationTask = (async () => {
+            if (!this.store.getAll) {
+                this.hydrated = true;
+                return;
+            }
+
+            let rawEntries: Record<string, string>;
+            try {
+                rawEntries = await this.store.getAll();
+            } catch {
+                // Keep hydrated=false so future calls can retry.
+                return;
+            }
+
+            for (const [storageKey, rawValue] of Object.entries(rawEntries)) {
+                if (!storageKey.startsWith(this.keyPrefix) || typeof rawValue !== 'string') {
+                    continue;
+                }
+                const conversationId = storageKey.slice(this.keyPrefix.length);
+                const parsed = this.parseRecord(rawValue);
+                if (!conversationId || !parsed) {
+                    continue;
+                }
+                this.cache.set(conversationId, parsed);
+            }
+            this.trimToMaxEntries();
+            this.hydrated = true;
+        })();
+
+        this.hydrationPromise = hydrationTask;
         try {
-            rawEntries = await this.store.getAll();
-        } catch {
-            return;
+            await hydrationTask;
+        } finally {
+            this.hydrationPromise = null;
         }
-
-        for (const [storageKey, rawValue] of Object.entries(rawEntries)) {
-            if (!storageKey.startsWith(this.keyPrefix) || typeof rawValue !== 'string') {
-                continue;
-            }
-            const conversationId = storageKey.slice(this.keyPrefix.length);
-            const parsed = this.parseRecord(rawValue);
-            if (!conversationId || !parsed) {
-                continue;
-            }
-            this.cache.set(conversationId, parsed);
-        }
-        this.trimToMaxEntries();
     }
 
     private async pruneExpired(now: number): Promise<void> {
@@ -137,24 +154,43 @@ export class ProbeLeaseCoordinator {
                 expired.push(conversationId);
             }
         }
+        if (expired.length === 0) {
+            return;
+        }
         for (const conversationId of expired) {
             this.cache.delete(conversationId);
-            try {
-                await this.store.remove(this.keyFor(conversationId));
-            } catch {
-                // Ignore storage cleanup errors; expired lease is already dropped from memory.
-            }
         }
+        await Promise.all(
+            expired.map((conversationId) =>
+                this.store.remove(this.keyFor(conversationId)).catch(() => {
+                    // Ignore storage cleanup errors; expired lease is already dropped from memory.
+                }),
+            ),
+        );
     }
 
     private trimToMaxEntries(): void {
-        while (this.cache.size > this.maxEntries) {
-            const oldestEntry = this.cache.entries().next().value as [string, ProbeLeaseRecord] | undefined;
-            if (!oldestEntry) {
+        if (this.cache.size <= this.maxEntries) {
+            return;
+        }
+
+        const candidates = Array.from(this.cache.entries()).sort((left, right) => {
+            const leftAge = left[1].expiresAtMs ?? left[1].updatedAtMs ?? 0;
+            const rightAge = right[1].expiresAtMs ?? right[1].updatedAtMs ?? 0;
+            if (leftAge !== rightAge) {
+                return leftAge - rightAge;
+            }
+            const leftUpdated = left[1].updatedAtMs ?? 0;
+            const rightUpdated = right[1].updatedAtMs ?? 0;
+            return leftUpdated - rightUpdated;
+        });
+
+        for (const [conversationId] of candidates) {
+            if (this.cache.size <= this.maxEntries) {
                 break;
             }
-            this.cache.delete(oldestEntry[0]);
-            void this.store.remove(this.keyFor(oldestEntry[0])).catch(() => {
+            this.cache.delete(conversationId);
+            void this.store.remove(this.keyFor(conversationId)).catch(() => {
                 // Best-effort eviction cleanup.
             });
         }

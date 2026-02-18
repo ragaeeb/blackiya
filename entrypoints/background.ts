@@ -8,7 +8,7 @@
  */
 
 import { logger } from '@/utils/logger';
-import { logsStorage } from '@/utils/logs-storage';
+import { type LogEntry, logsStorage } from '@/utils/logs-storage';
 import { ProbeLeaseCoordinator, type ProbeLeaseCoordinatorStore } from '@/utils/sfe/probe-lease-coordinator';
 import {
     isProbeLeaseClaimRequest,
@@ -80,8 +80,26 @@ function createProbeLeaseStore(): ProbeLeaseCoordinatorStore {
     return new InMemoryProbeLeaseStore();
 }
 
+function isLogContext(value: unknown): value is LogEntry['context'] {
+    return value === 'background' || value === 'content' || value === 'popup' || value === 'unknown';
+}
+
+function isLogEntryPayload(payload: unknown): payload is LogEntry {
+    if (!payload || typeof payload !== 'object') {
+        return false;
+    }
+    const candidate = payload as Partial<LogEntry>;
+    if (typeof candidate.timestamp !== 'string' || typeof candidate.level !== 'string') {
+        return false;
+    }
+    if (typeof candidate.message !== 'string' || !isLogContext(candidate.context)) {
+        return false;
+    }
+    return candidate.data === undefined || Array.isArray(candidate.data);
+}
+
 type BackgroundMessageHandlerDeps = {
-    saveLog: (payload: unknown) => Promise<void>;
+    saveLog: (payload: LogEntry) => Promise<void>;
     leaseCoordinator: ProbeLeaseCoordinator;
     logger: BackgroundLogger;
 };
@@ -94,7 +112,7 @@ function handleGenericBackgroundMessage(
 ): true {
     const type =
         typeof message === 'object' && message !== null && typeof (message as { type?: unknown }).type === 'string'
-            ? ((message as { type: string }).type ?? 'unknown')
+            ? (message as { type: string }).type
             : 'unknown';
 
     loggerInstance.info('Received message:', type, 'from', sender.tab?.url);
@@ -152,10 +170,12 @@ export function createBackgroundMessageHandler(deps: BackgroundMessageHandlerDep
 
         if (typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'LOG_ENTRY') {
             const payload = (message as { payload?: unknown }).payload;
-            if (payload) {
+            if (isLogEntryPayload(payload)) {
                 deps.saveLog(payload).catch((error) => {
                     console.error('Failed to save log from content script:', error);
                 });
+            } else {
+                deps.logger.warn('Discarding malformed LOG_ENTRY payload');
             }
             return;
         }
@@ -186,7 +206,7 @@ export default defineBackground(() => {
     // Currently content script handles everything locally
     browser.runtime.onMessage.addListener(
         createBackgroundMessageHandler({
-            saveLog: (payload) => logsStorage.saveLog(payload as any),
+            saveLog: (payload) => logsStorage.saveLog(payload),
             leaseCoordinator,
             logger,
         }),

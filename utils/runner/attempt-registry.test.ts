@@ -40,7 +40,7 @@ describe('runner attempt registry helpers', () => {
             attemptByConversation: new Map(),
             resolveAliasedAttemptId: (attemptId) => attemptId,
         });
-        expect(result.attemptId.startsWith('grok:')).toBe(true);
+        expect(result.attemptId.startsWith('grok:')).toBeTrue();
         expect(result.nextActiveAttemptId).toBe(result.attemptId);
     });
 
@@ -64,7 +64,7 @@ describe('runner attempt registry helpers', () => {
 
     it('keeps existing disposed-binding behavior through shared helper', () => {
         const resolveAttemptId = (attemptId: string) => attemptId.replace('alias:', 'canonical:');
-        expect(shouldRemoveDisposedAttemptBinding('alias:1', 'canonical:1', resolveAttemptId)).toBe(true);
-        expect(shouldRemoveDisposedAttemptBinding('alias:2', 'canonical:1', resolveAttemptId)).toBe(false);
+        expect(shouldRemoveDisposedAttemptBinding('alias:1', 'canonical:1', resolveAttemptId)).toBeTrue();
+        expect(shouldRemoveDisposedAttemptBinding('alias:2', 'canonical:1', resolveAttemptId)).toBeFalse();
     });
 });

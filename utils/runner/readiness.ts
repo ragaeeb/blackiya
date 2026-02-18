@@ -56,8 +56,10 @@ function createLegacyReadinessDecision(
     };
 }
 
-function createTimeoutReadinessDecision(input: ResolveRunnerReadinessInput): ReadinessDecision | null {
-    const attemptId = input.resolveAttemptId(input.conversationId);
+function createTimeoutReadinessDecision(
+    input: ResolveRunnerReadinessInput,
+    attemptId: string,
+): ReadinessDecision | null {
     const hasTimeout =
         input.sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
         (input.captureMeta.fidelity === 'degraded' && input.hasCanonicalStabilizationTimedOut(attemptId));
@@ -108,12 +110,13 @@ export function resolveRunnerReadinessDecision(input: ResolveRunnerReadinessInpu
 
     input.clearCanonicalReadyLogStamp(input.conversationId);
 
-    const timeoutDecision = createTimeoutReadinessDecision(input);
+    const attemptId = input.resolveAttemptId(input.conversationId);
+    const timeoutDecision = createTimeoutReadinessDecision(input, attemptId);
     if (timeoutDecision) {
         return timeoutDecision;
     }
 
-    input.clearTimeoutWarningByAttempt(input.resolveAttemptId(input.conversationId));
+    input.clearTimeoutWarningByAttempt(attemptId);
 
     if (input.captureMeta.fidelity === 'degraded') {
         return {

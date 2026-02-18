@@ -1,4 +1,4 @@
-export function safePathname(url: string): string {
+export function safePathname(url: string) {
     try {
         const fallbackOrigin =
             typeof window !== 'undefined' && typeof window.location?.origin === 'string'
@@ -10,7 +10,7 @@ export function safePathname(url: string): string {
     }
 }
 
-export function detectPlatformFromHostname(hostname = window.location.hostname): string {
+export function detectPlatformFromHostname(hostname = typeof window !== 'undefined' ? window.location.hostname : '') {
     if (hostname.includes('gemini')) {
         return 'Gemini';
     }

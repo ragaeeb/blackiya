@@ -21,6 +21,7 @@ import type { ConversationData, Message, MessageContent, MessageNode } from '@/u
 const CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const HOST_CANDIDATES = ['https://chatgpt.com', 'https://chat.openai.com'];
 const PLACEHOLDER_TITLE_PATTERNS = [/^new chat$/i, /^new conversation$/i, /^untitled$/i];
+export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = /\/backend-api\/(?:f\/)?conversation(?:\?.*)?$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);

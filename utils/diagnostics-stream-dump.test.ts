@@ -76,7 +76,7 @@ describe('diagnostics-stream-dump', () => {
         expect(dump.sessions[0]?.frameCount).toBe(3);
         expect(dump.sessions[0]?.frames.length).toBe(2);
         expect(dump.sessions[0]?.frames[0]?.text).toBe('second');
-        expect(dump.sessions[0]?.truncated).toBe(true);
+        expect(dump.sessions[0]?.truncated).toBeTrue();
     });
 
     it('redacts sensitive token-like values in frame text', async () => {
@@ -114,7 +114,7 @@ describe('diagnostics-stream-dump', () => {
 
         const dump = await storage.getStore();
         expect(dump.sessions.length).toBe(2);
-        expect(dump.sessions.some((s) => s.attemptId === 'a3')).toBe(true);
+        expect(dump.sessions.some((s) => s.attemptId === 'a3')).toBeTrue();
 
         await storage.clearStore();
         const raw = await backend.get(STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_STORE);
@@ -136,7 +136,7 @@ describe('diagnostics-stream-dump', () => {
         const dump = await storage.getStore();
         const text = dump.sessions[0]?.frames[0]?.text ?? '';
         expect(text.length).toBeLessThanOrEqual(14);
-        expect(text.endsWith('...<truncated>')).toBe(true);
+        expect(text.endsWith('...<truncated>')).toBeTrue();
     });
     it('preserves leading content before suffix when maxTextCharsPerFrame exceeds suffix length', async () => {
         const backend = createMemoryStorage();
@@ -206,8 +206,8 @@ describe('diagnostics-stream-dump', () => {
         const dump = await storage.getStore();
         expect(dump.sessions).toHaveLength(2);
         expect(dump.sessions[0]?.attemptId).toBe('a3');
-        expect(dump.sessions[0]?.truncated).toBe(false);
+        expect(dump.sessions[0]?.truncated).toBeFalse();
         expect(dump.sessions[1]?.attemptId).toBe('a2');
-        expect(dump.sessions[1]?.truncated).toBe(true);
+        expect(dump.sessions[1]?.truncated).toBeTrue();
     });
 });

@@ -15,7 +15,7 @@ describe('probe-lease-protocol', () => {
                 attemptId: 'attempt-1',
                 ttlMs: 5_000,
             }),
-        ).toBe(true);
+        ).toBeTrue();
 
         expect(
             isProbeLeaseClaimRequest({
@@ -23,7 +23,7 @@ describe('probe-lease-protocol', () => {
                 conversationId: 'conv-1',
                 attemptId: 'attempt-1',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
     it('validates release request shape', () => {
@@ -33,14 +33,14 @@ describe('probe-lease-protocol', () => {
                 conversationId: 'conv-1',
                 attemptId: 'attempt-1',
             }),
-        ).toBe(true);
+        ).toBeTrue();
 
         expect(
             isProbeLeaseReleaseRequest({
                 type: 'BLACKIYA_PROBE_LEASE_RELEASE',
                 conversationId: 'conv-1',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
     it('validates claim response shape', () => {
@@ -51,7 +51,7 @@ describe('probe-lease-protocol', () => {
                 ownerAttemptId: 'attempt-1',
                 expiresAtMs: 5_000,
             }),
-        ).toBe(true);
+        ).toBeTrue();
 
         expect(
             isProbeLeaseClaimResponse({
@@ -60,7 +60,7 @@ describe('probe-lease-protocol', () => {
                 ownerAttemptId: 'attempt-1',
                 expiresAtMs: 5_000,
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
     it('validates release response shape', () => {
@@ -69,13 +69,13 @@ describe('probe-lease-protocol', () => {
                 type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
                 released: true,
             }),
-        ).toBe(true);
+        ).toBeTrue();
 
         expect(
             isProbeLeaseReleaseResponse({
                 type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
                 released: 'true',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 });

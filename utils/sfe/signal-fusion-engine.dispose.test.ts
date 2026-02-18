@@ -25,6 +25,6 @@ describe('SignalFusionEngine dispose', () => {
             conversationId: 'c1',
         });
         expect(after.phase).toBe('disposed');
-        expect(after.ready).toBe(false);
+        expect(after.ready).toBeFalse();
     });
 });

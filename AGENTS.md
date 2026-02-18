@@ -80,7 +80,7 @@ For any bug fix:
 2. Implement minimal fix.
 3. Re-run targeted tests.
 4. Re-run typecheck.
-5. Update `docs/reviews/synthesis.md` status and `docs/architecture.md` when behavior/invariants change.
+5. Update `docs/handoff.md` status and `docs/architecture.md` when behavior/invariants change.
 
 Minimum commands:
 ```bash
@@ -146,3 +146,17 @@ Before shipping:
 2. Gemini: verify StreamGenerate lifecycle stability and correct title export without requiring refresh.
 3. Grok: verify long-thinking sessions do not regress `Completed -> Streaming` and Save stays readiness-gated.
 4. Export metadata: verify canonical vs degraded exports set `captureSource`, `fidelity`, and `completeness` correctly.
+
+## 12) PR Review Triage Rules
+
+When processing external PR review comments:
+1. Verify each finding against current code before changing anything.
+2. Accept findings that materially improve correctness, regression safety, or diagnosability with low-to-moderate risk.
+3. Reject or defer findings when they are:
+   - Overengineering for current scope
+   - High-churn with little ROI
+   - Out of scope for the release slice
+   - Unrealistic edge cases without evidence
+   - Pure style changes with no reliability benefit
+4. For accepted findings: implement test-first, then minimal fix, then rerun targeted tests + `bun run tsc --noEmit`.
+5. For rejected/deferred findings in review docs: add a concise rationale directly under the point and sign as `GPT-5.3 Codex`.

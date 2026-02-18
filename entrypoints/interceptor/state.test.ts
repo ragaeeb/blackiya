@@ -11,7 +11,7 @@ describe('interceptor state helpers', () => {
         ]);
         const removed = pruneTimestampCache(map, 1_000, now);
         expect(removed).toBe(2);
-        expect(map.has('fresh')).toBe(true);
+        expect(map.has('fresh')).toBeTrue();
     });
 
     it('cleans attempt-scoped state for disposed attempts', () => {
@@ -35,10 +35,15 @@ describe('interceptor state helpers', () => {
             ]),
         };
         cleanupDisposedAttemptState('attempt-a', state, 3);
-        expect(state.disposedAttemptIds.has('attempt-a')).toBe(true);
-        expect(state.streamDumpFrameCountByAttempt.has('attempt-a')).toBe(false);
-        expect(state.streamDumpLastTextByAttempt.has('attempt-a')).toBe(false);
+        expect(state.disposedAttemptIds.has('attempt-a')).toBeTrue();
+        expect(state.streamDumpFrameCountByAttempt.has('attempt-a')).toBeFalse();
+        expect(state.streamDumpLastTextByAttempt.has('attempt-a')).toBeFalse();
         expect(state.latestAttemptIdByPlatform.get('Gemini')).toBeUndefined();
         expect(state.attemptByConversationId.get('conv-a')).toBeUndefined();
+
+        expect(state.streamDumpFrameCountByAttempt.get('attempt-b')).toBe(1);
+        expect(state.streamDumpLastTextByAttempt.get('attempt-b')).toBe('bbb');
+        expect(state.latestAttemptIdByPlatform.get('Grok')).toBe('attempt-b');
+        expect(state.attemptByConversationId.get('conv-b')).toBe('attempt-b');
     });
 });

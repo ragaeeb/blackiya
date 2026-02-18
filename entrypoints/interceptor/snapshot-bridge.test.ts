@@ -5,7 +5,7 @@ import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-br
 describe('snapshot bridge requester', () => {
     it('resolves when response message returns success', async () => {
         const testWindow = new Window();
-        const requester = createWindowJsonRequester(testWindow as unknown as any, {
+        const requester = createWindowJsonRequester(testWindow as unknown as globalThis.Window, {
             requestType: 'BLACKIYA_GET_JSON_REQUEST',
             responseType: 'BLACKIYA_GET_JSON_RESPONSE',
             timeoutMs: 200,
@@ -33,7 +33,7 @@ describe('snapshot bridge requester', () => {
 
     it('rejects when no response arrives before timeout', async () => {
         const testWindow = new Window();
-        const requester = createWindowJsonRequester(testWindow as unknown as any, {
+        const requester = createWindowJsonRequester(testWindow as unknown as globalThis.Window, {
             requestType: 'BLACKIYA_GET_JSON_REQUEST',
             responseType: 'BLACKIYA_GET_JSON_RESPONSE',
             timeoutMs: 20,

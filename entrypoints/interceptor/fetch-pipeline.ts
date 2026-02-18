@@ -1,3 +1,4 @@
+import { CHATGPT_PROMPT_REQUEST_PATH_PATTERN } from '@/platforms/chatgpt';
 import type { LLMPlatform } from '@/platforms/types';
 import { createAttemptId } from '@/utils/protocol/messages';
 
@@ -49,8 +50,7 @@ export function createFetchInterceptorContext(
         isNonChatGptApiRequest && fetchApiAdapter
             ? deps.resolveAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
             : undefined;
-    const isChatGptPromptRequest =
-        outgoingMethod === 'POST' && /\/backend-api\/f\/conversation(?:\?.*)?$/i.test(outgoingPath);
+    const isChatGptPromptRequest = outgoingMethod === 'POST' && CHATGPT_PROMPT_REQUEST_PATH_PATTERN.test(outgoingPath);
     const lifecycleConversationId = isChatGptPromptRequest ? deps.resolveLifecycleConversationId(args) : undefined;
     const lifecycleAttemptId = isChatGptPromptRequest ? createAttemptId('chatgpt') : undefined;
 

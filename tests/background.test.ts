@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { InMemoryLeaseStore } from '@/tests/helpers/in-memory-lease-store';
+import type { LogEntry } from '@/utils/logs-storage';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 type MessageHandler = (
@@ -7,29 +9,9 @@ type MessageHandler = (
     sendResponse: (response: unknown) => void,
 ) => boolean | undefined;
 
-class InMemoryLeaseStore {
-    private readonly entries = new Map<string, string>();
-
-    public async get(key: string): Promise<string | null> {
-        return this.entries.get(key) ?? null;
-    }
-
-    public async set(key: string, value: string): Promise<void> {
-        this.entries.set(key, value);
-    }
-
-    public async remove(key: string): Promise<void> {
-        this.entries.delete(key);
-    }
-
-    public async getAll(): Promise<Record<string, string>> {
-        return Object.fromEntries(this.entries.entries());
-    }
-}
-
 describe('background message handler', () => {
     let handlerFactory: (deps: {
-        saveLog: (payload: unknown) => Promise<void>;
+        saveLog: (payload: LogEntry) => Promise<void>;
         leaseCoordinator: ProbeLeaseCoordinator;
         logger: {
             info: (...args: unknown[]) => void;
@@ -45,13 +27,15 @@ describe('background message handler', () => {
     }
 
     async function waitForResponse(responses: unknown[], expectedLength: number): Promise<void> {
-        const maxAttempts = 50;
+        const maxAttempts = 200;
         for (let i = 0; i < maxAttempts; i += 1) {
             if (responses.length >= expectedLength) {
                 return;
             }
             await flushAsyncWork();
+            await new Promise((resolve) => setTimeout(resolve, 5));
         }
+        throw new Error(`Timed out waiting for ${expectedLength} responses; received ${responses.length}`);
     }
 
     beforeAll(async () => {
@@ -104,7 +88,7 @@ describe('background message handler', () => {
                 {},
                 sendResponse,
             ),
-        ).toBe(true);
+        ).toBeTrue();
         await waitForResponse(responses, 1);
         expect(responses[0]).toMatchObject({
             type: 'BLACKIYA_PROBE_LEASE_CLAIM_RESULT',
@@ -123,7 +107,7 @@ describe('background message handler', () => {
                 {},
                 sendResponse,
             ),
-        ).toBe(true);
+        ).toBeTrue();
         await waitForResponse(responses, 2);
         expect(responses[1]).toMatchObject({
             type: 'BLACKIYA_PROBE_LEASE_CLAIM_RESULT',
@@ -141,7 +125,7 @@ describe('background message handler', () => {
                 {},
                 sendResponse,
             ),
-        ).toBe(true);
+        ).toBeTrue();
         await waitForResponse(responses, 3);
         expect(responses[2]).toEqual({
             type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
@@ -158,7 +142,7 @@ describe('background message handler', () => {
                 {},
                 sendResponse,
             ),
-        ).toBe(true);
+        ).toBeTrue();
         await waitForResponse(responses, 4);
         expect(responses[3]).toEqual({
             type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
@@ -191,7 +175,13 @@ describe('background message handler', () => {
         const logResult = handler(
             {
                 type: 'LOG_ENTRY',
-                payload: { level: 'info', message: 'test' },
+                payload: {
+                    timestamp: new Date().toISOString(),
+                    level: 'info',
+                    message: 'test',
+                    context: 'content',
+                    data: [],
+                },
             },
             {},
             sendResponse,
@@ -201,7 +191,42 @@ describe('background message handler', () => {
         expect(savedLogs).toHaveLength(1);
 
         const pingResult = handler({ type: 'PING' }, {}, sendResponse);
-        expect(pingResult).toBe(true);
+        expect(pingResult).toBeTrue();
         expect(responses).toContainEqual({ success: true, pong: true });
+    });
+
+    it('drops malformed LOG_ENTRY payloads without calling saveLog', async () => {
+        const coordinator = new ProbeLeaseCoordinator({
+            store: new InMemoryLeaseStore(),
+            now: () => now,
+        });
+        let warned = false;
+        const handler = handlerFactory({
+            saveLog: async (payload) => {
+                savedLogs.push(payload);
+            },
+            leaseCoordinator: coordinator,
+            logger: {
+                info: () => {},
+                warn: () => {
+                    warned = true;
+                },
+                error: () => {},
+            },
+        });
+
+        const result = handler(
+            {
+                type: 'LOG_ENTRY',
+                payload: { level: 'info', message: 'missing timestamp/context' },
+            },
+            {},
+            () => {},
+        );
+
+        expect(result).toBeUndefined();
+        await flushAsyncWork();
+        expect(savedLogs).toHaveLength(0);
+        expect(warned).toBeTrue();
     });
 });

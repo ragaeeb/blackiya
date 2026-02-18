@@ -108,13 +108,25 @@ export class InterceptionManager {
             }
         }
         this.preserveSpecificTitle(conversationId, data, source, existing);
-        const target = existing && isSnapshotSource ? Object.assign(existing, data) : data;
+        const target = existing && isSnapshotSource ? this.mergeSnapshotIntoExisting(existing, data) : data;
         this.conversationCache.set(conversationId, target);
         logger.info(`Successfully captured/cached data for conversation: ${conversationId}`, {
             source,
             directIngest: true,
         });
         this.onDataCaptured(conversationId, target, { source });
+    }
+
+    private mergeSnapshotIntoExisting(existing: ConversationData, incoming: ConversationData): ConversationData {
+        // Preserve object identity so downstream references (e.g. late title updates) stay attached.
+        const blockedKeys = new Set(['__proto__', 'prototype', 'constructor']);
+        for (const [key, value] of Object.entries(incoming as unknown as Record<string, unknown>)) {
+            if (blockedKeys.has(key)) {
+                continue;
+            }
+            (existing as unknown as Record<string, unknown>)[key] = value;
+        }
+        return existing;
     }
 
     private isConversationReady(data: ConversationData): boolean {

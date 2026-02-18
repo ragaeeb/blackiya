@@ -490,4 +490,50 @@ describe('InterceptionManager', () => {
         expect(cached?.title).toBe('Discussion on Istinja Rulings');
         expect(cached?.update_time).toBe(3);
     });
+
+    it('should ignore prototype-poisoning keys when merging snapshot data into existing cache object', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        const baseConversation = {
+            title: 'Google Gemini',
+            create_time: 1,
+            update_time: 2,
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: [] },
+            },
+            conversation_id: 'gemini-safe-merge',
+            current_node: 'root',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'gemini',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+
+        manager.ingestConversationData(baseConversation, 'network');
+
+        const snapshotPayload = {
+            ...baseConversation,
+            update_time: 3,
+        } as any;
+        Object.defineProperty(snapshotPayload, '__proto__', {
+            value: { polluted: true },
+            enumerable: true,
+            configurable: true,
+        });
+
+        manager.ingestConversationData(snapshotPayload, 'stream-done-snapshot');
+
+        const cached = manager.getConversation('gemini-safe-merge');
+        expect(cached).toBeDefined();
+        expect((cached as any).polluted).toBeUndefined();
+        expect((Object.prototype as any).polluted).toBeUndefined();
+        expect(cached?.update_time).toBe(3);
+    });
 });

@@ -23,6 +23,6 @@ describe('StructuredAttemptLogger', () => {
         logger.emit('a1', 'info', 'event2', 'world', {}, 'k2');
 
         expect(emitted.filter((e) => e.level === 'info').length).toBe(1);
-        expect(emitted.some((e) => e.message === 'log_budget_exceeded')).toBe(true);
+        expect(emitted.some((e) => e.message === 'log_budget_exceeded')).toBeTrue();
     });
 });

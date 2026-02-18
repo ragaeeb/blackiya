@@ -30,6 +30,13 @@ On discovery-enabled hosts, interceptor records compact request/response metadat
 
 Static assets are filtered out.
 
+Current host scope:
+1. Enabled capture path is currently wired for Gemini and Grok hosts:
+   - `gemini.google.com`
+   - `grok.com`
+   - `x.com` (Grok surface)
+2. ChatGPT is not part of this discovery-host filter today.
+
 If stream dump is enabled, discovery is complemented with frame/chunk-level capture for stream forensics.
 
 ## When To Use
@@ -43,6 +50,9 @@ Use discovery mode if:
 
 ## Workflow
 1. Enable discovery diagnostics.
+   - In DevTools console on a target host, run:
+   - `localStorage.setItem('blackiya.discovery', '1')`
+   - Reload tab after toggling.
 2. Reproduce once with minimal noise (single tab first).
 3. Export debug report TXT.
 4. If unclear, export full logs JSON.
@@ -50,6 +60,9 @@ Use discovery mode if:
 6. Identify changed endpoints, payload shapes, and lifecycle ordering.
 7. Update adapter parsing/patterns and tests.
 8. Re-run single-tab, then multi-tab stress.
+
+To disable:
+- `localStorage.removeItem('blackiya.discovery')` (or set to `0`) and reload.
 
 ## Platform Notes
 - ChatGPT: stream lifecycle is usually visible early; canonical capture may still lag.

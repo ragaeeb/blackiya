@@ -26,8 +26,8 @@ describe('interceptor discovery helpers', () => {
                 throw new Error('blocked');
             },
         };
-        expect(isDiscoveryDiagnosticsEnabled(enabledStorage)).toBe(true);
-        expect(isDiscoveryDiagnosticsEnabled(disabledStorage)).toBe(false);
-        expect(isDiscoveryDiagnosticsEnabled(throwingStorage)).toBe(false);
+        expect(isDiscoveryDiagnosticsEnabled(enabledStorage)).toBeTrue();
+        expect(isDiscoveryDiagnosticsEnabled(disabledStorage)).toBeFalse();
+        expect(isDiscoveryDiagnosticsEnabled(throwingStorage)).toBeFalse();
     });
 });

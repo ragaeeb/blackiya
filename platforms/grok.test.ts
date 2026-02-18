@@ -103,15 +103,15 @@ describe('Grok Platform Adapter', () => {
 
     describe('isPlatformUrl', () => {
         it('should recognize valid Grok URLs', () => {
-            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok?conversation=123')).toBe(true);
-            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok')).toBe(true);
-            expect(grokAdapter.isPlatformUrl('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBe(true);
-            expect(grokAdapter.isPlatformUrl('https://grok.com/')).toBe(true);
+            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok?conversation=123')).toBeTrue();
+            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok')).toBeTrue();
+            expect(grokAdapter.isPlatformUrl('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBeTrue();
+            expect(grokAdapter.isPlatformUrl('https://grok.com/')).toBeTrue();
         });
 
         it('should reject non-Grok URLs', () => {
-            expect(grokAdapter.isPlatformUrl('https://x.com/home')).toBe(false);
-            expect(grokAdapter.isPlatformUrl('https://chatgpt.com')).toBe(false);
+            expect(grokAdapter.isPlatformUrl('https://x.com/home')).toBeFalse();
+            expect(grokAdapter.isPlatformUrl('https://chatgpt.com')).toBeFalse();
         });
     });
 
@@ -119,12 +119,12 @@ describe('Grok Platform Adapter', () => {
         it('should match Grok GraphQL conversation endpoint', () => {
             const endpoint =
                 'https://x.com/i/api/graphql/6QmFgXuRQyOnW2iJ7nIk7g/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222013295304527827227%22%7D';
-            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
         it('should match GrokHistory endpoint', () => {
             const endpoint = 'https://x.com/i/api/graphql/9Hyh5D4-WXLnExZkONSkZg/GrokHistory?variables=%7B%7D';
-            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
         it('should match grok.com conversation endpoints', () => {
@@ -133,47 +133,47 @@ describe('Grok Platform Adapter', () => {
                 pattern.test(
                     'https://grok.com/rest/app-chat/conversations_v2/01cb0729-6455-471d-b33a-124b3de76a29?includeWorkspaces=true&includeTaskResult=true',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
             expect(
                 pattern.test(
                     'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/response-node?includeThreads=true',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
             expect(
                 pattern.test(
                     'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
         });
 
         it('should match x.com add_response.json streaming endpoint (V2.1-027)', () => {
             const endpoint = 'https://x.com/2/grok/add_response.json';
-            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
         it('should match grok.com conversations/new endpoint', () => {
             const endpoint = 'https://grok.com/rest/app-chat/conversations/new';
-            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
         it('should match completion trigger for add_response.json (V2.1-027)', () => {
             const pattern = grokAdapter.completionTriggerPattern;
-            expect(pattern.test('https://x.com/2/grok/add_response.json')).toBe(true);
+            expect(pattern.test('https://x.com/2/grok/add_response.json')).toBeTrue();
         });
 
         it('should match completion trigger for conversations/new (V2.1-026)', () => {
             const pattern = grokAdapter.completionTriggerPattern;
-            expect(pattern.test('https://grok.com/rest/app-chat/conversations/new')).toBe(true);
+            expect(pattern.test('https://grok.com/rest/app-chat/conversations/new')).toBeTrue();
         });
 
         it('should not match other GraphQL endpoints', () => {
             const endpoint = 'https://x.com/i/api/graphql/abc123/UserByScreenName';
-            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeFalse();
         });
 
         it('should not match non-API URLs', () => {
             const endpoint = 'https://x.com/i/grok?conversation=123';
-            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBe(false);
+            expect(grokAdapter.apiEndpointPattern.test(endpoint)).toBeFalse();
         });
 
         it('should match completion trigger URLs for x.com and grok.com response endpoints', () => {
@@ -182,15 +182,15 @@ describe('Grok Platform Adapter', () => {
                 pattern.test(
                     'https://x.com/i/api/graphql/6QmFgXuRQyOnW2iJ7nIk7g/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222013295304527827227%22%7D',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
             expect(
                 pattern.test(
                     'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
             expect(
                 pattern.test('https://x.com/i/api/graphql/9Hyh5D4-WXLnExZkONSkZg/GrokHistory?variables=%7B%7D'),
-            ).toBe(false);
+            ).toBeFalse();
         });
     });
 
@@ -318,7 +318,7 @@ describe('Grok Platform Adapter', () => {
             if (nodes.length > 0) {
                 for (const node of nodes) {
                     expect(node.message?.content.thoughts).toBeDefined();
-                    expect(Array.isArray(node.message?.content.thoughts)).toBe(true);
+                    expect(Array.isArray(node.message?.content.thoughts)).toBeTrue();
                 }
             }
         });
@@ -731,7 +731,7 @@ describe('Grok Platform Adapter', () => {
 
             for (const node of nodes) {
                 expect(node.id).toBeDefined();
-                expect(Array.isArray(node.children)).toBe(true);
+                expect(Array.isArray(node.children)).toBeTrue();
             }
         });
 
@@ -870,8 +870,8 @@ describe('Grok Platform Adapter - evaluateReadiness', () => {
             },
         });
 
-        expect(readiness?.ready).toBe(false);
-        expect(readiness?.terminal).toBe(false);
+        expect(readiness?.ready).toBeFalse();
+        expect(readiness?.terminal).toBeFalse();
     });
 
     it('returns ready for finished terminal assistant response', () => {
@@ -912,8 +912,8 @@ describe('Grok Platform Adapter - evaluateReadiness', () => {
             },
         });
 
-        expect(readiness?.ready).toBe(true);
-        expect(readiness?.terminal).toBe(true);
+        expect(readiness?.ready).toBeTrue();
+        expect(readiness?.terminal).toBeTrue();
         expect(readiness?.contentHash).not.toBeNull();
     });
 });
@@ -929,26 +929,26 @@ describe('Grok dual-match and metadata endpoints', () => {
     describe('Dual-match: URLs matching both apiEndpointPattern AND completionTriggerPattern', () => {
         it('conversations/new matches BOTH patterns (root cause of premature completion)', () => {
             const url = 'https://grok.com/rest/app-chat/conversations/new';
-            expect(grokAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(grokAdapter.completionTriggerPattern?.test(url)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(grokAdapter.completionTriggerPattern?.test(url)).toBeTrue();
         });
 
         it('add_response.json matches BOTH patterns', () => {
             const url = 'https://x.com/2/grok/add_response.json';
-            expect(grokAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(grokAdapter.completionTriggerPattern?.test(url)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(grokAdapter.completionTriggerPattern?.test(url)).toBeTrue();
         });
 
         it('load-responses matches BOTH patterns', () => {
             const url = 'https://grok.com/rest/app-chat/conversations/af642f01/load-responses';
-            expect(grokAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(grokAdapter.completionTriggerPattern?.test(url)).toBe(true);
+            expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(grokAdapter.completionTriggerPattern?.test(url)).toBeTrue();
         });
 
         it('conversations_v2 matches apiEndpointPattern but NOT completionTriggerPattern', () => {
             const url = 'https://grok.com/rest/app-chat/conversations_v2/af642f01?includeWorkspaces=true';
-            expect(grokAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(grokAdapter.completionTriggerPattern?.test(url)).toBe(false);
+            expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(grokAdapter.completionTriggerPattern?.test(url)).toBeFalse();
         });
     });
 

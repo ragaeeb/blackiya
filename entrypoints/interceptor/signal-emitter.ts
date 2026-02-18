@@ -19,6 +19,13 @@ export function shouldEmitGeminiXhrLoadendCompletion(
     state: { emittedCompleted: boolean; emittedStreaming: boolean; seedConversationId?: string },
     requestUrl: string,
 ): boolean {
+    return tryMarkGeminiXhrLoadendCompleted(state, requestUrl);
+}
+
+export function tryMarkGeminiXhrLoadendCompleted(
+    state: { emittedCompleted: boolean; emittedStreaming: boolean; seedConversationId?: string },
+    requestUrl: string,
+): boolean {
     if (state.emittedCompleted) {
         return false;
     }

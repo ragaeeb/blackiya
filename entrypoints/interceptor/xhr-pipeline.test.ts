@@ -19,7 +19,7 @@ describe('xhr pipeline helpers', () => {
         });
         expect(context.methodUpper).toBe('POST');
         expect(context.requestAdapter?.name).toBe('Grok');
-        expect(context.shouldEmitNonChatLifecycle).toBe(true);
+        expect(context.shouldEmitNonChatLifecycle).toBeTrue();
         expect(context.conversationId).toBe('grok-conv-1');
         expect(context.attemptId).toBe('Grok:grok-conv-1');
     });
@@ -37,7 +37,7 @@ describe('xhr pipeline helpers', () => {
             resolveAttemptIdForConversation: () => 'ignored',
         });
         expect(context.requestAdapter).toBeNull();
-        expect(context.shouldEmitNonChatLifecycle).toBe(false);
+        expect(context.shouldEmitNonChatLifecycle).toBeFalse();
         expect(context.attemptId).toBeUndefined();
     });
 });

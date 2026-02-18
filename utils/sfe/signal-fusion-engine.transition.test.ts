@@ -35,7 +35,7 @@ describe('SignalFusionEngine transitions', () => {
             conversationId: 'c1',
         });
         expect(completedHint.phase).toBe('completed_hint');
-        expect(completedHint.ready).toBe(false);
+        expect(completedHint.ready).toBeFalse();
     });
 
     it('ignores regressive transitions', () => {
@@ -62,7 +62,7 @@ describe('SignalFusionEngine transitions', () => {
     it('returns not_captured for unknown attempt resolution', () => {
         const sfe = new SignalFusionEngine({ now: () => 999 });
         const unknown = sfe.resolve('missing');
-        expect(unknown.ready).toBe(false);
+        expect(unknown.ready).toBeFalse();
         expect(unknown.reason).toBe('not_captured');
         expect(unknown.updatedAtMs).toBe(999);
     });
@@ -252,7 +252,7 @@ describe('SignalFusionEngine transitions', () => {
                 latestAssistantTextLength: 8,
             },
         });
-        expect(first.ready).toBe(false);
+        expect(first.ready).toBeFalse();
         expect(first.blockingConditions).toContain('awaiting_second_sample');
         expect(first.blockingConditions).not.toContain('stabilization_timeout');
 
@@ -285,7 +285,7 @@ describe('SignalFusionEngine transitions', () => {
                 latestAssistantTextLength: 8,
             },
         });
-        expect(second.ready).toBe(true);
+        expect(second.ready).toBeTrue();
         expect(second.phase).toBe('captured_ready');
     });
 });

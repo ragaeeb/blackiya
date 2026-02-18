@@ -3,7 +3,7 @@ import { shouldProcessGeminiChunk } from '@/entrypoints/interceptor/stream-monit
 
 describe('gemini-stream-monitor', () => {
     it('ignores empty chunks and processes non-empty chunks', () => {
-        expect(shouldProcessGeminiChunk('   ')).toBe(false);
-        expect(shouldProcessGeminiChunk('token')).toBe(true);
+        expect(shouldProcessGeminiChunk('   ')).toBeFalse();
+        expect(shouldProcessGeminiChunk('token')).toBeTrue();
     });
 });

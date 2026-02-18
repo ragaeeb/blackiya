@@ -26,6 +26,7 @@ export class CrossTabProbeLease {
         this.sendMessage =
             options?.sendMessage ??
             ((message: ProbeLeaseRuntimeMessage) => {
+                // WXT's runtime typing is narrower than Chrome's runtime message payloads.
                 return browser.runtime.sendMessage(message as any);
             });
     }

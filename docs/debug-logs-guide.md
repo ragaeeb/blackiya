@@ -43,6 +43,7 @@ These should usually be enough for first-pass triage:
 - Race/disposal hygiene:
 - `attempt_alias_forwarded`
 - `late_signal_dropped_after_dispose`
+- `Probe lease claim transport failed; failing open`
 
 - UI state:
 - `Button state ...`
@@ -90,6 +91,7 @@ These statuses are expected during normal capture retries unless noted otherwise
 10. `stream-done: lease held by another tab`
 - Meaning: another tab currently owns probe arbitration for this conversation.
 - Concern if: it never clears after lease expiry/retry window.
+- Note: if you instead see repeated `Probe lease claim transport failed; failing open`, arbitration transport is degraded and multiple tabs may probe concurrently.
 
 Readiness tie-in:
 - `canonical_ready`: expected healthy end state; Save enabled.

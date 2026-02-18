@@ -10,13 +10,13 @@ describe('protocol/messages', () => {
                 attemptId: 'a-1',
                 phase: 'prompt-sent',
             }),
-        ).toBe(true);
+        ).toBeTrue();
         expect(
             protocol.isBlackiyaMessage({
                 type: 'BLACKIYA_STREAM_DUMP_CONFIG',
                 enabled: true,
             }),
-        ).toBe(true);
+        ).toBeTrue();
         expect(
             protocol.isBlackiyaMessage({
                 type: 'BLACKIYA_STREAM_DUMP_FRAME',
@@ -25,7 +25,7 @@ describe('protocol/messages', () => {
                 kind: 'snapshot',
                 text: 'hello',
             }),
-        ).toBe(true);
+        ).toBeTrue();
     });
 
     it('rejects lifecycle and completion messages without attempt IDs', () => {
@@ -35,32 +35,32 @@ describe('protocol/messages', () => {
                 platform: 'ChatGPT',
                 phase: 'streaming',
             }),
-        ).toBe(false);
+        ).toBeFalse();
         expect(
             protocol.isBlackiyaMessage({
                 type: 'BLACKIYA_RESPONSE_FINISHED',
                 platform: 'ChatGPT',
                 conversationId: 'conv-1',
             }),
-        ).toBe(false);
+        ).toBeFalse();
         expect(
             protocol.isBlackiyaMessage({
                 type: 'BLACKIYA_STREAM_DELTA',
                 platform: 'ChatGPT',
                 text: 'hello',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
     it('does not expose removed legacy helper exports', () => {
-        expect('isLegacyLifecycleMessage' in protocol).toBe(false);
-        expect('isLegacyFinishedMessage' in protocol).toBe(false);
-        expect('isLegacyStreamDeltaMessage' in protocol).toBe(false);
-        expect('buildLegacyAttemptId' in protocol).toBe(false);
+        expect('isLegacyLifecycleMessage' in protocol).toBeFalse();
+        expect('isLegacyFinishedMessage' in protocol).toBeFalse();
+        expect('isLegacyStreamDeltaMessage' in protocol).toBeFalse();
+        expect('buildLegacyAttemptId' in protocol).toBeFalse();
     });
 
     it('creates attempt IDs', () => {
         const attemptId = protocol.createAttemptId('test');
-        expect(attemptId.startsWith('test:')).toBe(true);
+        expect(attemptId.startsWith('test:')).toBeTrue();
     });
 });
