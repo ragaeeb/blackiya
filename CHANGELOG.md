@@ -1,3 +1,10 @@
+## [2.0.3](https://github.com/ragaeeb/blackiya/compare/v2.0.2...v2.0.3) (2026-02-18)
+
+
+### Bug Fixes
+
+* **p2:** P2 implementation ([#23](https://github.com/ragaeeb/blackiya/issues/23)) ([11347ae](https://github.com/ragaeeb/blackiya/commit/11347ae20088b2feb6d6ae48502b9b4d4442558d))
+
 ## [2.0.2](https://github.com/ragaeeb/blackiya/compare/v2.0.1...v2.0.2) (2026-02-18)
 
 
