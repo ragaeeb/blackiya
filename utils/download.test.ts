@@ -21,30 +21,49 @@ type BrowserApiOverrides = {
 
 function withMockedBrowserAPIs(overrides: BrowserApiOverrides, fn: () => void): void {
     const globalAny = globalThis as any;
+    const hadDocument = Object.prototype.hasOwnProperty.call(globalAny, 'document');
     const originalDocument = globalAny.document;
     const originalDocumentDescriptor = Object.getOwnPropertyDescriptor(globalAny, 'document');
     const originalCreateObjectURLDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL');
     const originalRevokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL');
 
-    const body = {
-        appendChild: overrides.document?.body?.appendChild ?? (() => {}),
-        removeChild: overrides.document?.body?.removeChild ?? (() => {}),
+    const defaultBody = {
+        appendChild: () => {},
+        removeChild: () => {},
     };
+    const testDocument = (originalDocument ??
+        ({
+            body: defaultBody,
+            createElement: () => ({
+                href: '',
+                download: '',
+                click: () => {},
+            }),
+        } as any)) as any;
+
+    if (!testDocument.body) {
+        testDocument.body = defaultBody;
+    }
+
+    const originalCreateElement = testDocument.createElement;
+    const originalAppendChild = testDocument.body.appendChild;
+    const originalRemoveChild = testDocument.body.removeChild;
 
     Object.defineProperty(globalAny, 'document', {
         configurable: true,
         writable: true,
-        value: {
-            body,
-            createElement:
-                overrides.document?.createElement ??
-                (() => ({
-                    href: '',
-                    download: '',
-                    click: () => {},
-                })),
-        },
+        value: testDocument,
     });
+
+    testDocument.createElement =
+        overrides.document?.createElement ??
+        (() => ({
+            href: '',
+            download: '',
+            click: () => {},
+        }));
+    testDocument.body.appendChild = overrides.document?.body?.appendChild ?? (() => {});
+    testDocument.body.removeChild = overrides.document?.body?.removeChild ?? (() => {});
 
     Object.defineProperty(globalThis.URL, 'createObjectURL', {
         configurable: true,
@@ -60,10 +79,16 @@ function withMockedBrowserAPIs(overrides: BrowserApiOverrides, fn: () => void): 
     try {
         fn();
     } finally {
-        if (originalDocumentDescriptor) {
+        testDocument.createElement = originalCreateElement;
+        testDocument.body.appendChild = originalAppendChild;
+        testDocument.body.removeChild = originalRemoveChild;
+
+        if (hadDocument && originalDocumentDescriptor) {
             Object.defineProperty(globalAny, 'document', originalDocumentDescriptor);
-        } else {
+        } else if (hadDocument) {
             globalAny.document = originalDocument;
+        } else {
+            delete globalAny.document;
         }
 
         if (originalCreateObjectURLDescriptor) {
