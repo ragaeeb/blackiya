@@ -33,6 +33,7 @@ import type {
     StreamDumpFrameMessage,
     TitleResolvedMessage,
 } from '@/utils/protocol/messages';
+import { generateSessionToken, isValidToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 import {
     getConversationAttemptMismatch as getConversationAttemptMismatchForRegistry,
     resolveRunnerAttemptId,
@@ -217,6 +218,14 @@ export function runPlatform(): void {
 
     const runnerControl: RunnerControl = {};
     (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] = runnerControl;
+
+    // S-01: Generate per-session token for postMessage authentication
+    const sessionToken = generateSessionToken();
+    setSessionToken(sessionToken);
+
+    // Share session token with MAIN world (interceptor) via handshake
+    window.postMessage({ type: 'BLACKIYA_SESSION_INIT', token: sessionToken }, window.location.origin);
+
     const runnerState = new RunnerState();
 
     let currentAdapter: LLMPlatform | null = null;
@@ -1266,7 +1275,7 @@ export function runPlatform(): void {
             attemptId,
             reason,
         };
-        window.postMessage(payload, window.location.origin);
+        window.postMessage(stampToken(payload), window.location.origin);
     }
 
     function emitStreamDumpConfig(): void {
@@ -1274,7 +1283,7 @@ export function runPlatform(): void {
             type: 'BLACKIYA_STREAM_DUMP_CONFIG',
             enabled: streamDumpEnabled,
         };
-        window.postMessage(payload, window.location.origin);
+        window.postMessage(stampToken(payload), window.location.origin);
     }
 
     async function loadStreamDumpSetting(): Promise<void> {
@@ -2364,11 +2373,11 @@ export function runPlatform(): void {
 
             window.addEventListener('message', onMessage);
             window.postMessage(
-                {
+                stampToken({
                     type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST',
                     requestId,
                     conversationId,
-                },
+                }),
                 window.location.origin,
             );
         });
@@ -4246,13 +4255,13 @@ export function runPlatform(): void {
         options?: { data?: unknown; error?: string },
     ): void {
         window.postMessage(
-            {
+            stampToken({
                 type: 'BLACKIYA_GET_JSON_RESPONSE',
                 requestId,
                 success,
                 data: options?.data,
                 error: options?.error,
-            },
+            }),
             window.location.origin,
         );
     }
@@ -4302,6 +4311,10 @@ export function runPlatform(): void {
     function registerWindowBridge(): () => void {
         const handler = (event: MessageEvent) => {
             if (!isSameWindowOrigin(event)) {
+                return;
+            }
+            if (!isValidToken(event.data)) {
+                logger.debug('Dropped message with invalid session token');
                 return;
             }
             dispatchWindowBridgeMessage(event.data);

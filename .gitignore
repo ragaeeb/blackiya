@@ -21,6 +21,7 @@ stats.html
 stats-*.json
 .wxt
 web-ext.config.ts
+.minimax
 
 # Editor directories and files
 .idea

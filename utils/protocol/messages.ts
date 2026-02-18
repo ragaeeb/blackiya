@@ -91,7 +91,13 @@ export type BlackiyaMessage =
     | StreamDumpConfigMessage
     | StreamDumpFrameMessage
     | CaptureInterceptedMessage
-    | LogEntryMessage;
+    | LogEntryMessage
+    | SessionInitMessage;
+
+export interface SessionInitMessage {
+    type: 'BLACKIYA_SESSION_INIT';
+    token: string;
+}
 
 function hasString(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0;
@@ -137,6 +143,8 @@ export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
             return hasString(value.platform) && hasString(value.url) && typeof value.data === 'string';
         case 'LLM_LOG_ENTRY':
             return isRecord(value.payload) && hasString(value.payload.level) && hasString(value.payload.message);
+        case 'BLACKIYA_SESSION_INIT':
+            return hasString(value.token);
         default:
             return false;
     }
