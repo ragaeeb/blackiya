@@ -34,7 +34,6 @@ export function clearCanonicalStabilizationAttemptState(
 
 export function resolveShouldSkipCanonicalRetryAfterAwait(
     attemptId: string,
-    _conversationId: string,
     disposedOrSuperseded: boolean,
     mappedAttemptId: string | undefined,
     resolveAttemptId: (attemptId: string) => string,

@@ -66,7 +66,9 @@ import { RunnerState } from '@/utils/runner/state';
 import {
     appendLiveRunnerStreamPreview,
     appendPendingRunnerStreamPreview,
+    ensureLiveRunnerStreamPreview,
     migratePendingRunnerStreamPreview,
+    removePendingRunnerStreamPreview,
     type RunnerStreamPreviewState,
     withPreservedRunnerStreamMirrorSnapshot,
 } from '@/utils/runner/stream-preview';
@@ -905,7 +907,6 @@ export function runPlatform(): void {
         const disposedOrSuperseded = isAttemptDisposedOrSuperseded(attemptId);
         const shouldSkip = resolveShouldSkipCanonicalRetryAfterAwait(
             attemptId,
-            conversationId,
             disposedOrSuperseded,
             mappedAttempt,
             resolveAliasedAttemptId,
@@ -3932,7 +3933,7 @@ export function runPlatform(): void {
             return;
         }
         if (!liveStreamPreviewByConversation.has(conversationId)) {
-            setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
+            ensureLiveRunnerStreamPreview(streamPreviewState, conversationId);
             setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
         }
         lifecycleAttemptId = attemptId;
@@ -4186,7 +4187,7 @@ export function runPlatform(): void {
         clearCanonicalStabilizationRetry(canonicalDisposedId);
         sfe.dispose(canonicalDisposedId);
         pendingLifecycleByAttempt.delete(canonicalDisposedId);
-        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalDisposedId);
+        removePendingRunnerStreamPreview(streamPreviewState, canonicalDisposedId);
         for (const [conversationId, mappedAttemptId] of attemptByConversation.entries()) {
             if (shouldRemoveDisposedAttemptBinding(mappedAttemptId, canonicalDisposedId, resolveAliasedAttemptId)) {
                 attemptByConversation.delete(conversationId);

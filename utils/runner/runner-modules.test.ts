@@ -10,8 +10,10 @@ import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
 import {
     appendLiveRunnerStreamPreview,
     appendPendingRunnerStreamPreview,
+    ensureLiveRunnerStreamPreview,
     mergeRunnerStreamProbeText,
     migratePendingRunnerStreamPreview,
+    removePendingRunnerStreamPreview,
     type RunnerStreamPreviewState,
     withPreservedRunnerStreamMirrorSnapshot,
 } from '@/utils/runner/stream-preview';
@@ -96,6 +98,23 @@ describe('runner helper modules', () => {
         const appended = appendLiveRunnerStreamPreview(state, 'conv-1', 'Update');
         expect(appended).toBe('Initial Update');
         expect(state.liveByConversation.get('conv-1')).toBe('Initial Update');
+    });
+
+    it('should initialize empty live previews and remove pending previews via helpers', () => {
+        const state: RunnerStreamPreviewState = {
+            liveByConversation: new Map<string, string>(),
+            liveByAttemptWithoutConversation: new Map<string, string>([['attempt-2', 'pending']]),
+            preservedByConversation: new Map<string, string>(),
+            maxEntries: 10,
+        };
+
+        const initialized = ensureLiveRunnerStreamPreview(state, 'conv-2');
+        expect(initialized).toBe('');
+        expect(state.liveByConversation.get('conv-2')).toBe('');
+
+        const removed = removePendingRunnerStreamPreview(state, 'attempt-2');
+        expect(removed).toBeTrue();
+        expect(state.liveByAttemptWithoutConversation.has('attempt-2')).toBeFalse();
     });
 
     it('should preserve live mirror snapshot text only for stream-done probe states', () => {

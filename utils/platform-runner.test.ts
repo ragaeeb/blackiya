@@ -4332,7 +4332,6 @@ describe('canonical stabilization retry helpers', () => {
     it('re-checks disposal and conversation mismatch after await boundaries', () => {
         const disposed = resolveShouldSkipCanonicalRetryAfterAwait(
             'attempt-1',
-            'conv-1',
             true,
             undefined,
             (attemptId) => attemptId,
@@ -4341,7 +4340,6 @@ describe('canonical stabilization retry helpers', () => {
 
         const mismatched = resolveShouldSkipCanonicalRetryAfterAwait(
             'attempt-1',
-            'conv-1',
             false,
             'attempt-2',
             (attemptId) => attemptId,
@@ -4350,7 +4348,6 @@ describe('canonical stabilization retry helpers', () => {
 
         const canonicalAliasMatch = resolveShouldSkipCanonicalRetryAfterAwait(
             'attempt-1',
-            'conv-1',
             false,
             'alias-attempt-1',
             (attemptId) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),

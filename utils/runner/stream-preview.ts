@@ -1,6 +1,7 @@
 import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
 
+// Tuned to retain enough live context for diagnostics while staying bounded for popup rendering.
 const DEFAULT_MAX_PREVIEW_LENGTH = 15_503;
 
 export type RunnerStreamPreviewState = {
@@ -69,6 +70,22 @@ export function appendPendingRunnerStreamPreview(
     const capped = appendStreamProbePreview('', next, state.maxPreviewLength ?? DEFAULT_MAX_PREVIEW_LENGTH);
     setBoundedMapValue(state.liveByAttemptWithoutConversation, canonicalAttemptId, capped, state.maxEntries);
     return capped;
+}
+
+export function removePendingRunnerStreamPreview(
+    state: RunnerStreamPreviewState,
+    canonicalAttemptId: string,
+): boolean {
+    return state.liveByAttemptWithoutConversation.delete(canonicalAttemptId);
+}
+
+export function ensureLiveRunnerStreamPreview(state: RunnerStreamPreviewState, conversationId: string): string {
+    const current = state.liveByConversation.get(conversationId);
+    if (current !== undefined) {
+        return current;
+    }
+    setBoundedMapValue(state.liveByConversation, conversationId, '', state.maxEntries);
+    return '';
 }
 
 export function migratePendingRunnerStreamPreview(

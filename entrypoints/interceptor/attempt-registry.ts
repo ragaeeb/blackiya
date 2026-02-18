@@ -92,7 +92,7 @@ export function createInterceptorAttemptRegistry(
         conversationId?: string,
         platformName = defaultPlatformName,
     ): string | undefined => {
-        const platformKey = platformName || defaultPlatformName;
+        const platformKey = resolvePlatformKey(platformName);
         if (conversationId) {
             const bound = state.attemptByConversationId.get(conversationId);
             if (bound && !state.disposedAttemptIds.has(bound)) {
