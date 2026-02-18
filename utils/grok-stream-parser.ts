@@ -2,6 +2,32 @@ import { dedupePreserveOrder } from '@/utils/text-utils';
 
 const GROK_CONVERSATION_ID_REGEX = /^[a-zA-Z0-9-]{8,128}$/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+const TOOL_USAGE_CARD_ARGS_REGEX = /<xai:tool_args><!\[CDATA\[([\s\S]*?)\]\]><\/xai:tool_args>/i;
+const GROK_METADATA_KEYS_TO_SKIP = new Set(['responseId', 'messageTag', 'messageStepId', 'toolUsageCardId']);
+
+function extractToolUsageCardMessage(value: string): string | null {
+    if (!value.includes('<xai:tool_usage_card')) {
+        return null;
+    }
+    const argsMatch = value.match(TOOL_USAGE_CARD_ARGS_REGEX);
+    const rawArgs = argsMatch?.[1]?.trim();
+    if (!rawArgs) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(rawArgs) as { message?: unknown };
+        if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+            return parsed.message.trim();
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
+
+function normalizeCandidateText(value: string): string {
+    return extractToolUsageCardMessage(value) ?? value;
+}
 
 function isLikelyGrokText(value: string): boolean {
     const trimmed = value.trim();
@@ -34,8 +60,9 @@ function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void 
         return;
     }
     if (typeof node === 'string') {
-        if (isLikelyGrokText(node)) {
-            out.push(node.trim());
+        const normalized = normalizeCandidateText(node).trim();
+        if (isLikelyGrokText(normalized)) {
+            out.push(normalized);
         }
         return;
     }
@@ -56,7 +83,14 @@ function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void 
             collectLikelyTextValues(obj[key], out, depth + 1);
         }
     }
-    for (const value of Object.values(obj)) {
+    const shouldSkipThinkingToken = obj.isThinking === true && typeof obj.token === 'string';
+    for (const [key, value] of Object.entries(obj)) {
+        if (GROK_METADATA_KEYS_TO_SKIP.has(key)) {
+            continue;
+        }
+        if (shouldSkipThinkingToken && key === 'token') {
+            continue;
+        }
         collectLikelyTextValues(value, out, depth + 1);
     }
 }
@@ -111,6 +145,9 @@ function collectDeepSearchReasoning(headers: unknown, out: string[]): void {
 function collectReasoningFromObject(obj: Record<string, unknown>, out: string[]): void {
     pushReasoningIfText(obj.thinking_trace, out);
     pushReasoningIfText(obj.reasoning, out);
+    if (obj.isThinking === true && typeof obj.token === 'string') {
+        pushReasoningIfText(normalizeCandidateText(obj.token), out);
+    }
     collectDeepSearchReasoning(obj.deepsearch_headers, out);
 }
 

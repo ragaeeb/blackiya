@@ -61,6 +61,29 @@ Use discovery mode if:
 7. Update adapter parsing/patterns and tests.
 8. Re-run single-tab, then multi-tab stress.
 
+## HAR Triage Workflow (Automatable)
+Use this when you already have a DevTools `.har` export and want a repeatable, agent-friendly summary.
+
+1. Export HAR from DevTools after a clean repro window.
+2. Run the analyzer:
+   - `bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking" --hint "I have the full text broken into segments P101391 to P101395a."`
+3. Review generated files:
+   - `logs/har-analysis/grok.com.analysis.json`
+   - `logs/har-analysis/grok.com.analysis.md`
+4. Use JSON as machine-readable input for agent workflows:
+   - endpoint inventory (`endpointSummary`)
+   - likely stream endpoints (`likelyStreamingEndpoints`)
+   - timeline (`timeline`)
+   - hint hits with snippets (`hintMatches`)
+5. Use Markdown for quick human triage and PR notes.
+
+Notes:
+- The analyzer redacts sensitive URL/header fields (`token`, `authorization`, `cookie`, etc.).
+- The analyzer decodes base64 HAR response bodies before hint matching.
+- `--hint` is repeatable; pass exact strings you suspect appear in reasoning or stream payloads.
+- `--host` is repeatable; useful for mixed captures (e.g., `grok.com` + `x.com`).
+- Override output paths with `--output` and `--report` as needed.
+
 To disable:
 - `localStorage.removeItem('blackiya.discovery')` (or set to `0`) and reload.
 

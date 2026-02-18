@@ -242,6 +242,7 @@ export function runPlatform(): void {
     let lastStreamProbeKey = '';
     let lastStreamProbeConversationId: string | null = null;
     const liveStreamPreviewByConversation = runnerState.streamPreviewByConversation;
+    const liveStreamPreviewByAttemptWithoutConversation = new Map<string, string>();
     const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
@@ -498,9 +499,10 @@ export function runPlatform(): void {
         if (!conversationId) {
             return;
         }
+        const canonicalAttemptId = resolveAliasedAttemptId(attemptId);
         const isNewBinding = !attemptByConversation.has(conversationId);
         const previous = attemptByConversation.get(conversationId);
-        if (previous && previous !== attemptId) {
+        if (previous && previous !== canonicalAttemptId) {
             const canonicalPrevious = resolveAliasedAttemptId(previous);
             sfe.getAttemptTracker().markSuperseded(canonicalPrevious, attemptId);
             cancelStreamDoneProbe(canonicalPrevious, 'superseded');
@@ -517,8 +519,9 @@ export function runPlatform(): void {
                 `supersede:${conversationId}:${attemptId}`,
             );
         }
-        setBoundedMapValue(attemptByConversation, conversationId, attemptId, MAX_CONVERSATION_ATTEMPTS);
-        if (isNewBinding || previous !== attemptId) {
+        setBoundedMapValue(attemptByConversation, conversationId, canonicalAttemptId, MAX_CONVERSATION_ATTEMPTS);
+        migratePendingStreamProbeText(conversationId, canonicalAttemptId);
+        if (isNewBinding || previous !== canonicalAttemptId) {
             structuredLogger.emit(
                 attemptId,
                 'debug',
@@ -1571,6 +1574,28 @@ export function runPlatform(): void {
         return `${primaryBody}\n\n--- Preserved live mirror snapshot (pre-final) ---\n${boundedSnapshot}`;
     }
 
+    function mergeLiveStreamProbeText(current: string, text: string): string {
+        if (text.startsWith(current)) {
+            return text; // Snapshot-style update (preferred)
+        }
+        if (current.startsWith(text)) {
+            return current; // Stale/shorter snapshot, ignore
+        }
+        // Delta-style fallback with conservative boundary guard.
+        // Only inject a space when next chunk begins with uppercase (word boundary signal),
+        // to avoid corrupting lowercase continuations like "Glass" + "es" or "W" + "earing".
+        const needsSpaceJoin =
+            current.length > 0 &&
+            text.length > 0 &&
+            !current.endsWith(' ') &&
+            !current.endsWith('\n') &&
+            !text.startsWith(' ') &&
+            !text.startsWith('\n') &&
+            /[A-Za-z0-9]$/.test(current) &&
+            /^[A-Z]/.test(text);
+        return needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
+    }
+
     function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData): void {
         const panel = document.getElementById('blackiya-stream-probe');
         if (!panel) {
@@ -1592,28 +1617,35 @@ export function runPlatform(): void {
         );
     }
 
+    function appendPendingStreamProbeText(canonicalAttemptId: string, text: string): void {
+        const current = liveStreamPreviewByAttemptWithoutConversation.get(canonicalAttemptId) ?? '';
+        const next = mergeLiveStreamProbeText(current, text);
+        const capped = appendStreamProbePreview('', next, 15_503);
+        setBoundedMapValue(
+            liveStreamPreviewByAttemptWithoutConversation,
+            canonicalAttemptId,
+            capped,
+            MAX_STREAM_PREVIEWS,
+        );
+        setStreamProbePanel('stream: awaiting conversation id', capped);
+    }
+
+    function migratePendingStreamProbeText(conversationId: string, canonicalAttemptId: string): void {
+        const pending = liveStreamPreviewByAttemptWithoutConversation.get(canonicalAttemptId);
+        if (!pending) {
+            return;
+        }
+        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalAttemptId);
+        const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
+        const merged = mergeLiveStreamProbeText(current, pending);
+        const capped = appendStreamProbePreview('', merged, 15_503);
+        setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
+        setStreamProbePanel('stream: live mirror', capped);
+    }
+
     function appendLiveStreamProbeText(conversationId: string, text: string): void {
         const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
-        let next = '';
-        if (text.startsWith(current)) {
-            next = text; // Snapshot-style update (preferred)
-        } else if (current.startsWith(text)) {
-            next = current; // Stale/shorter snapshot, ignore
-        } else {
-            // Delta-style fallback with conservative boundary guard.
-            // Only inject a space when next chunk begins with uppercase (word boundary signal),
-            // to avoid corrupting lowercase continuations like "Glass" + "es" or "W" + "earing".
-            const needsSpaceJoin =
-                current.length > 0 &&
-                text.length > 0 &&
-                !current.endsWith(' ') &&
-                !current.endsWith('\n') &&
-                !text.startsWith(' ') &&
-                !text.startsWith('\n') &&
-                /[A-Za-z0-9]$/.test(current) &&
-                /^[A-Z]/.test(text);
-            next = needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
-        }
+        const next = mergeLiveStreamProbeText(current, text);
         const capped = appendStreamProbePreview('', next, 15_503);
         setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
         setStreamProbePanel('stream: live mirror', capped);
@@ -4195,11 +4227,19 @@ export function runPlatform(): void {
             return true;
         }
 
+        setActiveAttempt(attemptId);
+
         if (!conversationId) {
+            // Grok reconnect streams can emit deltas before a conversation ID is known.
+            // Surface live text immediately and promote lifecycle so the UI does not stay idle.
+            if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
+                lifecycleAttemptId = attemptId;
+                setLifecycleState('streaming');
+            }
+            appendPendingStreamProbeText(attemptId, text);
             return true;
         }
 
-        setActiveAttempt(attemptId);
         bindAttempt(conversationId, attemptId);
         appendLiveStreamProbeText(conversationId, text);
         return true;
@@ -4281,6 +4321,7 @@ export function runPlatform(): void {
         clearCanonicalStabilizationRetry(canonicalDisposedId);
         sfe.dispose(canonicalDisposedId);
         pendingLifecycleByAttempt.delete(canonicalDisposedId);
+        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalDisposedId);
         for (const [conversationId, mappedAttemptId] of attemptByConversation.entries()) {
             if (shouldRemoveDisposedAttemptBinding(mappedAttemptId, canonicalDisposedId, resolveAliasedAttemptId)) {
                 attemptByConversation.delete(conversationId);

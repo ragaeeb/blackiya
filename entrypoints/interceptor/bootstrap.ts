@@ -25,7 +25,11 @@ import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
-import { shouldEmitGrokCompletion, shouldEmitGrokLifecycle } from '@/utils/grok-request-classifier';
+import {
+    isGrokStreamingEndpoint,
+    shouldEmitGrokCompletion,
+    shouldEmitGrokLifecycle,
+} from '@/utils/grok-request-classifier';
 import { extractGrokStreamSignalsFromBuffer } from '@/utils/grok-stream-parser';
 import {
     extractForwardableHeadersFromFetchArgs,
@@ -2791,7 +2795,8 @@ export default defineContentScript({
             if (
                 context.isNonChatGptApiRequest &&
                 context.fetchApiAdapter?.name === 'Grok' &&
-                context.nonChatAttemptId
+                context.nonChatAttemptId &&
+                isGrokStreamingEndpoint(context.outgoingUrl)
             ) {
                 if (shouldLogTransient(`grok:fetch:response:${context.nonChatAttemptId}`, 3000)) {
                     log('info', 'Grok fetch response intercepted', {
@@ -2830,6 +2835,7 @@ export default defineContentScript({
                 shouldEmitNonChatLifecycleForRequest,
                 resolveRequestConversationId,
                 peekAttemptIdForConversation,
+                resolveAttemptIdForConversation,
                 resolveLifecycleConversationId,
                 safePathname,
             });

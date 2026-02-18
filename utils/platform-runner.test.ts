@@ -1165,9 +1165,7 @@ describe('Platform Runner', () => {
         }
 
         // No ATTEMPT_DISPOSED should have been emitted for the active streaming attempt
-        const disposals = postedMessages
-            .filter((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED')
-            .map((p) => p.attemptId);
+        const disposals = postedMessages.filter((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED').map((p) => p.attemptId);
         expect(disposals).not.toContain('attempt:grok-nodispose-1');
         // Lifecycle should still be streaming
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
@@ -1555,6 +1553,93 @@ describe('Platform Runner', () => {
         expect(panel).not.toBeNull();
         expect(panel?.textContent).toContain('stream: live mirror');
         expect(panel?.textContent).toContain('Gemini response chunk');
+    });
+
+    it('should surface Grok stream delta when conversation ID is unresolved', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-1',
+                text: '[Thinking] Agents thinking chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('stream: awaiting conversation id');
+        expect(panelText).toContain('Agents thinking chunk');
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should preserve unresolved Grok stream delta after conversation resolves', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-2',
+                text: '[Thinking] first chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-2',
+                conversationId: 'grok-conv-pending-2',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-delta-2',
+                text: 'second chunk',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
+        expect(panelText).toContain('first chunk');
+        expect(panelText).toContain('second chunk');
     });
 
     it('should preserve word boundaries when concatenating stream deltas', async () => {
@@ -3112,6 +3197,77 @@ describe('Platform Runner', () => {
             .filter((payload) => payload?.type === 'BLACKIYA_ATTEMPT_DISPOSED' && payload?.reason === 'superseded')
             .map((payload) => payload.attemptId);
         expect(supersededDisposals).not.toContain('attempt:chain-c');
+    });
+
+    it('should not supersede when rebinding a conversation with an aliased attempt that resolves to same canonical id', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const postLifecycle = async (attemptId: string, conversationId: string) => {
+            postStampedMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId,
+                    phase: 'prompt-sent',
+                    conversationId,
+                },
+                window.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 15));
+        };
+
+        // Establish alias mapping attempt:alias-a -> attempt:canon-a via supersede.
+        await postLifecycle('attempt:alias-a', 'conv-1');
+        await postLifecycle('attempt:canon-a', 'conv-1');
+
+        // Bind conv-2 using the upstream alias id.
+        const captureForConv2 = buildConversation('conv-2', 'Partial response', {
+            status: 'in_progress',
+            endTurn: false,
+        });
+        postStampedMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/backend-api/conversation/conv-2',
+                data: JSON.stringify(captureForConv2),
+                attemptId: 'attempt:alias-a',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        const postedMessages: any[] = [];
+        const originalPostMessage = window.postMessage.bind(window);
+        (window as any).postMessage = (payload: any, targetOrigin: string) => {
+            postedMessages.push(payload);
+            return originalPostMessage(payload, targetOrigin);
+        };
+
+        try {
+            // Rebinding conv-2 with the alias should resolve to the same canonical attempt and not supersede.
+            await postLifecycle('attempt:alias-a', 'conv-2');
+            await new Promise((resolve) => setTimeout(resolve, 30));
+        } finally {
+            (window as any).postMessage = originalPostMessage;
+        }
+
+        const supersededDisposals = postedMessages
+            .filter((payload) => payload?.type === 'BLACKIYA_ATTEMPT_DISPOSED' && payload?.reason === 'superseded')
+            .map((payload) => payload.attemptId);
+        expect(supersededDisposals).not.toContain('attempt:canon-a');
     });
 
     it('should keep ChatGPT stream deltas after navigation into the same conversation route', async () => {
