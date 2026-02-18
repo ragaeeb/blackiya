@@ -618,7 +618,7 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
-    it('should ignore lifecycle messages without conversation context', async () => {
+    it('should update lifecycle badge but keep save disabled for lifecycle messages without conversation context', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
 
@@ -647,7 +647,8 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
+        // Badge should reflect the lifecycle phase, even without conversation context
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
         expect(saveBtn?.disabled).toBeTrue();
     });
 
@@ -913,6 +914,128 @@ describe('Platform Runner', () => {
                 url: 'https://grok.com/rest/app-chat/conversations/new',
                 data: JSON.stringify(canonicalConversation),
                 attemptId: 'attempt:grok-canonical-finish',
+            },
+            window.location.origin,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
+    it('should update lifecycle badge for pending signals with null conversationId (Grok regression)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => null,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Emit lifecycle with null conversationId (Grok pattern for /conversations/new)
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-1',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Prompt Sent');
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-pending-1',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+    });
+
+    it('should promote Grok to completed when lifecycle attempt is disposed and canonical capture arrives on new attempt', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'Grok',
+            extractConversationId: () => 'grok-disposed-conv',
+            evaluateReadiness: evaluateReadinessMock,
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://grok.com/c/grok-disposed-conv',
+            origin: 'https://grok.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        // Step 1: Lifecycle signals arrive with null conversationId
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-old',
+                phase: 'prompt-sent',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'Grok',
+                attemptId: 'attempt:grok-old',
+                phase: 'streaming',
+                conversationId: null,
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Step 2: Attempt is disposed by navigation (Grok SPA URL change)
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_ATTEMPT_DISPOSED',
+                attemptId: 'attempt:grok-old',
+                reason: 'navigation',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        // Step 3: Late canonical capture arrives with a NEW attempt ID
+        const canonicalConversation = buildConversation('grok-disposed-conv', 'Grok final answer', {
+            status: 'finished_successfully',
+            endTurn: true,
+        });
+        postStampedMessage(
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'Grok',
+                url: 'https://grok.com/rest/app-chat/conversations/new',
+                data: JSON.stringify(canonicalConversation),
+                attemptId: 'attempt:grok-new',
             },
             window.location.origin,
         );

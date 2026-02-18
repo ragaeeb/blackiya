@@ -163,4 +163,4 @@ When processing external PR review comments:
    - Unrealistic edge cases without evidence
    - Pure style changes with no reliability benefit
 4. For accepted findings: implement test-first, then minimal fix, then rerun targeted tests + `bun run tsc --noEmit`.
-5. For rejected/deferred findings in review docs: add a concise rationale directly under the point and sign as `GPT-5.3 Codex`.
+5. For rejected/deferred findings in review docs: add a concise rationale directly under the point and sign with the reviewing agent's name.

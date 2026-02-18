@@ -3716,7 +3716,10 @@ export function runPlatform(): void {
         if (source !== 'network' || currentAdapter?.name !== 'Grok' || !cachedReady) {
             return false;
         }
-        return lifecycle === 'prompt-sent' || lifecycle === 'streaming';
+        // Also accept 'idle': when the original lifecycle attempt was disposed by Grok SPA
+        // navigation before conversation ID resolution, the lifecycle resets to idle.
+        // The canonical capture arriving on a fresh attempt is the only remaining signal.
+        return lifecycle === 'idle' || lifecycle === 'prompt-sent' || lifecycle === 'streaming';
     }
 
     function handleFinishedConversation(conversationId: string, attemptId: string, source: 'network' | 'dom'): void {
@@ -4124,6 +4127,14 @@ export function runPlatform(): void {
             platform,
             attemptId: originalAttemptId,
         });
+
+        // Update UI badge immediately for pending lifecycle signals
+        // so users see "Prompt Sent" / "Streaming" instead of "Idle"
+        // even before the conversation ID is resolved.
+        if (phase === 'prompt-sent' || phase === 'streaming') {
+            lifecycleAttemptId = attemptId;
+            setLifecycleState(phase);
+        }
     }
 
     function handleStreamDeltaMessage(message: unknown): boolean {
