@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-18 (v2.0.4 attempt-id split + calibration centralization + Grok state isolation)
+> Last updated: 2026-02-18 (v2.0.6 runner/interceptor decomposition continuation)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -33,6 +33,7 @@ flowchart LR
 - Interceptor (MAIN world):
   - `entrypoints/interceptor.content.ts`
   - `entrypoints/interceptor/bootstrap.ts`
+  - `entrypoints/interceptor/attempt-registry.ts`
   - `entrypoints/interceptor/fetch-pipeline.ts`
   - `entrypoints/interceptor/xhr-pipeline.ts`
   - `entrypoints/interceptor/snapshot-bridge.ts`
@@ -44,7 +45,10 @@ flowchart LR
   - `utils/runner/index.ts`
   - `utils/runner/*` (state/lifecycle/export/probe/calibration/bridge + attempt/readiness modules)
   - `utils/runner/attempt-registry.ts` (attempt-id resolution: `resolveRunnerAttemptId` for writes, `peekRunnerAttemptId` for reads)
+  - `utils/runner/calibration-policy.ts` (calibration ordering + persistence policy helpers)
+  - `utils/runner/canonical-stabilization.ts` (canonical stabilization retry state helpers)
   - `utils/runner/readiness.ts`
+  - `utils/runner/stream-preview.ts` (pending/live stream preview merge and snapshot preservation)
 - Calibration profile management:
   - `utils/calibration-profile.ts` (strategy defaults, `CalibrationStep` type, `buildCalibrationProfileFromStep` manual-strict policy)
   - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
@@ -105,7 +109,7 @@ Critical invariant:
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
-- **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative) and always-disabled `['dom_hint', 'snapshot_fallback']`. The runner exclusively uses the manual-strict policy path.
+- **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative/snapshot) and always-disabled `['dom_hint', 'snapshot_fallback']`. `CalibrationStep` mapping is now reversible via a distinct `snapshot` strategy for `page-snapshot`. The runner exclusively uses the manual-strict policy path.
 
 ## 5) End-to-End Flow (Generic)
 
@@ -316,8 +320,10 @@ Docs:
 - ✅ Grok lifecycle regression fixed: pending signals now update UI badge immediately; canonical capture promotes from idle.
 - ✅ Attempt-ID read/write separation completed (H-01): read-only paths no longer mutate `activeAttemptId`.
 - ✅ Calibration builder centralized (H-02): no more duplicated profile construction between `calibration-profile.ts` and `runner/index.ts`.
+- ✅ Runner decomposition continuation completed (H-03): calibration policy, canonical stabilization, and stream preview helper clusters extracted into dedicated runner modules.
+- ✅ Interceptor decomposition continuation completed (H-04): attempt binding/lookup/disposal logic extracted to `entrypoints/interceptor/attempt-registry.ts`; bootstrap now consumes injected registry methods.
 - ✅ Grok adapter state isolated (H-05): all mutable state encapsulated in `GrokAdapterState` class; `resetGrokAdapterState()` available for test isolation.
 - Need continued multi-tab validation for Grok and Gemini under long reasoning sessions.
 - Keep regression suite expanding where smoke tests find platform-specific edge cases.
-- Remaining post-v2.0.4 backlog: runner subsystem extraction (H-03), interceptor decomposition (H-04), and P2 items (logging/type-hygiene/perf follow-ups).
+- Remaining post-v2.0.6 backlog: P2 items (logging/type-hygiene/perf follow-ups) and P4 defense-in-depth hardening.
 - P4 defense-in-depth: token validation for InterceptionManager, snapshot response path, queue stamping, JSON bridge restoration, SESSION_INIT first-in-wins lock.

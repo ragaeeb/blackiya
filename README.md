@@ -194,6 +194,7 @@ blackiya/
 │   ├── interceptor.content.ts # Thin MAIN-world entrypoint
 │   ├── interceptor/
 │   │   ├── bootstrap.ts       # MAIN-world interceptor implementation
+│   │   ├── attempt-registry.ts
 │   │   ├── fetch-pipeline.ts
 │   │   ├── xhr-pipeline.ts
 │   │   ├── snapshot-bridge.ts
@@ -224,10 +225,13 @@ blackiya/
 │   │   ├── message-bridge.ts
 │   │   ├── stream-probe.ts
 │   │   ├── calibration-runner.ts
+│   │   ├── calibration-policy.ts
+│   │   ├── canonical-stabilization.ts
 │   │   ├── dom-snapshot.ts
 │   │   ├── export-pipeline.ts
 │   │   ├── attempt-registry.ts
-│   │   └── readiness.ts
+│   │   ├── readiness.ts
+│   │   └── stream-preview.ts
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities

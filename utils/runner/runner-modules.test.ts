@@ -7,6 +7,16 @@ import {
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { getLifecyclePhasePriority, isRegressiveLifecycleTransition } from '@/utils/runner/lifecycle-manager';
 import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
+import {
+    appendLiveRunnerStreamPreview,
+    appendPendingRunnerStreamPreview,
+    ensureLiveRunnerStreamPreview,
+    mergeRunnerStreamProbeText,
+    migratePendingRunnerStreamPreview,
+    removePendingRunnerStreamPreview,
+    type RunnerStreamPreviewState,
+    withPreservedRunnerStreamMirrorSnapshot,
+} from '@/utils/runner/stream-preview';
 import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
 import type { ConversationData } from '@/utils/types';
 
@@ -59,6 +69,73 @@ describe('runner helper modules', () => {
 
         const cappedWithoutDelta = appendStreamProbePreview('1234567890', '', 8);
         expect(cappedWithoutDelta).toBe('...67890');
+    });
+
+    it('should merge stream probe text with snapshot and delta-aware fallbacks', () => {
+        expect(mergeRunnerStreamProbeText('Hello', 'Hello world')).toBe('Hello world');
+        expect(mergeRunnerStreamProbeText('Hello world', 'Hello')).toBe('Hello world');
+        expect(mergeRunnerStreamProbeText('Hello', 'World')).toBe('Hello World');
+        expect(mergeRunnerStreamProbeText('Glass', 'es')).toBe('Glasses');
+    });
+
+    it('should append and migrate pending stream previews into conversation-bound previews', () => {
+        const state: RunnerStreamPreviewState = {
+            liveByConversation: new Map<string, string>(),
+            liveByAttemptWithoutConversation: new Map<string, string>(),
+            preservedByConversation: new Map<string, string>(),
+            maxEntries: 10,
+        };
+
+        const pending = appendPendingRunnerStreamPreview(state, 'attempt-1', 'Initial');
+        expect(pending).toBe('Initial');
+        expect(state.liveByAttemptWithoutConversation.get('attempt-1')).toBe('Initial');
+
+        const migrated = migratePendingRunnerStreamPreview(state, 'conv-1', 'attempt-1');
+        expect(migrated).toBe('Initial');
+        expect(state.liveByAttemptWithoutConversation.has('attempt-1')).toBeFalse();
+        expect(state.liveByConversation.get('conv-1')).toBe('Initial');
+
+        const appended = appendLiveRunnerStreamPreview(state, 'conv-1', 'Update');
+        expect(appended).toBe('Initial Update');
+        expect(state.liveByConversation.get('conv-1')).toBe('Initial Update');
+    });
+
+    it('should initialize empty live previews and remove pending previews via helpers', () => {
+        const state: RunnerStreamPreviewState = {
+            liveByConversation: new Map<string, string>(),
+            liveByAttemptWithoutConversation: new Map<string, string>([['attempt-2', 'pending']]),
+            preservedByConversation: new Map<string, string>(),
+            maxEntries: 10,
+        };
+
+        const initialized = ensureLiveRunnerStreamPreview(state, 'conv-2');
+        expect(initialized).toBe('');
+        expect(state.liveByConversation.get('conv-2')).toBe('');
+
+        const removed = removePendingRunnerStreamPreview(state, 'attempt-2');
+        expect(removed).toBeTrue();
+        expect(state.liveByAttemptWithoutConversation.has('attempt-2')).toBeFalse();
+    });
+
+    it('should preserve live mirror snapshot text only for stream-done probe states', () => {
+        const state: RunnerStreamPreviewState = {
+            liveByConversation: new Map<string, string>([['conv-2', 'Live mirror snapshot']]),
+            liveByAttemptWithoutConversation: new Map<string, string>(),
+            preservedByConversation: new Map<string, string>(),
+            maxEntries: 10,
+        };
+
+        const merged = withPreservedRunnerStreamMirrorSnapshot(
+            state,
+            'conv-2',
+            'stream-done: canonical capture ready',
+            'Canonical body',
+        );
+        expect(merged).toContain('Preserved live mirror snapshot');
+        expect(state.preservedByConversation.get('conv-2')).toBe('Live mirror snapshot');
+
+        const untouched = withPreservedRunnerStreamMirrorSnapshot(state, 'conv-2', 'stream: live mirror', 'Body');
+        expect(untouched).toBe('Body');
     });
 
     it('builds conversation snapshot data from message candidates', () => {

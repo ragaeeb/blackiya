@@ -45,14 +45,33 @@ import {
     resolveRunnerAttemptId,
     shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry,
 } from '@/utils/runner/attempt-registry';
-import { type CalibrationStep, prioritizeCalibrationStep } from '@/utils/runner/calibration-runner';
+import {
+    buildCalibrationOrderForMode,
+    type CalibrationMode,
+    shouldPersistCalibrationProfile,
+} from '@/utils/runner/calibration-policy';
+import type { CalibrationStep } from '@/utils/runner/calibration-runner';
+import {
+    beginCanonicalStabilizationTick,
+    type CanonicalStabilizationAttemptState,
+    clearCanonicalStabilizationAttemptState,
+    resolveShouldSkipCanonicalRetryAfterAwait,
+} from '@/utils/runner/canonical-stabilization';
 import { buildRunnerSnapshotConversationData } from '@/utils/runner/dom-snapshot';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { getLifecyclePhasePriority } from '@/utils/runner/lifecycle-manager';
 import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
 import { resolveRunnerReadinessDecision } from '@/utils/runner/readiness';
 import { RunnerState } from '@/utils/runner/state';
-import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
+import {
+    appendLiveRunnerStreamPreview,
+    appendPendingRunnerStreamPreview,
+    ensureLiveRunnerStreamPreview,
+    migratePendingRunnerStreamPreview,
+    removePendingRunnerStreamPreview,
+    type RunnerStreamPreviewState,
+    withPreservedRunnerStreamMirrorSnapshot,
+} from '@/utils/runner/stream-preview';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import { shouldIngestAsCanonicalSample, shouldUseCachedConversationForWarmFetch } from '@/utils/sfe/capture-fidelity';
 import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
@@ -72,7 +91,6 @@ interface SnapshotMessageCandidate {
     text: string;
 }
 
-type CalibrationMode = 'manual' | 'auto';
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
 type InterceptionCaptureMeta = { attemptId?: string; source?: string };
@@ -92,37 +110,9 @@ type RunnerControl = {
     cleanup?: () => void;
 };
 
-export function buildCalibrationOrderForMode(
-    preferredStep: CalibrationStep | null,
-    mode: CalibrationMode,
-    platformName?: string,
-): CalibrationStep[] {
-    const defaultOrder: CalibrationStep[] = ['queue-flush', 'passive-wait', 'endpoint-retry', 'page-snapshot'];
-    if (!preferredStep) {
-        return defaultOrder;
-    }
-
-    if (mode === 'auto' && preferredStep === 'page-snapshot') {
-        // For ChatGPT, snapshot fallback is currently the most reliable and avoids long endpoint-retry delays.
-        if (platformName === 'ChatGPT') {
-            return ['queue-flush', 'page-snapshot', 'passive-wait', 'endpoint-retry'];
-        }
-        return defaultOrder;
-    }
-
-    const reordered = prioritizeCalibrationStep(preferredStep, defaultOrder);
-    if (mode !== 'auto') {
-        return reordered;
-    }
-
-    // In auto mode, keep page-snapshot as a last resort to reduce premature partial captures.
-    const withoutSnapshot = reordered.filter((step) => step !== 'page-snapshot');
-    return [...withoutSnapshot, 'page-snapshot'];
-}
-
-export function shouldPersistCalibrationProfile(mode: CalibrationMode): boolean {
-    return mode === 'manual';
-}
+export { beginCanonicalStabilizationTick, clearCanonicalStabilizationAttemptState };
+export type { CanonicalStabilizationAttemptState };
+export { buildCalibrationOrderForMode, shouldPersistCalibrationProfile };
 
 function normalizeContentText(text: string): string {
     return text.trim().normalize('NFC');
@@ -140,55 +130,7 @@ export function shouldRemoveDisposedAttemptBinding(
     return shouldRemoveDisposedAttemptBindingFromRegistry(mappedAttemptId, disposedAttemptId, resolveAttemptId);
 }
 
-export type CanonicalStabilizationAttemptState = {
-    timerIds: Map<string, number>;
-    retryCounts: Map<string, number>;
-    startedAt: Map<string, number>;
-    timeoutWarnings: Set<string>;
-    inProgress: Set<string>;
-};
-
-export function beginCanonicalStabilizationTick(attemptId: string, inProgress: Set<string>): boolean {
-    if (inProgress.has(attemptId)) {
-        return false;
-    }
-    inProgress.add(attemptId);
-    return true;
-}
-
-export function clearCanonicalStabilizationAttemptState(
-    attemptId: string,
-    state: CanonicalStabilizationAttemptState,
-    clearTimer: (timerId: number) => void = (timerId) => {
-        clearTimeout(timerId);
-    },
-): void {
-    const timerId = state.timerIds.get(attemptId);
-    if (timerId !== undefined) {
-        clearTimer(timerId);
-    }
-    state.timerIds.delete(attemptId);
-    state.retryCounts.delete(attemptId);
-    state.startedAt.delete(attemptId);
-    state.timeoutWarnings.delete(attemptId);
-    state.inProgress.delete(attemptId);
-}
-
-export function resolveShouldSkipCanonicalRetryAfterAwait(
-    attemptId: string,
-    _conversationId: string,
-    disposedOrSuperseded: boolean,
-    mappedAttemptId: string | undefined,
-    resolveAttemptId: (attemptId: string) => string,
-): boolean {
-    if (disposedOrSuperseded) {
-        return true;
-    }
-    if (!mappedAttemptId) {
-        return false;
-    }
-    return resolveAttemptId(mappedAttemptId) !== resolveAttemptId(attemptId);
-}
+export { resolveShouldSkipCanonicalRetryAfterAwait };
 
 export function runPlatform(): void {
     const globalRunnerControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
@@ -230,6 +172,12 @@ export function runPlatform(): void {
     const liveStreamPreviewByConversation = runnerState.streamPreviewByConversation;
     const liveStreamPreviewByAttemptWithoutConversation = new Map<string, string>();
     const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
+    const streamPreviewState: RunnerStreamPreviewState = {
+        liveByConversation: liveStreamPreviewByConversation,
+        liveByAttemptWithoutConversation: liveStreamPreviewByAttemptWithoutConversation,
+        preservedByConversation: preservedLiveStreamSnapshotByConversation,
+        maxEntries: MAX_STREAM_PREVIEWS,
+    };
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
     const probeLeaseRetryTimers = new Map<string, number>();
@@ -959,7 +907,6 @@ export function runPlatform(): void {
         const disposedOrSuperseded = isAttemptDisposedOrSuperseded(attemptId);
         const shouldSkip = resolveShouldSkipCanonicalRetryAfterAwait(
             attemptId,
-            conversationId,
             disposedOrSuperseded,
             mappedAttempt,
             resolveAliasedAttemptId,
@@ -1522,51 +1469,7 @@ export function runPlatform(): void {
     }
 
     function withPreservedLiveMirrorSnapshot(conversationId: string, status: string, primaryBody: string): string {
-        if (!status.startsWith('stream-done:')) {
-            return primaryBody;
-        }
-
-        const liveSnapshot = liveStreamPreviewByConversation.get(conversationId) ?? '';
-        if (liveSnapshot.length === 0) {
-            return primaryBody;
-        }
-
-        setBoundedMapValue(
-            preservedLiveStreamSnapshotByConversation,
-            conversationId,
-            liveSnapshot,
-            MAX_STREAM_PREVIEWS,
-        );
-        const normalizedPrimary = primaryBody.trim();
-        const normalizedLive = liveSnapshot.trim();
-        if (normalizedPrimary.length > 0 && normalizedPrimary === normalizedLive) {
-            return primaryBody;
-        }
-
-        const boundedSnapshot = normalizedLive.length > 4000 ? `...${normalizedLive.slice(-3800)}` : normalizedLive;
-        return `${primaryBody}\n\n--- Preserved live mirror snapshot (pre-final) ---\n${boundedSnapshot}`;
-    }
-
-    function mergeLiveStreamProbeText(current: string, text: string): string {
-        if (text.startsWith(current)) {
-            return text; // Snapshot-style update (preferred)
-        }
-        if (current.startsWith(text)) {
-            return current; // Stale/shorter snapshot, ignore
-        }
-        // Delta-style fallback with conservative boundary guard.
-        // Only inject a space when next chunk begins with uppercase (word boundary signal),
-        // to avoid corrupting lowercase continuations like "Glass" + "es" or "W" + "earing".
-        const needsSpaceJoin =
-            current.length > 0 &&
-            text.length > 0 &&
-            !current.endsWith(' ') &&
-            !current.endsWith('\n') &&
-            !text.startsWith(' ') &&
-            !text.startsWith('\n') &&
-            /[A-Za-z0-9]$/.test(current) &&
-            /^[A-Z]/.test(text);
-        return needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
+        return withPreservedRunnerStreamMirrorSnapshot(streamPreviewState, conversationId, status, primaryBody);
     }
 
     function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData): void {
@@ -1591,36 +1494,20 @@ export function runPlatform(): void {
     }
 
     function appendPendingStreamProbeText(canonicalAttemptId: string, text: string): void {
-        const current = liveStreamPreviewByAttemptWithoutConversation.get(canonicalAttemptId) ?? '';
-        const next = mergeLiveStreamProbeText(current, text);
-        const capped = appendStreamProbePreview('', next, 15_503);
-        setBoundedMapValue(
-            liveStreamPreviewByAttemptWithoutConversation,
-            canonicalAttemptId,
-            capped,
-            MAX_STREAM_PREVIEWS,
-        );
+        const capped = appendPendingRunnerStreamPreview(streamPreviewState, canonicalAttemptId, text);
         setStreamProbePanel('stream: awaiting conversation id', capped);
     }
 
     function migratePendingStreamProbeText(conversationId: string, canonicalAttemptId: string): void {
-        const pending = liveStreamPreviewByAttemptWithoutConversation.get(canonicalAttemptId);
-        if (!pending) {
+        const capped = migratePendingRunnerStreamPreview(streamPreviewState, conversationId, canonicalAttemptId);
+        if (!capped) {
             return;
         }
-        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalAttemptId);
-        const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
-        const merged = mergeLiveStreamProbeText(current, pending);
-        const capped = appendStreamProbePreview('', merged, 15_503);
-        setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
         setStreamProbePanel('stream: live mirror', capped);
     }
 
     function appendLiveStreamProbeText(conversationId: string, text: string): void {
-        const current = liveStreamPreviewByConversation.get(conversationId) ?? '';
-        const next = mergeLiveStreamProbeText(current, text);
-        const capped = appendStreamProbePreview('', next, 15_503);
-        setBoundedMapValue(liveStreamPreviewByConversation, conversationId, capped, MAX_STREAM_PREVIEWS);
+        const capped = appendLiveRunnerStreamPreview(streamPreviewState, conversationId, text);
         setStreamProbePanel('stream: live mirror', capped);
     }
 
@@ -3729,12 +3616,13 @@ export function runPlatform(): void {
         if (!adapter) {
             return;
         }
-        const attemptKey = peekAttemptId(conversationId);
+        let attemptKey = peekAttemptId(conversationId);
         const shouldDeferWhileGenerating = adapter.name === 'ChatGPT';
         if (shouldDeferWhileGenerating && isPlatformGenerating(adapter)) {
-            if (attemptKey) {
-                scheduleDeferredAutoCapture(attemptKey, conversationId, reason);
+            if (!attemptKey) {
+                attemptKey = resolveAttemptId(conversationId);
             }
+            scheduleDeferredAutoCapture(attemptKey, conversationId, reason);
             return;
         }
         if (attemptKey) {
@@ -4045,7 +3933,7 @@ export function runPlatform(): void {
             return;
         }
         if (!liveStreamPreviewByConversation.has(conversationId)) {
-            setBoundedMapValue(liveStreamPreviewByConversation, conversationId, '', MAX_STREAM_PREVIEWS);
+            ensureLiveRunnerStreamPreview(streamPreviewState, conversationId);
             setStreamProbePanel('stream: awaiting delta', `conversationId=${conversationId}`);
         }
         lifecycleAttemptId = attemptId;
@@ -4299,7 +4187,7 @@ export function runPlatform(): void {
         clearCanonicalStabilizationRetry(canonicalDisposedId);
         sfe.dispose(canonicalDisposedId);
         pendingLifecycleByAttempt.delete(canonicalDisposedId);
-        liveStreamPreviewByAttemptWithoutConversation.delete(canonicalDisposedId);
+        removePendingRunnerStreamPreview(streamPreviewState, canonicalDisposedId);
         for (const [conversationId, mappedAttemptId] of attemptByConversation.entries()) {
             if (shouldRemoveDisposedAttemptBinding(mappedAttemptId, canonicalDisposedId, resolveAliasedAttemptId)) {
                 attemptByConversation.delete(conversationId);

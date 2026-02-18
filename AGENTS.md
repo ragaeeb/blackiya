@@ -41,10 +41,16 @@ Two-world design:
 Supporting modules:
 - Adapter interface: `platforms/types.ts`
 - Adapter factory: `platforms/factory.ts`
+- Interceptor attempt registry: `entrypoints/interceptor/attempt-registry.ts`
 - SFE: `utils/sfe/*`
 - Lease arbitration: `utils/sfe/probe-lease-*`, `entrypoints/background.ts`
 - Interception cache: `utils/managers/interception-manager.ts`
 - UI buttons: `utils/ui/button-manager.ts`
+- Runner helpers:
+  - `utils/runner/attempt-registry.ts`
+  - `utils/runner/calibration-policy.ts`
+  - `utils/runner/canonical-stabilization.ts`
+  - `utils/runner/stream-preview.ts`
 - Protocol types: `utils/protocol/messages.ts`
 - Protocol contract: lifecycle/finished/delta messages require `attemptId` (legacy attempt-less messages removed)
 
@@ -127,6 +133,7 @@ When changing lifecycle/completion logic:
 3. Validate that late/background signals cannot regress state (`Completed -> Streaming`).
 4. Verify multi-tab behavior with attempt binding/supersession.
 5. Keep probe lease arbitration always-on and owner-safe (no setting gate).
+6. Preserve first-prompt auto-capture deferral behavior when no attempt is pre-bound (attempt must be created before defer scheduling).
 
 When changing title handling:
 1. Prefer stream/API title events.
