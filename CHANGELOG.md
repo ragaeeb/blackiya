@@ -1,3 +1,10 @@
+## [2.0.4](https://github.com/ragaeeb/blackiya/compare/v2.0.3...v2.0.4) (2026-02-18)
+
+
+### Bug Fixes
+
+* **p3:** P3 Tokenized postMessage Contract ([e2d3c95](https://github.com/ragaeeb/blackiya/commit/e2d3c9588190fa77d5395aad5a8178020dfad8e5))
+
 ## [2.0.3](https://github.com/ragaeeb/blackiya/compare/v2.0.2...v2.0.3) (2026-02-18)
 
 
