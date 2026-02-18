@@ -59,7 +59,7 @@ describe('integration: attemptId rebind race', () => {
             },
         });
 
-        expect(stale.ready).toBe(false);
+        expect(stale.ready).toBeFalse();
         expect(stale.phase).toBe('superseded');
 
         const active = sfe.resolveByConversation('c1');

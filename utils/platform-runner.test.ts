@@ -98,6 +98,7 @@ const evaluateReadinessMock = (data: any) => {
 // We need a mutable reference to control the mock return value
 let currentAdapterMock: any = createMockAdapter();
 let storageDataMock: Record<string, unknown> = {};
+let runtimeSendMessageMock: (message: unknown) => Promise<unknown> = async () => undefined;
 
 // Mock the factory module
 mock.module('@/platforms/factory', () => ({
@@ -148,7 +149,7 @@ const browserMock = {
     },
     runtime: {
         getURL: () => 'chrome-extension://mock/',
-        sendMessage: async () => {},
+        sendMessage: async (message: unknown) => runtimeSendMessageMock(message),
     },
 };
 mock.module('wxt/browser', () => ({
@@ -172,6 +173,7 @@ describe('Platform Runner', () => {
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter();
         storageDataMock = {};
+        runtimeSendMessageMock = async () => undefined;
         downloadCalls.length = 0;
         loggerDebugCalls.length = 0;
         loggerInfoCalls.length = 0;
@@ -446,7 +448,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveBtn?.disabled).toBe(false);
+        expect(saveBtn?.disabled).toBeFalse();
 
         saveBtn?.click();
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -520,7 +522,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveBtn?.disabled).toBe(false);
+        expect(saveBtn?.disabled).toBeFalse();
 
         saveBtn?.click();
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -639,7 +641,7 @@ describe('Platform Runner', () => {
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
-        expect(saveBtn?.disabled).toBe(true);
+        expect(saveBtn?.disabled).toBeTrue();
     });
 
     it('should replay pending Gemini lifecycle once conversation ID resolves mid-stream', async () => {
@@ -694,7 +696,7 @@ describe('Platform Runner', () => {
         const badge = document.getElementById('blackiya-lifecycle-badge');
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(badge?.textContent).toContain('Streaming');
-        expect(saveBtn?.disabled).toBe(true);
+        expect(saveBtn?.disabled).toBeTrue();
     });
 
     it('should keep Gemini Save disabled while streaming even after canonical samples arrive before completion', async () => {
@@ -781,7 +783,7 @@ describe('Platform Runner', () => {
 
         const saveDuringStream = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
-        expect(saveDuringStream?.disabled).toBe(true);
+        expect(saveDuringStream?.disabled).toBeTrue();
 
         window.postMessage(
             {
@@ -796,7 +798,7 @@ describe('Platform Runner', () => {
 
         const saveAfterFinish = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
-        expect(saveAfterFinish?.disabled).toBe(false);
+        expect(saveAfterFinish?.disabled).toBeFalse();
     }, 10_000);
 
     it('should accept Gemini RESPONSE_FINISHED while streaming even if DOM has generating markers', async () => {
@@ -940,10 +942,10 @@ describe('Platform Runner', () => {
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Idle');
-        expect(saveBtn?.disabled).toBe(true);
+        expect(saveBtn?.disabled).toBeTrue();
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-        expect(panelText.includes('stream-done: no api url candidates')).toBe(false);
+        expect(panelText.includes('stream-done: no api url candidates')).toBeFalse();
     });
 
     it('should not reuse stale conversation id on Gemini /app health checks', async () => {
@@ -998,7 +1000,7 @@ describe('Platform Runner', () => {
 
         const saveAfter = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         const lifecycle = document.getElementById('blackiya-lifecycle-badge');
-        expect(saveAfter?.disabled).toBe(true);
+        expect(saveAfter?.disabled).toBeTrue();
         expect(lifecycle?.textContent).toContain('Idle');
     });
 
@@ -1200,7 +1202,7 @@ describe('Platform Runner', () => {
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
         expect(panelText).toContain('When Glasses Are Actually Helpful');
-        expect(panelText.includes('When Glass es')).toBe(false);
+        expect(panelText.includes('When Glass es')).toBeFalse();
     });
 
     it('should not split single-letter prefix plus lowercase continuation', async () => {
@@ -1233,7 +1235,7 @@ describe('Platform Runner', () => {
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
         expect(panelText).toContain('Wearing the correct prescription:');
-        expect(panelText.includes('W earing')).toBe(false);
+        expect(panelText.includes('W earing')).toBeFalse();
     });
 
     it('should default to SFE readiness source', async () => {
@@ -1338,7 +1340,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         const saveBeforeStreaming = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveBeforeStreaming?.disabled).toBe(false);
+        expect(saveBeforeStreaming?.disabled).toBeFalse();
 
         window.postMessage(
             {
@@ -1376,7 +1378,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         const saveDuringStreaming = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveDuringStreaming?.disabled).toBe(true);
+        expect(saveDuringStreaming?.disabled).toBeTrue();
     });
 
     it('should not show parse-failure toast when stream probe cannot parse payload', async () => {
@@ -1410,13 +1412,13 @@ describe('Platform Runner', () => {
             await new Promise((resolve) => setTimeout(resolve, 40));
 
             const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-            expect(panelText.includes('Could not parse conversation payload')).toBe(false);
+            expect(panelText.includes('Could not parse conversation payload')).toBeFalse();
         } finally {
             (globalThis as any).fetch = originalFetch;
         }
     });
 
-    it('should skip stream probe when probe lease is held by another tab', async () => {
+    it('should skip stream probe when probe lease is denied by coordinator', async () => {
         const originalFetch = (globalThis as any).fetch;
         let fetchCalls = 0;
         try {
@@ -1428,18 +1430,20 @@ describe('Platform Runner', () => {
                 };
             };
 
-            const now = Date.now();
-            window.localStorage.setItem(
-                'blackiya:probe-lease:123',
-                JSON.stringify({
-                    attemptId: 'attempt:owner',
-                    expiresAtMs: now + 10_000,
-                    updatedAtMs: now,
-                }),
-            );
-
-            storageDataMock = {
-                'userSettings.sfe.probeLeaseEnabled': true,
+            runtimeSendMessageMock = async (message: unknown) => {
+                const typed = message as { type?: string };
+                if (typed?.type === 'BLACKIYA_PROBE_LEASE_CLAIM') {
+                    return {
+                        type: 'BLACKIYA_PROBE_LEASE_CLAIM_RESULT',
+                        acquired: false,
+                        ownerAttemptId: 'attempt:owner',
+                        expiresAtMs: Date.now() + 10_000,
+                    };
+                }
+                return {
+                    type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
+                    released: false,
+                };
             };
 
             currentAdapterMock = {
@@ -1537,7 +1541,7 @@ describe('Platform Runner', () => {
 
         const saveBefore = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveBefore).not.toBeNull();
-        expect(saveBefore?.disabled).toBe(true);
+        expect(saveBefore?.disabled).toBeTrue();
 
         window.postMessage(
             {
@@ -1561,11 +1565,11 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 80));
         const saveDuring = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveDuring?.disabled).toBe(true);
+        expect(saveDuring?.disabled).toBeTrue();
 
         await new Promise((resolve) => setTimeout(resolve, 1300));
         const saveAfter = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveAfter?.disabled).toBe(false);
+        expect(saveAfter?.disabled).toBeFalse();
     });
 
     it('should enter degraded manual-only mode when canonical hash never stabilizes', async () => {
@@ -1664,14 +1668,14 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 120));
         const saveEarly = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveEarly?.disabled).toBe(true);
+        expect(saveEarly?.disabled).toBeTrue();
 
         await new Promise((resolve) => setTimeout(resolve, 7600));
         const saveFallback = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         const copyFallback = document.getElementById('blackiya-copy-btn') as HTMLButtonElement | null;
-        expect(saveFallback?.disabled).toBe(false);
+        expect(saveFallback?.disabled).toBeFalse();
         expect(saveFallback?.textContent).toContain('Force Save');
-        expect(copyFallback?.disabled).toBe(true);
+        expect(copyFallback?.disabled).toBeTrue();
     }, 15_000);
 
     it('should keep Save disabled for ChatGPT thoughts-only captures even after fallback window', async () => {
@@ -1759,7 +1763,7 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 3800));
         const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveButton?.disabled).toBe(true);
+        expect(saveButton?.disabled).toBeTrue();
     });
 
     it('should preserve pre-final live mirror snapshot when probe switches to stream-done state', async () => {
@@ -1836,7 +1840,7 @@ describe('Platform Runner', () => {
         expect(
             panelAfterDone.includes('stream-done: no api url candidates') ||
                 panelAfterDone.includes('stream-done: awaiting canonical capture'),
-        ).toBe(true);
+        ).toBeTrue();
         expect(panelAfterDone).toContain('Preserved live mirror snapshot (pre-final)');
         expect(panelAfterDone).toContain('Live chunk one. Live chunk two.');
     });
@@ -1976,8 +1980,8 @@ describe('Platform Runner', () => {
             // promoted to canonical since the API warm fetch consistently failed.
             const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(saveButton).not.toBeNull();
-            expect(saveButton?.disabled).toBe(false);
-            expect(saveButton?.textContent?.includes('Force Save')).toBe(false);
+            expect(saveButton?.disabled).toBeFalse();
+            expect(saveButton?.textContent?.includes('Force Save')).toBeFalse();
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -2053,8 +2057,8 @@ describe('Platform Runner', () => {
 
             await new Promise((resolve) => setTimeout(resolve, 700));
             const degradedSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(degradedSaveButton?.disabled).toBe(true);
-            expect(degradedSaveButton?.textContent?.includes('Force Save')).toBe(false);
+            expect(degradedSaveButton?.disabled).toBeTrue();
+            expect(degradedSaveButton?.textContent?.includes('Force Save')).toBeFalse();
 
             window.postMessage(
                 {
@@ -2080,7 +2084,7 @@ describe('Platform Runner', () => {
             await new Promise((resolve) => setTimeout(resolve, 250));
 
             const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(recoveredSaveButton?.disabled).toBe(false);
+            expect(recoveredSaveButton?.disabled).toBeFalse();
             expect(recoveredSaveButton?.textContent).not.toContain('Force Save');
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
@@ -2168,7 +2172,7 @@ describe('Platform Runner', () => {
 
             // Save should NOT be enabled yet (degraded, awaiting canonical)
             const degradedSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(degradedSaveButton?.disabled).toBe(true);
+            expect(degradedSaveButton?.disabled).toBeTrue();
 
             // 3. Send ONE canonical API capture (simulates the interceptor's proactive fetch)
             window.postMessage(
@@ -2189,7 +2193,7 @@ describe('Platform Runner', () => {
 
             // Save button should be enabled in canonical_ready mode (not Force Save)
             const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(recoveredSaveButton?.disabled).toBe(false);
+            expect(recoveredSaveButton?.disabled).toBeFalse();
             expect(recoveredSaveButton?.textContent).not.toContain('Force Save');
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
@@ -2279,7 +2283,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 180));
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveBtn?.disabled).toBe(false);
+        expect(saveBtn?.disabled).toBeFalse();
 
         const stopButton = document.createElement('button');
         stopButton.setAttribute('data-testid', 'stop-button');
@@ -2302,7 +2306,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 120));
 
         const saveAfterHint = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveAfterHint?.disabled).toBe(false);
+        expect(saveAfterHint?.disabled).toBeFalse();
     }, 15_000);
 
     it('should enable Save when RESPONSE_FINISHED arrives before canonical data in multi-tab scenario', async () => {
@@ -2401,7 +2405,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
         const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveButton?.disabled).toBe(false);
+        expect(saveButton?.disabled).toBeFalse();
     }, 10_000);
 
     it('should keep Save disabled during active generation despite repeated network finished hints', async () => {
@@ -2451,7 +2455,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
 
         const saveBeforeGeneration = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveBeforeGeneration?.disabled).toBe(false);
+        expect(saveBeforeGeneration?.disabled).toBeFalse();
 
         const stopButton = document.createElement('button');
         stopButton.setAttribute('data-testid', 'stop-button');
@@ -2473,7 +2477,7 @@ describe('Platform Runner', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 120));
         const saveDuringGeneration = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        expect(saveDuringGeneration?.disabled).toBe(true);
+        expect(saveDuringGeneration?.disabled).toBeTrue();
     }, 15_000);
 
     it('should keep Save enabled when late degraded snapshot arrives after canonical-ready', async () => {
@@ -2572,8 +2576,8 @@ describe('Platform Runner', () => {
             await new Promise((resolve) => setTimeout(resolve, 1200));
 
             const saveAfterSnapshot = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-            expect(saveAfterSnapshot?.disabled).toBe(false);
-            expect(saveAfterSnapshot?.textContent?.includes('Force Save')).toBe(false);
+            expect(saveAfterSnapshot?.disabled).toBeFalse();
+            expect(saveAfterSnapshot?.textContent?.includes('Force Save')).toBeFalse();
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -2742,7 +2746,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-        expect(panelText.includes('delta-after-same-conversation-navigation')).toBe(true);
+        expect(panelText.includes('delta-after-same-conversation-navigation')).toBeTrue();
     });
 
     it('should dispose prior ChatGPT attempt when navigation switches to a different conversation route', async () => {
@@ -2794,7 +2798,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-        expect(panelText.includes('delta-from-disposed-old-conversation')).toBe(false);
+        expect(panelText.includes('delta-from-disposed-old-conversation')).toBeFalse();
     });
 
     it('should ignore stale stream delta from superseded attempt', async () => {
@@ -2827,7 +2831,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
-        expect(panelText.includes('Should not render')).toBe(false);
+        expect(panelText.includes('Should not render')).toBeFalse();
     });
 
     it('should NOT inject button if no adapter matches', async () => {
@@ -2837,7 +2841,7 @@ describe('Platform Runner', () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
 
         const saveBtn = document.getElementById('blackiya-save-btn');
-        expect(saveBtn === null).toBe(true);
+        expect(saveBtn === null).toBeTrue();
     });
 
     it('should respond with cached conversation JSON for window bridge request', async () => {
@@ -3056,7 +3060,7 @@ describe('Platform Runner', () => {
         const responsePayload = await responsePromise;
         expect(responsePayload.type).toBe('BLACKIYA_GET_JSON_RESPONSE');
         expect(responsePayload.requestId).toBe('request-2');
-        expect(responsePayload.success).toBe(true);
+        expect(responsePayload.success).toBeTrue();
         expect(responsePayload.data.format).toBe('common');
         expect(responsePayload.data.llm).toBe('TestPlatform');
     });
@@ -3181,7 +3185,7 @@ describe('Platform Runner', () => {
         // 5. Verify save button is enabled
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveBtn).not.toBeNull();
-        expect(saveBtn?.disabled).toBe(false);
+        expect(saveBtn?.disabled).toBeFalse();
 
         // 6. Click save
         downloadCalls.length = 0;
@@ -3317,7 +3321,7 @@ describe('Platform Runner', () => {
         // 5. Verify Save button is enabled — SFE should reach captured_ready
         const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveButton).not.toBeNull();
-        expect(saveButton?.disabled).toBe(false);
+        expect(saveButton?.disabled).toBeFalse();
     }, 15_000);
 
     it('should re-request fresh DOM snapshot when cached snapshot has assistant-missing (V2.1-019 fix)', async () => {
@@ -3484,8 +3488,8 @@ describe('Platform Runner', () => {
             // the conversation should reach captured_ready (Save JSON, not Force Save)
             const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(saveButton).not.toBeNull();
-            expect(saveButton?.disabled).toBe(false);
-            expect(saveButton?.textContent?.includes('Force Save')).toBe(false);
+            expect(saveButton?.disabled).toBeFalse();
+            expect(saveButton?.textContent?.includes('Force Save')).toBeFalse();
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -3579,7 +3583,7 @@ describe('Platform Runner', () => {
         // blocked all button state transitions.
         const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveButton).not.toBeNull();
-        expect(saveButton?.disabled).toBe(true);
+        expect(saveButton?.disabled).toBeTrue();
 
         stopButton.remove();
     }, 15_000);
@@ -3601,7 +3605,7 @@ describe('shouldRemoveDisposedAttemptBinding', () => {
             'attempt:raw-a': 'attempt:raw-b',
             'attempt:raw-b': 'attempt:canonical-c',
         });
-        expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBe(true);
+        expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBeTrue();
     });
 
     it('keeps mapped attempts that resolve to a different canonical attempt', () => {
@@ -3609,16 +3613,16 @@ describe('shouldRemoveDisposedAttemptBinding', () => {
             'attempt:raw-a': 'attempt:canonical-a',
             'attempt:raw-b': 'attempt:canonical-b',
         });
-        expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBe(false);
+        expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBeFalse();
     });
 });
 
 describe('canonical stabilization retry helpers', () => {
     it('allows only one in-flight retry tick per attempt', () => {
         const inProgress = new Set<string>();
-        expect(beginCanonicalStabilizationTick('attempt-1', inProgress)).toBe(true);
-        expect(beginCanonicalStabilizationTick('attempt-1', inProgress)).toBe(false);
-        expect(inProgress.has('attempt-1')).toBe(true);
+        expect(beginCanonicalStabilizationTick('attempt-1', inProgress)).toBeTrue();
+        expect(beginCanonicalStabilizationTick('attempt-1', inProgress)).toBeFalse();
+        expect(inProgress.has('attempt-1')).toBeTrue();
     });
 
     it('clears retry timer/count/start/timeout state in one call', () => {
@@ -3644,11 +3648,11 @@ describe('canonical stabilization retry helpers', () => {
         );
 
         expect(clearedTimers).toEqual([101]);
-        expect(timerIds.has('attempt-1')).toBe(false);
-        expect(retryCounts.has('attempt-1')).toBe(false);
-        expect(startedAt.has('attempt-1')).toBe(false);
-        expect(timeoutWarnings.has('attempt-1')).toBe(false);
-        expect(inProgress.has('attempt-1')).toBe(false);
+        expect(timerIds.has('attempt-1')).toBeFalse();
+        expect(retryCounts.has('attempt-1')).toBeFalse();
+        expect(startedAt.has('attempt-1')).toBeFalse();
+        expect(timeoutWarnings.has('attempt-1')).toBeFalse();
+        expect(inProgress.has('attempt-1')).toBeFalse();
     });
 
     it('re-checks disposal and conversation mismatch after await boundaries', () => {
@@ -3659,7 +3663,7 @@ describe('canonical stabilization retry helpers', () => {
             undefined,
             (attemptId) => attemptId,
         );
-        expect(disposed).toBe(true);
+        expect(disposed).toBeTrue();
 
         const mismatched = resolveShouldSkipCanonicalRetryAfterAwait(
             'attempt-1',
@@ -3668,7 +3672,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-2',
             (attemptId) => attemptId,
         );
-        expect(mismatched).toBe(true);
+        expect(mismatched).toBeTrue();
 
         const canonicalAliasMatch = resolveShouldSkipCanonicalRetryAfterAwait(
             'attempt-1',
@@ -3677,6 +3681,6 @@ describe('canonical stabilization retry helpers', () => {
             'alias-attempt-1',
             (attemptId) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),
         );
-        expect(canonicalAliasMatch).toBe(false);
+        expect(canonicalAliasMatch).toBeFalse();
     });
 });

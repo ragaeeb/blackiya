@@ -49,7 +49,7 @@ describe('integration: dispose retry race', () => {
             },
         });
 
-        expect(lateSample.ready).toBe(false);
+        expect(lateSample.ready).toBeFalse();
         expect(lateSample.phase).toBe('disposed');
         expect(lateSample.blockingConditions).toContain('disposed');
     });

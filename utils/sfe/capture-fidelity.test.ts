@@ -24,7 +24,7 @@ describe('capture fidelity policies', () => {
     };
 
     it('detects degraded capture fidelity', () => {
-        expect(isDegradedCapture(undefined)).toBe(false);
+        expect(isDegradedCapture(undefined)).toBeFalse();
         expect(isDegradedCapture({ captureSource: 'canonical_api', fidelity: 'high', completeness: 'complete' })).toBe(
             false,
         );
@@ -34,7 +34,7 @@ describe('capture fidelity policies', () => {
                 fidelity: 'degraded',
                 completeness: 'partial',
             }),
-        ).toBe(true);
+        ).toBeTrue();
     });
 
     it('allows warm-fetch short-circuit only for ready + high-fidelity captures', () => {
@@ -44,21 +44,21 @@ describe('capture fidelity policies', () => {
                 fidelity: 'high',
                 completeness: 'complete',
             }),
-        ).toBe(true);
+        ).toBeTrue();
         expect(
             shouldUseCachedConversationForWarmFetch(readyReadiness, {
                 captureSource: 'dom_snapshot_degraded',
                 fidelity: 'degraded',
                 completeness: 'partial',
             }),
-        ).toBe(false);
+        ).toBeFalse();
         expect(
             shouldUseCachedConversationForWarmFetch(notReadyReadiness, {
                 captureSource: 'canonical_api',
                 fidelity: 'high',
                 completeness: 'complete',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
     it('only ingests high-fidelity captures as canonical samples', () => {
@@ -68,13 +68,13 @@ describe('capture fidelity policies', () => {
                 fidelity: 'high',
                 completeness: 'complete',
             }),
-        ).toBe(true);
+        ).toBeTrue();
         expect(
             shouldIngestAsCanonicalSample({
                 captureSource: 'dom_snapshot_degraded',
                 fidelity: 'degraded',
                 completeness: 'partial',
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 });

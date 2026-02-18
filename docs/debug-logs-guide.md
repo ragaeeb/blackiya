@@ -43,10 +43,60 @@ These should usually be enough for first-pass triage:
 - Race/disposal hygiene:
 - `attempt_alias_forwarded`
 - `late_signal_dropped_after_dispose`
+- `Probe lease claim transport failed; failing open`
 
 - UI state:
 - `Button state ...`
 - `Button target missing; retry pending`
+
+## Bottom-Left Toast / Probe Panel Statuses
+These statuses are expected during normal capture retries unless noted otherwise.
+
+1. `stream: awaiting delta`
+- Meaning: lifecycle moved to streaming and Blackiya is waiting for first text chunk.
+- Concern if: it stays here after response visibly finished and never transitions to any `stream-done:*` status.
+
+2. `stream: live mirror`
+- Meaning: token/chunk deltas are being mirrored live.
+- Concern if: the model is visibly streaming but this never appears (possible stream monitor regression).
+
+3. `stream-done: fetching conversation`
+- Meaning: stream ended; Blackiya is probing canonical API/snapshot paths.
+- Concern if: it persists for a long time and Save/Force Save never resolves.
+
+4. `stream-done: fetched full text`
+- Meaning: stream-done probe fetched a complete response body candidate.
+- Concern if: this appears but readiness never converges to `canonical_ready` or `degraded_manual_only`.
+
+5. `stream-done: using captured cache`
+- Meaning: canonical-ready data already exists in cache; probe used that immediately.
+- Concern if: Save stays disabled despite this status.
+
+6. `stream-done: canonical capture ready`
+- Meaning: canonical capture is ready and stabilized enough for normal Save flow.
+- Concern if: Save is still disabled.
+
+7. `stream-done: awaiting canonical capture`
+- Meaning: completion was detected, but canonical data is still being stabilized/retried.
+- Concern if: it never resolves and no `degraded_manual_only` path appears.
+
+8. `stream-done: degraded snapshot captured`
+- Meaning: fallback snapshot was captured; canonical capture is still pending.
+- Concern if: this is frequent on stable sessions (indicates canonical probe misses or parser drift).
+
+9. `stream-done: no api url candidates`
+- Meaning: no direct canonical fetch URL was available for that adapter path; fallback logic is used.
+- Concern if: repeated on a platform where canonical URL probing is expected to work.
+
+10. `stream-done: lease held by another tab`
+- Meaning: another tab currently owns probe arbitration for this conversation.
+- Concern if: it never clears after lease expiry/retry window.
+- Note: if you instead see repeated `Probe lease claim transport failed; failing open`, arbitration transport is degraded and multiple tabs may probe concurrently.
+
+Readiness tie-in:
+- `canonical_ready`: expected healthy end state; Save enabled.
+- `degraded_manual_only`: fallback end state after stabilization timeout; Force Save only.
+- Treat `degraded_manual_only` as occasional fallback, not automatic bug. Treat it as a bug when it becomes frequent/reproducible on otherwise healthy sessions.
 
 ## Expected Noise
 These are often benign:

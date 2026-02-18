@@ -1,22 +1,22 @@
 import type { ConversationData, Message } from '@/utils/types';
 
-function trimmedString(value: unknown): string {
+const trimmedString = (value: unknown) => {
     return typeof value === 'string' ? value.trim() : '';
-}
+};
 
-function hasNonEmptyParts(message: Message): boolean {
+const hasNonEmptyParts = (message: Message) => {
     const parts = message.content?.parts;
     if (!Array.isArray(parts) || parts.length === 0) {
         return false;
     }
     return parts.some((part) => trimmedString(part).length > 0);
-}
+};
 
-function hasNonEmptyContentField(message: Message): boolean {
+const hasNonEmptyContentField = (message: Message) => {
     return trimmedString(message.content?.content).length > 0;
-}
+};
 
-function hasNonEmptyThoughts(message: Message): boolean {
+const hasNonEmptyThoughts = (message: Message) => {
     const thoughts = message.content?.thoughts;
     if (!Array.isArray(thoughts) || thoughts.length === 0) {
         return false;
@@ -33,14 +33,14 @@ function hasNonEmptyThoughts(message: Message): boolean {
             : false;
         return summary.length > 0 || content.length > 0 || chunks;
     });
-}
+};
 
-function hasReasoningMetadata(message: Message): boolean {
+const hasReasoningMetadata = (message: Message) => {
     return (
         trimmedString(message.metadata?.reasoning).length > 0 ||
         trimmedString(message.metadata?.thinking_trace).length > 0
     );
-}
+};
 
 export function hasMeaningfulAssistantContent(message: Message): boolean {
     if (message.author?.role !== 'assistant') {

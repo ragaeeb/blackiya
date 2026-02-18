@@ -406,7 +406,7 @@ describe('ChatGPT Platform Adapter', () => {
             };
 
             const readiness = adapter.evaluateReadiness(data);
-            expect(readiness.ready).toBe(false);
+            expect(readiness.ready).toBeFalse();
             expect(readiness.reason).toBe('assistant-text-missing');
         });
 
@@ -470,7 +470,7 @@ describe('ChatGPT Platform Adapter', () => {
             };
 
             const readiness = adapter.evaluateReadiness(data);
-            expect(readiness.ready).toBe(true);
+            expect(readiness.ready).toBeTrue();
             expect(readiness.reason).toBe('terminal');
             expect(readiness.contentHash).not.toBeNull();
         });
@@ -532,7 +532,7 @@ describe('ChatGPT Platform Adapter', () => {
             };
 
             const readiness = adapter.evaluateReadiness(data);
-            expect(readiness.ready).toBe(false);
+            expect(readiness.ready).toBeFalse();
             expect(readiness.reason).toBe('assistant-latest-text-not-terminal-turn');
         });
 
@@ -575,7 +575,7 @@ describe('ChatGPT Platform Adapter', () => {
             };
             const readiness = adapter.evaluateReadiness(data);
             expect(readiness.reason).toBe('assistant-missing');
-            expect(readiness.ready).toBe(false);
+            expect(readiness.ready).toBeFalse();
         });
 
         it('should return assistant-in-progress when any assistant message is still in progress', () => {
@@ -617,7 +617,7 @@ describe('ChatGPT Platform Adapter', () => {
             };
             const readiness = adapter.evaluateReadiness(data);
             expect(readiness.reason).toBe('assistant-in-progress');
-            expect(readiness.terminal).toBe(false);
+            expect(readiness.terminal).toBeFalse();
         });
 
         it('should ignore non-finished assistant text messages when evaluating readiness', () => {
@@ -659,7 +659,7 @@ describe('ChatGPT Platform Adapter', () => {
             };
             const readiness = adapter.evaluateReadiness(data);
             expect(readiness.reason).toBe('assistant-text-missing');
-            expect(readiness.terminal).toBe(true);
+            expect(readiness.terminal).toBeTrue();
         });
     });
 
@@ -899,23 +899,23 @@ describe('ChatGPT Platform Adapter', () => {
     describe('apiEndpointPattern', () => {
         it('should match ChatGPT conversation API endpoint', () => {
             const endpoint = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59';
-            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
         it('should match ChatGPT conversation API endpoint with query params', () => {
             const endpoint =
                 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59?foo=bar';
-            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
 
         it('should not match other API endpoints', () => {
             const endpoint = 'https://chatgpt.com/backend-api/models';
-            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(false);
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBeFalse();
         });
 
         it('should match ChatGPT f/conversation endpoint', () => {
             const endpoint = 'https://chatgpt.com/backend-api/f/conversation';
-            expect(adapter.apiEndpointPattern.test(endpoint)).toBe(true);
+            expect(adapter.apiEndpointPattern.test(endpoint)).toBeTrue();
         });
     });
 
@@ -959,8 +959,8 @@ describe('ChatGPT Platform Adapter', () => {
             };
 
             const readiness = adapter.evaluateReadiness?.(data as any);
-            expect(readiness?.ready).toBe(true);
-            expect(readiness?.terminal).toBe(true);
+            expect(readiness?.ready).toBeTrue();
+            expect(readiness?.terminal).toBeTrue();
             expect(typeof readiness?.contentHash).toBe('string');
             expect(readiness?.latestAssistantTextLength).toBeGreaterThan(0);
         });
@@ -970,12 +970,12 @@ describe('ChatGPT Platform Adapter', () => {
         it('should match stream_status completion endpoint', () => {
             const url =
                 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/stream_status';
-            expect(adapter.completionTriggerPattern.test(url)).toBe(true);
+            expect(adapter.completionTriggerPattern.test(url)).toBeTrue();
         });
 
         it('should not match textdocs endpoint as completion signal', () => {
             const url = 'https://chatgpt.com/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/textdocs';
-            expect(adapter.completionTriggerPattern.test(url)).toBe(false);
+            expect(adapter.completionTriggerPattern.test(url)).toBeFalse();
         });
 
         it('should extract conversation ID from completion endpoint URL', () => {

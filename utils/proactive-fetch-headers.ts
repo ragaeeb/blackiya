@@ -19,7 +19,7 @@ const FORBIDDEN_HEADER_NAMES = new Set([
     'priority',
 ]);
 
-function isForwardableHeader(name: string): boolean {
+const isForwardableHeader = (name: string) => {
     const normalized = name.toLowerCase();
     if (FORBIDDEN_HEADER_NAMES.has(normalized)) {
         return false;
@@ -28,9 +28,9 @@ function isForwardableHeader(name: string): boolean {
         return false;
     }
     return true;
-}
+};
 
-function appendHeaders(target: Map<string, string>, headers: HeadersInit | undefined): void {
+const appendHeaders = (target: Map<string, string>, headers: HeadersInit | undefined) => {
     if (!headers) {
         return;
     }
@@ -52,7 +52,7 @@ function appendHeaders(target: Map<string, string>, headers: HeadersInit | undef
     for (const [key, value] of Object.entries(headers)) {
         target.set(key.toLowerCase(), String(value));
     }
-}
+};
 
 export function toForwardableHeaderRecord(headers: HeadersInit | undefined): HeaderRecord | undefined {
     const collected = new Map<string, string>();

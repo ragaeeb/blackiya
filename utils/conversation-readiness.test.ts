@@ -62,7 +62,7 @@ function createBaseConversation(): ConversationData {
 describe('conversation readiness', () => {
     it('returns true for finished assistant message with non-empty parts', () => {
         const data = createBaseConversation();
-        expect(isConversationReady(data)).toBe(true);
+        expect(isConversationReady(data)).toBeTrue();
     });
 
     it('returns false for assistant messages with empty content payloads', () => {
@@ -71,12 +71,12 @@ describe('conversation readiness', () => {
             content_type: 'model_editable_context' as any,
             parts: [],
         };
-        expect(isConversationReady(data)).toBe(false);
+        expect(isConversationReady(data)).toBeFalse();
     });
 
     it('returns false when assistant is still in progress', () => {
         const data = createBaseConversation();
         data.mapping['assistant-node'].message!.status = 'in_progress';
-        expect(isConversationReady(data)).toBe(false);
+        expect(isConversationReady(data)).toBeFalse();
     });
 });

@@ -79,7 +79,7 @@ describe('SignalFusionEngine supersede', () => {
             },
         });
 
-        expect(oldSample.ready).toBe(false);
+        expect(oldSample.ready).toBeFalse();
         expect(oldSample.phase).toBe('superseded');
     });
 });

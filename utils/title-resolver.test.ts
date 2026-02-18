@@ -66,11 +66,11 @@ function buildConversation(title: string): ConversationData {
 
 describe('title-resolver', () => {
     it('classifies shared generic titles consistently', () => {
-        expect(isGenericConversationTitle('Conversation with Gemini')).toBe(true);
-        expect(isGenericConversationTitle('You said: hello')).toBe(true);
-        expect(isGenericConversationTitle('Chats')).toBe(true);
-        expect(isGenericConversationTitle('New chat')).toBe(true);
-        expect(isGenericConversationTitle('Specific conversation title')).toBe(false);
+        expect(isGenericConversationTitle('Conversation with Gemini')).toBeTrue();
+        expect(isGenericConversationTitle('You said: hello')).toBeTrue();
+        expect(isGenericConversationTitle('Chats')).toBeTrue();
+        expect(isGenericConversationTitle('New chat')).toBeTrue();
+        expect(isGenericConversationTitle('Specific conversation title')).toBeFalse();
     });
 
     it('honors platform default titles in generic classification', () => {
@@ -78,7 +78,7 @@ describe('title-resolver', () => {
             isGenericConversationTitle('Untitled conversation', {
                 platformDefaultTitles: ['Untitled conversation'],
             }),
-        ).toBe(true);
+        ).toBeTrue();
     });
 
     it('derives first-user-message fallback title', () => {

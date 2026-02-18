@@ -56,6 +56,6 @@ describe('integration: supersede during probe', () => {
         });
 
         expect(stale.phase).toBe('superseded');
-        expect(stale.ready).toBe(false);
+        expect(stale.ready).toBeFalse();
     });
 });

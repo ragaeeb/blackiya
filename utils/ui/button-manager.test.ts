@@ -39,9 +39,9 @@ describe('ButtonManager', () => {
         const copyBtn = document.getElementById('blackiya-copy-btn') as HTMLButtonElement | null;
         const calibrateBtn = document.getElementById('blackiya-calibrate-btn') as HTMLButtonElement | null;
 
-        expect(saveBtn?.disabled).toBe(true);
-        expect(copyBtn?.disabled).toBe(true);
-        expect(calibrateBtn?.disabled).toBe(false);
+        expect(saveBtn?.disabled).toBeTrue();
+        expect(copyBtn?.disabled).toBeTrue();
+        expect(calibrateBtn?.disabled).toBeFalse();
         expect(calibrateBtn?.style.opacity).toBe('1');
     });
 
@@ -55,11 +55,11 @@ describe('ButtonManager', () => {
 
         manager.setCalibrationState('capturing');
         const calibrateBtn = document.getElementById('blackiya-calibrate-btn') as HTMLButtonElement | null;
-        expect(calibrateBtn?.disabled).toBe(true);
+        expect(calibrateBtn?.disabled).toBeTrue();
         expect(calibrateBtn?.style.opacity).toBe('0.85');
 
         manager.setCalibrationState('idle');
-        expect(calibrateBtn?.disabled).toBe(false);
+        expect(calibrateBtn?.disabled).toBeFalse();
         expect(calibrateBtn?.style.opacity).toBe('1');
     });
 
@@ -129,8 +129,8 @@ describe('ButtonManager', () => {
         const copyButtons = document.querySelectorAll('#blackiya-copy-btn');
         expect(saveButtons.length).toBe(1);
         expect(copyButtons.length).toBe(1);
-        expect(saveButtons[0]?.textContent?.includes('stale')).toBe(false);
-        expect(copyButtons[0]?.textContent?.includes('stale')).toBe(false);
+        expect(saveButtons[0]?.textContent?.includes('stale')).toBeFalse();
+        expect(copyButtons[0]?.textContent?.includes('stale')).toBeFalse();
     });
 
     it('does not re-inject when container already exists in DOM', () => {
@@ -172,7 +172,7 @@ describe('ButtonManager', () => {
 
         const saveButtons = document.querySelectorAll('#blackiya-save-btn');
         expect(saveButtons.length).toBe(1);
-        expect(saveButtons[0]?.textContent?.includes('duplicate')).toBe(false);
+        expect(saveButtons[0]?.textContent?.includes('duplicate')).toBeFalse();
     });
 
     it('removes duplicate controls injected inside a shadow root', () => {

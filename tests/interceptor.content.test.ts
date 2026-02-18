@@ -25,7 +25,7 @@ type ShouldEmitXhrRequestLifecycle = (context: {
 }) => boolean;
 
 describe('interceptor.content utilities', () => {
-    let shouldEmitGeminiXhrLoadendCompletion: GeminiLoadendGuard;
+    let tryEmitGeminiXhrLoadendCompletion: GeminiLoadendGuard;
     let setBoundedMapValue: SetBoundedMapValue;
     let pruneTimestampCache: PruneTimestampCache;
     let cleanupDisposedAttemptState: CleanupDisposedAttemptState;
@@ -34,7 +34,7 @@ describe('interceptor.content utilities', () => {
     beforeAll(async () => {
         (globalThis as any).defineContentScript = (config: unknown) => config;
         const mod = await import('../entrypoints/interceptor.content');
-        shouldEmitGeminiXhrLoadendCompletion = mod.shouldEmitGeminiXhrLoadendCompletion as GeminiLoadendGuard;
+        tryEmitGeminiXhrLoadendCompletion = mod.tryEmitGeminiXhrLoadendCompletion as GeminiLoadendGuard;
         setBoundedMapValue = mod.setBoundedMapValue as SetBoundedMapValue;
         pruneTimestampCache = mod.pruneTimestampCache as PruneTimestampCache;
         cleanupDisposedAttemptState = mod.cleanupDisposedAttemptState as CleanupDisposedAttemptState;
@@ -50,9 +50,9 @@ describe('interceptor.content utilities', () => {
         const streamGenerateUrl =
             'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
 
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBe(true);
-        expect(state.emittedCompleted).toBe(true);
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBe(false);
+        expect(tryEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeTrue();
+        expect(state.emittedCompleted).toBeTrue();
+        expect(tryEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeFalse();
     });
 
     it('does not emit completed without streaming or conversation context', () => {
@@ -62,7 +62,7 @@ describe('interceptor.content utilities', () => {
         };
         const streamGenerateUrl =
             'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBe(false);
+        expect(tryEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeFalse();
     });
 
     it('allows Gemini XHR lifecycle emission without an initial conversation id', () => {
@@ -73,7 +73,7 @@ describe('interceptor.content utilities', () => {
                 attemptId: 'gemini:attempt-1',
                 conversationId: undefined,
             }),
-        ).toBe(true);
+        ).toBeTrue();
 
         expect(
             shouldEmitXhrRequestLifecycle({
@@ -82,7 +82,7 @@ describe('interceptor.content utilities', () => {
                 attemptId: 'grok:attempt-1',
                 conversationId: undefined,
             }),
-        ).toBe(false);
+        ).toBeFalse();
     });
 
     it('bounds map size and evicts oldest entries', () => {
@@ -91,9 +91,9 @@ describe('interceptor.content utilities', () => {
         setBoundedMapValue(map, 'b', 2, 2);
         setBoundedMapValue(map, 'c', 3, 2);
         expect(map.size).toBe(2);
-        expect(map.has('a')).toBe(false);
-        expect(map.has('b')).toBe(true);
-        expect(map.has('c')).toBe(true);
+        expect(map.has('a')).toBeFalse();
+        expect(map.has('b')).toBeTrue();
+        expect(map.has('c')).toBeTrue();
     });
 
     it('prunes stale timestamp cache entries by ttl', () => {
@@ -105,9 +105,9 @@ describe('interceptor.content utilities', () => {
         ]);
         const removed = pruneTimestampCache(map, 2_000, now);
         expect(removed).toBe(2);
-        expect(map.has('fresh')).toBe(true);
-        expect(map.has('stale-a')).toBe(false);
-        expect(map.has('stale-b')).toBe(false);
+        expect(map.has('fresh')).toBeTrue();
+        expect(map.has('stale-a')).toBeFalse();
+        expect(map.has('stale-b')).toBeFalse();
     });
 
     it('cleans attempt-scoped caches when attempt is disposed', () => {
@@ -133,11 +133,11 @@ describe('interceptor.content utilities', () => {
 
         cleanupDisposedAttemptState('attempt-a', state, 2);
 
-        expect(state.streamDumpFrameCountByAttempt.has('attempt-a')).toBe(false);
-        expect(state.streamDumpLastTextByAttempt.has('attempt-a')).toBe(false);
+        expect(state.streamDumpFrameCountByAttempt.has('attempt-a')).toBeFalse();
+        expect(state.streamDumpLastTextByAttempt.has('attempt-a')).toBeFalse();
         expect(state.latestAttemptIdByPlatform.get('Gemini')).toBeUndefined();
         expect(state.attemptByConversationId.get('conv-a')).toBeUndefined();
-        expect(state.disposedAttemptIds.has('attempt-a')).toBe(true);
+        expect(state.disposedAttemptIds.has('attempt-a')).toBeTrue();
     });
 
     it('promotes an existing key to most-recent on update', () => {
@@ -148,8 +148,8 @@ describe('interceptor.content utilities', () => {
         setBoundedMapValue(map, 'a', 99, 2);
         setBoundedMapValue(map, 'c', 3, 2);
         // 'b' should be evicted, 'a' and 'c' survive
-        expect(map.has('b')).toBe(false);
+        expect(map.has('b')).toBeFalse();
         expect(map.get('a')).toBe(99);
-        expect(map.has('c')).toBe(true);
+        expect(map.has('c')).toBeTrue();
     });
 });

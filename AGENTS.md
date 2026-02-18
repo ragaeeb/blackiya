@@ -42,6 +42,7 @@ Supporting modules:
 - Adapter interface: `platforms/types.ts`
 - Adapter factory: `platforms/factory.ts`
 - SFE: `utils/sfe/*`
+- Lease arbitration: `utils/sfe/probe-lease-*`, `entrypoints/background.ts`
 - Interception cache: `utils/managers/interception-manager.ts`
 - UI buttons: `utils/ui/button-manager.ts`
 - Protocol types: `utils/protocol/messages.ts`
@@ -68,9 +69,13 @@ Supporting modules:
 
 - TypeScript-first.
 - Prefer explicit, testable utility functions.
+- Prefer inferred function return types; add explicit return types only when they materially improve clarity/safety.
+- Prefer `type` aliases over `interface` in TypeScript unless interface-specific behavior is required.
+- Prefer arrow functions over classic `function` declarations for new code.
 - Keep platform logic isolated to adapter/parser/classifier modules.
 - Avoid broad DOM heuristics as lifecycle source of truth for non-ChatGPT platforms.
 - No silent behavior changes without tests.
+- In tests, use Bun convention `it('should ...')` for test names.
 
 ## 6) TDD and Regression Policy
 
@@ -79,7 +84,7 @@ For any bug fix:
 2. Implement minimal fix.
 3. Re-run targeted tests.
 4. Re-run typecheck.
-5. Update `docs/reviews/synthesis.md` status and `docs/architecture.md` when behavior/invariants change.
+5. Update `docs/handoff.md` status and `docs/architecture.md` when behavior/invariants change.
 
 Minimum commands:
 ```bash
@@ -114,6 +119,7 @@ When changing lifecycle/completion logic:
 2. Ensure completion hints are readiness-gated where required.
 3. Validate that late/background signals cannot regress state (`Completed -> Streaming`).
 4. Verify multi-tab behavior with attempt binding/supersession.
+5. Keep probe lease arbitration always-on and owner-safe (no setting gate).
 
 When changing title handling:
 1. Prefer stream/API title events.
@@ -144,3 +150,17 @@ Before shipping:
 2. Gemini: verify StreamGenerate lifecycle stability and correct title export without requiring refresh.
 3. Grok: verify long-thinking sessions do not regress `Completed -> Streaming` and Save stays readiness-gated.
 4. Export metadata: verify canonical vs degraded exports set `captureSource`, `fidelity`, and `completeness` correctly.
+
+## 12) PR Review Triage Rules
+
+When processing external PR review comments:
+1. Verify each finding against current code before changing anything.
+2. Accept findings that materially improve correctness, regression safety, or diagnosability with low-to-moderate risk.
+3. Reject or defer findings when they are:
+   - Overengineering for current scope
+   - High-churn with little ROI
+   - Out of scope for the release slice
+   - Unrealistic edge cases without evidence
+   - Pure style changes with no reliability benefit
+4. For accepted findings: implement test-first, then minimal fix, then rerun targeted tests + `bun run tsc --noEmit`.
+5. For rejected/deferred findings in review docs: add a concise rationale directly under the point and sign as `GPT-5.3 Codex`.

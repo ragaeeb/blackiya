@@ -35,10 +35,10 @@ describe('integration: existing conversation load', () => {
         };
 
         const first = sfe.applyCanonicalSample({ ...sample, timestampMs: 1000 });
-        expect(first.ready).toBe(false);
+        expect(first.ready).toBeFalse();
 
         const second = sfe.applyCanonicalSample({ ...sample, timestampMs: 2200 });
-        expect(second.ready).toBe(true);
+        expect(second.ready).toBeTrue();
         expect(second.phase).toBe('captured_ready');
     });
 });

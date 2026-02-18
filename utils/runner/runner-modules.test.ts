@@ -26,8 +26,8 @@ describe('runner helper modules', () => {
         expect(getLifecyclePhasePriority('streaming')).toBe(2);
         expect(getLifecyclePhasePriority('completed')).toBe(3);
         expect(getLifecyclePhasePriority('terminated')).toBe(4);
-        expect(isRegressiveLifecycleTransition('completed', 'streaming')).toBe(true);
-        expect(isRegressiveLifecycleTransition('streaming', 'completed')).toBe(false);
+        expect(isRegressiveLifecycleTransition('completed', 'streaming')).toBeTrue();
+        expect(isRegressiveLifecycleTransition('streaming', 'completed')).toBeFalse();
     });
 
     it('dispatches message handlers until first handler claims the message', () => {
@@ -46,7 +46,7 @@ describe('runner helper modules', () => {
                 return true;
             },
         ]);
-        expect(handled).toBe(true);
+        expect(handled).toBeTrue();
         expect(calls).toEqual(['first', 'second']);
     });
 

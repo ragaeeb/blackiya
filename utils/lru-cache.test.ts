@@ -14,7 +14,7 @@ describe('LRUCache', () => {
         cache.set('b', 2);
         cache.set('c', 3); // Should evict 'a'
 
-        expect(cache.has('a')).toBe(false);
+        expect(cache.has('a')).toBeFalse();
         expect(cache.get('b')).toBe(2);
         expect(cache.get('c')).toBe(3);
         expect(cache.size).toBe(2);
@@ -30,9 +30,9 @@ describe('LRUCache', () => {
 
         cache.set('c', 3); // Should evict 'b'
 
-        expect(cache.has('b')).toBe(false);
-        expect(cache.has('a')).toBe(true);
-        expect(cache.has('c')).toBe(true);
+        expect(cache.has('b')).toBeFalse();
+        expect(cache.has('a')).toBeTrue();
+        expect(cache.has('c')).toBeTrue();
     });
 
     it('should refresh item position on update (set)', () => {
@@ -45,7 +45,7 @@ describe('LRUCache', () => {
 
         cache.set('c', 3); // Should evict 'b'
 
-        expect(cache.has('b')).toBe(false);
+        expect(cache.has('b')).toBeFalse();
         expect(cache.get('a')).toBe(10);
         expect(cache.get('c')).toBe(3);
     });
@@ -61,6 +61,6 @@ describe('LRUCache', () => {
         cache.set('b', 2);
         cache.clear();
         expect(cache.size).toBe(0);
-        expect(cache.has('a')).toBe(false);
+        expect(cache.has('a')).toBeFalse();
     });
 });

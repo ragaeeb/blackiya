@@ -43,9 +43,9 @@ describe('Gemini Platform Adapter', () => {
 
     describe('URL Handling', () => {
         it('should identify Gemini URLs', () => {
-            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app/12345')).toBe(true);
-            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/')).toBe(true);
-            expect(geminiAdapter.isPlatformUrl('https://google.com')).toBe(false);
+            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app/12345')).toBeTrue();
+            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/')).toBeTrue();
+            expect(geminiAdapter.isPlatformUrl('https://google.com')).toBeFalse();
         });
 
         it('should extract conversation IDs', () => {
@@ -60,18 +60,18 @@ describe('Gemini Platform Adapter', () => {
     describe('API Pattern Matching', () => {
         it('should match batchexecute URLs even when rpcids drift', () => {
             const pattern = geminiAdapter.apiEndpointPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBe(true);
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBe(true);
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBe(true);
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBeTrue();
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBeTrue();
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBeTrue();
             expect(
                 pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?v=1&rpcids=hNvQHb&test=1'),
-            ).toBe(true);
+            ).toBeTrue();
         });
 
         it('should match generic batchexecute URLs without requiring rpcids', () => {
             const pattern = geminiAdapter.apiEndpointPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=otAQ7b')).toBe(true);
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute')).toBe(true);
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=otAQ7b')).toBeTrue();
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute')).toBeTrue();
         });
 
         it('should match StreamGenerate URL (Gemini 3.0 — V2.1-025)', () => {
@@ -80,7 +80,7 @@ describe('Gemini Platform Adapter', () => {
                 pattern.test(
                     'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq_assistant-bard-web-server_20260210.04_p0&f.sid=-37108853284977362&hl=en&_reqid=2641802&rt=c',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
         });
 
         it('should match StreamGenerate as completion trigger (Gemini 3.0 — V2.1-025)', () => {
@@ -89,14 +89,14 @@ describe('Gemini Platform Adapter', () => {
                 pattern.test(
                     'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq',
                 ),
-            ).toBe(true);
+            ).toBeTrue();
         });
 
         it('should match completion trigger URLs for generic batchexecute RPCs', () => {
             const pattern = geminiAdapter.completionTriggerPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBe(true);
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBe(true);
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBe(true);
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBeTrue();
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBeTrue();
+            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBeTrue();
         });
 
         it('should return null when extracting conversation ID from Gemini API URL', () => {
@@ -136,16 +136,16 @@ describe('Gemini Platform Adapter', () => {
             expect(userMsg).toBeDefined();
             const userText = userMsg.content.parts?.[0] || '';
 
-            expect(userText.startsWith('ROLE: Expert academic translator')).toBe(true);
-            expect(userText.endsWith('دبر الصلوات يُؤتى بها ما يستطيع الإنسان وليس إلا.')).toBe(true);
+            expect(userText.startsWith('ROLE: Expert academic translator')).toBeTrue();
+            expect(userText.endsWith('دبر الصلوات يُؤتى بها ما يستطيع الإنسان وليس إلا.')).toBeTrue();
 
             // 2. Strict Assistant Message Validation
             const assistantMsg = messages.find((m) => m.author.role === 'assistant')!;
             expect(assistantMsg).toBeDefined();
             const assistantText = assistantMsg.content.parts?.[0] || '';
 
-            expect(assistantText.startsWith('P258071 - The Shaykh: Yes.')).toBe(true);
-            expect(assistantText.endsWith('rforms of them what man is able, and nothing else.')).toBe(true);
+            expect(assistantText.startsWith('P258071 - The Shaykh: Yes.')).toBeTrue();
+            expect(assistantText.endsWith('rforms of them what man is able, and nothing else.')).toBeTrue();
 
             // 3. Strict Reasoning/Thoughts Validation
             const thoughts = assistantMsg.content.thoughts;
@@ -154,8 +154,8 @@ describe('Gemini Platform Adapter', () => {
 
             const firstThought = thoughts![0];
             expect(firstThought.summary).toBe('Clarifying Key Parameters');
-            expect(firstThought.content.startsWith("I've established key parameters for the task. This")).toBe(true);
-            expect(firstThought.content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBe(true);
+            expect(firstThought.content.startsWith("I've established key parameters for the task. This")).toBeTrue();
+            expect(firstThought.content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBeTrue();
         });
     });
 
@@ -347,7 +347,7 @@ describe('Gemini Platform Adapter', () => {
                 },
             });
 
-            expect(readiness?.ready).toBe(false);
+            expect(readiness?.ready).toBeFalse();
             expect(readiness?.reason).toBe('assistant-text-missing');
         });
 
@@ -410,8 +410,8 @@ describe('Gemini Platform Adapter', () => {
                 },
             });
 
-            expect(readiness?.ready).toBe(true);
-            expect(readiness?.terminal).toBe(true);
+            expect(readiness?.ready).toBeTrue();
+            expect(readiness?.terminal).toBeTrue();
             expect(readiness?.contentHash).not.toBeNull();
         });
     });
@@ -666,20 +666,20 @@ describe('Gemini Platform Adapter', () => {
         it('StreamGenerate matches BOTH patterns (XHR timing is OK, but documents the overlap)', () => {
             const url =
                 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBe(true);
+            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
         });
 
         it('hNvQHb batchexecute matches BOTH patterns', () => {
             const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBe(true);
+            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
         });
 
         it('MaZiqc batchexecute matches completionTriggerPattern (suppressed at interceptor layer)', () => {
             const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBe(true);
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBe(true);
+            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
+            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
         });
 
         it('extractConversationIdFromUrl returns null for StreamGenerate (no ID in URL)', () => {
@@ -785,6 +785,59 @@ describe('Gemini Platform Adapter', () => {
                 expect(geminiAdapter.extractTitleFromDom()).toBe("Discussion on Istinja' Rulings");
             } finally {
                 (globalThis as any).document = originalDocument;
+            }
+        });
+
+        it('should extract active sidebar conversation title from matching app href when aria-current is absent', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <nav>
+                    <a href="/app/aaaaaaaaaaaaaaaa">Old conversation</a>
+                    <a href="/app/20de061ec5dae81c">Discussion on Istinja' Rulings</a>
+                </nav>
+                <main>
+                    <div>No heading yet</div>
+                </main>
+            `;
+            win.location.href = 'https://gemini.google.com/app/20de061ec5dae81c';
+
+            const originalDocument = (globalThis as any).document;
+            const originalWindow = (globalThis as any).window;
+            (globalThis as any).document = doc;
+            (globalThis as any).window = win;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBe("Discussion on Istinja' Rulings");
+            } finally {
+                (globalThis as any).document = originalDocument;
+                (globalThis as any).window = originalWindow;
+            }
+        });
+
+        it('should ignore non-matching sidebar app href titles when aria-current is absent', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <nav>
+                    <a href="/app/aaaaaaaaaaaaaaaa">Older conversation title</a>
+                </nav>
+                <main>
+                    <div>No heading yet</div>
+                </main>
+            `;
+            win.location.href = 'https://gemini.google.com/app/bbbbbbbbbbbbbbbb';
+
+            const originalDocument = (globalThis as any).document;
+            const originalWindow = (globalThis as any).window;
+            (globalThis as any).document = doc;
+            (globalThis as any).window = win;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBeNull();
+            } finally {
+                (globalThis as any).document = originalDocument;
+                (globalThis as any).window = originalWindow;
             }
         });
 

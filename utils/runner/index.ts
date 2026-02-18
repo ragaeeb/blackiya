@@ -23,22 +23,28 @@ import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
-import {
-    type AttemptDisposedMessage,
-    type ConversationIdResolvedMessage,
-    createAttemptId,
-    type ResponseFinishedMessage,
-    type ResponseLifecycleMessage,
-    type StreamDeltaMessage,
-    type StreamDumpConfigMessage,
-    type StreamDumpFrameMessage,
-    type TitleResolvedMessage,
+import type {
+    AttemptDisposedMessage,
+    ConversationIdResolvedMessage,
+    ResponseFinishedMessage,
+    ResponseLifecycleMessage,
+    StreamDeltaMessage,
+    StreamDumpConfigMessage,
+    StreamDumpFrameMessage,
+    TitleResolvedMessage,
 } from '@/utils/protocol/messages';
+import {
+    getConversationAttemptMismatch as getConversationAttemptMismatchForRegistry,
+    resolveRunnerAttemptId,
+    shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry,
+} from '@/utils/runner/attempt-registry';
 import { type CalibrationStep, prioritizeCalibrationStep } from '@/utils/runner/calibration-runner';
 import { buildRunnerSnapshotConversationData } from '@/utils/runner/dom-snapshot';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { getLifecyclePhasePriority } from '@/utils/runner/lifecycle-manager';
 import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
+import { resolveRunnerReadinessDecision } from '@/utils/runner/readiness';
+import { RunnerState } from '@/utils/runner/state';
 import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import { shouldIngestAsCanonicalSample, shouldUseCachedConversationForWarmFetch } from '@/utils/sfe/capture-fidelity';
@@ -144,7 +150,7 @@ export function shouldRemoveDisposedAttemptBinding(
     disposedAttemptId: string,
     resolveAttemptId: (attemptId: string) => string,
 ): boolean {
-    return resolveAttemptId(mappedAttemptId) === resolveAttemptId(disposedAttemptId);
+    return shouldRemoveDisposedAttemptBindingFromRegistry(mappedAttemptId, disposedAttemptId, resolveAttemptId);
 }
 
 export type CanonicalStabilizationAttemptState = {
@@ -211,6 +217,7 @@ export function runPlatform(): void {
 
     const runnerControl: RunnerControl = {};
     (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] = runnerControl;
+    const runnerState = new RunnerState();
 
     let currentAdapter: LLMPlatform | null = null;
     let currentConversationId: string | null = null;
@@ -225,7 +232,7 @@ export function runPlatform(): void {
     let lifecycleConversationId: string | null = null;
     let lastStreamProbeKey = '';
     let lastStreamProbeConversationId: string | null = null;
-    const liveStreamPreviewByConversation = new Map<string, string>();
+    const liveStreamPreviewByConversation = runnerState.streamPreviewByConversation;
     const preservedLiveStreamSnapshotByConversation = new Map<string, string>();
     let streamDumpEnabled = false;
     const streamProbeControllers = new Map<string, AbortController>();
@@ -242,7 +249,6 @@ export function runPlatform(): void {
     let calibrationPreferenceLoaded = false;
     let calibrationPreferenceLoading: Promise<void> | null = null;
     let sfeEnabled = true;
-    let probeLeaseEnabled = false;
     const autoCaptureAttempts = new Map<string, number>();
     const autoCaptureRetryTimers = new Map<string, number>();
     const autoCaptureDeferredLogged = new Set<string>();
@@ -253,8 +259,8 @@ export function runPlatform(): void {
         }),
     });
     const structuredLogger = new StructuredAttemptLogger();
-    const attemptByConversation = new Map<string, string>();
-    const attemptAliasForward = new Map<string, string>();
+    const attemptByConversation = runnerState.attemptByConversation;
+    const attemptAliasForward = runnerState.attemptAliasForward;
     const pendingLifecycleByAttempt = new Map<
         string,
         {
@@ -263,11 +269,21 @@ export function runPlatform(): void {
             receivedAtMs: number;
         }
     >();
-    const captureMetaByConversation = new Map<string, ExportMeta>();
+    const captureMetaByConversation = runnerState.captureMetaByConversation;
     const probeLease = new CrossTabProbeLease();
     const streamResolvedTitles = new Map<string, string>();
     const lastCanonicalReadyLogAtByConversation = new Map<string, number>();
     let activeAttemptId: string | null = null;
+
+    function setCurrentConversation(conversationId: string | null): void {
+        currentConversationId = conversationId;
+        runnerState.conversationId = conversationId;
+    }
+
+    function setActiveAttempt(attemptId: string | null): void {
+        activeAttemptId = attemptId;
+        runnerState.activeAttemptId = attemptId;
+    }
 
     function cachePendingLifecycleSignal(
         attemptId: string,
@@ -355,7 +371,7 @@ export function runPlatform(): void {
         if (!meta?.attemptId) {
             return;
         }
-        activeAttemptId = meta.attemptId;
+        setActiveAttempt(meta.attemptId);
         bindAttempt(conversationId, meta.attemptId);
     }
 
@@ -414,7 +430,7 @@ export function runPlatform(): void {
         meta?: InterceptionCaptureMeta,
     ): void {
         applyStreamResolvedTitleIfNeeded(capturedId, data);
-        currentConversationId = capturedId;
+        setCurrentConversation(capturedId);
         updateActiveAttemptFromMeta(capturedId, meta);
 
         const source = meta?.source ?? 'network';
@@ -458,19 +474,15 @@ export function runPlatform(): void {
     }
 
     function resolveAttemptId(conversationId?: string): string {
-        if (conversationId) {
-            const mapped = attemptByConversation.get(conversationId);
-            if (mapped) {
-                return resolveAliasedAttemptId(mapped);
-            }
-        }
-        if (activeAttemptId) {
-            return resolveAliasedAttemptId(activeAttemptId);
-        }
-        const prefix = (currentAdapter?.name ?? 'attempt').toLowerCase().replace(/\s+/g, '-');
-        const created = createAttemptId(prefix);
-        activeAttemptId = created;
-        return created;
+        const resolved = resolveRunnerAttemptId({
+            conversationId,
+            activeAttemptId,
+            adapterName: currentAdapter?.name,
+            attemptByConversation,
+            resolveAliasedAttemptId,
+        });
+        setActiveAttempt(resolved.nextActiveAttemptId);
+        return resolved.attemptId;
     }
 
     function bindAttempt(conversationId: string | undefined, attemptId: string): void {
@@ -551,15 +563,12 @@ export function runPlatform(): void {
     }
 
     function getConversationAttemptMismatch(canonicalAttemptId: string, conversationId?: string): string | null {
-        if (!conversationId) {
-            return null;
-        }
-        const mapped = attemptByConversation.get(conversationId);
-        const canonicalMapped = mapped ? resolveAliasedAttemptId(mapped) : null;
-        if (!canonicalMapped || canonicalMapped === canonicalAttemptId) {
-            return null;
-        }
-        return canonicalMapped;
+        return getConversationAttemptMismatchForRegistry(
+            canonicalAttemptId,
+            conversationId,
+            attemptByConversation,
+            resolveAliasedAttemptId,
+        );
     }
 
     function emitConversationMismatchDrop(
@@ -631,12 +640,8 @@ export function runPlatform(): void {
         }
     }
 
-    function tryAcquireProbeLease(conversationId: string, attemptId: string): boolean {
-        if (!probeLeaseEnabled) {
-            return true;
-        }
-
-        const claim = probeLease.claim(conversationId, attemptId, PROBE_LEASE_TTL_MS);
+    async function tryAcquireProbeLease(conversationId: string, attemptId: string): Promise<boolean> {
+        const claim = await probeLease.claim(conversationId, attemptId, PROBE_LEASE_TTL_MS);
         if (claim.acquired) {
             clearProbeLeaseRetry(attemptId);
             return true;
@@ -1285,20 +1290,15 @@ export function runPlatform(): void {
 
     async function loadSfeSettings(): Promise<void> {
         try {
-            const result = await browser.storage.local.get([
-                STORAGE_KEYS.SFE_ENABLED,
-                STORAGE_KEYS.PROBE_LEASE_ENABLED,
-            ]);
+            const result = await browser.storage.local.get([STORAGE_KEYS.SFE_ENABLED]);
             sfeEnabled = result[STORAGE_KEYS.SFE_ENABLED] !== false;
-            probeLeaseEnabled = result[STORAGE_KEYS.PROBE_LEASE_ENABLED] === true;
             logger.info('SFE settings loaded', {
                 sfeEnabled,
-                probeLeaseEnabled,
+                probeLeaseArbitration: 'always_on',
             });
         } catch (error) {
             logger.warn('Failed to load SFE settings. Falling back to defaults.', error);
             sfeEnabled = true;
-            probeLeaseEnabled = false;
         }
     }
 
@@ -1491,6 +1491,7 @@ export function runPlatform(): void {
         const resolvedConversationId = conversationId ?? currentConversationId ?? null;
         logLifecycleTransition(lifecycleState, state, resolvedConversationId);
         lifecycleState = state;
+        runnerState.lifecycleState = state;
         syncLifecycleContext(state, resolvedConversationId);
         buttonManager.setLifecycleState(state);
         applyLifecycleUiState(state, conversationId);
@@ -1734,10 +1735,10 @@ export function runPlatform(): void {
         controller: AbortController;
     };
 
-    function createStreamDoneProbeContext(
+    async function createStreamDoneProbeContext(
         conversationId: string,
         hintedAttemptId?: string,
-    ): StreamDoneProbeContext | null {
+    ): Promise<StreamDoneProbeContext | null> {
         if (!currentAdapter) {
             return null;
         }
@@ -1745,7 +1746,7 @@ export function runPlatform(): void {
         if (isAttemptDisposedOrSuperseded(attemptId)) {
             return null;
         }
-        if (!tryAcquireProbeLease(conversationId, attemptId)) {
+        if (!(await tryAcquireProbeLease(conversationId, attemptId))) {
             return null;
         }
 
@@ -1910,13 +1911,17 @@ export function runPlatform(): void {
 
     function finalizeStreamDoneProbe(context: StreamDoneProbeContext): void {
         streamProbeControllers.delete(context.attemptId);
-        if (probeLeaseEnabled) {
-            probeLease.release(context.conversationId, context.attemptId);
-        }
+        void probeLease.release(context.conversationId, context.attemptId).catch((error) => {
+            logger.debug('Probe lease release failed after stream-done probe finalize', {
+                conversationId: context.conversationId,
+                attemptId: context.attemptId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
     }
 
     async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
-        const context = createStreamDoneProbeContext(conversationId, hintedAttemptId);
+        const context = await createStreamDoneProbeContext(conversationId, hintedAttemptId);
         if (!context) {
             return;
         }
@@ -2092,13 +2097,13 @@ export function runPlatform(): void {
             return;
         }
 
-        calibrationState = 'waiting';
-        buttonManager.setCalibrationState('waiting');
+        setCalibrationStatus('waiting');
         logger.info('Calibration armed. Click Done when response is complete.');
     }
 
     function setCalibrationStatus(status: 'idle' | 'waiting' | 'capturing' | 'success' | 'error'): void {
         calibrationState = status;
+        runnerState.calibrationState = status;
         buttonManager.setCalibrationState(status, {
             timestampLabel:
                 status === 'success' ? formatCalibrationTimestampLabel(rememberedCalibrationUpdatedAt) : null,
@@ -2918,7 +2923,7 @@ export function runPlatform(): void {
             setCalibrationStatus('capturing');
             return;
         }
-        calibrationState = 'capturing';
+        setCalibrationStatus('capturing');
     }
 
     function logCalibrationCaptureStart(
@@ -2976,7 +2981,7 @@ export function runPlatform(): void {
             markCalibrationSuccess(conversationId);
             return;
         }
-        calibrationState = 'success';
+        setCalibrationStatus('success');
         refreshButtonState(conversationId);
     }
 
@@ -2986,7 +2991,7 @@ export function runPlatform(): void {
             refreshButtonState(conversationId);
             return;
         }
-        calibrationState = 'idle';
+        setCalibrationStatus('idle');
     }
 
     async function getConversationData(options: { silent?: boolean; allowDegraded?: boolean } = {}) {
@@ -3188,7 +3193,7 @@ export function runPlatform(): void {
 
         if (!conversationId) {
             logger.info('No conversation ID yet; showing calibration only');
-            currentConversationId = null;
+            setCurrentConversation(null);
             if (lifecycleState !== 'idle') {
                 setLifecycleState('idle');
             }
@@ -3199,7 +3204,7 @@ export function runPlatform(): void {
         }
 
         buttonManager.setActionButtonsEnabled(true);
-        currentConversationId = conversationId;
+        setCurrentConversation(conversationId);
 
         refreshButtonState(conversationId);
         scheduleButtonRefresh(conversationId);
@@ -3246,19 +3251,20 @@ export function runPlatform(): void {
     function handleConversationSwitch(newId: string | null): void {
         disposeInFlightAttemptsOnNavigation(newId);
         if (!newId) {
-            currentConversationId = null;
+            setCurrentConversation(null);
             setLifecycleState('idle');
             setTimeout(injectSaveButton, 300);
             return;
         }
 
         buttonManager.remove();
-        currentConversationId = newId;
+        setCurrentConversation(newId);
 
         // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
         const newAdapter = getPlatformAdapter(window.location.href);
         if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
             currentAdapter = newAdapter;
+            runnerState.adapter = newAdapter;
             updateManagers();
             calibrationPreferenceLoaded = false;
             calibrationPreferenceLoading = null;
@@ -3284,7 +3290,7 @@ export function runPlatform(): void {
     }
 
     function resetButtonStateForNoConversation(): void {
-        currentConversationId = null;
+        setCurrentConversation(null);
         if (lifecycleState !== 'idle') {
             setLifecycleState('idle');
         }
@@ -3360,12 +3366,12 @@ export function runPlatform(): void {
     function syncCalibrationDisplayFromDecision(decision: ReadinessDecision): void {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         if (isCanonicalReady && calibrationState !== 'capturing') {
-            calibrationState = 'success';
+            setCalibrationStatus('success');
             syncCalibrationButtonDisplay();
             return;
         }
         if (!isCanonicalReady && calibrationState === 'success') {
-            calibrationState = 'idle';
+            setCalibrationStatus('idle');
             syncCalibrationButtonDisplay();
         }
     }
@@ -3468,59 +3474,6 @@ export function runPlatform(): void {
         return isPlatformGenerating(currentAdapter);
     }
 
-    function createMissingDataReadinessDecision(): ReadinessDecision {
-        return {
-            ready: false,
-            mode: 'awaiting_stabilization',
-            reason: 'no_canonical_data',
-        };
-    }
-
-    function createLegacyReadinessDecision(
-        conversationId: string,
-        readiness: PlatformReadiness,
-        captureMeta: ExportMeta,
-    ): ReadinessDecision {
-        const ready = readiness.ready;
-        if (ready) {
-            logger.debug('Readiness decision: SFE disabled, legacy ready', {
-                conversationId,
-                fidelity: captureMeta.fidelity,
-                readinessReason: readiness.reason,
-            });
-        }
-        return {
-            ready,
-            mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
-            reason: ready ? 'legacy_ready' : readiness.reason,
-        };
-    }
-
-    function createTimeoutReadinessDecision(
-        conversationId: string,
-        captureMeta: ExportMeta,
-        sfeResolution: ReturnType<typeof sfe.resolveByConversation>,
-    ): ReadinessDecision | null {
-        const attemptId = resolveAttemptId(conversationId);
-        const hasTimeout =
-            sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
-            (captureMeta.fidelity === 'degraded' && hasCanonicalStabilizationTimedOut(attemptId));
-        if (!hasTimeout) {
-            return null;
-        }
-        logger.debug('Readiness decision: degraded_manual_only (timeout)', {
-            conversationId,
-            attemptId,
-            fidelity: captureMeta.fidelity,
-        });
-        emitTimeoutWarningOnce(attemptId, conversationId);
-        return {
-            ready: false,
-            mode: 'degraded_manual_only',
-            reason: 'stabilization_timeout',
-        };
-    }
-
     function shouldLogCanonicalReadyDecision(conversationId: string): boolean {
         const now = Date.now();
         const lastLoggedAt = lastCanonicalReadyLogAtByConversation.get(conversationId);
@@ -3532,60 +3485,36 @@ export function runPlatform(): void {
     }
 
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
-        const data = interceptionManager.getConversation(conversationId);
-        if (!data) {
-            lastCanonicalReadyLogAtByConversation.delete(conversationId);
-            return createMissingDataReadinessDecision();
-        }
-
-        const readiness = evaluateReadinessForData(data);
         const captureMeta = getCaptureMeta(conversationId);
-
-        if (!sfeEnabled) {
-            return createLegacyReadinessDecision(conversationId, readiness, captureMeta);
-        }
-
         const sfeResolution = sfe.resolveByConversation(conversationId);
-        const sfeReady = !!sfeResolution?.ready;
-        logSfeMismatchIfNeeded(conversationId, readiness.ready);
-        if (sfeReady && readiness.ready && captureMeta.fidelity === 'high') {
-            if (shouldLogCanonicalReadyDecision(conversationId)) {
-                logger.debug('Readiness decision: canonical_ready', {
-                    conversationId,
-                    fidelity: captureMeta.fidelity,
-                    sfeReady,
-                    legacyReady: readiness.ready,
-                });
-            }
-            return {
-                ready: true,
-                mode: 'canonical_ready',
-                reason: 'canonical_ready',
-            };
-        }
-
-        lastCanonicalReadyLogAtByConversation.delete(conversationId);
-
-        const timeoutDecision = createTimeoutReadinessDecision(conversationId, captureMeta, sfeResolution);
-        if (timeoutDecision) {
-            return timeoutDecision;
-        }
-
-        timeoutWarningByAttempt.delete(resolveAttemptId(conversationId));
-
-        if (captureMeta.fidelity === 'degraded') {
-            return {
-                ready: false,
-                mode: 'awaiting_stabilization',
-                reason: 'snapshot_degraded_capture',
-            };
-        }
-
-        return {
-            ready: false,
-            mode: 'awaiting_stabilization',
-            reason: sfeResolution?.reason ?? readiness.reason,
-        };
+        return resolveRunnerReadinessDecision({
+            conversationId,
+            data: interceptionManager.getConversation(conversationId) ?? null,
+            sfeEnabled,
+            captureMeta,
+            sfeResolution: sfeResolution
+                ? {
+                      ready: sfeResolution.ready,
+                      reason: sfeResolution.reason,
+                      blockingConditions: [...sfeResolution.blockingConditions],
+                  }
+                : null,
+            evaluateReadinessForData,
+            resolveAttemptId,
+            hasCanonicalStabilizationTimedOut,
+            emitTimeoutWarningOnce,
+            clearTimeoutWarningByAttempt: (attemptId) => {
+                timeoutWarningByAttempt.delete(attemptId);
+            },
+            logSfeMismatchIfNeeded,
+            shouldLogCanonicalReadyDecision,
+            clearCanonicalReadyLogStamp: (id) => {
+                lastCanonicalReadyLogAtByConversation.delete(id);
+            },
+            loggerDebug: (message, payload) => {
+                logger.debug(message, payload);
+            },
+        });
     }
 
     function isConversationReadyForActions(
@@ -3809,11 +3738,11 @@ export function runPlatform(): void {
             return;
         }
         const attemptId = resolveAttemptId(conversationId ?? undefined);
-        activeAttemptId = attemptId;
+        setActiveAttempt(attemptId);
         ingestSfeLifecycle('completed_hint', attemptId, conversationId);
 
         if (conversationId) {
-            currentConversationId = conversationId;
+            setCurrentConversation(conversationId);
             bindAttempt(conversationId, attemptId);
         }
 
@@ -3947,7 +3876,7 @@ export function runPlatform(): void {
     }
 
     function attachFinishedAttemptContext(conversationId: string, attemptId: string): void {
-        activeAttemptId = attemptId;
+        setActiveAttempt(attemptId);
         bindAttempt(conversationId, attemptId);
     }
 
@@ -4140,9 +4069,9 @@ export function runPlatform(): void {
             return;
         }
 
-        currentConversationId = conversationId;
+        setCurrentConversation(conversationId);
         bindAttempt(conversationId, attemptId);
-        activeAttemptId = attemptId;
+        setActiveAttempt(attemptId);
         applyLifecyclePhaseForConversation(phase, platform, attemptId, conversationId, 'direct');
     }
 
@@ -4215,7 +4144,7 @@ export function runPlatform(): void {
             return true;
         }
 
-        activeAttemptId = attemptId;
+        setActiveAttempt(attemptId);
         bindAttempt(conversationId, attemptId);
         appendLiveStreamProbeText(conversationId, text);
         return true;
@@ -4275,8 +4204,8 @@ export function runPlatform(): void {
             return true;
         }
 
-        activeAttemptId = canonicalAttemptId;
-        currentConversationId = typed.conversationId;
+        setActiveAttempt(canonicalAttemptId);
+        setCurrentConversation(typed.conversationId);
         bindAttempt(typed.conversationId, canonicalAttemptId);
         sfe.getAttemptTracker().updateConversationId(canonicalAttemptId, typed.conversationId);
         replayPendingLifecycleSignal(canonicalAttemptId, typed.conversationId);
@@ -4306,7 +4235,7 @@ export function runPlatform(): void {
             activeAttemptId &&
             shouldRemoveDisposedAttemptBinding(activeAttemptId, canonicalDisposedId, resolveAliasedAttemptId)
         ) {
-            activeAttemptId = null;
+            setActiveAttempt(null);
         }
         return true;
     }
@@ -4424,6 +4353,7 @@ export function runPlatform(): void {
 
     const url = window.location.href;
     currentAdapter = getPlatformAdapter(url);
+    runnerState.adapter = currentAdapter;
 
     if (!currentAdapter) {
         logger.warn('No matching platform adapter for this URL');
@@ -4453,9 +4383,6 @@ export function runPlatform(): void {
         if (changes[STORAGE_KEYS.SFE_ENABLED]) {
             sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
             refreshButtonState(currentConversationId ?? undefined);
-        }
-        if (changes[STORAGE_KEYS.PROBE_LEASE_ENABLED]) {
-            probeLeaseEnabled = changes[STORAGE_KEYS.PROBE_LEASE_ENABLED]?.newValue === true;
         }
         if (changes[STORAGE_KEYS.CALIBRATION_PROFILES] && currentAdapter) {
             calibrationPreferenceLoaded = false;
@@ -4532,7 +4459,7 @@ export function runPlatform(): void {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Initial injection
-    currentConversationId = currentAdapter.extractConversationId(url);
+    setCurrentConversation(currentAdapter.extractConversationId(url));
     injectSaveButton();
     if (currentConversationId) {
         void warmFetchConversationSnapshot(currentConversationId, 'initial-load');

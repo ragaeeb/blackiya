@@ -177,6 +177,12 @@ blackiya/
 │   ├── interceptor.content.ts # Thin MAIN-world entrypoint
 │   ├── interceptor/
 │   │   ├── bootstrap.ts       # MAIN-world interceptor implementation
+│   │   ├── fetch-pipeline.ts
+│   │   ├── xhr-pipeline.ts
+│   │   ├── snapshot-bridge.ts
+│   │   ├── state.ts
+│   │   ├── signal-emitter.ts
+│   │   ├── discovery.ts
 │   │   ├── fetch-wrapper.ts
 │   │   ├── xhr-wrapper.ts
 │   │   ├── proactive-fetcher.ts
@@ -202,7 +208,9 @@ blackiya/
 │   │   ├── stream-probe.ts
 │   │   ├── calibration-runner.ts
 │   │   ├── dom-snapshot.ts
-│   │   └── export-pipeline.ts
+│   │   ├── export-pipeline.ts
+│   │   ├── attempt-registry.ts
+│   │   └── readiness.ts
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities
@@ -405,6 +413,8 @@ The JSON file contains:
 Debugging references:
 - `docs/debug-logs-guide.md`
 - `docs/discovery-mode.md`
+
+For bottom-left stream/probe toast meanings (`stream-done:*`, canonical vs degraded states), see `docs/debug-logs-guide.md` section **Bottom-Left Toast / Probe Panel Statuses**.
 
 ## 🐛 Troubleshooting
 

@@ -11,7 +11,6 @@ export const STORAGE_KEYS = {
     EXPORT_FORMAT: 'userSettings.exportFormat',
     CALIBRATION_PROFILES: 'userSettings.calibrationProfiles',
     SFE_ENABLED: 'userSettings.sfe.enabled',
-    PROBE_LEASE_ENABLED: 'userSettings.sfe.probeLeaseEnabled',
     DIAGNOSTICS_STREAM_DUMP_ENABLED: 'userSettings.diagnostics.streamDumpEnabled',
     DIAGNOSTICS_STREAM_DUMP_STORE: 'diagnostics.streamDumpStore',
 } as const;

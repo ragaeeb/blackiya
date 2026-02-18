@@ -1,14 +1,27 @@
+import {
+    detectPlatformFromHostname,
+    isDiscoveryDiagnosticsEnabled,
+    safePathname,
+} from '@/entrypoints/interceptor/discovery';
+import { createFetchInterceptorContext, type FetchInterceptorContext } from '@/entrypoints/interceptor/fetch-pipeline';
 import { createFetchInterceptor } from '@/entrypoints/interceptor/fetch-wrapper';
 import { ProactiveFetcher } from '@/entrypoints/interceptor/proactive-fetcher';
+import {
+    shouldEmitXhrRequestLifecycle,
+    tryMarkGeminiXhrLoadendCompleted,
+} from '@/entrypoints/interceptor/signal-emitter';
+import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-bridge';
+import { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
 import { monitorChatgptSseChunk } from '@/entrypoints/interceptor/stream-monitors/chatgpt-sse-monitor';
 import { shouldProcessGeminiChunk } from '@/entrypoints/interceptor/stream-monitors/gemini-stream-monitor';
 import { normalizeGrokStreamChunk } from '@/entrypoints/interceptor/stream-monitors/grok-stream-monitor';
+import { buildXhrLifecycleContext, type XhrLifecycleContext } from '@/entrypoints/interceptor/xhr-pipeline';
 import { notifyXhrOpen } from '@/entrypoints/interceptor/xhr-wrapper';
 import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
-import { addBoundedSetValue, setBoundedMapValue } from '@/utils/bounded-collections';
+import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
@@ -33,6 +46,13 @@ import {
     type StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
 import type { ConversationData } from '@/utils/types';
+
+export {
+    tryEmitGeminiXhrLoadendCompletion,
+    shouldEmitXhrRequestLifecycle,
+    tryMarkGeminiXhrLoadendCompleted,
+} from '@/entrypoints/interceptor/signal-emitter';
+export { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
 
 interface RawCaptureSnapshot {
     __blackiyaSnapshotType: 'raw-capture';
@@ -68,8 +88,11 @@ const streamDumpLastTextByAttempt = new Map<string, string>();
 const latestAttemptIdByPlatform = new Map<string, string>();
 const MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES = 300;
 const MAX_INTERCEPTOR_ATTEMPT_BINDINGS = 400;
-const MAX_INTERCEPTOR_DISPOSED_ATTEMPTS = 500;
 const MAX_INTERCEPTOR_STREAM_DUMP_ATTEMPTS = 250;
+const BLACKIYA_GET_JSON_REQUEST = 'BLACKIYA_GET_JSON_REQUEST';
+const BLACKIYA_GET_JSON_RESPONSE = 'BLACKIYA_GET_JSON_RESPONSE';
+const JSON_FORMAT_ORIGINAL = 'original';
+const JSON_FORMAT_COMMON = 'common';
 const INTERCEPTOR_CACHE_ENTRY_TTL_MS = 60_000;
 const INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS = 15_000;
 let lastCachePruneAtMs = 0;
@@ -104,18 +127,6 @@ type GrokXhrStreamState = {
 
 export { setBoundedMapValue };
 
-export function pruneTimestampCache(map: Map<string, number>, ttlMs: number, nowMs = Date.now()): number {
-    let removed = 0;
-    for (const [key, timestamp] of map.entries()) {
-        if (nowMs - timestamp <= ttlMs) {
-            continue;
-        }
-        map.delete(key);
-        removed += 1;
-    }
-    return removed;
-}
-
 function maybePruneTimestampCaches(nowMs = Date.now()): void {
     if (nowMs - lastCachePruneAtMs < INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS) {
         return;
@@ -126,32 +137,6 @@ function maybePruneTimestampCaches(nowMs = Date.now()): void {
     pruneTimestampCache(capturePayloadCache, INTERCEPTOR_CACHE_ENTRY_TTL_MS, nowMs);
     pruneTimestampCache(lifecycleSignalCache, INTERCEPTOR_CACHE_ENTRY_TTL_MS, nowMs);
     pruneTimestampCache(conversationResolvedSignalCache, INTERCEPTOR_CACHE_ENTRY_TTL_MS, nowMs);
-}
-
-export function cleanupDisposedAttemptState(
-    attemptIdToRemove: string,
-    state: {
-        disposedAttemptIds: Set<string>;
-        streamDumpFrameCountByAttempt: Map<string, number>;
-        streamDumpLastTextByAttempt: Map<string, string>;
-        latestAttemptIdByPlatform: Map<string, string>;
-        attemptByConversationId: Map<string, string>;
-    },
-    maxDisposedAttempts = MAX_INTERCEPTOR_DISPOSED_ATTEMPTS,
-): void {
-    addBoundedSetValue(state.disposedAttemptIds, attemptIdToRemove, maxDisposedAttempts);
-    state.streamDumpFrameCountByAttempt.delete(attemptIdToRemove);
-    state.streamDumpLastTextByAttempt.delete(attemptIdToRemove);
-    for (const [platform, attemptId] of state.latestAttemptIdByPlatform.entries()) {
-        if (attemptId === attemptIdToRemove) {
-            state.latestAttemptIdByPlatform.delete(platform);
-        }
-    }
-    for (const [conversationId, attemptId] of state.attemptByConversationId.entries()) {
-        if (attemptId === attemptIdToRemove) {
-            state.attemptByConversationId.delete(conversationId);
-        }
-    }
 }
 
 function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
@@ -238,36 +223,6 @@ function queueLogMessage(payload: InterceptorLogPayload) {
         queue.splice(0, queue.length - 100);
     }
     (window as any).__BLACKIYA_LOG_QUEUE__ = queue;
-}
-
-function safePathname(url: string): string {
-    try {
-        return new URL(url, window.location.origin).pathname;
-    } catch {
-        return url.slice(0, 120);
-    }
-}
-
-function detectPlatformFromHostname(): string {
-    const hostname = window.location.hostname;
-    if (hostname.includes('gemini')) {
-        return 'Gemini';
-    }
-    if (hostname.includes('grok')) {
-        return 'Grok';
-    }
-    if (hostname.includes('chatgpt')) {
-        return 'ChatGPT';
-    }
-    return 'Discovery';
-}
-
-function isDiscoveryDiagnosticsEnabled(): boolean {
-    try {
-        return window.localStorage.getItem('blackiya.discovery') === '1';
-    } catch {
-        return false;
-    }
 }
 
 function emitDiscoveryDumpFrame(label: string, path: string, text: string): void {
@@ -362,6 +317,24 @@ function resolveAttemptIdForConversation(conversationId?: string, platformName =
         bindAttemptToConversation(created, conversationId);
     }
     return created;
+}
+
+function peekAttemptIdForConversation(
+    conversationId?: string,
+    platformName = chatGPTAdapter.name,
+): string | undefined {
+    const platformKey = platformName || chatGPTAdapter.name;
+    if (conversationId) {
+        const bound = attemptByConversationId.get(conversationId);
+        if (bound && !disposedAttemptIds.has(bound)) {
+            return bound;
+        }
+    }
+    const latestAttemptId = latestAttemptIdByPlatform.get(platformKey);
+    if (latestAttemptId && !disposedAttemptIds.has(latestAttemptId)) {
+        return latestAttemptId;
+    }
+    return undefined;
 }
 
 function emitConversationIdResolvedSignal(attemptId: string, conversationId: string, platformOverride?: string): void {
@@ -483,23 +456,6 @@ function shouldEmitNonChatLifecycleForRequest(adapter: LLMPlatform, url: string)
         return allowed;
     }
     return true;
-}
-
-export function shouldEmitXhrRequestLifecycle(context: {
-    shouldEmitNonChatLifecycle: boolean;
-    requestAdapter: LLMPlatform | null;
-    attemptId?: string;
-    conversationId?: string;
-}): boolean {
-    if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter || !context.attemptId) {
-        return false;
-    }
-    // Gemini StreamGenerate requests can start before a conversation id is available.
-    // Emit prompt-sent and wire stream monitoring so the id can resolve from stream payloads.
-    if (context.requestAdapter.name === 'Gemini') {
-        return true;
-    }
-    return typeof context.conversationId === 'string' && context.conversationId.length > 0;
 }
 
 function shouldEmitCompletionSignalForUrl(adapter: LLMPlatform, url: string): boolean {
@@ -1040,23 +996,6 @@ function createGeminiXhrStreamState(attemptId: string, seedConversationId?: stri
     };
 }
 
-export function shouldEmitGeminiXhrLoadendCompletion(
-    state: Pick<GeminiXhrStreamState, 'emittedCompleted' | 'emittedStreaming' | 'seedConversationId'>,
-    requestUrl: string,
-): boolean {
-    if (state.emittedCompleted) {
-        return false;
-    }
-    if (!shouldEmitGeminiCompletion(requestUrl)) {
-        return false;
-    }
-    if (!state.emittedStreaming && !state.seedConversationId) {
-        return false;
-    }
-    state.emittedCompleted = true;
-    return true;
-}
-
 function syncGeminiSeenPayloadOrder(state: GeminiXhrStreamState): void {
     for (const payload of state.seenPayloads) {
         if (state.seenPayloadOrder.includes(payload)) {
@@ -1195,7 +1134,7 @@ function wireGeminiXhrProgressMonitor(
             xhr.readyState === XMLHttpRequest.DONE &&
             xhr.status >= 200 &&
             xhr.status < 300 &&
-            shouldEmitGeminiXhrLoadendCompletion(state, requestUrl)
+            tryMarkGeminiXhrLoadendCompleted(state, requestUrl)
         ) {
             emitLifecycleSignal(state.attemptId, 'completed', state.seedConversationId, 'Gemini');
         }
@@ -2759,56 +2698,6 @@ export default defineContentScript({
             });
         };
 
-        type FetchInterceptorContext = {
-            args: Parameters<typeof fetch>;
-            outgoingUrl: string;
-            outgoingMethod: string;
-            outgoingPath: string;
-            fetchApiAdapter: LLMPlatform | null;
-            isNonChatGptApiRequest: boolean;
-            shouldEmitNonChatLifecycle: boolean;
-            nonChatConversationId: string | undefined;
-            nonChatAttemptId: string | undefined;
-            isChatGptPromptRequest: boolean;
-            lifecycleConversationId: string | undefined;
-            lifecycleAttemptId: string | undefined;
-        };
-
-        const createFetchInterceptorContext = (args: Parameters<typeof fetch>): FetchInterceptorContext => {
-            const outgoingUrl = getRequestUrl(args[0]);
-            const outgoingMethod = getRequestMethod(args).toUpperCase();
-            const outgoingPath = safePathname(outgoingUrl);
-            const fetchApiAdapter = outgoingMethod === 'POST' ? getPlatformAdapterByApiUrl(outgoingUrl) : null;
-            const isNonChatGptApiRequest = !!fetchApiAdapter && fetchApiAdapter.name !== chatGPTAdapter.name;
-            const shouldEmitNonChatLifecycle =
-                isNonChatGptApiRequest && shouldEmitNonChatLifecycleForRequest(fetchApiAdapter, outgoingUrl);
-            const nonChatConversationId = isNonChatGptApiRequest
-                ? resolveRequestConversationId(fetchApiAdapter, outgoingUrl)
-                : undefined;
-            const nonChatAttemptId =
-                isNonChatGptApiRequest && fetchApiAdapter
-                    ? resolveAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
-                    : undefined;
-            const isChatGptPromptRequest =
-                outgoingMethod === 'POST' && /\/backend-api\/f\/conversation(?:\?.*)?$/i.test(outgoingPath);
-            const lifecycleConversationId = isChatGptPromptRequest ? resolveLifecycleConversationId(args) : undefined;
-            const lifecycleAttemptId = isChatGptPromptRequest ? createAttemptId('chatgpt') : undefined;
-            return {
-                args,
-                outgoingUrl,
-                outgoingMethod,
-                outgoingPath,
-                fetchApiAdapter,
-                isNonChatGptApiRequest,
-                shouldEmitNonChatLifecycle,
-                nonChatConversationId,
-                nonChatAttemptId,
-                isChatGptPromptRequest,
-                lifecycleConversationId,
-                lifecycleAttemptId,
-            };
-        };
-
         const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
             if (context.isChatGptPromptRequest && context.lifecycleAttemptId) {
                 setBoundedMapValue(
@@ -2825,19 +2714,22 @@ export default defineContentScript({
                 emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
             }
 
-            if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter || !context.nonChatAttemptId) {
+            if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter) {
                 return;
             }
+            const nonChatAttemptId =
+                context.nonChatAttemptId ??
+                resolveAttemptIdForConversation(context.nonChatConversationId, context.fetchApiAdapter.name);
 
             emitLifecycleSignal(
-                context.nonChatAttemptId,
+                nonChatAttemptId,
                 'prompt-sent',
                 context.nonChatConversationId,
                 context.fetchApiAdapter.name,
             );
             if (context.fetchApiAdapter.name !== 'Gemini') {
                 emitLifecycleSignal(
-                    context.nonChatAttemptId,
+                    nonChatAttemptId,
                     'streaming',
                     context.nonChatConversationId,
                     context.fetchApiAdapter.name,
@@ -2846,10 +2738,10 @@ export default defineContentScript({
 
             if (
                 context.fetchApiAdapter.name === 'Grok' &&
-                shouldLogTransient(`grok:fetch:request:${context.nonChatAttemptId}`, 3000)
+                shouldLogTransient(`grok:fetch:request:${nonChatAttemptId}`, 3000)
             ) {
                 log('info', 'Grok fetch request intercepted', {
-                    attemptId: context.nonChatAttemptId,
+                    attemptId: nonChatAttemptId,
                     conversationId: context.nonChatConversationId ?? null,
                     method: context.outgoingMethod,
                     path: context.outgoingPath,
@@ -2931,7 +2823,17 @@ export default defineContentScript({
         };
 
         const interceptFetchRequest = async (args: Parameters<typeof fetch>): Promise<Response> => {
-            const context = createFetchInterceptorContext(args);
+            const context = createFetchInterceptorContext(args, {
+                getRequestUrl,
+                getRequestMethod,
+                getPlatformAdapterByApiUrl,
+                chatGptPlatformName: chatGPTAdapter.name,
+                shouldEmitNonChatLifecycleForRequest,
+                resolveRequestConversationId,
+                peekAttemptIdForConversation,
+                resolveLifecycleConversationId,
+                safePathname,
+            });
             emitFetchPromptLifecycle(context);
 
             const response = await originalFetch(...args);
@@ -2969,49 +2871,19 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
-        type XhrLifecycleContext = {
-            methodUpper: string;
-            requestUrl: string;
-            requestAdapter: LLMPlatform | null;
-            shouldEmitNonChatLifecycle: boolean;
-            conversationId?: string;
-            attemptId?: string;
-        };
-
-        const buildXhrLifecycleContext = (xhr: XMLHttpRequest): XhrLifecycleContext => {
-            const method = ((xhr as any)._method as string | undefined) ?? 'GET';
-            const requestUrl = ((xhr as any)._url as string | undefined) ?? '';
-            const methodUpper = method.toUpperCase();
-            const requestAdapter = methodUpper === 'POST' ? getPlatformAdapterByApiUrl(requestUrl) : null;
-            const shouldEmitNonChatLifecycle =
-                !!requestAdapter &&
-                requestAdapter.name !== chatGPTAdapter.name &&
-                shouldEmitNonChatLifecycleForRequest(requestAdapter, requestUrl);
-            const conversationId =
-                shouldEmitNonChatLifecycle && requestAdapter
-                    ? resolveRequestConversationId(requestAdapter, requestUrl)
-                    : undefined;
-            const attemptId =
-                shouldEmitNonChatLifecycle && requestAdapter
-                    ? resolveAttemptIdForConversation(conversationId, requestAdapter.name)
-                    : undefined;
-            return {
-                methodUpper,
-                requestUrl,
-                requestAdapter,
-                shouldEmitNonChatLifecycle,
-                conversationId,
-                attemptId,
-            };
-        };
-
         const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext): void => {
-            if (!shouldEmitXhrRequestLifecycle(context)) {
+            if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter) {
+                return;
+            }
+            const attemptId =
+                context.attemptId ?? resolveAttemptIdForConversation(context.conversationId, context.requestAdapter.name);
+            const lifecycleContext = { ...context, attemptId };
+            if (!shouldEmitXhrRequestLifecycle(lifecycleContext)) {
                 return;
             }
 
             emitLifecycleSignal(
-                context.attemptId as string,
+                attemptId,
                 'prompt-sent',
                 context.conversationId,
                 context.requestAdapter?.name,
@@ -3020,17 +2892,17 @@ export default defineContentScript({
             if (context.requestAdapter?.name === 'Gemini') {
                 wireGeminiXhrProgressMonitor(
                     xhr,
-                    context.attemptId as string,
+                    attemptId,
                     context.conversationId,
                     context.requestUrl,
                 );
                 return;
             }
             if (context.requestAdapter?.name === 'Grok' && context.conversationId) {
-                wireGrokXhrProgressMonitor(xhr, context.attemptId as string, context.conversationId);
-                if (shouldLogTransient(`grok:xhr:request:${context.attemptId as string}`, 3000)) {
+                wireGrokXhrProgressMonitor(xhr, attemptId, context.conversationId);
+                if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
                     log('info', 'Grok XHR request intercepted', {
-                        attemptId: context.attemptId as string,
+                        attemptId,
                         conversationId: context.conversationId,
                         method: context.methodUpper,
                         path: safePathname(context.requestUrl),
@@ -3042,7 +2914,7 @@ export default defineContentScript({
                 return;
             }
             emitLifecycleSignal(
-                context.attemptId as string,
+                attemptId,
                 'streaming',
                 context.conversationId,
                 context.requestAdapter?.name,
@@ -3108,7 +2980,13 @@ export default defineContentScript({
 
         XHR.prototype.send = function (body?: any) {
             const xhr = this as XMLHttpRequest;
-            const context = buildXhrLifecycleContext(xhr);
+            const context = buildXhrLifecycleContext(xhr, {
+                getPlatformAdapterByApiUrl,
+                chatGptPlatformName: chatGPTAdapter.name,
+                shouldEmitNonChatLifecycleForRequest,
+                resolveRequestConversationId,
+                peekAttemptIdForConversation,
+            });
             emitXhrRequestLifecycle(xhr, context);
             registerXhrLoadHandler(xhr, context.methodUpper);
             return originalSend.call(this, body);
@@ -3120,58 +2998,11 @@ export default defineContentScript({
         });
 
         if (!(window as any).__blackiya) {
-            const REQUEST_TYPE = 'BLACKIYA_GET_JSON_REQUEST';
-            const RESPONSE_TYPE = 'BLACKIYA_GET_JSON_RESPONSE';
-            const timeoutMs = 5000;
-
-            const isResponseMessage = (event: MessageEvent, requestId: string) => {
-                if (event.source !== window || event.origin !== window.location.origin) {
-                    return false;
-                }
-                const message = event.data;
-                return message?.type === RESPONSE_TYPE && message.requestId === requestId;
-            };
-
-            const makeRequestId = () => {
-                if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-                    return crypto.randomUUID();
-                }
-                return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-            };
-
-            const requestJson = (format: 'original' | 'common') =>
-                new Promise((resolve, reject) => {
-                    const requestId = makeRequestId();
-                    let timeoutId: number | undefined;
-
-                    const cleanup = () => {
-                        if (timeoutId !== undefined) {
-                            clearTimeout(timeoutId);
-                        }
-                        window.removeEventListener('message', handler);
-                    };
-
-                    const handler = (event: MessageEvent) => {
-                        if (!isResponseMessage(event, requestId)) {
-                            return;
-                        }
-                        const message = event.data;
-                        cleanup();
-                        if (message.success) {
-                            resolve(message.data);
-                        } else {
-                            reject(new Error(message.error || 'FAILED'));
-                        }
-                    };
-
-                    window.addEventListener('message', handler);
-                    window.postMessage({ type: REQUEST_TYPE, requestId, format }, window.location.origin);
-
-                    timeoutId = window.setTimeout(() => {
-                        cleanup();
-                        reject(new Error('TIMEOUT'));
-                    }, timeoutMs);
-                });
+            const requestJson = createWindowJsonRequester(window, {
+                requestType: BLACKIYA_GET_JSON_REQUEST,
+                responseType: BLACKIYA_GET_JSON_RESPONSE,
+                timeoutMs: 5000,
+            });
 
             const handlePageSnapshotRequest = (event: MessageEvent) => {
                 const message = isSnapshotRequestEvent(event);
@@ -3234,8 +3065,8 @@ export default defineContentScript({
             window.addEventListener('message', handleStreamDumpConfig);
 
             (window as any).__blackiya = {
-                getJSON: () => requestJson('original'),
-                getCommonJSON: () => requestJson('common'),
+                getJSON: () => requestJson(JSON_FORMAT_ORIGINAL),
+                getCommonJSON: () => requestJson(JSON_FORMAT_COMMON),
             };
         }
     },
