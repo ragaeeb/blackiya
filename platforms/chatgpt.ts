@@ -806,6 +806,17 @@ export const createChatGPTAdapter = (): LLMPlatform => {
         evaluateReadiness(data: ConversationData) {
             return evaluateChatGPTReadiness(data);
         },
+
+        isPlatformGenerating(): boolean {
+            const selectors = [
+                'button[data-testid="stop-button"]',
+                'button[aria-label*="Stop generating"]',
+                'button[aria-label*="Stop response"]',
+                'button[data-testid*="stop"]',
+                '[data-is-streaming="true"]',
+            ];
+            return selectors.some((selector) => !!document.querySelector(selector));
+        },
     };
 };
 

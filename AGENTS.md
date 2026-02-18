@@ -28,12 +28,14 @@ Two-world design:
 
 1. MAIN world interceptor:
 - `entrypoints/interceptor.content.ts`
+- Core implementation: `entrypoints/interceptor/bootstrap.ts`
 - Hooks `fetch` + `XMLHttpRequest`
 - Emits protocol events via `window.postMessage`
 
 2. ISOLATED world runner:
 - `entrypoints/main.content.ts`
-- `utils/platform-runner.ts`
+- `utils/platform-runner.ts` (compat re-export)
+- Core implementation: `utils/runner/index.ts`
 - Handles lifecycle state, SFE readiness, UI gating, export
 
 Supporting modules:
@@ -43,6 +45,7 @@ Supporting modules:
 - Interception cache: `utils/managers/interception-manager.ts`
 - UI buttons: `utils/ui/button-manager.ts`
 - Protocol types: `utils/protocol/messages.ts`
+- Protocol contract: lifecycle/finished/delta messages require `attemptId` (legacy attempt-less messages removed)
 
 ## 4) Platform-Specific Notes
 
@@ -119,8 +122,8 @@ When changing title handling:
 
 ## 9) Files Most Likely to Need Careful Review
 
-- `entrypoints/interceptor.content.ts`
-- `utils/platform-runner.ts`
+- `entrypoints/interceptor/bootstrap.ts`
+- `utils/runner/index.ts`
 - `platforms/gemini.ts`
 - `platforms/grok.ts`
 

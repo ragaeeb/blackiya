@@ -635,6 +635,31 @@ describe('Gemini Platform Adapter', () => {
             expect(assistantMsg?.content.thoughts?.length).toBe(2);
             expect(assistantMsg?.content.thoughts?.[0].summary).toBe('Analyzing the Problem');
         });
+
+        it('should parse StreamGenerate payload when envelope indices shift but conversation shape exists', () => {
+            const convId = 'stream_test_conv_shifted_005';
+            const shiftedPayload = JSON.stringify([
+                'metadata',
+                null,
+                [`c_${convId}`, 'r_resp5'],
+                null,
+                null,
+                [['rc_cand5', ['Shifted envelope final answer'], null]],
+            ]);
+            const chunk = JSON.stringify([['wrb.fr', null, shiftedPayload, null]]);
+            const response = `)]}'\n\n${chunk.length}\n${chunk}\n`;
+            const url =
+                'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
+
+            const result = geminiAdapter.parseInterceptedData(response, url);
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe(convId);
+            const assistantMsg = Object.values(result!.mapping)
+                .map((n: any) => n.message)
+                .filter((m: any) => m !== null)
+                .find((m: any) => m.author.role === 'assistant');
+            expect(assistantMsg?.content.parts?.[0]).toBe('Shifted envelope final answer');
+        });
     });
 
     describe('Dual-match: URLs matching both apiEndpointPattern AND completionTriggerPattern', () => {

@@ -29,6 +29,26 @@ class InMemoryStorage implements Storage {
     }
 }
 
+class RaceOnWriteStorage extends InMemoryStorage {
+    public override setItem(key: string, value: string): void {
+        const parsed = JSON.parse(value) as { expiresAtMs: number };
+        super.setItem(
+            key,
+            JSON.stringify({
+                attemptId: 'racing-attempt',
+                expiresAtMs: parsed.expiresAtMs,
+                updatedAtMs: parsed.expiresAtMs - 1,
+            }),
+        );
+    }
+}
+
+class ThrowingWriteStorage extends InMemoryStorage {
+    public override setItem(_key: string, _value: string): void {
+        throw new Error('quota-exceeded');
+    }
+}
+
 describe('CrossTabProbeLease', () => {
     it('allows a first claimant and blocks competing non-expired claim', () => {
         const storage = new InMemoryStorage();
@@ -96,5 +116,34 @@ describe('CrossTabProbeLease', () => {
 
         now = 55_000;
         lease.dispose();
+    });
+
+    it('returns not acquired when post-write verification sees a different owner', () => {
+        const storage = new RaceOnWriteStorage();
+        const lease = new CrossTabProbeLease({
+            storage,
+            now: () => 1_000,
+        });
+
+        const claim = lease.claim('conv-race', 'attempt-a', 5_000);
+        expect(claim.acquired).toBe(false);
+        expect(claim.ownerAttemptId).toBe('racing-attempt');
+    });
+
+    it('does not throw when storage write fails and reports lease as not acquired', () => {
+        const storage = new ThrowingWriteStorage();
+        storage.setItem = () => {
+            throw new Error('quota-exceeded');
+        };
+        const lease = new CrossTabProbeLease({
+            storage,
+            now: () => 2_000,
+        });
+
+        expect(() => lease.claim('conv-fail', 'attempt-a', 5_000)).not.toThrow();
+        const claim = lease.claim('conv-fail', 'attempt-a', 5_000);
+        expect(claim.acquired).toBe(false);
+        expect(claim.ownerAttemptId).toBeNull();
+        expect(claim.expiresAtMs).toBeNull();
     });
 });

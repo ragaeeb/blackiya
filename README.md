@@ -93,8 +93,10 @@ mkdir -p entrypoints/popup public/icon platforms utils docs
 touch wxt.config.ts biome.json tsconfig.json
 touch entrypoints/background.ts
 touch entrypoints/main.content.ts entrypoints/interceptor.content.ts
+mkdir -p entrypoints/interceptor
 touch platforms/chatgpt.ts platforms/gemini.ts platforms/grok.ts
 touch utils/platform-runner.ts utils/protocol/messages.ts
+mkdir -p utils/runner
 ```
 
 #### Step 5: Configure Project Files
@@ -172,7 +174,16 @@ blackiya/
 ├── entrypoints/
 │   ├── background.ts          # Service worker for API interception
 │   ├── main.content.ts        # Unified content script for all LLMs
-│   ├── interceptor.content.ts # Fetch interceptor
+│   ├── interceptor.content.ts # Thin MAIN-world entrypoint
+│   ├── interceptor/
+│   │   ├── bootstrap.ts       # MAIN-world interceptor implementation
+│   │   ├── fetch-wrapper.ts
+│   │   ├── xhr-wrapper.ts
+│   │   ├── proactive-fetcher.ts
+│   │   └── stream-monitors/
+│   │       ├── chatgpt-sse-monitor.ts
+│   │       ├── gemini-stream-monitor.ts
+│   │       └── grok-stream-monitor.ts
 │   └── popup/
 │       ├── index.html        # Extension popup UI (optional)
 │       └── App.tsx           # Popup logic (optional)
@@ -182,7 +193,16 @@ blackiya/
 │   ├── grok.ts               # Grok platform adapter
 │   └── types.ts              # Platform interface definitions
 ├── utils/
-│   ├── platform-runner.ts    # Main orchestration + readiness gating
+│   ├── platform-runner.ts    # Compatibility re-export for runner
+│   ├── runner/
+│   │   ├── index.ts          # Main orchestration + readiness gating
+│   │   ├── state.ts
+│   │   ├── lifecycle-manager.ts
+│   │   ├── message-bridge.ts
+│   │   ├── stream-probe.ts
+│   │   ├── calibration-runner.ts
+│   │   ├── dom-snapshot.ts
+│   │   └── export-pipeline.ts
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities

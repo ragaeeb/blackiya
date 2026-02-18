@@ -156,7 +156,14 @@ mock.module('wxt/browser', () => ({
 }));
 
 // Import subject under test AFTER mocking
-import { resolveExportConversationTitle, runPlatform, shouldRemoveDisposedAttemptBinding } from './platform-runner';
+import {
+    beginCanonicalStabilizationTick,
+    clearCanonicalStabilizationAttemptState,
+    resolveExportConversationTitle,
+    resolveShouldSkipCanonicalRetryAfterAwait,
+    runPlatform,
+    shouldRemoveDisposedAttemptBinding,
+} from './platform-runner';
 
 describe('Platform Runner', () => {
     beforeEach(() => {
@@ -3603,5 +3610,73 @@ describe('shouldRemoveDisposedAttemptBinding', () => {
             'attempt:raw-b': 'attempt:canonical-b',
         });
         expect(shouldRemoveDisposedAttemptBinding('attempt:raw-a', 'attempt:raw-b', resolve)).toBe(false);
+    });
+});
+
+describe('canonical stabilization retry helpers', () => {
+    it('allows only one in-flight retry tick per attempt', () => {
+        const inProgress = new Set<string>();
+        expect(beginCanonicalStabilizationTick('attempt-1', inProgress)).toBe(true);
+        expect(beginCanonicalStabilizationTick('attempt-1', inProgress)).toBe(false);
+        expect(inProgress.has('attempt-1')).toBe(true);
+    });
+
+    it('clears retry timer/count/start/timeout state in one call', () => {
+        const timerIds = new Map<string, number>([['attempt-1', 101]]);
+        const retryCounts = new Map<string, number>([['attempt-1', 3]]);
+        const startedAt = new Map<string, number>([['attempt-1', 999]]);
+        const timeoutWarnings = new Set<string>(['attempt-1']);
+        const inProgress = new Set<string>(['attempt-1']);
+        const clearedTimers: number[] = [];
+
+        clearCanonicalStabilizationAttemptState(
+            'attempt-1',
+            {
+                timerIds,
+                retryCounts,
+                startedAt,
+                timeoutWarnings,
+                inProgress,
+            },
+            (timerId) => {
+                clearedTimers.push(timerId);
+            },
+        );
+
+        expect(clearedTimers).toEqual([101]);
+        expect(timerIds.has('attempt-1')).toBe(false);
+        expect(retryCounts.has('attempt-1')).toBe(false);
+        expect(startedAt.has('attempt-1')).toBe(false);
+        expect(timeoutWarnings.has('attempt-1')).toBe(false);
+        expect(inProgress.has('attempt-1')).toBe(false);
+    });
+
+    it('re-checks disposal and conversation mismatch after await boundaries', () => {
+        const disposed = resolveShouldSkipCanonicalRetryAfterAwait(
+            'attempt-1',
+            'conv-1',
+            true,
+            undefined,
+            (attemptId) => attemptId,
+        );
+        expect(disposed).toBe(true);
+
+        const mismatched = resolveShouldSkipCanonicalRetryAfterAwait(
+            'attempt-1',
+            'conv-1',
+            false,
+            'attempt-2',
+            (attemptId) => attemptId,
+        );
+        expect(mismatched).toBe(true);
+
+        const canonicalAliasMatch = resolveShouldSkipCanonicalRetryAfterAwait(
+            'attempt-1',
+            'conv-1',
+            false,
+            'alias-attempt-1',
+            (attemptId) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),
+        );
+        expect(canonicalAliasMatch).toBe(false);
     });
 });

@@ -93,10 +93,6 @@ export type BlackiyaMessage =
     | CaptureInterceptedMessage
     | LogEntryMessage;
 
-export type LegacyLifecycleMessage = Omit<ResponseLifecycleMessage, 'attemptId'>;
-export type LegacyFinishedMessage = Omit<ResponseFinishedMessage, 'attemptId'>;
-export type LegacyStreamDeltaMessage = Omit<StreamDeltaMessage, 'attemptId'>;
-
 function hasString(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0;
 }
@@ -146,34 +142,9 @@ export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
     }
 }
 
-export function isLegacyLifecycleMessage(value: unknown): value is LegacyLifecycleMessage {
-    if (!isRecord(value) || value.type !== 'BLACKIYA_RESPONSE_LIFECYCLE') {
-        return false;
-    }
-    return hasString(value.platform) && hasString(value.phase) && !hasString(value.attemptId);
-}
-
-export function isLegacyFinishedMessage(value: unknown): value is LegacyFinishedMessage {
-    if (!isRecord(value) || value.type !== 'BLACKIYA_RESPONSE_FINISHED') {
-        return false;
-    }
-    return hasString(value.platform) && !hasString(value.attemptId);
-}
-
-export function isLegacyStreamDeltaMessage(value: unknown): value is LegacyStreamDeltaMessage {
-    if (!isRecord(value) || value.type !== 'BLACKIYA_STREAM_DELTA') {
-        return false;
-    }
-    return hasString(value.platform) && typeof value.text === 'string' && !hasString(value.attemptId);
-}
-
 export function createAttemptId(prefix = 'attempt'): string {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
         return `${prefix}:${crypto.randomUUID()}`;
     }
     return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-export function buildLegacyAttemptId(platform: string, conversationId?: string): string {
-    return `legacy:${platform}:${conversationId ?? 'unknown'}`;
 }

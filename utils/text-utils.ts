@@ -46,3 +46,32 @@ export function stripMagicHeader(text: string): string {
 export function cleanJsonString(text: string): string {
     return text.trim();
 }
+
+/**
+ * Removes duplicate string entries while keeping first-seen ordering.
+ */
+export function dedupePreserveOrder(values: string[]): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+        if (seen.has(value)) {
+            continue;
+        }
+        seen.add(value);
+        out.push(value);
+    }
+    return out;
+}
+
+/**
+ * Returns a copy of the list limited to its newest entries.
+ */
+export function keepMostRecentEntries<T>(values: T[], maxEntries: number): T[] {
+    if (maxEntries <= 0) {
+        return [];
+    }
+    if (values.length <= maxEntries) {
+        return [...values];
+    }
+    return values.slice(values.length - maxEntries);
+}

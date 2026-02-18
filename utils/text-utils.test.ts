@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { GOOGLE_SECURITY_PREFIX } from '../platforms/constants';
-import { stripMagicHeader } from './text-utils';
+import { dedupePreserveOrder, keepMostRecentEntries, stripMagicHeader } from './text-utils';
 
 describe('Text Utils', () => {
     describe('stripMagicHeader', () => {
@@ -26,6 +26,25 @@ describe('Text Utils', () => {
         it('should trim start of string before checking', () => {
             const input = '   )]}\'\n\n{"a":1}';
             expect(stripMagicHeader(input)).toBe('{"a":1}');
+        });
+    });
+
+    describe('dedupePreserveOrder', () => {
+        it('removes duplicate entries while preserving first-seen order', () => {
+            expect(dedupePreserveOrder(['a', 'b', 'a', 'c', 'b'])).toEqual(['a', 'b', 'c']);
+        });
+    });
+
+    describe('keepMostRecentEntries', () => {
+        it('keeps only the tail entries up to max size', () => {
+            expect(keepMostRecentEntries(['a', 'b', 'c', 'd'], 2)).toEqual(['c', 'd']);
+        });
+
+        it('returns copy unchanged when list is within max size', () => {
+            const values = ['a', 'b'];
+            const trimmed = keepMostRecentEntries(values, 4);
+            expect(trimmed).toEqual(values);
+            expect(trimmed).not.toBe(values);
         });
     });
 });

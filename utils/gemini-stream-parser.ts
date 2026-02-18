@@ -1,9 +1,9 @@
 import { parseBatchexecuteResponse } from '@/utils/google-rpc';
+import { dedupePreserveOrder } from '@/utils/text-utils';
+import { isGenericConversationTitle } from '@/utils/title-resolver';
 
 const GEMINI_CONVERSATION_ID_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-const GENERIC_TITLE_RE =
-    /^(gemini|google gemini|gemini conversation|conversation with gemini|new chat|new conversation|chats)$/i;
 
 function isLikelyGeminiText(value: string): boolean {
     const trimmed = value.trim();
@@ -75,19 +75,6 @@ function extractConversationIdFromPayload(payload: string): string | undefined {
     return match?.[1];
 }
 
-function dedupeText(values: string[]): string[] {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const value of values) {
-        if (seen.has(value)) {
-            continue;
-        }
-        seen.add(value);
-        out.push(value);
-    }
-    return out;
-}
-
 function isLikelyGeminiTitle(value: string): boolean {
     const trimmed = value.trim().replace(/\s+/g, ' ');
     if (trimmed.length < 3 || trimmed.length > 180) {
@@ -102,7 +89,7 @@ function isLikelyGeminiTitle(value: string): boolean {
     if (/^v\d+$/i.test(trimmed)) {
         return false;
     }
-    if (GENERIC_TITLE_RE.test(trimmed)) {
+    if (isGenericConversationTitle(trimmed)) {
         return false;
     }
     return true;
@@ -171,7 +158,7 @@ export function extractGeminiStreamSignalsFromBuffer(buffer: string, seenPayload
 
     return {
         conversationId,
-        textCandidates: dedupeText(textCandidates),
-        titleCandidates: dedupeText(titleCandidates),
+        textCandidates: dedupePreserveOrder(textCandidates),
+        titleCandidates: dedupePreserveOrder(titleCandidates),
     };
 }

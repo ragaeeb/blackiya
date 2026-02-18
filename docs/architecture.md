@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-17 (v2.0.1 P0 stability pass)
+> Last updated: 2026-02-18 (v2.0.2 P1+P2 stability/decomposition pass)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -17,9 +17,9 @@ The architecture is split across two runtime worlds:
 
 ```mermaid
 flowchart LR
-    A["User prompt"] --> B["MAIN world interceptor\n/entrypoints/interceptor.content.ts"]
+    A["User prompt"] --> B["MAIN world interceptor\n/entrypoints/interceptor.content.ts -> /entrypoints/interceptor/bootstrap.ts"]
     B --> C["postMessage protocol\nBLACKIYA_* events"]
-    C --> D["ISOLATED runner\n/utils/platform-runner.ts"]
+    C --> D["ISOLATED runner\n/utils/platform-runner.ts -> /utils/runner/index.ts"]
     D --> E["InterceptionManager cache\n/utils/managers/interception-manager.ts"]
     D --> F["Signal Fusion Engine (SFE)\n/utils/sfe/*"]
     D --> G["ButtonManager UI\n/utils/ui/button-manager.ts"]
@@ -32,8 +32,11 @@ flowchart LR
   - `entrypoints/main.content.ts`
 - Interceptor (MAIN world):
   - `entrypoints/interceptor.content.ts`
+  - `entrypoints/interceptor/bootstrap.ts`
 - Platform orchestrator:
   - `utils/platform-runner.ts`
+  - `utils/runner/index.ts`
+  - `utils/runner/*` (incremental subsystem extraction: state/lifecycle/export/probe/calibration/bridge)
 - Adapter interface + readiness contract:
   - `platforms/types.ts`
 - Adapter factory:
@@ -54,6 +57,7 @@ Primary events:
 - `BLACKIYA_TITLE_RESOLVED` (stream-derived title)
 - `LLM_CAPTURE_DATA_INTERCEPTED` (raw canonical payload)
 - `BLACKIYA_STREAM_DUMP_FRAME` (optional diagnostics stream dump)
+- `attemptId` is mandatory for lifecycle/finished/delta wire messages (legacy attempt-less compatibility removed in v2.0.2)
 
 See:
 - `utils/protocol/messages.ts`
@@ -127,7 +131,7 @@ Flow:
 6. Runner stabilizes canonical sample and enables Save when ready.
 
 Primary code:
-- `entrypoints/interceptor.content.ts`
+- `entrypoints/interceptor/bootstrap.ts`
 - `platforms/chatgpt.ts`
 
 ### 6.2 Gemini
@@ -135,7 +139,7 @@ Primary code:
 Key endpoints/signals:
 - Generation endpoint: `/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate`
 - Metadata/title endpoint (non-generation): batchexecute `rpcids=MaZiqc`
-- Conversation payload endpoint (legacy/metadata mixes): batchexecute variants
+- Conversation payload endpoint (metadata and conversation mixes): batchexecute variants
 
 Flow:
 1. Interceptor classifies generation endpoints via:
@@ -207,7 +211,7 @@ On route changes, in-flight attempts bound to the destination conversation are p
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 
 Key methods:
-- `utils/platform-runner.ts`:
+- `utils/runner/index.ts`:
   - `handleLifecycleMessage`
   - `handleResponseFinishedMessage`
   - `resolveReadinessDecision`
@@ -230,7 +234,7 @@ Save pipeline:
 6. Downloads JSON via `downloadAsJSON`.
 
 Primary code:
-- `utils/platform-runner.ts`
+- `utils/runner/index.ts`
 - `utils/common-export.ts`
 - `utils/download.ts`
 
@@ -264,3 +268,4 @@ Docs:
 - Grok runtime smoke verification still ongoing after lifecycle gating fixes.
 - Need continued multi-tab validation for Grok and Gemini under long reasoning sessions.
 - Keep regression suite expanding where smoke tests find platform-specific edge cases.
+- Remaining post-v2.0.2 backlog: deeper runner/interceptor subsystem extraction and lease arbitration migration (`chrome.storage.session`/background ownership).

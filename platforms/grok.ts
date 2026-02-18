@@ -1215,6 +1215,10 @@ export const grokAdapter: LLMPlatform = {
         return evaluateGrokReadiness(data);
     },
 
+    isPlatformGenerating() {
+        return false;
+    },
+
     defaultTitles: ['New conversation', 'Grok Conversation'],
 
     extractTitleFromDom() {
