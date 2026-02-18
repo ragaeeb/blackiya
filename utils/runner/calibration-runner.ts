@@ -1,4 +1,6 @@
-export type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
+import type { CalibrationStep } from '@/utils/calibration-profile';
+
+export type { CalibrationStep };
 
 export function prioritizeCalibrationStep(step: CalibrationStep, defaultOrder: CalibrationStep[]): CalibrationStep[] {
     if (defaultOrder.includes(step)) {

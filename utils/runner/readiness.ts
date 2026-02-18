@@ -17,7 +17,7 @@ export interface ResolveRunnerReadinessInput {
     captureMeta: ExportMeta;
     sfeResolution: SfeConversationResolution;
     evaluateReadinessForData: (data: ConversationData) => PlatformReadiness;
-    resolveAttemptId: (conversationId: string) => string;
+    resolveAttemptId: (conversationId: string) => string | null;
     hasCanonicalStabilizationTimedOut: (attemptId: string) => boolean;
     emitTimeoutWarningOnce: (attemptId: string, conversationId: string) => void;
     clearTimeoutWarningByAttempt: (attemptId: string) => void;
@@ -111,12 +111,13 @@ export function resolveRunnerReadinessDecision(input: ResolveRunnerReadinessInpu
     input.clearCanonicalReadyLogStamp(input.conversationId);
 
     const attemptId = input.resolveAttemptId(input.conversationId);
-    const timeoutDecision = createTimeoutReadinessDecision(input, attemptId);
-    if (timeoutDecision) {
-        return timeoutDecision;
+    if (attemptId) {
+        const timeoutDecision = createTimeoutReadinessDecision(input, attemptId);
+        if (timeoutDecision) {
+            return timeoutDecision;
+        }
+        input.clearTimeoutWarningByAttempt(attemptId);
     }
-
-    input.clearTimeoutWarningByAttempt(attemptId);
 
     if (input.captureMeta.fidelity === 'degraded') {
         return {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
     getConversationAttemptMismatch,
+    peekRunnerAttemptId,
     resolveRunnerAttemptId,
     shouldRemoveDisposedAttemptBinding,
 } from '@/utils/runner/attempt-registry';
@@ -66,5 +67,59 @@ describe('runner attempt registry helpers', () => {
         const resolveAttemptId = (attemptId: string) => attemptId.replace('alias:', 'canonical:');
         expect(shouldRemoveDisposedAttemptBinding('alias:1', 'canonical:1', resolveAttemptId)).toBeTrue();
         expect(shouldRemoveDisposedAttemptBinding('alias:2', 'canonical:1', resolveAttemptId)).toBeFalse();
+    });
+
+    it('should return mapped conversation attempt from peekRunnerAttemptId', () => {
+        const result = peekRunnerAttemptId({
+            conversationId: 'conv-1',
+            activeAttemptId: null,
+            attemptByConversation: new Map([['conv-1', 'attempt-mapped']]),
+            resolveAliasedAttemptId: (id) => id,
+        });
+        expect(result).toBe('attempt-mapped');
+    });
+
+    it('should resolve alias on peeked attempt', () => {
+        const result = peekRunnerAttemptId({
+            conversationId: 'conv-1',
+            activeAttemptId: null,
+            attemptByConversation: new Map([['conv-1', 'alias:x']]),
+            resolveAliasedAttemptId: (id) => id.replace('alias:', 'canonical:'),
+        });
+        expect(result).toBe('canonical:x');
+    });
+
+    it('should fall back to active attempt from peekRunnerAttemptId when no conversation binding', () => {
+        const result = peekRunnerAttemptId({
+            conversationId: 'conv-2',
+            activeAttemptId: 'attempt-active',
+            attemptByConversation: new Map(),
+            resolveAliasedAttemptId: (id) => id,
+        });
+        expect(result).toBe('attempt-active');
+    });
+
+    it('should return null from peekRunnerAttemptId when no mapping or active attempt exists', () => {
+        const result = peekRunnerAttemptId({
+            activeAttemptId: null,
+            attemptByConversation: new Map(),
+            resolveAliasedAttemptId: (id) => id,
+        });
+        expect(result).toBeNull();
+    });
+
+    it('should never create a new attempt from peekRunnerAttemptId (unlike resolveRunnerAttemptId)', () => {
+        const input = {
+            activeAttemptId: null,
+            adapterName: 'Grok',
+            attemptByConversation: new Map<string, string>(),
+            resolveAliasedAttemptId: (id: string) => id,
+        };
+        // peek returns null — no creation
+        expect(peekRunnerAttemptId(input)).toBeNull();
+        // resolve creates a new attempt
+        const resolved = resolveRunnerAttemptId(input);
+        expect(resolved.attemptId.startsWith('grok:')).toBeTrue();
+        expect(resolved.nextActiveAttemptId).toBe(resolved.attemptId);
     });
 });

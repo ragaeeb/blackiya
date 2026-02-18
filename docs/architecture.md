@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-18 (v2.0.3 lease migration + decomposition pass)
+> Last updated: 2026-02-18 (v2.0.4 attempt-id split + calibration centralization + Grok state isolation)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -43,8 +43,11 @@ flowchart LR
   - `utils/platform-runner.ts`
   - `utils/runner/index.ts`
   - `utils/runner/*` (state/lifecycle/export/probe/calibration/bridge + attempt/readiness modules)
-  - `utils/runner/attempt-registry.ts`
+  - `utils/runner/attempt-registry.ts` (attempt-id resolution: `resolveRunnerAttemptId` for writes, `peekRunnerAttemptId` for reads)
   - `utils/runner/readiness.ts`
+- Calibration profile management:
+  - `utils/calibration-profile.ts` (strategy defaults, `CalibrationStep` type, `buildCalibrationProfileFromStep` manual-strict policy)
+  - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
 - Adapter interface + readiness contract:
   - `platforms/types.ts`
 - Adapter factory:
@@ -101,6 +104,8 @@ Critical invariant:
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
+- **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
+- **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative) and always-disabled `['dom_hint', 'snapshot_fallback']`. The runner exclusively uses the manual-strict policy path.
 
 ## 5) End-to-End Flow (Generic)
 
@@ -210,6 +215,10 @@ Primary code:
 - `utils/grok-stream-parser.ts`
 - `utils/grok-request-classifier.ts`
 
+State management:
+- All mutable state (conversation titles LRU, active conversations LRU, last-active conversation ID) is encapsulated in `GrokAdapterState` class.
+- `resetGrokAdapterState()` is exported for test isolation and deterministic cleanup.
+
 ## 7) How Idle -> Streaming -> Completed Is Determined
 
 Source of truth priority:
@@ -305,7 +314,10 @@ Docs:
 ## 10) Current Gaps / Ongoing Verification
 
 - ✅ Grok lifecycle regression fixed: pending signals now update UI badge immediately; canonical capture promotes from idle.
+- ✅ Attempt-ID read/write separation completed (H-01): read-only paths no longer mutate `activeAttemptId`.
+- ✅ Calibration builder centralized (H-02): no more duplicated profile construction between `calibration-profile.ts` and `runner/index.ts`.
+- ✅ Grok adapter state isolated (H-05): all mutable state encapsulated in `GrokAdapterState` class; `resetGrokAdapterState()` available for test isolation.
 - Need continued multi-tab validation for Grok and Gemini under long reasoning sessions.
 - Keep regression suite expanding where smoke tests find platform-specific edge cases.
-- Remaining post-v2.0.3 backlog: deeper runner/interceptor subsystem extraction and logging/type-hygiene follow-ups.
+- Remaining post-v2.0.4 backlog: runner subsystem extraction (H-03), interceptor decomposition (H-04), and P2 items (logging/type-hygiene/perf follow-ups).
 - P4 defense-in-depth: token validation for InterceptionManager, snapshot response path, queue stamping, JSON bridge restoration, SESSION_INIT first-in-wins lock.
