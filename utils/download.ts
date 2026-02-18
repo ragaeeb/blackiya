@@ -9,6 +9,8 @@
 import { downloadStringAsJsonFile } from '@/utils/dom-download';
 import { logger } from '@/utils/logger';
 
+export type DownloadStringAsJsonFileFn = (jsonString: string, filename: string) => void;
+
 /**
  * Sanitize a string for use as a filename
  *
@@ -69,11 +71,16 @@ export const generateTimestamp = (unixTime?: number): string => {
  *
  * @param data - The data to download as JSON
  * @param filename - The filename (without .json extension)
+ * @param downloadImpl - Optional injectable download implementation for deterministic testing
  */
-export const downloadAsJSON = (data: unknown, filename: string): void => {
+export const downloadAsJSON = (
+    data: unknown,
+    filename: string,
+    downloadImpl: DownloadStringAsJsonFileFn = downloadStringAsJsonFile,
+): void => {
     try {
         const jsonString = JSON.stringify(data, null, 2);
-        downloadStringAsJsonFile(jsonString, `${filename}.json`);
+        downloadImpl(jsonString, `${filename}.json`);
     } catch (error) {
         logger.error('Download failed:', error);
     }

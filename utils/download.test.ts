@@ -4,23 +4,8 @@
  * TDD tests for filename sanitization and timestamp generation
  */
 
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import type { downloadStringAsJsonFile as DownloadFn } from '@/utils/dom-download';
-
-let downloadCalls: Array<{ jsonString: string; filename: string }> = [];
-let downloadShouldThrow: Error | null = null;
-
-mock.module('@/utils/dom-download', () => ({
-    downloadStringAsJsonFile: ((jsonString: string, filename: string) => {
-        if (downloadShouldThrow) {
-            throw downloadShouldThrow;
-        }
-        downloadCalls.push({ jsonString, filename });
-    }) satisfies typeof DownloadFn,
-}));
-
-// Must be imported AFTER the mock.module call
-const { downloadAsJSON, generateTimestamp, sanitizeFilename } = await import('@/utils/download');
+import { beforeEach, describe, expect, it } from 'bun:test';
+import { downloadAsJSON, generateTimestamp, sanitizeFilename } from '@/utils/download';
 
 describe('Download Utilities', () => {
     describe('sanitizeFilename', () => {
@@ -99,32 +84,41 @@ describe('Download Utilities', () => {
     });
 
     describe('downloadAsJSON', () => {
+        let downloadCalls: Array<{ jsonString: string; filename: string }>;
+        let shouldThrow: Error | null;
+        const downloadImpl = (jsonString: string, filename: string) => {
+            if (shouldThrow) {
+                throw shouldThrow;
+            }
+            downloadCalls.push({ jsonString, filename });
+        };
+
         beforeEach(() => {
             downloadCalls = [];
-            downloadShouldThrow = null;
+            shouldThrow = null;
         });
 
         it('should not throw when JSON serialization fails', () => {
             const circular: Record<string, unknown> = {};
             circular.self = circular;
 
-            expect(() => downloadAsJSON(circular, 'test')).not.toThrow();
+            expect(() => downloadAsJSON(circular, 'test', downloadImpl)).not.toThrow();
             expect(downloadCalls).toEqual([]);
         });
 
         it('should serialize data and trigger download with correct filename', () => {
             const data = { ok: true };
 
-            expect(() => downloadAsJSON(data, 'test')).not.toThrow();
+            expect(() => downloadAsJSON(data, 'test', downloadImpl)).not.toThrow();
             expect(downloadCalls).toHaveLength(1);
             expect(downloadCalls[0].filename).toBe('test.json');
             expect(JSON.parse(downloadCalls[0].jsonString)).toEqual({ ok: true });
         });
 
         it('should not throw when the DOM download throws', () => {
-            downloadShouldThrow = new Error('blob-failure');
+            shouldThrow = new Error('blob-failure');
 
-            expect(() => downloadAsJSON({ ok: true }, 'test')).not.toThrow();
+            expect(() => downloadAsJSON({ ok: true }, 'test', downloadImpl)).not.toThrow();
             expect(downloadCalls).toEqual([]);
         });
     });
