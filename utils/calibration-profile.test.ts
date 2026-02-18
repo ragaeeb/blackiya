@@ -19,10 +19,14 @@ mock.module('wxt/browser', () => ({
 }));
 
 import {
+    buildCalibrationProfileFromStep,
     buildDefaultCalibrationProfile,
+    type CalibrationStep,
     loadCalibrationProfileV2,
     loadCalibrationProfileV2IfPresent,
     saveCalibrationProfileV2,
+    stepFromStrategy,
+    strategyFromStep,
     validateCalibrationProfileV2,
 } from '@/utils/calibration-profile';
 import { STORAGE_KEYS } from '@/utils/settings';
@@ -125,8 +129,95 @@ describe('calibration-profile', () => {
             { strategy: 'aggressive', disabledSources: ['not-real', 'also-not-real'] },
             'Gemini',
         );
-        // Adjust expected value to match actual normalizeSignalSources behaviour
-        // (either [] or ['snapshot_fallback'] depending on implementation)
         expect(profile.disabledSources).toEqual(['snapshot_fallback']);
+    });
+});
+
+describe('calibration step/strategy mapping', () => {
+    it('should map steps to strategies correctly', () => {
+        expect(strategyFromStep('passive-wait')).toBe('aggressive');
+        expect(strategyFromStep('endpoint-retry')).toBe('balanced');
+        expect(strategyFromStep('queue-flush')).toBe('conservative');
+        expect(strategyFromStep('page-snapshot')).toBe('conservative');
+    });
+
+    it('should map strategies to steps correctly', () => {
+        expect(stepFromStrategy('aggressive')).toBe('passive-wait');
+        expect(stepFromStrategy('balanced')).toBe('endpoint-retry');
+        expect(stepFromStrategy('conservative')).toBe('queue-flush');
+    });
+
+    it('should round-trip strategy→step→strategy', () => {
+        for (const strategy of ['aggressive', 'balanced', 'conservative'] as const) {
+            expect(strategyFromStep(stepFromStrategy(strategy))).toBe(strategy);
+        }
+    });
+});
+
+describe('buildCalibrationProfileFromStep (manual-strict policy)', () => {
+    it('should produce correct passive-wait/aggressive profile', () => {
+        const profile = buildCalibrationProfileFromStep('ChatGPT', 'passive-wait');
+        expect(profile.strategy).toBe('aggressive');
+        expect(profile.platform).toBe('ChatGPT');
+        expect(profile.schemaVersion).toBe(2);
+        expect(profile.lastModifiedBy).toBe('manual');
+        expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+        expect(profile.timingsMs).toEqual({ passiveWait: 900, domQuietWindow: 500, maxStabilizationWait: 12_000 });
+        expect(profile.retry).toEqual({ maxAttempts: 3, backoffMs: [300, 800, 1300], hardTimeoutMs: 12_000 });
+    });
+
+    it('should produce correct endpoint-retry/balanced profile', () => {
+        const profile = buildCalibrationProfileFromStep('Gemini', 'endpoint-retry');
+        expect(profile.strategy).toBe('balanced');
+        expect(profile.platform).toBe('Gemini');
+        expect(profile.lastModifiedBy).toBe('manual');
+        expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+        expect(profile.timingsMs).toEqual({ passiveWait: 1400, domQuietWindow: 800, maxStabilizationWait: 18_000 });
+        expect(profile.retry).toEqual({ maxAttempts: 4, backoffMs: [400, 900, 1600, 2400], hardTimeoutMs: 20_000 });
+    });
+
+    it('should produce correct queue-flush/conservative profile', () => {
+        const profile = buildCalibrationProfileFromStep('Grok', 'queue-flush');
+        expect(profile.strategy).toBe('conservative');
+        expect(profile.lastModifiedBy).toBe('manual');
+        expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+        expect(profile.timingsMs).toEqual({ passiveWait: 2200, domQuietWindow: 800, maxStabilizationWait: 30_000 });
+        expect(profile.retry).toEqual({
+            maxAttempts: 6,
+            backoffMs: [800, 1600, 2600, 3800, 5200, 7000],
+            hardTimeoutMs: 30_000,
+        });
+    });
+
+    it('should produce correct page-snapshot/conservative profile', () => {
+        const profile = buildCalibrationProfileFromStep('Grok', 'page-snapshot');
+        expect(profile.strategy).toBe('conservative');
+        expect(profile.lastModifiedBy).toBe('manual');
+        expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
+    });
+
+    it('should have intentionally different domQuietWindow from generic conservative defaults', () => {
+        const manualStrict = buildCalibrationProfileFromStep('ChatGPT', 'queue-flush');
+        const genericDefaults = buildDefaultCalibrationProfile('ChatGPT', 'conservative');
+        // Manual-strict uses 800ms, generic uses 1200ms — this is intentional
+        expect(manualStrict.timingsMs.domQuietWindow).toBe(800);
+        expect(genericDefaults.timingsMs.domQuietWindow).toBe(1200);
+    });
+
+    it('should always set lastModifiedBy to manual regardless of step', () => {
+        const steps: CalibrationStep[] = ['passive-wait', 'endpoint-retry', 'queue-flush', 'page-snapshot'];
+        for (const step of steps) {
+            expect(buildCalibrationProfileFromStep('Test', step).lastModifiedBy).toBe('manual');
+        }
+    });
+
+    it('should always disable dom_hint and snapshot_fallback regardless of step', () => {
+        const steps: CalibrationStep[] = ['passive-wait', 'endpoint-retry', 'queue-flush', 'page-snapshot'];
+        for (const step of steps) {
+            expect(buildCalibrationProfileFromStep('Test', step).disabledSources).toEqual([
+                'dom_hint',
+                'snapshot_fallback',
+            ]);
+        }
     });
 });

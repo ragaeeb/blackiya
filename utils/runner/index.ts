@@ -13,7 +13,12 @@ import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { addBoundedSetValue, setBoundedMapValue } from '@/utils/bounded-collections';
-import { loadCalibrationProfileV2IfPresent, saveCalibrationProfileV2 } from '@/utils/calibration-profile';
+import {
+    buildCalibrationProfileFromStep,
+    loadCalibrationProfileV2IfPresent,
+    saveCalibrationProfileV2,
+    stepFromStrategy,
+} from '@/utils/calibration-profile';
 import { buildCommonExport } from '@/utils/common-export';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
@@ -36,6 +41,7 @@ import type {
 import { generateSessionToken, isValidToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 import {
     getConversationAttemptMismatch as getConversationAttemptMismatchForRegistry,
+    peekRunnerAttemptId,
     resolveRunnerAttemptId,
     shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry,
 } from '@/utils/runner/attempt-registry';
@@ -116,26 +122,6 @@ export function buildCalibrationOrderForMode(
 
 export function shouldPersistCalibrationProfile(mode: CalibrationMode): boolean {
     return mode === 'manual';
-}
-
-function preferredStepFromStrategy(strategy: 'aggressive' | 'balanced' | 'conservative'): CalibrationStep {
-    if (strategy === 'aggressive') {
-        return 'passive-wait';
-    }
-    if (strategy === 'balanced') {
-        return 'endpoint-retry';
-    }
-    return 'queue-flush';
-}
-
-function strategyFromPreferredStep(step: CalibrationStep): 'aggressive' | 'balanced' | 'conservative' {
-    if (step === 'passive-wait') {
-        return 'aggressive';
-    }
-    if (step === 'endpoint-retry') {
-        return 'balanced';
-    }
-    return 'conservative';
 }
 
 function normalizeContentText(text: string): string {
@@ -392,8 +378,9 @@ export function runPlatform(): void {
         } else {
             markSnapshotCaptureMeta(conversationId);
         }
+        const snapshotAttemptId = peekAttemptId(conversationId) ?? resolveAttemptId(conversationId);
         structuredLogger.emit(
-            resolveAttemptId(conversationId),
+            snapshotAttemptId,
             'info',
             'snapshot_degraded_mode_used',
             'Snapshot-based capture marked as degraded/manual-only',
@@ -401,15 +388,14 @@ export function runPlatform(): void {
             `snapshot-degraded:${conversationId}:${source}`,
         );
 
-        const retryAttemptIdResolved = resolveAttemptId(conversationId);
         logger.info('Snapshot retry decision', {
             conversationId,
             lifecycleState,
             willSchedule: lifecycleState === 'completed',
-            attemptId: retryAttemptIdResolved,
+            attemptId: snapshotAttemptId,
         });
         if (lifecycleState === 'completed') {
-            scheduleCanonicalStabilizationRetry(conversationId, retryAttemptIdResolved);
+            scheduleCanonicalStabilizationRetry(conversationId, snapshotAttemptId);
         }
     }
 
@@ -483,6 +469,30 @@ export function runPlatform(): void {
         return DEFAULT_EXPORT_FORMAT;
     }
 
+    /**
+     * Pure read-only attempt lookup. Returns the existing attempt ID for
+     * a conversation (or the active attempt as fallback), without creating
+     * a new attempt or mutating `activeAttemptId`.
+     *
+     * Use for: logging, display, throttle keys, readiness checks, diagnostics.
+     */
+    function peekAttemptId(conversationId?: string): string | null {
+        return peekRunnerAttemptId({
+            conversationId,
+            activeAttemptId,
+            attemptByConversation,
+            resolveAliasedAttemptId,
+        });
+    }
+
+    /**
+     * Mutating resolve: returns the existing attempt ID or creates a new one,
+     * and updates `activeAttemptId` as a side effect.
+     *
+     * Use ONLY for write paths that intentionally create or bind attempts
+     * (e.g., response-finished, stream-done probe, force-save recovery,
+     * visibility recovery, SFE ingestion without a pre-resolved attempt).
+     */
     function resolveAttemptId(conversationId?: string): string {
         const resolved = resolveRunnerAttemptId({
             conversationId,
@@ -1248,7 +1258,7 @@ export function runPlatform(): void {
         if (!sfeEnabled) {
             return;
         }
-        const attemptId = resolveAttemptId(conversationId);
+        const attemptId = peekAttemptId(conversationId) ?? 'unknown';
         const sfeReady = resolveSfeReady(conversationId);
         if (legacyReady === sfeReady) {
             return;
@@ -1318,7 +1328,7 @@ export function runPlatform(): void {
         try {
             const profileV2 = await loadCalibrationProfileV2IfPresent(platformName);
             if (profileV2) {
-                rememberedPreferredStep = preferredStepFromStrategy(profileV2.strategy);
+                rememberedPreferredStep = stepFromStrategy(profileV2.strategy);
                 rememberedCalibrationUpdatedAt = profileV2.updatedAt;
             } else {
                 rememberedPreferredStep = null;
@@ -1349,49 +1359,12 @@ export function runPlatform(): void {
         return calibrationPreferenceLoading;
     }
 
-    function buildCalibrationTimings(step: CalibrationStep): CalibrationProfileV2['timingsMs'] {
-        if (step === 'passive-wait') {
-            return { passiveWait: 900, domQuietWindow: 500, maxStabilizationWait: 12_000 };
-        }
-        if (step === 'endpoint-retry') {
-            return { passiveWait: 1400, domQuietWindow: 800, maxStabilizationWait: 18_000 };
-        }
-        return { passiveWait: 2200, domQuietWindow: 800, maxStabilizationWait: 30_000 };
-    }
-
-    function buildCalibrationRetry(step: CalibrationStep): CalibrationProfileV2['retry'] {
-        if (step === 'passive-wait') {
-            return { maxAttempts: 3, backoffMs: [300, 800, 1300], hardTimeoutMs: 12_000 };
-        }
-        if (step === 'endpoint-retry') {
-            return { maxAttempts: 4, backoffMs: [400, 900, 1600, 2400], hardTimeoutMs: 20_000 };
-        }
-        return {
-            maxAttempts: 6,
-            backoffMs: [800, 1600, 2600, 3800, 5200, 7000],
-            hardTimeoutMs: 30_000,
-        };
-    }
-
-    function buildCalibrationProfile(platformName: string, step: CalibrationStep): CalibrationProfileV2 {
-        return {
-            schemaVersion: 2,
-            platform: platformName,
-            strategy: strategyFromPreferredStep(step),
-            disabledSources: ['dom_hint', 'snapshot_fallback'],
-            timingsMs: buildCalibrationTimings(step),
-            retry: buildCalibrationRetry(step),
-            updatedAt: new Date().toISOString(),
-            lastModifiedBy: 'manual',
-        };
-    }
-
     async function rememberCalibrationSuccess(platformName: string, step: CalibrationStep): Promise<void> {
         try {
             rememberedPreferredStep = step;
             rememberedCalibrationUpdatedAt = new Date().toISOString();
             calibrationPreferenceLoaded = true;
-            await saveCalibrationProfileV2(buildCalibrationProfile(platformName, step));
+            await saveCalibrationProfileV2(buildCalibrationProfileFromStep(platformName, step));
         } catch (error) {
             logger.warn('Failed to save calibration profile', error);
         }
@@ -3161,7 +3134,7 @@ export function runPlatform(): void {
         if (allowDegraded !== true) {
             return;
         }
-        const attemptId = resolveAttemptId(conversationId);
+        const attemptId = peekAttemptId(conversationId) ?? 'unknown';
         structuredLogger.emit(
             attemptId,
             'warn',
@@ -3423,8 +3396,9 @@ export function runPlatform(): void {
         const prevKey = lastButtonStateLog;
         const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
         if (prevKey !== newKey && hasData) {
-            const retries = canonicalStabilizationRetryCounts.get(resolveAttemptId(conversationId)) ?? 0;
-            const hasPendingTimer = canonicalStabilizationRetryTimers.has(resolveAttemptId(conversationId));
+            const peekedAttempt = peekAttemptId(conversationId);
+            const retries = peekedAttempt ? (canonicalStabilizationRetryCounts.get(peekedAttempt) ?? 0) : 0;
+            const hasPendingTimer = peekedAttempt ? canonicalStabilizationRetryTimers.has(peekedAttempt) : false;
             logger.info('Button readiness transition to hasData=true', {
                 conversationId,
                 decisionMode: decision.mode,
@@ -3576,7 +3550,7 @@ export function runPlatform(): void {
                   }
                 : null,
             evaluateReadinessForData,
-            resolveAttemptId,
+            resolveAttemptId: (cid: string) => peekAttemptId(cid),
             hasCanonicalStabilizationTimedOut,
             emitTimeoutWarningOnce,
             clearTimeoutWarningByAttempt: (attemptId) => {
@@ -3755,15 +3729,19 @@ export function runPlatform(): void {
         if (!adapter) {
             return;
         }
-        const attemptKey = resolveAttemptId(conversationId);
+        const attemptKey = peekAttemptId(conversationId);
         const shouldDeferWhileGenerating = adapter.name === 'ChatGPT';
         if (shouldDeferWhileGenerating && isPlatformGenerating(adapter)) {
-            scheduleDeferredAutoCapture(attemptKey, conversationId, reason);
+            if (attemptKey) {
+                scheduleDeferredAutoCapture(attemptKey, conversationId, reason);
+            }
             return;
         }
-        autoCaptureDeferredLogged.delete(attemptKey);
+        if (attemptKey) {
+            autoCaptureDeferredLogged.delete(attemptKey);
+        }
 
-        if (shouldThrottleAutoCapture(attemptKey)) {
+        if (attemptKey && shouldThrottleAutoCapture(attemptKey)) {
             return;
         }
         runAutoCaptureFromPreference(conversationId, reason);

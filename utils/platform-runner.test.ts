@@ -3269,6 +3269,59 @@ describe('Platform Runner', () => {
             .map((payload) => payload.attemptId);
         expect(supersededDisposals).not.toContain('attempt:canon-a');
     });
+    it('should not create a spurious active attempt when refreshButtonState fires on a different conversation (H-01)', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            parseInterceptedData: (raw: string) => {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed?.conversation_id ? parsed : null;
+                } catch {
+                    return null;
+                }
+            },
+        };
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        // Step 1: Establish an active attempt on conv-1 via lifecycle signals
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:h01-active',
+                phase: 'prompt-sent',
+                conversationId: 'conv-h01-a',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        // Step 2: Capture messages during button state refresh for a DIFFERENT conversation
+        const postedMessages: any[] = [];
+        const originalPostMessage = window.postMessage.bind(window);
+        (window as any).postMessage = (payload: any, targetOrigin: string) => {
+            postedMessages.push(payload);
+            return originalPostMessage(payload, targetOrigin);
+        };
+
+        try {
+            // Step 3: Navigate to a different conversation (triggers button refresh + readiness check)
+            delete (window as any).location;
+            (window as any).location = {
+                href: 'https://chatgpt.com/c/conv-h01-b',
+                origin: 'https://chatgpt.com',
+            };
+            window.dispatchEvent(new (window as any).Event('popstate'));
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        } finally {
+            (window as any).postMessage = originalPostMessage;
+        }
+
+        // Read-only paths must NOT have emitted BLACKIYA_ATTEMPT_DISPOSED for the original attempt
+        const disposals = postedMessages.filter((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED').map((p) => p.attemptId);
+        expect(disposals).not.toContain('attempt:h01-active');
+    });
 
     it('should keep ChatGPT stream deltas after navigation into the same conversation route', async () => {
         currentAdapterMock = {

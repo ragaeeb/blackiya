@@ -136,6 +136,82 @@ export function buildDefaultCalibrationProfile(
     };
 }
 
+// ── CalibrationStep-based builder (manual-strict policy) ──────────────
+
+export type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
+
+export function strategyFromStep(step: CalibrationStep): CalibrationStrategy {
+    if (step === 'passive-wait') {
+        return 'aggressive';
+    }
+    if (step === 'endpoint-retry') {
+        return 'balanced';
+    }
+    return 'conservative';
+}
+
+export function stepFromStrategy(strategy: CalibrationStrategy): CalibrationStep {
+    if (strategy === 'aggressive') {
+        return 'passive-wait';
+    }
+    if (strategy === 'balanced') {
+        return 'endpoint-retry';
+    }
+    return 'queue-flush';
+}
+
+/**
+ * Manual-strict policy timings. These intentionally differ from the generic
+ * strategy defaults in conservative/domQuietWindow (800 vs 1200) to provide
+ * tighter DOM quiet windows when the user has explicitly chosen/calibrated.
+ */
+function manualStrictTimings(step: CalibrationStep): CalibrationProfileV2['timingsMs'] {
+    if (step === 'passive-wait') {
+        return { passiveWait: 900, domQuietWindow: 500, maxStabilizationWait: 12_000 };
+    }
+    if (step === 'endpoint-retry') {
+        return { passiveWait: 1400, domQuietWindow: 800, maxStabilizationWait: 18_000 };
+    }
+    return { passiveWait: 2200, domQuietWindow: 800, maxStabilizationWait: 30_000 };
+}
+
+function manualStrictRetry(step: CalibrationStep): CalibrationProfileV2['retry'] {
+    if (step === 'passive-wait') {
+        return { maxAttempts: 3, backoffMs: [300, 800, 1300], hardTimeoutMs: 12_000 };
+    }
+    if (step === 'endpoint-retry') {
+        return { maxAttempts: 4, backoffMs: [400, 900, 1600, 2400], hardTimeoutMs: 20_000 };
+    }
+    return {
+        maxAttempts: 6,
+        backoffMs: [800, 1600, 2600, 3800, 5200, 7000],
+        hardTimeoutMs: 30_000,
+    };
+}
+
+/**
+ * Build a calibration profile from a CalibrationStep using the manual-strict
+ * policy. This is the centralized replacement for the runner's inline
+ * `buildCalibrationProfile` + `buildCalibrationTimings` + `buildCalibrationRetry`.
+ *
+ * Manual-strict policy always:
+ * - Sets `lastModifiedBy: 'manual'`
+ * - Disables `['dom_hint', 'snapshot_fallback']`
+ * - Uses tighter domQuietWindow for conservative (800ms vs 1200ms in generic defaults)
+ */
+export function buildCalibrationProfileFromStep(platform: string, step: CalibrationStep): CalibrationProfileV2 {
+    return {
+        schemaVersion: 2,
+        platform,
+        strategy: strategyFromStep(step),
+        disabledSources: ['dom_hint', 'snapshot_fallback'],
+        timingsMs: manualStrictTimings(step),
+        retry: manualStrictRetry(step),
+        updatedAt: new Date().toISOString(),
+        lastModifiedBy: 'manual',
+    };
+}
+
 export function validateCalibrationProfileV2(input: unknown, platform: string): CalibrationProfileV2 {
     if (!isRecord(input)) {
         return buildDefaultCalibrationProfile(platform, 'conservative');

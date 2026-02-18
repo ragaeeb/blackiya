@@ -4,7 +4,7 @@
  * TDD tests for conversation ID extraction, API URL matching, and data parsing
  */
 
-import { beforeAll, describe, expect, it, mock } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 // Mock wxt/browser explicitly to avoid logging errors
 const browserMock = {
@@ -1185,5 +1185,126 @@ describe('Grok dual-match and metadata endpoints', () => {
                 expect(result).toBeNull();
             });
         });
+    });
+});
+
+describe('Grok Adapter State Isolation (H-05)', () => {
+    let grokAdapter: any;
+    let resetGrokAdapterState: () => void;
+
+    beforeAll(async () => {
+        const mod = await import('@/platforms/grok');
+        grokAdapter = mod.grokAdapter;
+        resetGrokAdapterState = mod.resetGrokAdapterState;
+    });
+
+    beforeEach(() => {
+        resetGrokAdapterState();
+    });
+
+    it('should reset all state when resetGrokAdapterState is called', () => {
+        // Seed state via parsing
+        const conversationId = '01cb0729-6455-471d-b33a-124b3de76a29';
+        const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true`;
+        grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'State Test Conversation',
+                    createTime: '2026-02-18T00:00:00Z',
+                    modifyTime: '2026-02-18T00:00:00Z',
+                },
+            }),
+            metaUrl,
+        );
+
+        // Parse something to populate the cache
+        const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+        grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                responseId: 'resp-1',
+                message: 'Hello',
+                sender: 'human',
+                createTime: '2026-02-18T00:00:00Z',
+                partial: false,
+                model: 'grok-4',
+            }),
+            loadResponsesUrl,
+        );
+
+        // Reset
+        resetGrokAdapterState();
+
+        // After reset, a fresh parse should NOT find the previous conversation
+        const freshResult = grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                responseId: 'resp-2',
+                message: 'After reset',
+                sender: 'assistant',
+                createTime: '2026-02-18T00:00:01Z',
+                partial: false,
+                model: 'grok-4',
+            }),
+            loadResponsesUrl,
+        );
+
+        // Should create a new conversation — title should be the default, not the cached one
+        expect(freshResult).not.toBeNull();
+        expect((freshResult as { title: string }).title).toBe('Grok Conversation');
+    });
+
+    it('should not leak titles across resets', () => {
+        const conversationId = '7c5e5d2b-8a9c-4d6f-9e1b-3f2a7c8d9e10';
+        // Parse a history response to populate title cache
+        const sampleHistoryUrl = 'https://x.com/i/api/graphql/test/GrokHistory';
+        const historyData = {
+            data: {
+                grok_history: {
+                    conversations: [
+                        {
+                            rest_id: conversationId,
+                            default_response: { message: '' },
+                            created_at: '2026-02-18T00:00:00Z',
+                            core: { name: 'Leaked Title' },
+                        },
+                    ],
+                },
+            },
+        };
+        grokAdapter.parseInterceptedData(JSON.stringify(historyData), sampleHistoryUrl);
+
+        // Reset
+        resetGrokAdapterState();
+
+        // Parse a new conversation with the same ID (metadata-only path may return null until messages exist)
+        const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true`;
+        grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                conversation: {
+                    conversationId,
+                    createTime: '2026-02-18T00:00:00Z',
+                    modifyTime: '2026-02-18T00:00:00Z',
+                },
+            }),
+            metaUrl,
+        );
+
+        // Parse a message payload to materialize conversation data
+        const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+        const conversation = grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                responseId: 'resp-after-reset',
+                message: 'Assistant response',
+                sender: 'assistant',
+                createTime: '2026-02-18T00:00:01Z',
+                partial: false,
+                model: 'grok-4',
+            }),
+            loadResponsesUrl,
+        );
+
+        // Should NOT have the previous title
+        expect(conversation).not.toBeNull();
+        expect((conversation as { title: string }).title).not.toBe('Leaked Title');
     });
 });

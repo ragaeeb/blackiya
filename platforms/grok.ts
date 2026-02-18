@@ -25,21 +25,38 @@ const X_CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
 const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 /**
- * In-memory cache for conversation titles
- * Maps conversation ID (rest_id) to title
+ * Encapsulates all mutable adapter state to prevent cross-test/session leakage.
+ * Use `resetGrokAdapterState()` in tests to get a clean state.
  */
-const conversationTitles = new LRUCache<string, string>(50);
+export class GrokAdapterState {
+    /** Maps conversation ID (rest_id) to title */
+    readonly conversationTitles = new LRUCache<string, string>(50);
+    /** Track active conversation objects for retroactive title updates */
+    readonly activeConversations = new LRUCache<string, ConversationData>(50);
+    /** Most recently active grok.com conversation ID (last-resort fallback) */
+    lastActiveConversationId: string | null = null;
+
+    reset(): void {
+        this.conversationTitles.clear();
+        this.activeConversations.clear();
+        this.lastActiveConversationId = null;
+    }
+}
+
+let grokState = new GrokAdapterState();
 
 /**
- * Track active conversation objects to allow retroactive title updates
- * Maps conversation ID -> ConversationData object reference
+ * Reset all Grok adapter state. Call in test `beforeEach` to ensure
+ * no cross-test leakage from the module-level singleton.
  */
-const activeConversations = new LRUCache<string, ConversationData>(50);
+export const resetGrokAdapterState = (): void => {
+    grokState.reset();
+};
 
 const createGrokComConversation = (conversationId: string) => {
     const rootId = `grok-com-root-${conversationId}`;
     const nowSeconds = Date.now() / 1000;
-    const title = conversationTitles.get(conversationId) || 'Grok Conversation';
+    const title = grokState.conversationTitles.get(conversationId) || 'Grok Conversation';
 
     const conversation: ConversationData = {
         title: title,
@@ -65,13 +82,13 @@ const createGrokComConversation = (conversationId: string) => {
         blocked_urls: [],
     };
 
-    activeConversations.set(conversationId, conversation);
+    grokState.activeConversations.set(conversationId, conversation);
     return conversation;
 };
 
 const getOrCreateGrokComConversation = (conversationId: string) => {
-    _lastActiveGrokComConversationId = conversationId;
-    const existing = activeConversations.get(conversationId);
+    grokState.lastActiveConversationId = conversationId;
+    const existing = grokState.activeConversations.get(conversationId);
     if (existing) {
         return existing;
     }
@@ -142,7 +159,7 @@ const parseGrokComConversationMeta = (data: any, conversationId: string) => {
     const updateTime = typeof conversation.modifyTime === 'string' ? Date.parse(conversation.modifyTime) / 1000 : null;
 
     if (title) {
-        conversationTitles.set(conversationId, title);
+        grokState.conversationTitles.set(conversationId, title);
     }
 
     const conversationData = getOrCreateGrokComConversation(conversationId);
@@ -442,16 +459,7 @@ const parseGrokNdjsonConversation = (parsedLines: any[], conversationId: string)
     return foundMessages ? conversation : null;
 };
 
-/**
- * Get the most recently active grok.com conversation ID from the cache.
- * Used as a last-resort fallback when the NDJSON URL doesn't contain an ID.
- */
-const getLastActiveGrokComConversationId = (): string | null => {
-    // LRUCache doesn't expose iteration, so we use a separate tracking variable
-    return _lastActiveGrokComConversationId;
-};
-
-let _lastActiveGrokComConversationId: string | null = null;
+const getLastActiveGrokComConversationId = (): string | null => grokState.lastActiveConversationId;
 
 const isGrokComMetaEndpoint = (url: string) => url.includes('/rest/app-chat/conversations_v2/');
 
@@ -531,8 +539,8 @@ const parseTitlesResponse = (data: string, url: string) => {
                 titles.set(restId, title);
 
                 // Retroactively update any active conversation object
-                if (activeConversations.has(restId)) {
-                    const activeObj = activeConversations.get(restId);
+                if (grokState.activeConversations.has(restId)) {
+                    const activeObj = grokState.activeConversations.get(restId);
                     if (activeObj && activeObj.title !== title) {
                         activeObj.title = title;
                         logger.info(
@@ -662,7 +670,7 @@ const getConversationId = (conversationIdOverride: string | undefined, chatItemI
     conversationIdOverride || chatItemId || '';
 
 const getTitleFromFirstItem = (conversationId: string, senderType: string, messageText: string) => {
-    if (senderType !== 'User' || !messageText || conversationTitles.has(conversationId)) {
+    if (senderType !== 'User' || !messageText || grokState.conversationTitles.has(conversationId)) {
         return null;
     }
 
@@ -793,8 +801,8 @@ const parseGrokResponse = (data: any, conversationIdOverride?: string) => {
         const lastNodeId = items.length > 0 ? items[items.length - 1].chat_item_id : rootId;
 
         // Check if we have a cached title for this conversation
-        if (conversationId && conversationTitles.has(conversationId)) {
-            conversationTitle = conversationTitles.get(conversationId)!;
+        if (conversationId && grokState.conversationTitles.has(conversationId)) {
+            conversationTitle = grokState.conversationTitles.get(conversationId)!;
             logger.info('[Blackiya/Grok] Using cached title:', conversationTitle);
         }
 
@@ -817,7 +825,7 @@ const parseGrokResponse = (data: any, conversationIdOverride?: string) => {
 
         // Store in active conversations map for potential retroactive title updates
         if (conversationId) {
-            activeConversations.set(conversationId, result);
+            grokState.activeConversations.set(conversationId, result);
         }
 
         logger.info('[Blackiya/Grok] Successfully parsed conversation with', Object.keys(mapping).length, 'nodes');
@@ -917,9 +925,9 @@ const tryHandleGrokTitlesEndpoint = (data: string | any, url: string): boolean =
     const titles = parseTitlesResponse(dataStr, url);
     if (titles) {
         for (const [id, title] of titles) {
-            conversationTitles.set(id, title);
+            grokState.conversationTitles.set(id, title);
         }
-        logger.info(`[Blackiya/Grok] Title cache now contains ${conversationTitles.size} entries`);
+        logger.info(`[Blackiya/Grok] Title cache now contains ${grokState.conversationTitles.size} entries`);
     } else {
         logger.info('[Blackiya/Grok/Titles] Failed to extract titles from this response');
     }
