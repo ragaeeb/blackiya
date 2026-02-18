@@ -26,21 +26,21 @@ class SessionStorageProbeLeaseStore implements ProbeLeaseCoordinatorStore {
         this.storage = storage;
     }
 
-    public async get(key: string): Promise<string | null> {
+    public async get(key: string) {
         const result = await this.storage.get(key);
         const value = result[key];
         return typeof value === 'string' ? value : null;
     }
 
-    public async set(key: string, value: string): Promise<void> {
+    public async set(key: string, value: string) {
         await this.storage.set({ [key]: value });
     }
 
-    public async remove(key: string): Promise<void> {
+    public async remove(key: string) {
         await this.storage.remove(key);
     }
 
-    public async getAll(): Promise<Record<string, string>> {
+    public async getAll() {
         const result = await this.storage.get(null);
         const output: Record<string, string> = {};
         for (const [key, value] of Object.entries(result)) {
@@ -55,24 +55,24 @@ class SessionStorageProbeLeaseStore implements ProbeLeaseCoordinatorStore {
 class InMemoryProbeLeaseStore implements ProbeLeaseCoordinatorStore {
     private readonly entries = new Map<string, string>();
 
-    public async get(key: string): Promise<string | null> {
+    public async get(key: string) {
         return this.entries.get(key) ?? null;
     }
 
-    public async set(key: string, value: string): Promise<void> {
+    public async set(key: string, value: string) {
         this.entries.set(key, value);
     }
 
-    public async remove(key: string): Promise<void> {
+    public async remove(key: string) {
         this.entries.delete(key);
     }
 
-    public async getAll(): Promise<Record<string, string>> {
+    public async getAll() {
         return Object.fromEntries(this.entries.entries());
     }
 }
 
-function createProbeLeaseStore(): ProbeLeaseCoordinatorStore {
+function createProbeLeaseStore() {
     const sessionStorage = browser.storage?.session;
     if (sessionStorage) {
         return new SessionStorageProbeLeaseStore(sessionStorage);
@@ -172,12 +172,14 @@ export function createBackgroundMessageHandler(deps: BackgroundMessageHandlerDep
             const payload = (message as { payload?: unknown }).payload;
             if (isLogEntryPayload(payload)) {
                 deps.saveLog(payload).catch((error) => {
-                    console.error('Failed to save log from content script:', error);
+                    deps.logger.error('Failed to save log from content script', error);
                 });
+                sendResponse({ success: true });
             } else {
                 deps.logger.warn('Discarding malformed LOG_ENTRY payload');
+                sendResponse({ success: false, error: 'Malformed LOG_ENTRY payload' });
             }
-            return;
+            return true;
         }
 
         return handleGenericBackgroundMessage(message, sender, sendResponse, deps.logger);

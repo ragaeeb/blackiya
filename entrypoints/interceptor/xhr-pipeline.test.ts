@@ -15,7 +15,7 @@ describe('xhr pipeline helpers', () => {
             chatGptPlatformName: 'ChatGPT',
             shouldEmitNonChatLifecycleForRequest: () => true,
             resolveRequestConversationId: () => 'grok-conv-1',
-            resolveAttemptIdForConversation: (conversationId, platformName) => `${platformName}:${conversationId}`,
+            peekAttemptIdForConversation: (conversationId, platformName) => `${platformName}:${conversationId}`,
         });
         expect(context.methodUpper).toBe('POST');
         expect(context.requestAdapter?.name).toBe('Grok');
@@ -34,7 +34,7 @@ describe('xhr pipeline helpers', () => {
             chatGptPlatformName: 'ChatGPT',
             shouldEmitNonChatLifecycleForRequest: () => true,
             resolveRequestConversationId: () => 'ignored',
-            resolveAttemptIdForConversation: () => 'ignored',
+            peekAttemptIdForConversation: () => 'ignored',
         });
         expect(context.requestAdapter).toBeNull();
         expect(context.shouldEmitNonChatLifecycle).toBeFalse();

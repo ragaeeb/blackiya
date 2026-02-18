@@ -14,6 +14,7 @@ import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
 export class InterceptionManager {
+    private static readonly BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private readonly conversationCache: LRUCache<string, ConversationData>;
     private readonly specificTitleCache: LRUCache<string, string>;
     private currentAdapter: LLMPlatform | null = null;
@@ -119,14 +120,28 @@ export class InterceptionManager {
 
     private mergeSnapshotIntoExisting(existing: ConversationData, incoming: ConversationData): ConversationData {
         // Preserve object identity so downstream references (e.g. late title updates) stay attached.
-        const blockedKeys = new Set(['__proto__', 'prototype', 'constructor']);
         for (const [key, value] of Object.entries(incoming as unknown as Record<string, unknown>)) {
-            if (blockedKeys.has(key)) {
+            if (InterceptionManager.BLOCKED_KEYS.has(key)) {
                 continue;
             }
-            (existing as unknown as Record<string, unknown>)[key] = value;
+            (existing as unknown as Record<string, unknown>)[key] = this.cloneSnapshotValue(value);
         }
         return existing;
+    }
+
+    private cloneSnapshotValue(value: unknown): unknown {
+        if (Array.isArray(value)) {
+            return value.map((item) => this.cloneSnapshotValue(item));
+        }
+        if (value && typeof value === 'object') {
+            const source = value as Record<string, unknown>;
+            const cloned: Record<string, unknown> = {};
+            for (const [k, nested] of Object.entries(source)) {
+                cloned[k] = this.cloneSnapshotValue(nested);
+            }
+            return cloned;
+        }
+        return value;
     }
 
     private isConversationReady(data: ConversationData): boolean {

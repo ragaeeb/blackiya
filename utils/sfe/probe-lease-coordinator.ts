@@ -82,7 +82,7 @@ export class ProbeLeaseCoordinator {
         };
     }
 
-    public async release(conversationId: string, attemptId: string): Promise<boolean> {
+    public async release(conversationId: string, attemptId: string) {
         await this.ensureHydrated();
         const now = this.now();
         await this.pruneExpired(now);
@@ -101,7 +101,7 @@ export class ProbeLeaseCoordinator {
         return true;
     }
 
-    private async ensureHydrated(): Promise<void> {
+    private async ensureHydrated() {
         if (this.hydrated) {
             return;
         }
@@ -120,6 +120,8 @@ export class ProbeLeaseCoordinator {
             try {
                 rawEntries = await this.store.getAll();
             } catch {
+                // Intentional fail-open: if getAll() fails, awaiters coalesced on hydrationPromise
+                // continue with hydrated=false and an unpopulated cache so runtime flow is not blocked.
                 // Keep hydrated=false so future calls can retry.
                 return;
             }
@@ -147,7 +149,7 @@ export class ProbeLeaseCoordinator {
         }
     }
 
-    private async pruneExpired(now: number): Promise<void> {
+    private async pruneExpired(now: number) {
         const expired: string[] = [];
         for (const [conversationId, record] of this.cache.entries()) {
             if (record.expiresAtMs <= now) {
@@ -169,19 +171,19 @@ export class ProbeLeaseCoordinator {
         );
     }
 
-    private trimToMaxEntries(): void {
+    private trimToMaxEntries() {
         if (this.cache.size <= this.maxEntries) {
             return;
         }
 
         const candidates = Array.from(this.cache.entries()).sort((left, right) => {
-            const leftAge = left[1].expiresAtMs ?? left[1].updatedAtMs ?? 0;
-            const rightAge = right[1].expiresAtMs ?? right[1].updatedAtMs ?? 0;
+            const leftAge = left[1].expiresAtMs;
+            const rightAge = right[1].expiresAtMs;
             if (leftAge !== rightAge) {
                 return leftAge - rightAge;
             }
-            const leftUpdated = left[1].updatedAtMs ?? 0;
-            const rightUpdated = right[1].updatedAtMs ?? 0;
+            const leftUpdated = left[1].updatedAtMs;
+            const rightUpdated = right[1].updatedAtMs;
             return leftUpdated - rightUpdated;
         });
 
@@ -196,7 +198,7 @@ export class ProbeLeaseCoordinator {
         }
     }
 
-    private parseRecord(raw: string): ProbeLeaseRecord | null {
+    private parseRecord(raw: string) {
         try {
             const parsed = JSON.parse(raw) as Partial<ProbeLeaseRecord>;
             if (typeof parsed.attemptId !== 'string') {
@@ -216,7 +218,7 @@ export class ProbeLeaseCoordinator {
         }
     }
 
-    private keyFor(conversationId: string): string {
+    private keyFor(conversationId: string) {
         return `${this.keyPrefix}${conversationId}`;
     }
 }

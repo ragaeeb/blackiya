@@ -1,25 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { ProbeLeaseCoordinator, type ProbeLeaseCoordinatorStore } from '@/utils/sfe/probe-lease-coordinator';
-
-class InMemoryLeaseStore implements ProbeLeaseCoordinatorStore {
-    private readonly map = new Map<string, string>();
-
-    public async get(key: string): Promise<string | null> {
-        return this.map.has(key) ? (this.map.get(key) ?? null) : null;
-    }
-
-    public async set(key: string, value: string): Promise<void> {
-        this.map.set(key, value);
-    }
-
-    public async remove(key: string): Promise<void> {
-        this.map.delete(key);
-    }
-
-    public async getAll(): Promise<Record<string, string>> {
-        return Object.fromEntries(this.map.entries());
-    }
-}
+import { InMemoryLeaseStore } from '@/tests/helpers/in-memory-lease-store';
+import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 describe('integration: probe lease collision + expiry', () => {
     it('enforces single owner until expiry, then transfers ownership deterministically', async () => {

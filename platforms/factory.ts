@@ -13,9 +13,9 @@ import type { LLMPlatform } from '@/platforms/types';
  * Get all supported platforms.
  * Encapsulated in a function to allow future extension (e.g., dynamic registration).
  */
-function getPlatforms(): LLMPlatform[] {
+const getPlatforms = () => {
     return [chatGPTAdapter, geminiAdapter, grokAdapter];
-}
+};
 
 /**
  * Get the appropriate platform adapter for a given URL

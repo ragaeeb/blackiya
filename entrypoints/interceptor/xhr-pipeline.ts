@@ -14,7 +14,7 @@ export interface BuildXhrLifecycleContextDeps {
     chatGptPlatformName: string;
     shouldEmitNonChatLifecycleForRequest: (adapter: LLMPlatform, url: string) => boolean;
     resolveRequestConversationId: (adapter: LLMPlatform, requestUrl: string) => string | undefined;
-    resolveAttemptIdForConversation: (conversationId: string | undefined, platformName?: string) => string;
+    peekAttemptIdForConversation: (conversationId: string | undefined, platformName?: string) => string | undefined;
 }
 
 export function buildXhrLifecycleContext(xhr: XMLHttpRequest, deps: BuildXhrLifecycleContextDeps): XhrLifecycleContext {
@@ -32,7 +32,7 @@ export function buildXhrLifecycleContext(xhr: XMLHttpRequest, deps: BuildXhrLife
             : undefined;
     const attemptId =
         shouldEmitNonChatLifecycle && requestAdapter
-            ? deps.resolveAttemptIdForConversation(conversationId, requestAdapter.name)
+            ? deps.peekAttemptIdForConversation(conversationId, requestAdapter.name)
             : undefined;
     return {
         methodUpper,

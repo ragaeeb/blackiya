@@ -15,10 +15,10 @@ export function shouldEmitXhrRequestLifecycle(context: {
     return typeof context.conversationId === 'string' && context.conversationId.length > 0;
 }
 
-export function shouldEmitGeminiXhrLoadendCompletion(
+export function tryEmitGeminiXhrLoadendCompletion(
     state: { emittedCompleted: boolean; emittedStreaming: boolean; seedConversationId?: string },
     requestUrl: string,
-): boolean {
+){
     return tryMarkGeminiXhrLoadendCompleted(state, requestUrl);
 }
 

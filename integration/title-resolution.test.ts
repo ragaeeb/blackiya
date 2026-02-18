@@ -4,7 +4,7 @@ import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { resolveConversationTitleByPrecedence } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
-function buildConversation(title: string): ConversationData {
+const buildConversation = (title: string): ConversationData => {
     return {
         title,
         create_time: 1,
@@ -59,7 +59,7 @@ function buildConversation(title: string): ConversationData {
             },
         },
     };
-}
+};
 
 describe('integration: title resolution precedence', () => {
     it('prefers stream title over cached generic title and DOM fallback', () => {

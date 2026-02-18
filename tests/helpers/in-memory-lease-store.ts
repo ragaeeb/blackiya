@@ -3,19 +3,19 @@ import type { ProbeLeaseCoordinatorStore } from '@/utils/sfe/probe-lease-coordin
 export class InMemoryLeaseStore implements ProbeLeaseCoordinatorStore {
     private readonly entries = new Map<string, string>();
 
-    public async get(key: string): Promise<string | null> {
+    public async get(key: string) {
         return this.entries.get(key) ?? null;
     }
 
-    public async set(key: string, value: string): Promise<void> {
+    public async set(key: string, value: string) {
         this.entries.set(key, value);
     }
 
-    public async remove(key: string): Promise<void> {
+    public async remove(key: string) {
         this.entries.delete(key);
     }
 
-    public async getAll(): Promise<Record<string, string>> {
-        return Object.fromEntries(this.entries.entries());
+    public async getAll() {
+        return Object.fromEntries(this.entries);
     }
 }

@@ -24,7 +24,7 @@ export interface CreateFetchInterceptorContextDeps {
     chatGptPlatformName: string;
     shouldEmitNonChatLifecycleForRequest: (adapter: LLMPlatform, url: string) => boolean;
     resolveRequestConversationId: (adapter: LLMPlatform, requestUrl: string) => string | undefined;
-    resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string;
+    peekAttemptIdForConversation: (conversationId?: string, platformName?: string) => string | undefined;
     resolveLifecycleConversationId: (args: Parameters<typeof fetch>) => string | undefined;
     safePathname: (url: string) => string;
 }
@@ -48,7 +48,7 @@ export function createFetchInterceptorContext(
             : undefined;
     const nonChatAttemptId =
         isNonChatGptApiRequest && fetchApiAdapter
-            ? deps.resolveAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
+            ? deps.peekAttemptIdForConversation(nonChatConversationId, fetchApiAdapter.name)
             : undefined;
     const isChatGptPromptRequest = outgoingMethod === 'POST' && CHATGPT_PROMPT_REQUEST_PATH_PATTERN.test(outgoingPath);
     const lifecycleConversationId = isChatGptPromptRequest ? deps.resolveLifecycleConversationId(args) : undefined;

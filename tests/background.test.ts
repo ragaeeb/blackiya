@@ -22,11 +22,11 @@ describe('background message handler', () => {
     let savedLogs: unknown[];
     let now: number;
 
-    async function flushAsyncWork(): Promise<void> {
+    async function flushAsyncWork() {
         await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    async function waitForResponse(responses: unknown[], expectedLength: number): Promise<void> {
+    async function waitForResponse(responses: unknown[], expectedLength: number) {
         const maxAttempts = 200;
         for (let i = 0; i < maxAttempts; i += 1) {
             if (responses.length >= expectedLength) {

@@ -48,7 +48,7 @@ import {
 import type { ConversationData } from '@/utils/types';
 
 export {
-    shouldEmitGeminiXhrLoadendCompletion,
+    tryEmitGeminiXhrLoadendCompletion,
     shouldEmitXhrRequestLifecycle,
     tryMarkGeminiXhrLoadendCompleted,
 } from '@/entrypoints/interceptor/signal-emitter';
@@ -89,6 +89,10 @@ const latestAttemptIdByPlatform = new Map<string, string>();
 const MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES = 300;
 const MAX_INTERCEPTOR_ATTEMPT_BINDINGS = 400;
 const MAX_INTERCEPTOR_STREAM_DUMP_ATTEMPTS = 250;
+const BLACKIYA_GET_JSON_REQUEST = 'BLACKIYA_GET_JSON_REQUEST';
+const BLACKIYA_GET_JSON_RESPONSE = 'BLACKIYA_GET_JSON_RESPONSE';
+const JSON_FORMAT_ORIGINAL = 'original';
+const JSON_FORMAT_COMMON = 'common';
 const INTERCEPTOR_CACHE_ENTRY_TTL_MS = 60_000;
 const INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS = 15_000;
 let lastCachePruneAtMs = 0;
@@ -313,6 +317,24 @@ function resolveAttemptIdForConversation(conversationId?: string, platformName =
         bindAttemptToConversation(created, conversationId);
     }
     return created;
+}
+
+function peekAttemptIdForConversation(
+    conversationId?: string,
+    platformName = chatGPTAdapter.name,
+): string | undefined {
+    const platformKey = platformName || chatGPTAdapter.name;
+    if (conversationId) {
+        const bound = attemptByConversationId.get(conversationId);
+        if (bound && !disposedAttemptIds.has(bound)) {
+            return bound;
+        }
+    }
+    const latestAttemptId = latestAttemptIdByPlatform.get(platformKey);
+    if (latestAttemptId && !disposedAttemptIds.has(latestAttemptId)) {
+        return latestAttemptId;
+    }
+    return undefined;
 }
 
 function emitConversationIdResolvedSignal(attemptId: string, conversationId: string, platformOverride?: string): void {
@@ -2692,19 +2714,22 @@ export default defineContentScript({
                 emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
             }
 
-            if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter || !context.nonChatAttemptId) {
+            if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter) {
                 return;
             }
+            const nonChatAttemptId =
+                context.nonChatAttemptId ??
+                resolveAttemptIdForConversation(context.nonChatConversationId, context.fetchApiAdapter.name);
 
             emitLifecycleSignal(
-                context.nonChatAttemptId,
+                nonChatAttemptId,
                 'prompt-sent',
                 context.nonChatConversationId,
                 context.fetchApiAdapter.name,
             );
             if (context.fetchApiAdapter.name !== 'Gemini') {
                 emitLifecycleSignal(
-                    context.nonChatAttemptId,
+                    nonChatAttemptId,
                     'streaming',
                     context.nonChatConversationId,
                     context.fetchApiAdapter.name,
@@ -2713,10 +2738,10 @@ export default defineContentScript({
 
             if (
                 context.fetchApiAdapter.name === 'Grok' &&
-                shouldLogTransient(`grok:fetch:request:${context.nonChatAttemptId}`, 3000)
+                shouldLogTransient(`grok:fetch:request:${nonChatAttemptId}`, 3000)
             ) {
                 log('info', 'Grok fetch request intercepted', {
-                    attemptId: context.nonChatAttemptId,
+                    attemptId: nonChatAttemptId,
                     conversationId: context.nonChatConversationId ?? null,
                     method: context.outgoingMethod,
                     path: context.outgoingPath,
@@ -2805,7 +2830,7 @@ export default defineContentScript({
                 chatGptPlatformName: chatGPTAdapter.name,
                 shouldEmitNonChatLifecycleForRequest,
                 resolveRequestConversationId,
-                resolveAttemptIdForConversation,
+                peekAttemptIdForConversation,
                 resolveLifecycleConversationId,
                 safePathname,
             });
@@ -2847,12 +2872,18 @@ export default defineContentScript({
         };
 
         const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext): void => {
-            if (!shouldEmitXhrRequestLifecycle(context)) {
+            if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter) {
+                return;
+            }
+            const attemptId =
+                context.attemptId ?? resolveAttemptIdForConversation(context.conversationId, context.requestAdapter.name);
+            const lifecycleContext = { ...context, attemptId };
+            if (!shouldEmitXhrRequestLifecycle(lifecycleContext)) {
                 return;
             }
 
             emitLifecycleSignal(
-                context.attemptId as string,
+                attemptId,
                 'prompt-sent',
                 context.conversationId,
                 context.requestAdapter?.name,
@@ -2861,17 +2892,17 @@ export default defineContentScript({
             if (context.requestAdapter?.name === 'Gemini') {
                 wireGeminiXhrProgressMonitor(
                     xhr,
-                    context.attemptId as string,
+                    attemptId,
                     context.conversationId,
                     context.requestUrl,
                 );
                 return;
             }
             if (context.requestAdapter?.name === 'Grok' && context.conversationId) {
-                wireGrokXhrProgressMonitor(xhr, context.attemptId as string, context.conversationId);
-                if (shouldLogTransient(`grok:xhr:request:${context.attemptId as string}`, 3000)) {
+                wireGrokXhrProgressMonitor(xhr, attemptId, context.conversationId);
+                if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
                     log('info', 'Grok XHR request intercepted', {
-                        attemptId: context.attemptId as string,
+                        attemptId,
                         conversationId: context.conversationId,
                         method: context.methodUpper,
                         path: safePathname(context.requestUrl),
@@ -2883,7 +2914,7 @@ export default defineContentScript({
                 return;
             }
             emitLifecycleSignal(
-                context.attemptId as string,
+                attemptId,
                 'streaming',
                 context.conversationId,
                 context.requestAdapter?.name,
@@ -2954,7 +2985,7 @@ export default defineContentScript({
                 chatGptPlatformName: chatGPTAdapter.name,
                 shouldEmitNonChatLifecycleForRequest,
                 resolveRequestConversationId,
-                resolveAttemptIdForConversation,
+                peekAttemptIdForConversation,
             });
             emitXhrRequestLifecycle(xhr, context);
             registerXhrLoadHandler(xhr, context.methodUpper);
@@ -2968,8 +2999,8 @@ export default defineContentScript({
 
         if (!(window as any).__blackiya) {
             const requestJson = createWindowJsonRequester(window, {
-                requestType: 'BLACKIYA_GET_JSON_REQUEST',
-                responseType: 'BLACKIYA_GET_JSON_RESPONSE',
+                requestType: BLACKIYA_GET_JSON_REQUEST,
+                responseType: BLACKIYA_GET_JSON_RESPONSE,
                 timeoutMs: 5000,
             });
 
@@ -3034,8 +3065,8 @@ export default defineContentScript({
             window.addEventListener('message', handleStreamDumpConfig);
 
             (window as any).__blackiya = {
-                getJSON: () => requestJson('original'),
-                getCommonJSON: () => requestJson('common'),
+                getJSON: () => requestJson(JSON_FORMAT_ORIGINAL),
+                getCommonJSON: () => requestJson(JSON_FORMAT_COMMON),
             };
         }
     },

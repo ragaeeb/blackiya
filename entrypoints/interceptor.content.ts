@@ -3,6 +3,6 @@ export {
     default,
     pruneTimestampCache,
     setBoundedMapValue,
-    shouldEmitGeminiXhrLoadendCompletion,
+    tryEmitGeminiXhrLoadendCompletion,
     shouldEmitXhrRequestLifecycle,
 } from '@/entrypoints/interceptor/bootstrap';

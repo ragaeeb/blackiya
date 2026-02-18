@@ -69,9 +69,13 @@ Supporting modules:
 
 - TypeScript-first.
 - Prefer explicit, testable utility functions.
+- Prefer inferred function return types; add explicit return types only when they materially improve clarity/safety.
+- Prefer `type` aliases over `interface` in TypeScript unless interface-specific behavior is required.
+- Prefer arrow functions over classic `function` declarations for new code.
 - Keep platform logic isolated to adapter/parser/classifier modules.
 - Avoid broad DOM heuristics as lifecycle source of truth for non-ChatGPT platforms.
 - No silent behavior changes without tests.
+- In tests, use Bun convention `it('should ...')` for test names.
 
 ## 6) TDD and Regression Policy
 

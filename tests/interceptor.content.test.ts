@@ -25,7 +25,7 @@ type ShouldEmitXhrRequestLifecycle = (context: {
 }) => boolean;
 
 describe('interceptor.content utilities', () => {
-    let shouldEmitGeminiXhrLoadendCompletion: GeminiLoadendGuard;
+    let tryEmitGeminiXhrLoadendCompletion: GeminiLoadendGuard;
     let setBoundedMapValue: SetBoundedMapValue;
     let pruneTimestampCache: PruneTimestampCache;
     let cleanupDisposedAttemptState: CleanupDisposedAttemptState;
@@ -34,7 +34,7 @@ describe('interceptor.content utilities', () => {
     beforeAll(async () => {
         (globalThis as any).defineContentScript = (config: unknown) => config;
         const mod = await import('../entrypoints/interceptor.content');
-        shouldEmitGeminiXhrLoadendCompletion = mod.shouldEmitGeminiXhrLoadendCompletion as GeminiLoadendGuard;
+        tryEmitGeminiXhrLoadendCompletion = mod.tryEmitGeminiXhrLoadendCompletion as GeminiLoadendGuard;
         setBoundedMapValue = mod.setBoundedMapValue as SetBoundedMapValue;
         pruneTimestampCache = mod.pruneTimestampCache as PruneTimestampCache;
         cleanupDisposedAttemptState = mod.cleanupDisposedAttemptState as CleanupDisposedAttemptState;
@@ -50,9 +50,9 @@ describe('interceptor.content utilities', () => {
         const streamGenerateUrl =
             'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
 
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeTrue();
+        expect(tryEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeTrue();
         expect(state.emittedCompleted).toBeTrue();
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeFalse();
+        expect(tryEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeFalse();
     });
 
     it('does not emit completed without streaming or conversation context', () => {
@@ -62,7 +62,7 @@ describe('interceptor.content utilities', () => {
         };
         const streamGenerateUrl =
             'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-        expect(shouldEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeFalse();
+        expect(tryEmitGeminiXhrLoadendCompletion(state, streamGenerateUrl)).toBeFalse();
     });
 
     it('allows Gemini XHR lifecycle emission without an initial conversation id', () => {

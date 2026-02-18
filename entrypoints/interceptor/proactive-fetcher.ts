@@ -15,7 +15,7 @@ export class ProactiveFetcher {
      * Callers that receive `true` must pair this with `clearInFlight(key)` in a
      * `finally` block to avoid permanently blocking that key.
      */
-    public markInFlight(key: string): boolean {
+    public markInFlight(key: string) {
         if (this.inFlight.has(key)) {
             return false;
         }
@@ -30,7 +30,7 @@ export class ProactiveFetcher {
      *
      * This should be called in `finally` after a successful `markInFlight(key)`.
      */
-    public clearInFlight(key: string): void {
+    public clearInFlight(key: string) {
         this.inFlight.delete(key);
         this.inFlightStartedAt.delete(key);
     }
@@ -39,7 +39,7 @@ export class ProactiveFetcher {
      * Safely executes an async callback while holding the in-flight key.
      * Returns `undefined` when the key is already in-flight.
      */
-    public async withInFlight<T>(key: string, callback: () => Promise<T>): Promise<T | undefined> {
+    public async withInFlight<T>(key: string, callback: () => Promise<T>) {
         if (!this.markInFlight(key)) {
             return undefined;
         }
@@ -50,7 +50,7 @@ export class ProactiveFetcher {
         }
     }
 
-    private enforceCapacity(): void {
+    private enforceCapacity() {
         while (this.inFlight.size >= this.maxInFlight) {
             const oldest = this.inFlightStartedAt.entries().next().value as [string, number] | undefined;
             if (!oldest) {

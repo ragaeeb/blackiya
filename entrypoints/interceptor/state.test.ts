@@ -46,4 +46,21 @@ describe('interceptor state helpers', () => {
         expect(state.latestAttemptIdByPlatform.get('Grok')).toBe('attempt-b');
         expect(state.attemptByConversationId.get('conv-b')).toBe('attempt-b');
     });
+
+    it('evicts oldest disposed attempt when bounded set overflows', () => {
+        const state = {
+            disposedAttemptIds: new Set<string>(['old-1', 'old-2']),
+            streamDumpFrameCountByAttempt: new Map<string, number>(),
+            streamDumpLastTextByAttempt: new Map<string, string>(),
+            latestAttemptIdByPlatform: new Map<string, string>(),
+            attemptByConversationId: new Map<string, string>(),
+        };
+        cleanupDisposedAttemptState('attempt-a', state, 3);
+        cleanupDisposedAttemptState('attempt-b', state, 3);
+
+        expect(state.disposedAttemptIds.has('old-1')).toBeFalse();
+        expect(state.disposedAttemptIds.has('old-2')).toBeTrue();
+        expect(state.disposedAttemptIds.has('attempt-a')).toBeTrue();
+        expect(state.disposedAttemptIds.has('attempt-b')).toBeTrue();
+    });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 
-function buildData(conversationId: string) {
+const buildData = (conversationId: string) => {
     return {
         title: conversationId,
         create_time: 1,
@@ -19,7 +19,7 @@ function buildData(conversationId: string) {
         safe_urls: [],
         blocked_urls: [],
     };
-}
+};
 
 describe('integration: multi-tab deterministic', () => {
     it('keeps attempts isolated across 8 concurrent conversations', () => {

@@ -1,6 +1,6 @@
 import type { ResponseLifecycleMessage } from '@/utils/protocol/messages';
 
-export function getLifecyclePhasePriority(phase: ResponseLifecycleMessage['phase']): number {
+export function getLifecyclePhasePriority(phase: ResponseLifecycleMessage['phase']) {
     if (phase === 'prompt-sent') {
         return 1;
     }
@@ -19,6 +19,6 @@ export function getLifecyclePhasePriority(phase: ResponseLifecycleMessage['phase
 export function isRegressiveLifecycleTransition(
     current: ResponseLifecycleMessage['phase'],
     next: ResponseLifecycleMessage['phase'],
-): boolean {
+) {
     return getLifecyclePhasePriority(next) < getLifecyclePhasePriority(current);
 }

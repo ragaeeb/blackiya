@@ -1,10 +1,10 @@
-function getNormalizedPath(url: string): string {
+const getNormalizedPath = (url: string) => {
     try {
         return new URL(url).pathname.toLowerCase();
     } catch {
         return url.toLowerCase();
     }
-}
+};
 
 export function isGrokGenerationEndpoint(url: string): boolean {
     const path = getNormalizedPath(url);

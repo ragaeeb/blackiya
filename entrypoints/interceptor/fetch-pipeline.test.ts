@@ -20,7 +20,7 @@ describe('fetch pipeline helpers', () => {
             chatGptPlatformName: 'ChatGPT',
             shouldEmitNonChatLifecycleForRequest: () => false,
             resolveRequestConversationId: () => undefined,
-            resolveAttemptIdForConversation: () => 'unused',
+            peekAttemptIdForConversation: () => 'unused',
             resolveLifecycleConversationId: () => 'chat-conv-1',
             safePathname: (url) => new URL(url).pathname,
         });
@@ -44,7 +44,7 @@ describe('fetch pipeline helpers', () => {
             chatGptPlatformName: 'ChatGPT',
             shouldEmitNonChatLifecycleForRequest: () => false,
             resolveRequestConversationId: () => undefined,
-            resolveAttemptIdForConversation: () => 'unused',
+            peekAttemptIdForConversation: () => 'unused',
             resolveLifecycleConversationId: () => 'chat-conv-2',
             safePathname: (url) => new URL(url).pathname,
         });
@@ -65,7 +65,7 @@ describe('fetch pipeline helpers', () => {
             chatGptPlatformName: 'ChatGPT',
             shouldEmitNonChatLifecycleForRequest: () => true,
             resolveRequestConversationId: () => 'gem-conv-1',
-            resolveAttemptIdForConversation: (conversationId, platformName) => `${platformName}:${conversationId}`,
+            peekAttemptIdForConversation: (conversationId, platformName) => `${platformName}:${conversationId}`,
             resolveLifecycleConversationId: () => undefined,
             safePathname: (url) => new URL(url).pathname,
         });
@@ -90,7 +90,7 @@ describe('fetch pipeline helpers', () => {
             chatGptPlatformName: 'ChatGPT',
             shouldEmitNonChatLifecycleForRequest: () => false,
             resolveRequestConversationId: () => undefined,
-            resolveAttemptIdForConversation: () => 'unused',
+            peekAttemptIdForConversation: () => 'unused',
             resolveLifecycleConversationId: () => 'chat-conv-1',
             safePathname: (url) => new URL(url).pathname,
         });

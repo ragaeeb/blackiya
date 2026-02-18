@@ -19,7 +19,7 @@ const STORAGE_KEY = 'logs';
 export const FLUSH_INTERVAL_MS = 2000;
 export const FLUSH_THRESHOLD = 50;
 
-function createInMemoryStorage(): StorageBackend {
+const createInMemoryStorage = () => {
     const store = new Map<string, unknown>();
 
     return {
@@ -35,7 +35,7 @@ function createInMemoryStorage(): StorageBackend {
             store.delete(key);
         },
     };
-}
+};
 
 const fallbackStorage = createInMemoryStorage();
 
