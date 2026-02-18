@@ -10,7 +10,10 @@ describe('chatgpt-sse-monitor', () => {
         monitorChatgptSseChunk('', (chunk) => {
             chunks.push(chunk);
         });
-        expect(chunks).toEqual(['delta']);
+        monitorChatgptSseChunk('  delta  ', (chunk) => {
+            chunks.push(chunk);
+        });
+        expect(chunks).toEqual(['delta', '  delta  ']);
     });
 
     it('suppresses whitespace-only keep-alive chunks', () => {

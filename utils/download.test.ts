@@ -121,6 +121,7 @@ describe('Download Utilities', () => {
                     createObjectURL: () => 'blob:mock',
                     revokeObjectURL: () => {},
                 },
+                createBlob: () => ({}) as Blob,
             };
 
             expect(() => downloadAsJSON(circular, 'test', browserApis)).not.toThrow();
@@ -165,6 +166,7 @@ describe('Download Utilities', () => {
                         revokedUrls.push(url);
                     },
                 },
+                createBlob: () => ({}) as Blob,
             };
 
             expect(() => downloadAsJSON({ ok: true }, 'test', browserApis)).not.toThrow();
@@ -204,6 +206,7 @@ describe('Download Utilities', () => {
                     },
                     revokeObjectURL: () => {},
                 },
+                createBlob: () => ({}) as Blob,
             };
 
             expect(() => downloadAsJSON({ ok: true }, 'test', browserApis)).not.toThrow();

@@ -139,4 +139,17 @@ describe('interceptor.content utilities', () => {
         expect(state.attemptByConversationId.get('conv-a')).toBeUndefined();
         expect(state.disposedAttemptIds.has('attempt-a')).toBe(true);
     });
+
+    it('promotes an existing key to most-recent on update', () => {
+        const map = new Map<string, number>();
+        setBoundedMapValue(map, 'a', 1, 2);
+        setBoundedMapValue(map, 'b', 2, 2);
+        // Refresh 'a' — it should now be most-recent, making 'b' the oldest
+        setBoundedMapValue(map, 'a', 99, 2);
+        setBoundedMapValue(map, 'c', 3, 2);
+        // 'b' should be evicted, 'a' and 'c' survive
+        expect(map.has('b')).toBe(false);
+        expect(map.get('a')).toBe(99);
+        expect(map.has('c')).toBe(true);
+    });
 });

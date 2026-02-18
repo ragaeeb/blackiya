@@ -374,9 +374,10 @@ function resolveGeminiStreamShape(payload: any): { idIndex: number; assistantSlo
     if (!Array.isArray(payload) || payload.length < 5) {
         return null;
     }
-    // StreamGenerate envelopes often resemble:
-    // [null, [conversationId, ...], ?, ?, [assistant slot, ...], ...]
-    // The assistant payload is typically 4 positions after the null sentinel.
+    // StreamGenerate envelopes follow this layout:
+    // [null, [conversationId, ...], <ignored>, <ignored>, [assistant slot, ...], ...]
+    // i+2 and i+3 are intermediate envelope fields whose structure varies by API
+    // version; only the assistant slot at i+4 is consumed downstream.
     for (let i = 0; i <= payload.length - 5; i++) {
         if (payload[i] !== null) {
             continue;

@@ -33,6 +33,7 @@ type DownloadUrlLike = {
 type DownloadBrowserApis = {
     document?: DownloadDocumentLike;
     URL?: DownloadUrlLike;
+    createBlob?: (parts: BlobPart[], options?: BlobPropertyBag) => Blob;
 };
 
 /**
@@ -117,7 +118,8 @@ export function downloadAsJSON(data: unknown, filename: string, browserApis?: Do
         }
 
         const jsonString = JSON.stringify(data, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
+        const makeBob = browserApis?.createBlob ?? ((parts, opts) => new Blob(parts, opts));
+        const blob = makeBob([jsonString], { type: 'application/json' });
         url = urlApi.createObjectURL(blob);
 
         link = doc.createElement('a');
