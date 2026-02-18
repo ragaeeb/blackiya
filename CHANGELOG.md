@@ -1,3 +1,10 @@
+## [2.0.6](https://github.com/ragaeeb/blackiya/compare/v2.0.5...v2.0.6) (2026-02-18)
+
+
+### Bug Fixes
+
+* **p1:** Fix P1 tasks calibration step/strategy round-trip loss ([3e69f6d](https://github.com/ragaeeb/blackiya/commit/3e69f6dc062f4866ae4ef3abec28082a456bd77a))
+
 ## [2.0.5](https://github.com/ragaeeb/blackiya/compare/v2.0.4...v2.0.5) (2026-02-18)
 
 
