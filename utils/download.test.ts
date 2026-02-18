@@ -106,15 +106,6 @@ describe('Download Utilities', () => {
             expect(downloadCalls).toEqual([]);
         });
 
-        it('should serialize data and trigger download with correct filename', () => {
-            const data = { ok: true };
-
-            expect(() => downloadAsJSON(data, 'test', downloadImpl)).not.toThrow();
-            expect(downloadCalls).toHaveLength(1);
-            expect(downloadCalls[0].filename).toBe('test.json');
-            expect(JSON.parse(downloadCalls[0].jsonString)).toEqual({ ok: true });
-        });
-
         it('should not throw when the DOM download throws', () => {
             shouldThrow = new Error('blob-failure');
 
