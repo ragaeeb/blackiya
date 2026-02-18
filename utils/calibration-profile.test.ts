@@ -138,19 +138,25 @@ describe('calibration step/strategy mapping', () => {
         expect(strategyFromStep('passive-wait')).toBe('aggressive');
         expect(strategyFromStep('endpoint-retry')).toBe('balanced');
         expect(strategyFromStep('queue-flush')).toBe('conservative');
-        expect(strategyFromStep('page-snapshot')).toBe('conservative');
+        expect(strategyFromStep('page-snapshot')).toBe('snapshot');
     });
 
     it('should map strategies to steps correctly', () => {
         expect(stepFromStrategy('aggressive')).toBe('passive-wait');
         expect(stepFromStrategy('balanced')).toBe('endpoint-retry');
         expect(stepFromStrategy('conservative')).toBe('queue-flush');
+        expect(stepFromStrategy('snapshot')).toBe('page-snapshot');
     });
 
     it('should round-trip strategy→step→strategy', () => {
-        for (const strategy of ['aggressive', 'balanced', 'conservative'] as const) {
+        for (const strategy of ['aggressive', 'balanced', 'conservative', 'snapshot'] as const) {
             expect(strategyFromStep(stepFromStrategy(strategy))).toBe(strategy);
         }
+    });
+
+    it('should round-trip step→strategy→step for page-snapshot and queue-flush', () => {
+        expect(stepFromStrategy(strategyFromStep('page-snapshot'))).toBe('page-snapshot');
+        expect(stepFromStrategy(strategyFromStep('queue-flush'))).toBe('queue-flush');
     });
 });
 
@@ -189,9 +195,9 @@ describe('buildCalibrationProfileFromStep (manual-strict policy)', () => {
         });
     });
 
-    it('should produce correct page-snapshot/conservative profile', () => {
+    it('should produce correct page-snapshot/snapshot profile', () => {
         const profile = buildCalibrationProfileFromStep('Grok', 'page-snapshot');
-        expect(profile.strategy).toBe('conservative');
+        expect(profile.strategy).toBe('snapshot');
         expect(profile.lastModifiedBy).toBe('manual');
         expect(profile.disabledSources).toEqual(['dom_hint', 'snapshot_fallback']);
     });

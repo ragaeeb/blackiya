@@ -3307,6 +3307,7 @@ describe('Platform Runner', () => {
 
         try {
             // Step 3: Navigate to a different conversation (triggers button refresh + readiness check)
+            currentAdapterMock.extractConversationId = () => 'conv-h01-b';
             delete (window as any).location;
             (window as any).location = {
                 href: 'https://chatgpt.com/c/conv-h01-b',
@@ -3425,6 +3426,38 @@ describe('Platform Runner', () => {
 
         const panelText = document.getElementById('blackiya-stream-probe')?.textContent ?? '';
         expect(panelText.includes('delta-from-disposed-old-conversation')).toBeFalse();
+    });
+
+    it('should defer auto calibration on first-prompt navigation even when no attempt is pre-bound', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            isPlatformGenerating: () => true,
+            extractConversationId: (url: string) => {
+                const match = url.match(/\/c\/([a-z0-9-]+)/i);
+                return match?.[1] ?? null;
+            },
+        };
+
+        delete (window as any).location;
+        (window as any).location = {
+            href: 'https://chatgpt.com/c/conv-old',
+            origin: 'https://chatgpt.com',
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        (window as any).location.href = 'https://chatgpt.com/c/conv-new';
+        window.dispatchEvent(new (window as any).Event('popstate'));
+        await new Promise((resolve) => setTimeout(resolve, 2100));
+
+        const deferred = loggerInfoCalls.find(
+            (entry) =>
+                entry.message === 'Auto calibration deferred: response still generating' &&
+                (entry.args?.[0] as { conversationId?: string } | undefined)?.conversationId === 'conv-new',
+        );
+        expect(deferred).toBeDefined();
     });
 
     it('should ignore stale stream delta from superseded attempt', async () => {

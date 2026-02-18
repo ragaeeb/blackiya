@@ -1,3 +1,4 @@
+import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/attempt-registry';
 import {
     detectPlatformFromHostname,
     isDiscoveryDiagnosticsEnabled,
@@ -37,18 +38,17 @@ import {
     mergeHeaderRecords,
     toForwardableHeaderRecord,
 } from '@/utils/proactive-fetch-headers';
-import {
-    type AttemptDisposedMessage,
-    type CaptureInterceptedMessage as CapturePayload,
-    type ConversationIdResolvedMessage,
-    createAttemptId,
-    type LogEntryMessage as InterceptorLogPayload,
-    type ResponseFinishedMessage as ResponseFinishedSignal,
-    type ResponseLifecycleMessage as ResponseLifecycleSignal,
-    type StreamDeltaMessage as ResponseStreamDeltaSignal,
-    type SessionInitMessage,
-    type StreamDumpConfigMessage,
-    type StreamDumpFrameMessage,
+import type {
+    AttemptDisposedMessage,
+    CaptureInterceptedMessage as CapturePayload,
+    ConversationIdResolvedMessage,
+    LogEntryMessage as InterceptorLogPayload,
+    ResponseFinishedMessage as ResponseFinishedSignal,
+    ResponseLifecycleMessage as ResponseLifecycleSignal,
+    StreamDeltaMessage as ResponseStreamDeltaSignal,
+    SessionInitMessage,
+    StreamDumpConfigMessage,
+    StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
 import { getSessionToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 import type { ConversationData } from '@/utils/types';
@@ -104,6 +104,18 @@ const INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS = 15_000;
 let lastCachePruneAtMs = 0;
 let streamDumpEnabled = false;
 const INTERCEPTOR_RUNTIME_TAG = 'v2.1.1-grok-stream';
+const attemptRegistry = createInterceptorAttemptRegistry({
+    state: {
+        attemptByConversationId,
+        latestAttemptIdByPlatform,
+        disposedAttemptIds,
+    },
+    maxAttemptBindings: MAX_INTERCEPTOR_ATTEMPT_BINDINGS,
+    defaultPlatformName: chatGPTAdapter.name,
+});
+const { bindAttemptToConversation, resolveAttemptIdForConversation, peekAttemptIdForConversation, isAttemptDisposed } =
+    attemptRegistry;
+
 type GeminiXhrStreamState = {
     attemptId: string;
     seedConversationId?: string;
@@ -285,61 +297,6 @@ function shouldLogTransient(key: string, intervalMs = 2000): boolean {
     return true;
 }
 
-function bindAttemptToConversation(attemptId: string | null | undefined, conversationId: string | undefined): void {
-    if (!attemptId || !conversationId) {
-        return;
-    }
-    setBoundedMapValue(attemptByConversationId, conversationId, attemptId, MAX_INTERCEPTOR_ATTEMPT_BINDINGS);
-}
-
-function toAttemptPrefix(platformName: string): string {
-    return platformName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-}
-
-function resolveAttemptIdForConversation(conversationId?: string, platformName = chatGPTAdapter.name): string {
-    const platformKey = platformName || chatGPTAdapter.name;
-    if (conversationId) {
-        const bound = attemptByConversationId.get(conversationId);
-        if (bound) {
-            return bound;
-        }
-    }
-    const latestAttemptId = latestAttemptIdByPlatform.get(platformKey);
-    if (latestAttemptId && !disposedAttemptIds.has(latestAttemptId)) {
-        if (conversationId) {
-            bindAttemptToConversation(latestAttemptId, conversationId);
-        }
-        return latestAttemptId;
-    }
-    if (latestAttemptId && disposedAttemptIds.has(latestAttemptId)) {
-        latestAttemptIdByPlatform.delete(platformKey);
-    }
-    const created = createAttemptId(toAttemptPrefix(platformKey));
-    setBoundedMapValue(latestAttemptIdByPlatform, platformKey, created, MAX_INTERCEPTOR_ATTEMPT_BINDINGS);
-    if (conversationId) {
-        bindAttemptToConversation(created, conversationId);
-    }
-    return created;
-}
-
-function peekAttemptIdForConversation(conversationId?: string, platformName = chatGPTAdapter.name): string | undefined {
-    const platformKey = platformName || chatGPTAdapter.name;
-    if (conversationId) {
-        const bound = attemptByConversationId.get(conversationId);
-        if (bound && !disposedAttemptIds.has(bound)) {
-            return bound;
-        }
-    }
-    const latestAttemptId = latestAttemptIdByPlatform.get(platformKey);
-    if (latestAttemptId && !disposedAttemptIds.has(latestAttemptId)) {
-        return latestAttemptId;
-    }
-    return undefined;
-}
-
 function emitConversationIdResolvedSignal(attemptId: string, conversationId: string, platformOverride?: string): void {
     const key = `${attemptId}:${conversationId}`;
     const now = Date.now();
@@ -358,10 +315,6 @@ function emitConversationIdResolvedSignal(attemptId: string, conversationId: str
         conversationId,
     };
     window.postMessage(stampToken(payload), window.location.origin);
-}
-
-function isAttemptDisposed(attemptId: string | undefined): boolean {
-    return !!attemptId && disposedAttemptIds.has(attemptId);
 }
 
 function emitResponseFinishedSignal(adapter: LLMPlatform, url: string): void {

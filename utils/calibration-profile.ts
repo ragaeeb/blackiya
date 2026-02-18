@@ -2,7 +2,7 @@ import { browser } from 'wxt/browser';
 import { STORAGE_KEYS } from '@/utils/settings';
 import type { SignalSource } from '@/utils/sfe/types';
 
-export type CalibrationStrategy = 'aggressive' | 'balanced' | 'conservative';
+export type CalibrationStrategy = 'aggressive' | 'balanced' | 'conservative' | 'snapshot';
 
 export interface CalibrationProfileV2 {
     schemaVersion: 2;
@@ -33,7 +33,7 @@ const ALLOWED_SOURCE_SET = new Set<SignalSource>([
     'snapshot_fallback',
 ]);
 
-const ALLOWED_STRATEGY_SET = new Set<CalibrationStrategy>(['aggressive', 'balanced', 'conservative']);
+const ALLOWED_STRATEGY_SET = new Set<CalibrationStrategy>(['aggressive', 'balanced', 'conservative', 'snapshot']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -107,7 +107,7 @@ function strategyDefaults(strategy: CalibrationStrategy): CalibrationProfileV2 {
     return {
         schemaVersion: 2,
         platform: 'Unknown',
-        strategy: 'conservative',
+        strategy,
         disabledSources: ['dom_hint', 'snapshot_fallback'],
         timingsMs: {
             passiveWait: 2200,
@@ -147,6 +147,9 @@ export function strategyFromStep(step: CalibrationStep): CalibrationStrategy {
     if (step === 'endpoint-retry') {
         return 'balanced';
     }
+    if (step === 'page-snapshot') {
+        return 'snapshot';
+    }
     return 'conservative';
 }
 
@@ -156,6 +159,9 @@ export function stepFromStrategy(strategy: CalibrationStrategy): CalibrationStep
     }
     if (strategy === 'balanced') {
         return 'endpoint-retry';
+    }
+    if (strategy === 'snapshot') {
+        return 'page-snapshot';
     }
     return 'queue-flush';
 }

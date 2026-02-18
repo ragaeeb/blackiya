@@ -43,7 +43,7 @@ export class GrokAdapterState {
     }
 }
 
-let grokState = new GrokAdapterState();
+const grokState = new GrokAdapterState();
 
 /**
  * Reset all Grok adapter state. Call in test `beforeEach` to ensure
