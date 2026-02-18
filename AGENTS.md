@@ -42,6 +42,7 @@ Supporting modules:
 - Adapter interface: `platforms/types.ts`
 - Adapter factory: `platforms/factory.ts`
 - SFE: `utils/sfe/*`
+- Lease arbitration: `utils/sfe/probe-lease-*`, `entrypoints/background.ts`
 - Interception cache: `utils/managers/interception-manager.ts`
 - UI buttons: `utils/ui/button-manager.ts`
 - Protocol types: `utils/protocol/messages.ts`
@@ -114,6 +115,7 @@ When changing lifecycle/completion logic:
 2. Ensure completion hints are readiness-gated where required.
 3. Validate that late/background signals cannot regress state (`Completed -> Streaming`).
 4. Verify multi-tab behavior with attempt binding/supersession.
+5. Keep probe lease arbitration always-on and owner-safe (no setting gate).
 
 When changing title handling:
 1. Prefer stream/API title events.

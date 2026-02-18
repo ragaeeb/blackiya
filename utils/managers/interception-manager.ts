@@ -108,12 +108,13 @@ export class InterceptionManager {
             }
         }
         this.preserveSpecificTitle(conversationId, data, source, existing);
-        this.conversationCache.set(conversationId, data);
+        const target = existing && isSnapshotSource ? Object.assign(existing, data) : data;
+        this.conversationCache.set(conversationId, target);
         logger.info(`Successfully captured/cached data for conversation: ${conversationId}`, {
             source,
             directIngest: true,
         });
-        this.onDataCaptured(conversationId, data, { source });
+        this.onDataCaptured(conversationId, target, { source });
     }
 
     private isConversationReady(data: ConversationData): boolean {

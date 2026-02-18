@@ -1,5 +1,13 @@
 export class ProactiveFetcher {
+    private readonly maxInFlight: number;
+    private readonly now: () => number;
     private readonly inFlight = new Set<string>();
+    private readonly inFlightStartedAt = new Map<string, number>();
+
+    public constructor(options?: { maxInFlight?: number; now?: () => number }) {
+        this.maxInFlight = Math.max(1, options?.maxInFlight ?? 500);
+        this.now = options?.now ?? (() => Date.now());
+    }
 
     /**
      * Marks a key as in-flight.
@@ -11,7 +19,9 @@ export class ProactiveFetcher {
         if (this.inFlight.has(key)) {
             return false;
         }
+        this.enforceCapacity();
         this.inFlight.add(key);
+        this.inFlightStartedAt.set(key, this.now());
         return true;
     }
 
@@ -22,6 +32,7 @@ export class ProactiveFetcher {
      */
     public clearInFlight(key: string): void {
         this.inFlight.delete(key);
+        this.inFlightStartedAt.delete(key);
     }
 
     /**
@@ -36,6 +47,17 @@ export class ProactiveFetcher {
             return await callback();
         } finally {
             this.clearInFlight(key);
+        }
+    }
+
+    private enforceCapacity(): void {
+        while (this.inFlight.size >= this.maxInFlight) {
+            const oldest = this.inFlightStartedAt.entries().next().value as [string, number] | undefined;
+            if (!oldest) {
+                break;
+            }
+            this.inFlight.delete(oldest[0]);
+            this.inFlightStartedAt.delete(oldest[0]);
         }
     }
 }

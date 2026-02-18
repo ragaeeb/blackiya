@@ -424,4 +424,70 @@ describe('InterceptionManager', () => {
         expect(cached?.title).toBe('Wiping Over Splints and Travel');
         expect(cached?.update_time).toBe(3);
     });
+
+    it('should preserve cached object identity for snapshot refresh so delayed title mutation still lands', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        const networkConversation = {
+            title: 'Google Gemini',
+            create_time: 1,
+            update_time: 2,
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: [] },
+            },
+            conversation_id: 'gemini-4',
+            current_node: 'root',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'gemini',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+
+        manager.ingestConversationData(networkConversation, 'network');
+
+        manager.ingestConversationData(
+            {
+                ...networkConversation,
+                update_time: 3,
+                mapping: {
+                    'snapshot-1': {
+                        id: 'snapshot-1',
+                        message: {
+                            id: 'snapshot-1',
+                            author: { role: 'assistant', name: 'Gemini', metadata: {} },
+                            content: { content_type: 'text', parts: ['Answer'] },
+                            create_time: 3,
+                            update_time: 3,
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: {},
+                            recipient: 'all',
+                            channel: null,
+                        },
+                        parent: null,
+                        children: [],
+                    },
+                },
+                current_node: 'snapshot-1',
+            },
+            'stream-done-snapshot',
+        );
+
+        // Simulates Gemini adapter's delayed title update via activeConversations cache.
+        networkConversation.title = 'Discussion on Istinja Rulings';
+
+        const cached = manager.getConversation('gemini-4');
+        expect(cached).toBeDefined();
+        expect(cached).toBe(networkConversation);
+        expect(cached?.title).toBe('Discussion on Istinja Rulings');
+        expect(cached?.update_time).toBe(3);
+    });
 });

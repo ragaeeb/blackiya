@@ -26,4 +26,19 @@ describe('ProactiveFetcher', () => {
         const result = await fetcher.withInFlight('conv-3', async () => true);
         expect(result).toBeUndefined();
     });
+
+    it('bounds in-flight keys by evicting oldest entry when capacity is exceeded', () => {
+        let now = 1_000;
+        const fetcher = new ProactiveFetcher({
+            maxInFlight: 2,
+            now: () => now,
+        });
+        expect(fetcher.markInFlight('a')).toBe(true);
+        now += 100;
+        expect(fetcher.markInFlight('b')).toBe(true);
+        now += 100;
+        expect(fetcher.markInFlight('c')).toBe(true);
+        // 'a' is the oldest and should be evicted to keep the set bounded.
+        expect(fetcher.markInFlight('a')).toBe(true);
+    });
 });

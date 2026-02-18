@@ -788,6 +788,59 @@ describe('Gemini Platform Adapter', () => {
             }
         });
 
+        it('should extract active sidebar conversation title from matching app href when aria-current is absent', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <nav>
+                    <a href="/app/aaaaaaaaaaaaaaaa">Old conversation</a>
+                    <a href="/app/20de061ec5dae81c">Discussion on Istinja' Rulings</a>
+                </nav>
+                <main>
+                    <div>No heading yet</div>
+                </main>
+            `;
+            win.location.href = 'https://gemini.google.com/app/20de061ec5dae81c';
+
+            const originalDocument = (globalThis as any).document;
+            const originalWindow = (globalThis as any).window;
+            (globalThis as any).document = doc;
+            (globalThis as any).window = win;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBe("Discussion on Istinja' Rulings");
+            } finally {
+                (globalThis as any).document = originalDocument;
+                (globalThis as any).window = originalWindow;
+            }
+        });
+
+        it('should ignore non-matching sidebar app href titles when aria-current is absent', () => {
+            const win = new Window();
+            const doc = win.document;
+            doc.title = 'Google Gemini';
+            doc.body.innerHTML = `
+                <nav>
+                    <a href="/app/aaaaaaaaaaaaaaaa">Older conversation title</a>
+                </nav>
+                <main>
+                    <div>No heading yet</div>
+                </main>
+            `;
+            win.location.href = 'https://gemini.google.com/app/bbbbbbbbbbbbbbbb';
+
+            const originalDocument = (globalThis as any).document;
+            const originalWindow = (globalThis as any).window;
+            (globalThis as any).document = doc;
+            (globalThis as any).window = win;
+            try {
+                expect(geminiAdapter.extractTitleFromDom()).toBeNull();
+            } finally {
+                (globalThis as any).document = originalDocument;
+                (globalThis as any).window = originalWindow;
+            }
+        });
+
         it('should ignore sidebar navigation label titles such as Chats', () => {
             const win = new Window();
             const doc = win.document;

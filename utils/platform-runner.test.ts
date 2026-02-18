@@ -98,6 +98,7 @@ const evaluateReadinessMock = (data: any) => {
 // We need a mutable reference to control the mock return value
 let currentAdapterMock: any = createMockAdapter();
 let storageDataMock: Record<string, unknown> = {};
+let runtimeSendMessageMock: (message: unknown) => Promise<unknown> = async () => undefined;
 
 // Mock the factory module
 mock.module('@/platforms/factory', () => ({
@@ -148,7 +149,7 @@ const browserMock = {
     },
     runtime: {
         getURL: () => 'chrome-extension://mock/',
-        sendMessage: async () => {},
+        sendMessage: async (message: unknown) => runtimeSendMessageMock(message),
     },
 };
 mock.module('wxt/browser', () => ({
@@ -172,6 +173,7 @@ describe('Platform Runner', () => {
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter();
         storageDataMock = {};
+        runtimeSendMessageMock = async () => undefined;
         downloadCalls.length = 0;
         loggerDebugCalls.length = 0;
         loggerInfoCalls.length = 0;
@@ -1416,7 +1418,7 @@ describe('Platform Runner', () => {
         }
     });
 
-    it('should skip stream probe when probe lease is held by another tab', async () => {
+    it('should skip stream probe when probe lease is denied by coordinator', async () => {
         const originalFetch = (globalThis as any).fetch;
         let fetchCalls = 0;
         try {
@@ -1428,18 +1430,20 @@ describe('Platform Runner', () => {
                 };
             };
 
-            const now = Date.now();
-            window.localStorage.setItem(
-                'blackiya:probe-lease:123',
-                JSON.stringify({
-                    attemptId: 'attempt:owner',
-                    expiresAtMs: now + 10_000,
-                    updatedAtMs: now,
-                }),
-            );
-
-            storageDataMock = {
-                'userSettings.sfe.probeLeaseEnabled': true,
+            runtimeSendMessageMock = async (message: unknown) => {
+                const typed = message as { type?: string };
+                if (typed?.type === 'BLACKIYA_PROBE_LEASE_CLAIM') {
+                    return {
+                        type: 'BLACKIYA_PROBE_LEASE_CLAIM_RESULT',
+                        acquired: false,
+                        ownerAttemptId: 'attempt:owner',
+                        expiresAtMs: Date.now() + 10_000,
+                    };
+                }
+                return {
+                    type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
+                    released: false,
+                };
             };
 
             currentAdapterMock = {

@@ -1,8 +1,10 @@
-interface ProbeLeaseRecord {
-    attemptId: string;
-    expiresAtMs: number;
-    updatedAtMs: number;
-}
+import { browser } from 'wxt/browser';
+import { logger } from '@/utils/logger';
+import {
+    isProbeLeaseClaimResponse,
+    isProbeLeaseReleaseResponse,
+    type ProbeLeaseRuntimeMessage,
+} from '@/utils/sfe/probe-lease-protocol';
 
 export interface ProbeLeaseClaimResult {
     acquired: boolean;
@@ -11,144 +13,88 @@ export interface ProbeLeaseClaimResult {
 }
 
 export interface CrossTabProbeLeaseOptions {
-    storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
     now?: () => number;
-    keyPrefix?: string;
+    sendMessage?: (message: ProbeLeaseRuntimeMessage) => Promise<unknown>;
 }
 
-const DEFAULT_KEY_PREFIX = 'blackiya:probe-lease:';
-
 export class CrossTabProbeLease {
-    private readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null;
     private readonly now: () => number;
-    private readonly keyPrefix: string;
+    private readonly sendMessage: (message: ProbeLeaseRuntimeMessage) => Promise<unknown>;
 
     public constructor(options?: CrossTabProbeLeaseOptions) {
-        this.storage = options?.storage ?? this.resolveStorage();
         this.now = options?.now ?? (() => Date.now());
-        this.keyPrefix = options?.keyPrefix ?? DEFAULT_KEY_PREFIX;
+        this.sendMessage =
+            options?.sendMessage ??
+            ((message: ProbeLeaseRuntimeMessage) => {
+                return browser.runtime.sendMessage(message as any);
+            });
     }
 
-    public claim(conversationId: string, attemptId: string, ttlMs: number): ProbeLeaseClaimResult {
-        if (!this.storage) {
-            return {
-                acquired: true,
-                ownerAttemptId: attemptId,
-                expiresAtMs: this.now() + Math.max(ttlMs, 1),
-            };
-        }
-
-        const now = this.now();
-        const current = this.read(conversationId);
-        if (current && current.expiresAtMs > now && current.attemptId !== attemptId) {
-            return {
-                acquired: false,
-                ownerAttemptId: current.attemptId,
-                expiresAtMs: current.expiresAtMs,
-            };
-        }
-
-        const next: ProbeLeaseRecord = {
+    public async claim(conversationId: string, attemptId: string, ttlMs: number): Promise<ProbeLeaseClaimResult> {
+        const message: ProbeLeaseRuntimeMessage = {
+            type: 'BLACKIYA_PROBE_LEASE_CLAIM',
+            conversationId,
             attemptId,
-            expiresAtMs: now + Math.max(ttlMs, 1),
-            updatedAtMs: now,
+            ttlMs,
         };
-        if (!this.write(conversationId, next)) {
-            return {
-                acquired: false,
-                ownerAttemptId: null,
-                expiresAtMs: null,
-            };
+
+        try {
+            const response = await this.sendMessage(message);
+            if (isProbeLeaseClaimResponse(response)) {
+                return {
+                    acquired: response.acquired,
+                    ownerAttemptId: response.ownerAttemptId,
+                    expiresAtMs: response.expiresAtMs,
+                };
+            }
+            logger.warn('Probe lease claim returned malformed response; failing open', {
+                conversationId,
+                attemptId,
+            });
+        } catch (error) {
+            logger.warn('Probe lease claim transport failed; failing open', {
+                conversationId,
+                attemptId,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
 
-        const verify = this.read(conversationId);
-        if (!verify || verify.attemptId !== attemptId) {
-            return {
-                acquired: false,
-                ownerAttemptId: verify?.attemptId ?? null,
-                expiresAtMs: verify?.expiresAtMs ?? null,
-            };
-        }
-
-        return {
-            acquired: true,
-            ownerAttemptId: attemptId,
-            expiresAtMs: verify.expiresAtMs,
-        };
+        return this.failOpenClaim(attemptId, ttlMs);
     }
 
-    public release(conversationId: string, attemptId: string): void {
-        if (!this.storage) {
-            return;
-        }
-        const current = this.read(conversationId);
-        if (!current) {
-            return;
-        }
-        if (current.attemptId !== attemptId) {
-            return;
-        }
+    public async release(conversationId: string, attemptId: string): Promise<void> {
+        const message: ProbeLeaseRuntimeMessage = {
+            type: 'BLACKIYA_PROBE_LEASE_RELEASE',
+            conversationId,
+            attemptId,
+        };
+
         try {
-            this.storage.removeItem(this.keyFor(conversationId));
-        } catch {
-            // Ignore storage removal errors; lease will naturally expire.
+            const response = await this.sendMessage(message);
+            if (!isProbeLeaseReleaseResponse(response)) {
+                logger.warn('Probe lease release returned malformed response', {
+                    conversationId,
+                    attemptId,
+                });
+            }
+        } catch (error) {
+            logger.warn('Probe lease release transport failed', {
+                conversationId,
+                attemptId,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 
     public dispose(): void {
-        // No background resources retained yet. Reserved for future channel listeners.
+        // Reserved for future abort/signal cleanup hooks.
     }
 
-    private resolveStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
-        try {
-            if (typeof window !== 'undefined' && window.localStorage) {
-                return window.localStorage;
-            }
-        } catch {
-            return null;
-        }
-        return null;
-    }
-
-    private keyFor(conversationId: string): string {
-        return `${this.keyPrefix}${conversationId}`;
-    }
-
-    private read(conversationId: string): ProbeLeaseRecord | null {
-        if (!this.storage) {
-            return null;
-        }
-        try {
-            const raw = this.storage.getItem(this.keyFor(conversationId));
-            if (!raw) {
-                return null;
-            }
-            const parsed = JSON.parse(raw) as Partial<ProbeLeaseRecord>;
-            if (typeof parsed.attemptId !== 'string') {
-                return null;
-            }
-            if (typeof parsed.expiresAtMs !== 'number') {
-                return null;
-            }
-            return {
-                attemptId: parsed.attemptId,
-                expiresAtMs: parsed.expiresAtMs,
-                updatedAtMs: typeof parsed.updatedAtMs === 'number' ? parsed.updatedAtMs : 0,
-            };
-        } catch {
-            return null;
-        }
-    }
-
-    private write(conversationId: string, record: ProbeLeaseRecord): boolean {
-        if (!this.storage) {
-            return false;
-        }
-        try {
-            this.storage.setItem(this.keyFor(conversationId), JSON.stringify(record));
-            return true;
-        } catch {
-            return false;
-        }
+    private failOpenClaim(attemptId: string, ttlMs: number): ProbeLeaseClaimResult {
+        return {
+            acquired: true,
+            ownerAttemptId: attemptId,
+            expiresAtMs: this.now() + Math.max(ttlMs, 1),
+        };
     }
 }

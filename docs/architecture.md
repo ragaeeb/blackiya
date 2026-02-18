@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-18 (v2.0.2 P1+P2 stability/decomposition pass)
+> Last updated: 2026-02-18 (v2.0.3 lease migration + decomposition pass)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -33,10 +33,18 @@ flowchart LR
 - Interceptor (MAIN world):
   - `entrypoints/interceptor.content.ts`
   - `entrypoints/interceptor/bootstrap.ts`
+  - `entrypoints/interceptor/fetch-pipeline.ts`
+  - `entrypoints/interceptor/xhr-pipeline.ts`
+  - `entrypoints/interceptor/snapshot-bridge.ts`
+  - `entrypoints/interceptor/state.ts`
+  - `entrypoints/interceptor/signal-emitter.ts`
+  - `entrypoints/interceptor/discovery.ts`
 - Platform orchestrator:
   - `utils/platform-runner.ts`
   - `utils/runner/index.ts`
-  - `utils/runner/*` (incremental subsystem extraction: state/lifecycle/export/probe/calibration/bridge)
+  - `utils/runner/*` (state/lifecycle/export/probe/calibration/bridge + attempt/readiness modules)
+  - `utils/runner/attempt-registry.ts`
+  - `utils/runner/readiness.ts`
 - Adapter interface + readiness contract:
   - `platforms/types.ts`
 - Adapter factory:
@@ -44,6 +52,11 @@ flowchart LR
 - SFE types + transitions:
   - `utils/sfe/types.ts`
   - `utils/sfe/signal-fusion-engine.ts`
+  - `utils/sfe/probe-lease-protocol.ts`
+  - `utils/sfe/probe-lease-coordinator.ts`
+  - `utils/sfe/cross-tab-probe-lease.ts`
+- Background lease coordinator:
+  - `entrypoints/background.ts`
 - Protocol message definitions:
   - `utils/protocol/messages.ts`
 
@@ -249,6 +262,23 @@ Title precedence (highest to lowest):
 
 Invariant:
 - Generic late titles must not clobber specific resolved titles already seen for the same conversation.
+- Snapshot refresh ingestion preserves cache object identity when possible, so delayed adapter title updates (for example Gemini title RPCs that arrive after stream-done snapshot fallback) still apply to the cached conversation.
+
+### 8.2 Cross-Tab Probe Lease Arbitration
+
+Lease model (v2.0.3):
+1. Runner always attempts cross-tab probe lease arbitration before stream-done canonical probe.
+2. Lease client (`utils/sfe/cross-tab-probe-lease.ts`) sends runtime messages:
+   - `BLACKIYA_PROBE_LEASE_CLAIM`
+   - `BLACKIYA_PROBE_LEASE_RELEASE`
+3. Background service worker owns arbitration via `ProbeLeaseCoordinator` and persists lease records in `chrome.storage.session` (with in-memory fallback if session storage is unavailable).
+4. Claims are owner-exclusive until expiry; release is owner-only and idempotent.
+5. If runtime transport is unavailable, lease client fails open so capture does not stall.
+
+Invariants:
+- Lease arbitration is always-on (no user setting gate).
+- Non-owner release cannot clear an active lease.
+- Expired leases are pruned and can be deterministically taken over.
 
 ## 9) Diagnostics and Debugging
 
@@ -269,4 +299,4 @@ Docs:
 - Grok runtime smoke verification still ongoing after lifecycle gating fixes.
 - Need continued multi-tab validation for Grok and Gemini under long reasoning sessions.
 - Keep regression suite expanding where smoke tests find platform-specific edge cases.
-- Remaining post-v2.0.2 backlog: deeper runner/interceptor subsystem extraction and lease arbitration migration (`chrome.storage.session`/background ownership).
+- Remaining post-v2.0.3 backlog: deeper runner/interceptor subsystem extraction and logging/type-hygiene follow-ups.

@@ -232,6 +232,48 @@ function extractTitleFromGeminiActiveConversationNav(): string | null {
         }
     }
 
+    const activeConversationId = (() => {
+        if (typeof window === 'undefined') {
+            return null;
+        }
+        const href = window.location?.href;
+        if (typeof href !== 'string' || href.length === 0) {
+            return null;
+        }
+        const match = href.match(/\/app\/([a-zA-Z0-9_-]+)/i);
+        return match?.[1] ?? null;
+    })();
+
+    if (!activeConversationId) {
+        return null;
+    }
+
+    const hrefSelectors = [
+        'nav a[href*="/app/"]',
+        'aside a[href*="/app/"]',
+        '[role="navigation"] a[href*="/app/"]',
+        'a[href*="/app/"]',
+    ];
+
+    for (const selector of hrefSelectors) {
+        const nodes = document.querySelectorAll(selector);
+        for (const node of nodes) {
+            const href = node.getAttribute('href');
+            if (typeof href !== 'string' || href.length === 0) {
+                continue;
+            }
+            const hrefMatch = href.match(/\/app\/([a-zA-Z0-9_-]+)/i);
+            if (!hrefMatch?.[1] || hrefMatch[1] !== activeConversationId) {
+                continue;
+            }
+            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
+            if (!candidate || isGenericGeminiTitle(candidate)) {
+                continue;
+            }
+            return candidate;
+        }
+    }
+
     return null;
 }
 

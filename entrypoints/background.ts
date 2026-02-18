@@ -9,8 +9,166 @@
 
 import { logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
+import { ProbeLeaseCoordinator, type ProbeLeaseCoordinatorStore } from '@/utils/sfe/probe-lease-coordinator';
+import {
+    isProbeLeaseClaimRequest,
+    isProbeLeaseReleaseRequest,
+    type ProbeLeaseClaimResponse,
+    type ProbeLeaseReleaseResponse,
+} from '@/utils/sfe/probe-lease-protocol';
+
+type BackgroundLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>;
+
+class SessionStorageProbeLeaseStore implements ProbeLeaseCoordinatorStore {
+    private readonly storage: typeof browser.storage.session;
+
+    public constructor(storage: typeof browser.storage.session) {
+        this.storage = storage;
+    }
+
+    public async get(key: string): Promise<string | null> {
+        const result = await this.storage.get(key);
+        const value = result[key];
+        return typeof value === 'string' ? value : null;
+    }
+
+    public async set(key: string, value: string): Promise<void> {
+        await this.storage.set({ [key]: value });
+    }
+
+    public async remove(key: string): Promise<void> {
+        await this.storage.remove(key);
+    }
+
+    public async getAll(): Promise<Record<string, string>> {
+        const result = await this.storage.get(null);
+        const output: Record<string, string> = {};
+        for (const [key, value] of Object.entries(result)) {
+            if (typeof value === 'string') {
+                output[key] = value;
+            }
+        }
+        return output;
+    }
+}
+
+class InMemoryProbeLeaseStore implements ProbeLeaseCoordinatorStore {
+    private readonly entries = new Map<string, string>();
+
+    public async get(key: string): Promise<string | null> {
+        return this.entries.get(key) ?? null;
+    }
+
+    public async set(key: string, value: string): Promise<void> {
+        this.entries.set(key, value);
+    }
+
+    public async remove(key: string): Promise<void> {
+        this.entries.delete(key);
+    }
+
+    public async getAll(): Promise<Record<string, string>> {
+        return Object.fromEntries(this.entries.entries());
+    }
+}
+
+function createProbeLeaseStore(): ProbeLeaseCoordinatorStore {
+    const sessionStorage = browser.storage?.session;
+    if (sessionStorage) {
+        return new SessionStorageProbeLeaseStore(sessionStorage);
+    }
+    return new InMemoryProbeLeaseStore();
+}
+
+type BackgroundMessageHandlerDeps = {
+    saveLog: (payload: unknown) => Promise<void>;
+    leaseCoordinator: ProbeLeaseCoordinator;
+    logger: BackgroundLogger;
+};
+
+function handleGenericBackgroundMessage(
+    message: unknown,
+    sender: { tab?: { url?: string } },
+    sendResponse: (response: unknown) => void,
+    loggerInstance: BackgroundLogger,
+): true {
+    const type =
+        typeof message === 'object' && message !== null && typeof (message as { type?: unknown }).type === 'string'
+            ? ((message as { type: string }).type ?? 'unknown')
+            : 'unknown';
+
+    loggerInstance.info('Received message:', type, 'from', sender.tab?.url);
+
+    if (type === 'PING') {
+        sendResponse({ success: true, pong: true });
+        return true;
+    }
+
+    loggerInstance.warn('Unknown message type:', type);
+    sendResponse({ success: false, error: 'Unknown message type' });
+    return true;
+}
+
+export function createBackgroundMessageHandler(deps: BackgroundMessageHandlerDeps) {
+    return (message: unknown, sender: { tab?: { url?: string } }, sendResponse: (response: unknown) => void) => {
+        if (isProbeLeaseClaimRequest(message)) {
+            void deps.leaseCoordinator
+                .claim(message.conversationId, message.attemptId, message.ttlMs)
+                .then((result) => {
+                    const response: ProbeLeaseClaimResponse = result;
+                    sendResponse(response);
+                })
+                .catch((error) => {
+                    deps.logger.error('Probe lease claim failed in background coordinator', error);
+                    sendResponse({
+                        type: 'BLACKIYA_PROBE_LEASE_CLAIM_RESULT',
+                        acquired: false,
+                        ownerAttemptId: null,
+                        expiresAtMs: null,
+                    } satisfies ProbeLeaseClaimResponse);
+                });
+            return true;
+        }
+
+        if (isProbeLeaseReleaseRequest(message)) {
+            void deps.leaseCoordinator
+                .release(message.conversationId, message.attemptId)
+                .then((released) => {
+                    const response: ProbeLeaseReleaseResponse = {
+                        type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
+                        released,
+                    };
+                    sendResponse(response);
+                })
+                .catch((error) => {
+                    deps.logger.error('Probe lease release failed in background coordinator', error);
+                    sendResponse({
+                        type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT',
+                        released: false,
+                    } satisfies ProbeLeaseReleaseResponse);
+                });
+            return true;
+        }
+
+        if (typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'LOG_ENTRY') {
+            const payload = (message as { payload?: unknown }).payload;
+            if (payload) {
+                deps.saveLog(payload).catch((error) => {
+                    console.error('Failed to save log from content script:', error);
+                });
+            }
+            return;
+        }
+
+        return handleGenericBackgroundMessage(message, sender, sendResponse, deps.logger);
+    };
+}
 
 export default defineBackground(() => {
+    const leaseCoordinator = new ProbeLeaseCoordinator({
+        store: createProbeLeaseStore(),
+    });
+
     logger.info('Background service worker started', {
         id: browser.runtime.id,
     });
@@ -26,33 +184,11 @@ export default defineBackground(() => {
 
     // Message handler for future extensibility
     // Currently content script handles everything locally
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        // Handle log entries first to avoid re-logging them
-        if (message.type === 'LOG_ENTRY') {
-            // Check if payload is valid
-            if (message.payload) {
-                logsStorage.saveLog(message.payload).catch((err) => {
-                    console.error('Failed to save log from content script:', err);
-                });
-            }
-            return; // Don't log LOG_ENTRY messages to avoid loops
-        }
-
-        logger.info('Received message:', message.type, 'from', sender.tab?.url);
-
-        // Handle different message types
-        switch (message.type) {
-            case 'PING':
-                // Simple ping to check if background is alive
-                sendResponse({ success: true, pong: true });
-                break;
-
-            default:
-                logger.warn('Unknown message type:', message.type);
-                sendResponse({ success: false, error: 'Unknown message type' });
-        }
-
-        // Return true to indicate async response (even if we respond sync)
-        return true;
-    });
+    browser.runtime.onMessage.addListener(
+        createBackgroundMessageHandler({
+            saveLog: (payload) => logsStorage.saveLog(payload as any),
+            leaseCoordinator,
+            logger,
+        }),
+    );
 });
