@@ -1,3 +1,10 @@
+## [2.0.2](https://github.com/ragaeeb/blackiya/compare/v2.0.1...v2.0.2) (2026-02-18)
+
+
+### Bug Fixes
+
+* **p1:** v2.0.2 plan ([#22](https://github.com/ragaeeb/blackiya/issues/22)) ([4d37f50](https://github.com/ragaeeb/blackiya/commit/4d37f5069ca3736726d0797a56f0be2b34697101))
+
 ## [2.0.1](https://github.com/ragaeeb/blackiya/compare/v2.0.0...v2.0.1) (2026-02-17)
 
 
