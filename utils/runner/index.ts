@@ -91,10 +91,10 @@ import {
 import type { ConversationData } from '@/utils/types';
 import { ButtonManager } from '@/utils/ui/button-manager';
 
-interface SnapshotMessageCandidate {
+type SnapshotMessageCandidate = {
     role: 'user' | 'assistant';
     text: string;
-}
+};
 
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
@@ -122,13 +122,13 @@ export { beginCanonicalStabilizationTick, clearCanonicalStabilizationAttemptStat
 export type { CanonicalStabilizationAttemptState };
 export { buildCalibrationOrderForMode, shouldPersistCalibrationProfile };
 
-function normalizeContentText(text: string): string {
+const normalizeContentText = (text: string): string => {
     return text.trim().normalize('NFC');
-}
+};
 
-export function resolveExportConversationTitle(data: ConversationData) {
+export const resolveExportConversationTitle = (data: ConversationData) => {
     return resolveExportTitleDecision(data).title;
-}
+};
 
 export function shouldRemoveDisposedAttemptBinding(
     mappedAttemptId: string,
@@ -140,7 +140,7 @@ export function shouldRemoveDisposedAttemptBinding(
 
 export { resolveShouldSkipCanonicalRetryAfterAwait };
 
-export function runPlatform(): void {
+export const runPlatform = (): void => {
     const globalRunnerControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
         | RunnerControl
         | undefined;
@@ -231,21 +231,21 @@ export function runPlatform(): void {
     let activeAttemptId: string | null = null;
     let lastInvalidSessionTokenLogAt = 0;
 
-    function setCurrentConversation(conversationId: string | null): void {
+    const setCurrentConversation = (conversationId: string | null) => {
         currentConversationId = conversationId;
         runnerState.conversationId = conversationId;
-    }
+    };
 
-    function setActiveAttempt(attemptId: string | null): void {
+    const setActiveAttempt = (attemptId: string | null) => {
         activeAttemptId = attemptId;
         runnerState.activeAttemptId = attemptId;
-    }
+    };
 
-    function cachePendingLifecycleSignal(
+    const cachePendingLifecycleSignal = (
         attemptId: string,
         phase: ResponseLifecycleMessage['phase'],
         platform: string,
-    ): void {
+    ) => {
         const existing = pendingLifecycleByAttempt.get(attemptId);
         if (existing && getLifecyclePhasePriority(existing.phase) > getLifecyclePhasePriority(phase)) {
             return;
@@ -270,29 +270,29 @@ export function runPlatform(): void {
                 });
             }
         }
-    }
+    };
 
-    function setCaptureMetaForConversation(conversationId: string, meta: ExportMeta): void {
+    const setCaptureMetaForConversation = (conversationId: string, meta: ExportMeta) => {
         setBoundedMapValue(captureMetaByConversation, conversationId, meta, MAX_CONVERSATION_ATTEMPTS);
-    }
+    };
 
-    function markSnapshotCaptureMeta(conversationId: string): void {
+    const markSnapshotCaptureMeta = (conversationId: string) => {
         setCaptureMetaForConversation(conversationId, {
             captureSource: 'dom_snapshot_degraded',
             fidelity: 'degraded',
             completeness: 'partial',
         });
-    }
+    };
 
-    function markCanonicalCaptureMeta(conversationId: string): void {
+    const markCanonicalCaptureMeta = (conversationId: string) => {
         setCaptureMetaForConversation(conversationId, {
             captureSource: 'canonical_api',
             fidelity: 'high',
             completeness: 'complete',
         });
-    }
+    };
 
-    function resolveAliasedAttemptId(attemptId: string): string {
+    const resolveAliasedAttemptId = (attemptId: string): string => {
         let resolved = attemptId;
         const visited = new Set<string>();
         while (attemptAliasForward.has(resolved) && !visited.has(resolved)) {
@@ -304,9 +304,9 @@ export function runPlatform(): void {
             resolved = next;
         }
         return resolved;
-    }
+    };
 
-    function forwardAttemptAlias(fromAttemptId: string, toAttemptId: string, reason: 'superseded' | 'rebound'): void {
+    const forwardAttemptAlias = (fromAttemptId: string, toAttemptId: string, reason: 'superseded' | 'rebound') => {
         if (fromAttemptId === toAttemptId) {
             return;
         }
@@ -319,29 +319,29 @@ export function runPlatform(): void {
             { fromAttemptId, toAttemptId, reason },
             `attempt-alias:${fromAttemptId}:${toAttemptId}:${reason}`,
         );
-    }
+    };
 
     // -- Manager Initialization --
 
     // 1. UI Manager
     const buttonManager = new ButtonManager(handleSaveClick, handleCalibrationClick);
 
-    function applyStreamResolvedTitleIfNeeded(conversationId: string, data: ConversationData): void {
+    const applyStreamResolvedTitleIfNeeded = (conversationId: string, data: ConversationData) => {
         const streamTitle = streamResolvedTitles.get(conversationId);
         if (streamTitle && data.title !== streamTitle) {
             data.title = streamTitle;
         }
-    }
+    };
 
-    function updateActiveAttemptFromMeta(conversationId: string, meta?: InterceptionCaptureMeta): void {
+    const updateActiveAttemptFromMeta = (conversationId: string, meta?: InterceptionCaptureMeta) => {
         if (!meta?.attemptId) {
             return;
         }
         setActiveAttempt(meta.attemptId);
         bindAttempt(conversationId, meta.attemptId);
-    }
+    };
 
-    function handleSnapshotSourceCapture(conversationId: string, source: string): void {
+    const handleSnapshotSourceCapture = (conversationId: string, source: string) => {
         const existingDecision = resolveReadinessDecision(conversationId);
         if (existingDecision.mode === 'canonical_ready') {
             markCanonicalCaptureMeta(conversationId);
@@ -367,13 +367,13 @@ export function runPlatform(): void {
         if (lifecycleState === 'completed') {
             scheduleCanonicalStabilizationRetry(conversationId, snapshotAttemptId);
         }
-    }
+    };
 
-    function handleNetworkSourceCapture(
+    const handleNetworkSourceCapture = (
         conversationId: string,
         meta?: InterceptionCaptureMeta,
         data?: ConversationData,
-    ): void {
+    ) => {
         if (!data) {
             return;
         }
@@ -388,13 +388,9 @@ export function runPlatform(): void {
         });
         markCanonicalCaptureMeta(conversationId);
         ingestSfeCanonicalSample(data, effectiveAttemptId);
-    }
+    };
 
-    function processInterceptionCapture(
-        capturedId: string,
-        data: ConversationData,
-        meta?: InterceptionCaptureMeta,
-    ): void {
+    const processInterceptionCapture = (capturedId: string, data: ConversationData, meta?: InterceptionCaptureMeta) => {
         applyStreamResolvedTitleIfNeeded(capturedId, data);
         setCurrentConversation(capturedId);
         updateActiveAttemptFromMeta(capturedId, meta);
@@ -411,7 +407,7 @@ export function runPlatform(): void {
         if (evaluateReadinessForData(data).ready) {
             handleResponseFinished('network', capturedId);
         }
-    }
+    };
 
     // 2. Data Manager
     const interceptionManager = new InterceptionManager((capturedId, data, meta) => {
@@ -426,7 +422,7 @@ export function runPlatform(): void {
     /**
      * Core orchestrator logic functions
      */
-    async function getExportFormat(): Promise<ExportFormat> {
+    const getExportFormat = async (): Promise<ExportFormat> => {
         try {
             const result = await browser.storage.local.get(STORAGE_KEYS.EXPORT_FORMAT);
             const value = result[STORAGE_KEYS.EXPORT_FORMAT];
@@ -437,7 +433,7 @@ export function runPlatform(): void {
             logger.warn('Failed to read export format setting, using default.', error);
         }
         return DEFAULT_EXPORT_FORMAT;
-    }
+    };
 
     /**
      * Pure read-only attempt lookup. Returns the existing attempt ID for
@@ -475,7 +471,7 @@ export function runPlatform(): void {
         return resolved.attemptId;
     }
 
-    function bindAttempt(conversationId: string | undefined, attemptId: string): void {
+    function bindAttempt(conversationId: string | undefined, attemptId: string) {
         if (!conversationId) {
             return;
         }
@@ -513,17 +509,17 @@ export function runPlatform(): void {
         }
     }
 
-    function isAttemptDisposedOrSuperseded(attemptId: string): boolean {
+    const isAttemptDisposedOrSuperseded = (attemptId: string): boolean => {
         const phase = sfe.resolve(attemptId).phase;
         return phase === 'disposed' || phase === 'superseded';
-    }
+    };
 
-    function emitAliasResolutionLog(
+    const emitAliasResolutionLog = (
         canonicalAttemptId: string,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
         originalAttemptId: string,
         conversationId?: string,
-    ): void {
+    ) => {
         structuredLogger.emit(
             canonicalAttemptId,
             'debug',
@@ -537,13 +533,13 @@ export function runPlatform(): void {
             },
             `attempt-alias-resolve:${signalType}:${originalAttemptId}:${canonicalAttemptId}`,
         );
-    }
+    };
 
-    function emitLateSignalDrop(
+    const emitLateSignalDrop = (
         canonicalAttemptId: string,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
         conversationId?: string,
-    ): void {
+    ) => {
         structuredLogger.emit(
             canonicalAttemptId,
             'debug',
@@ -552,23 +548,23 @@ export function runPlatform(): void {
             { signalType, reason: 'disposed_or_superseded', conversationId: conversationId ?? null },
             `stale:${signalType}:${conversationId ?? 'unknown'}:disposed`,
         );
-    }
+    };
 
-    function getConversationAttemptMismatch(canonicalAttemptId: string, conversationId?: string): string | null {
+    const getConversationAttemptMismatch = (canonicalAttemptId: string, conversationId?: string): string | null => {
         return getConversationAttemptMismatchForRegistry(
             canonicalAttemptId,
             conversationId,
             attemptByConversation,
             resolveAliasedAttemptId,
         );
-    }
+    };
 
-    function emitConversationMismatchDrop(
+    const emitConversationMismatchDrop = (
         canonicalAttemptId: string,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
         conversationId: string,
         activeAttemptId: string,
-    ): void {
+    ) => {
         structuredLogger.emit(
             canonicalAttemptId,
             'debug',
@@ -577,13 +573,13 @@ export function runPlatform(): void {
             { signalType, reason: 'conversation_mismatch', conversationId, activeAttemptId },
             `stale:${signalType}:${conversationId}:${activeAttemptId}`,
         );
-    }
+    };
 
-    function isStaleAttemptMessage(
+    const isStaleAttemptMessage = (
         attemptId: string,
         conversationId: string | undefined,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
-    ): boolean {
+    ): boolean => {
         const canonicalAttemptId = resolveAliasedAttemptId(attemptId);
 
         if (canonicalAttemptId !== attemptId) {
@@ -602,12 +598,9 @@ export function runPlatform(): void {
         }
 
         return false;
-    }
+    };
 
-    function cancelStreamDoneProbe(
-        attemptId: string,
-        reason: 'superseded' | 'disposed' | 'navigation' | 'teardown',
-    ): void {
+    function cancelStreamDoneProbe(attemptId: string, reason: 'superseded' | 'disposed' | 'navigation' | 'teardown') {
         const controller = streamProbeControllers.get(attemptId);
         if (!controller) {
             return;
@@ -624,7 +617,7 @@ export function runPlatform(): void {
         );
     }
 
-    function clearProbeLeaseRetry(attemptId: string): void {
+    function clearProbeLeaseRetry(attemptId: string) {
         const timerId = probeLeaseRetryTimers.get(attemptId);
         if (timerId !== undefined) {
             clearTimeout(timerId);
@@ -632,7 +625,7 @@ export function runPlatform(): void {
         }
     }
 
-    async function tryAcquireProbeLease(conversationId: string, attemptId: string): Promise<boolean> {
+    const tryAcquireProbeLease = async (conversationId: string, attemptId: string): Promise<boolean> => {
         const claim = await probeLease.claim(conversationId, attemptId, PROBE_LEASE_TTL_MS);
         if (claim.acquired) {
             clearProbeLeaseRetry(attemptId);
@@ -680,9 +673,9 @@ export function runPlatform(): void {
             ),
         );
         return false;
-    }
+    };
 
-    function clearCanonicalStabilizationRetry(attemptId: string): void {
+    function clearCanonicalStabilizationRetry(attemptId: string) {
         const hadTimer = canonicalStabilizationRetryTimers.has(attemptId);
         if (hadTimer) {
             logger.info('Stabilization retry cleared', { attemptId });
@@ -696,7 +689,7 @@ export function runPlatform(): void {
         });
     }
 
-    function emitTimeoutWarningOnce(attemptId: string, conversationId: string): void {
+    const emitTimeoutWarningOnce = (attemptId: string, conversationId: string) => {
         if (timeoutWarningByAttempt.has(attemptId)) {
             return;
         }
@@ -709,9 +702,9 @@ export function runPlatform(): void {
             { conversationId },
             `readiness-timeout:${conversationId}`,
         );
-    }
+    };
 
-    function maybeRestartCanonicalRecoveryAfterTimeout(conversationId: string, attemptId: string): void {
+    function maybeRestartCanonicalRecoveryAfterTimeout(conversationId: string, attemptId: string) {
         if (!hasCanonicalStabilizationTimedOut(attemptId)) {
             return;
         }
@@ -771,13 +764,13 @@ export function runPlatform(): void {
         return elapsed >= timeoutMs;
     }
 
-    async function tryPromoteReadySnapshotAsCanonical(
+    const tryPromoteReadySnapshotAsCanonical = async (
         conversationId: string,
         attemptId: string,
         retries: number,
         fetchSucceeded: boolean,
         readinessResult: PlatformReadiness,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         if (fetchSucceeded || !readinessResult.ready) {
             return false;
         }
@@ -794,15 +787,15 @@ export function runPlatform(): void {
         scheduleCanonicalStabilizationRetry(conversationId, attemptId);
         refreshButtonState(conversationId);
         return true;
-    }
+    };
 
-    async function tryRefreshDegradedSnapshotAndPromote(
+    const tryRefreshDegradedSnapshotAndPromote = async (
         conversationId: string,
         attemptId: string,
         retries: number,
         fetchSucceeded: boolean,
         readinessResult: PlatformReadiness,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         if (fetchSucceeded || readinessResult.ready) {
             return false;
         }
@@ -835,7 +828,7 @@ export function runPlatform(): void {
         scheduleCanonicalStabilizationRetry(conversationId, attemptId);
         refreshButtonState(conversationId);
         return true;
-    }
+    };
 
     function getReadyCachedConversation(conversationId: string): ConversationData | null {
         const recheckCached = interceptionManager.getConversation(conversationId);
@@ -855,7 +848,7 @@ export function runPlatform(): void {
     function ingestStabilizationRetrySnapshot(
         conversationId: string,
         freshData: ConversationData | RawCaptureSnapshot | unknown,
-    ): void {
+    ) {
         if (isConversationDataLike(freshData)) {
             interceptionManager.ingestConversationData(freshData, 'stabilization-retry-snapshot');
             return;
@@ -867,13 +860,13 @@ export function runPlatform(): void {
         });
     }
 
-    async function handleDegradedCanonicalCandidate(
+    const handleDegradedCanonicalCandidate = async (
         conversationId: string,
         attemptId: string,
         retries: number,
         fetchSucceeded: boolean,
         cached: ConversationData,
-    ): Promise<void> {
+    ) => {
         const readinessResult = evaluateReadinessForData(cached);
         if (
             await tryPromoteReadySnapshotAsCanonical(
@@ -901,9 +894,9 @@ export function runPlatform(): void {
 
         scheduleCanonicalStabilizationRetry(conversationId, attemptId);
         refreshButtonState(conversationId);
-    }
+    };
 
-    function shouldSkipCanonicalRetryTick(conversationId: string, attemptId: string, retries: number): boolean {
+    const shouldSkipCanonicalRetryTick = (conversationId: string, attemptId: string, retries: number): boolean => {
         const disposed = isAttemptDisposedOrSuperseded(attemptId);
         const mappedAttempt = attemptByConversation.get(conversationId);
         const mappedMismatch = !!mappedAttempt && mappedAttempt !== attemptId;
@@ -916,9 +909,9 @@ export function runPlatform(): void {
             sfePhase: sfe.resolve(attemptId).phase,
         });
         return disposed || mappedMismatch;
-    }
+    };
 
-    function shouldSkipCanonicalRetryAfterAwait(conversationId: string, attemptId: string): boolean {
+    const shouldSkipCanonicalRetryAfterAwait = (conversationId: string, attemptId: string): boolean => {
         const mappedAttempt = attemptByConversation.get(conversationId);
         const disposedOrSuperseded = isAttemptDisposedOrSuperseded(attemptId);
         const shouldSkip = resolveShouldSkipCanonicalRetryAfterAwait(
@@ -937,13 +930,13 @@ export function runPlatform(): void {
             mappedAttempt: mappedAttempt ?? null,
         });
         return true;
-    }
+    };
 
-    async function processCanonicalStabilizationRetryTick(
+    const processCanonicalStabilizationRetryTick = async (
         conversationId: string,
         attemptId: string,
         retries: number,
-    ): Promise<void> {
+    ) => {
         if (!beginCanonicalStabilizationTick(attemptId, canonicalStabilizationInProgress)) {
             logger.info('Stabilization retry tick skipped: already in progress', {
                 conversationId,
@@ -983,9 +976,9 @@ export function runPlatform(): void {
         } finally {
             canonicalStabilizationInProgress.delete(attemptId);
         }
-    }
+    };
 
-    function scheduleCanonicalStabilizationRetry(conversationId: string, attemptId: string): void {
+    function scheduleCanonicalStabilizationRetry(conversationId: string, attemptId: string) {
         if (canonicalStabilizationRetryTimers.has(attemptId)) {
             // #region agent log
             logger.info('Stabilization retry already scheduled (skip)', { conversationId, attemptId });
@@ -1064,7 +1057,7 @@ export function runPlatform(): void {
         };
     }
 
-    function ingestSfeLifecycle(phase: LifecyclePhase, attemptId: string, conversationId?: string | null): void {
+    const ingestSfeLifecycle = (phase: LifecyclePhase, attemptId: string, conversationId?: string | null) => {
         if (!sfeEnabled) {
             return;
         }
@@ -1097,14 +1090,14 @@ export function runPlatform(): void {
             { phase: resolution.phase, ready: resolution.ready, conversationId: conversationId ?? null },
             `phase:${resolution.phase}:${conversationId ?? 'unknown'}`,
         );
-    }
+    };
 
-    function emitCanonicalSampleProcessed(
+    const emitCanonicalSampleProcessed = (
         attemptId: string,
         conversationId: string,
         resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
         readiness: PlatformReadiness,
-    ): void {
+    ) => {
         structuredLogger.emit(
             attemptId,
             'debug',
@@ -1118,12 +1111,12 @@ export function runPlatform(): void {
             },
             `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
         );
-    }
+    };
 
-    function shouldScheduleCanonicalRetry(
+    const shouldScheduleCanonicalRetry = (
         resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
         activeLifecycleState: LifecycleUiState,
-    ): boolean {
+    ): boolean => {
         const hitStabilizationTimeout = resolution.blockingConditions.includes('stabilization_timeout');
         return (
             !resolution.ready &&
@@ -1131,14 +1124,14 @@ export function runPlatform(): void {
             activeLifecycleState === 'completed' &&
             (resolution.reason === 'awaiting_stabilization' || resolution.reason === 'captured_not_ready')
         );
-    }
+    };
 
-    function emitAwaitingCanonicalLog(
+    const emitAwaitingCanonicalLog = (
         attemptId: string,
         conversationId: string,
         resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
         contentHash: string | null,
-    ): void {
+    ) => {
         const isStabilizationWait = resolution.reason === 'awaiting_stabilization';
         structuredLogger.emit(
             attemptId,
@@ -1150,13 +1143,13 @@ export function runPlatform(): void {
             { conversationId, phase: resolution.phase },
             `${isStabilizationWait ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${contentHash ?? 'none'}`,
         );
-    }
+    };
 
-    function emitCapturedReadyLog(
+    const emitCapturedReadyLog = (
         attemptId: string,
         conversationId: string,
         resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
-    ): void {
+    ) => {
         structuredLogger.emit(
             attemptId,
             'info',
@@ -1165,7 +1158,7 @@ export function runPlatform(): void {
             { conversationId, phase: resolution.phase },
             `captured-ready:${conversationId}`,
         );
-    }
+    };
 
     function ingestSfeCanonicalSample(
         data: ConversationData,
@@ -1212,12 +1205,12 @@ export function runPlatform(): void {
         return resolution;
     }
 
-    function resolveSfeReady(conversationId: string): boolean {
+    const resolveSfeReady = (conversationId: string): boolean => {
         const resolution = sfe.resolveByConversation(conversationId);
         return !!resolution?.ready;
-    }
+    };
 
-    function logSfeMismatchIfNeeded(conversationId: string, legacyReady: boolean): void {
+    const logSfeMismatchIfNeeded = (conversationId: string, legacyReady: boolean) => {
         if (!sfeEnabled) {
             return;
         }
@@ -1234,9 +1227,9 @@ export function runPlatform(): void {
             { conversationId, legacyReady, sfeReady },
             `mismatch:${conversationId}:${legacyReady}:${sfeReady}`,
         );
-    }
+    };
 
-    function emitAttemptDisposed(attemptId: string, reason: AttemptDisposedMessage['reason']): void {
+    function emitAttemptDisposed(attemptId: string, reason: AttemptDisposedMessage['reason']) {
         pendingLifecycleByAttempt.delete(attemptId);
         structuredLogger.emit(
             attemptId,
@@ -1254,15 +1247,15 @@ export function runPlatform(): void {
         window.postMessage(stampToken(payload), window.location.origin);
     }
 
-    function emitStreamDumpConfig(): void {
+    const emitStreamDumpConfig = () => {
         const payload: StreamDumpConfigMessage = {
             type: 'BLACKIYA_STREAM_DUMP_CONFIG',
             enabled: streamDumpEnabled,
         };
         window.postMessage(stampToken(payload), window.location.origin);
-    }
+    };
 
-    async function loadStreamDumpSetting(): Promise<void> {
+    const loadStreamDumpSetting = async () => {
         try {
             const result = await browser.storage.local.get(STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED);
             streamDumpEnabled = result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true;
@@ -1271,17 +1264,17 @@ export function runPlatform(): void {
             streamDumpEnabled = false;
         }
         emitStreamDumpConfig();
-    }
+    };
 
-    function removeStreamProbePanel(): void {
+    const removeStreamProbePanel = () => {
         const panel = document.getElementById('blackiya-stream-probe');
         if (!panel || !panel.parentNode) {
             return;
         }
         panel.parentNode.removeChild(panel);
-    }
+    };
 
-    async function loadStreamProbeVisibilitySetting(): Promise<void> {
+    const loadStreamProbeVisibilitySetting = async () => {
         try {
             const result = await browser.storage.local.get(STORAGE_KEYS.STREAM_PROBE_VISIBLE);
             streamProbeVisible = result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true;
@@ -1292,9 +1285,9 @@ export function runPlatform(): void {
         if (!streamProbeVisible) {
             removeStreamProbePanel();
         }
-    }
+    };
 
-    async function loadSfeSettings(): Promise<void> {
+    const loadSfeSettings = async () => {
         try {
             const result = await browser.storage.local.get([STORAGE_KEYS.SFE_ENABLED]);
             sfeEnabled = result[STORAGE_KEYS.SFE_ENABLED] !== false;
@@ -1306,9 +1299,9 @@ export function runPlatform(): void {
             logger.warn('Failed to load SFE settings. Falling back to defaults.', error);
             sfeEnabled = true;
         }
-    }
+    };
 
-    async function loadCalibrationPreference(platformName: string): Promise<void> {
+    const loadCalibrationPreference = async (platformName: string) => {
         try {
             const profileV2 = await loadCalibrationProfileV2IfPresent(platformName);
             if (profileV2) {
@@ -1326,9 +1319,9 @@ export function runPlatform(): void {
             calibrationPreferenceLoaded = true;
             syncCalibrationButtonDisplay();
         }
-    }
+    };
 
-    function ensureCalibrationPreferenceLoaded(platformName: string): Promise<void> {
+    const ensureCalibrationPreferenceLoaded = (platformName: string): Promise<void> => {
         if (calibrationPreferenceLoaded) {
             return Promise.resolve();
         }
@@ -1341,9 +1334,9 @@ export function runPlatform(): void {
             calibrationPreferenceLoading = null;
         });
         return calibrationPreferenceLoading;
-    }
+    };
 
-    async function rememberCalibrationSuccess(platformName: string, step: CalibrationStep): Promise<void> {
+    const rememberCalibrationSuccess = async (platformName: string, step: CalibrationStep) => {
         try {
             rememberedPreferredStep = step;
             rememberedCalibrationUpdatedAt = new Date().toISOString();
@@ -1352,16 +1345,16 @@ export function runPlatform(): void {
         } catch (error) {
             logger.warn('Failed to save calibration profile', error);
         }
-    }
+    };
 
-    function resolveDisplayedCalibrationState(_conversationId: string | null): CalibrationUiState {
+    const resolveDisplayedCalibrationState = (_conversationId: string | null): CalibrationUiState => {
         if (calibrationState === 'idle' && !!rememberedPreferredStep) {
             return 'success';
         }
         return calibrationState;
-    }
+    };
 
-    function syncCalibrationButtonDisplay(): void {
+    function syncCalibrationButtonDisplay() {
         if (!buttonManager.exists() || !currentAdapter) {
             return;
         }
@@ -1409,11 +1402,11 @@ export function runPlatform(): void {
         });
     }
 
-    function logLifecycleTransition(
+    const logLifecycleTransition = (
         previousState: LifecycleUiState,
         nextState: LifecycleUiState,
         conversationId: string | null,
-    ): void {
+    ) => {
         // #region agent log — lifecycle transition tracking
         if (previousState !== nextState) {
             logger.info('Lifecycle transition', {
@@ -1423,9 +1416,9 @@ export function runPlatform(): void {
             });
         }
         // #endregion
-    }
+    };
 
-    function syncLifecycleContext(state: LifecycleUiState, conversationId: string | null): void {
+    const syncLifecycleContext = (state: LifecycleUiState, conversationId: string | null) => {
         if (state === 'idle') {
             lifecycleConversationId = null;
             lifecycleAttemptId = null;
@@ -1434,9 +1427,9 @@ export function runPlatform(): void {
         if (conversationId) {
             lifecycleConversationId = conversationId;
         }
-    }
+    };
 
-    function applyLifecycleUiState(state: LifecycleUiState, conversationId?: string): void {
+    const applyLifecycleUiState = (state: LifecycleUiState, conversationId?: string) => {
         if (!buttonManager.exists()) {
             return;
         }
@@ -1454,9 +1447,9 @@ export function runPlatform(): void {
             buttonManager.setActionButtonsEnabled(false);
             buttonManager.setOpacity('0.6');
         }
-    }
+    };
 
-    function setLifecycleState(state: LifecycleUiState, conversationId?: string): void {
+    const setLifecycleState = (state: LifecycleUiState, conversationId?: string) => {
         const resolvedConversationId = conversationId ?? currentConversationId ?? null;
         logLifecycleTransition(lifecycleState, state, resolvedConversationId);
         lifecycleState = state;
@@ -1464,9 +1457,9 @@ export function runPlatform(): void {
         syncLifecycleContext(state, resolvedConversationId);
         buttonManager.setLifecycleState(state);
         applyLifecycleUiState(state, conversationId);
-    }
+    };
 
-    function resolveStreamProbeDockPosition(): 'bottom-left' | 'top-left' {
+    const resolveStreamProbeDockPosition = (): 'bottom-left' | 'top-left' => {
         if ((currentAdapter?.name ?? '').toLowerCase() === 'gemini') {
             return 'top-left';
         }
@@ -1475,9 +1468,9 @@ export function runPlatform(): void {
             return 'top-left';
         }
         return 'bottom-left';
-    }
+    };
 
-    function applyStreamProbeDocking(panel: HTMLDivElement): void {
+    const applyStreamProbeDocking = (panel: HTMLDivElement) => {
         if (resolveStreamProbeDockPosition() === 'top-left') {
             panel.style.left = '16px';
             panel.style.right = 'auto';
@@ -1489,17 +1482,17 @@ export function runPlatform(): void {
         panel.style.right = 'auto';
         panel.style.top = 'auto';
         panel.style.bottom = '16px';
-    }
+    };
 
-    function normalizeStreamProbePanelInteraction(panel: HTMLDivElement): void {
+    const normalizeStreamProbePanelInteraction = (panel: HTMLDivElement) => {
         panel.style.maxHeight = '42vh';
         panel.style.overflow = 'auto';
         panel.style.pointerEvents = 'auto';
         panel.style.touchAction = 'pan-y';
         panel.style.overscrollBehavior = 'contain';
-    }
+    };
 
-    function ensureStreamProbePanel(): HTMLDivElement | null {
+    const ensureStreamProbePanel = (): HTMLDivElement | null => {
         if (!streamProbeVisible) {
             return null;
         }
@@ -1537,9 +1530,9 @@ export function runPlatform(): void {
         applyStreamProbeDocking(panel);
         document.body.appendChild(panel);
         return panel;
-    }
+    };
 
-    function setStreamProbePanel(status: string, body: string): void {
+    function setStreamProbePanel(status: string, body: string) {
         if (cleanedUp) {
             return;
         }
@@ -1558,7 +1551,7 @@ export function runPlatform(): void {
         return withPreservedRunnerStreamMirrorSnapshot(streamPreviewState, conversationId, status, primaryBody);
     }
 
-    function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData): void {
+    function syncStreamProbePanelFromCanonical(conversationId: string, data: ConversationData) {
         const panel = document.getElementById('blackiya-stream-probe');
         if (!panel) {
             return;
@@ -1579,12 +1572,12 @@ export function runPlatform(): void {
         );
     }
 
-    function appendPendingStreamProbeText(canonicalAttemptId: string, text: string): void {
+    const appendPendingStreamProbeText = (canonicalAttemptId: string, text: string) => {
         const capped = appendPendingRunnerStreamPreview(streamPreviewState, canonicalAttemptId, text);
         setStreamProbePanel('stream: awaiting conversation id', capped);
-    }
+    };
 
-    function migratePendingStreamProbeText(conversationId: string, canonicalAttemptId: string): void {
+    function migratePendingStreamProbeText(conversationId: string, canonicalAttemptId: string) {
         const capped = migratePendingRunnerStreamPreview(streamPreviewState, conversationId, canonicalAttemptId);
         if (!capped) {
             return;
@@ -1592,10 +1585,10 @@ export function runPlatform(): void {
         setStreamProbePanel('stream: live mirror', capped);
     }
 
-    function appendLiveStreamProbeText(conversationId: string, text: string): void {
+    const appendLiveStreamProbeText = (conversationId: string, text: string) => {
         const capped = appendLiveRunnerStreamPreview(streamPreviewState, conversationId, text);
         setStreamProbePanel('stream: live mirror', capped);
-    }
+    };
 
     function extractResponseTextForProbe(data: ConversationData): string {
         try {
@@ -1625,20 +1618,20 @@ export function runPlatform(): void {
         return assistantTexts.join('\n\n').trim();
     }
 
-    async function resolveStreamDoneFallbackSnapshot(
+    const resolveStreamDoneFallbackSnapshot = async (
         conversationId: string,
-    ): Promise<ConversationData | RawCaptureSnapshot | unknown | null> {
+    ): Promise<ConversationData | RawCaptureSnapshot | unknown | null> => {
         if (!currentAdapter) {
             return null;
         }
         const snapshot = await requestPageSnapshot(conversationId);
         return snapshot ?? buildIsolatedDomSnapshot(currentAdapter, conversationId);
-    }
+    };
 
-    function ingestStreamDoneSnapshot(
+    const ingestStreamDoneSnapshot = (
         conversationId: string,
         snapshot: ConversationData | RawCaptureSnapshot | unknown,
-    ): void {
+    ) => {
         if (!currentAdapter) {
             return;
         }
@@ -1666,9 +1659,9 @@ export function runPlatform(): void {
             data: JSON.stringify(snapshot),
             platform: currentAdapter.name,
         });
-    }
+    };
 
-    function logStreamDoneSnapshotCaptured(conversationId: string): void {
+    const logStreamDoneSnapshotCaptured = (conversationId: string) => {
         if (!currentAdapter) {
             return;
         }
@@ -1676,9 +1669,9 @@ export function runPlatform(): void {
             platform: currentAdapter.name,
             conversationId,
         });
-    }
+    };
 
-    async function tryStreamDoneSnapshotCapture(conversationId: string, attemptId: string): Promise<boolean> {
+    const tryStreamDoneSnapshotCapture = async (conversationId: string, attemptId: string): Promise<boolean> => {
         if (!currentAdapter || isAttemptDisposedOrSuperseded(attemptId)) {
             return false;
         }
@@ -1702,9 +1695,9 @@ export function runPlatform(): void {
             logStreamDoneSnapshotCaptured(conversationId);
         }
         return captured;
-    }
+    };
 
-    function logStreamDoneSnapshotRequested(conversationId: string): void {
+    function logStreamDoneSnapshotRequested(conversationId: string) {
         if (!currentAdapter) {
             return;
         }
@@ -1722,10 +1715,10 @@ export function runPlatform(): void {
         controller: AbortController;
     };
 
-    async function createStreamDoneProbeContext(
+    const createStreamDoneProbeContext = async (
         conversationId: string,
         hintedAttemptId?: string,
-    ): Promise<StreamDoneProbeContext | null> {
+    ): Promise<StreamDoneProbeContext | null> => {
         if (!currentAdapter) {
             return null;
         }
@@ -1748,9 +1741,9 @@ export function runPlatform(): void {
             probeKey,
             controller,
         };
-    }
+    };
 
-    function registerStreamDoneProbeStart(context: StreamDoneProbeContext): void {
+    const registerStreamDoneProbeStart = (context: StreamDoneProbeContext) => {
         lastStreamProbeKey = context.probeKey;
         lastStreamProbeConversationId = context.conversationId;
         setStreamProbePanel('stream-done: fetching conversation', `conversationId=${context.conversationId}`);
@@ -1758,13 +1751,13 @@ export function runPlatform(): void {
             platform: context.adapter.name,
             conversationId: context.conversationId,
         });
-    }
+    };
 
-    function setStreamDonePanelWithMirror(conversationId: string, title: string, body: string): void {
+    const setStreamDonePanelWithMirror = (conversationId: string, title: string, body: string) => {
         setStreamProbePanel(title, withPreservedLiveMirrorSnapshot(conversationId, title, body));
-    }
+    };
 
-    async function handleStreamDoneNoCandidates(context: StreamDoneProbeContext): Promise<void> {
+    const handleStreamDoneNoCandidates = async (context: StreamDoneProbeContext) => {
         const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(context.conversationId, context.attemptId);
         if (capturedFromSnapshot) {
             const cached = interceptionManager.getConversation(context.conversationId);
@@ -1787,16 +1780,16 @@ export function runPlatform(): void {
             platform: context.adapter.name,
             conversationId: context.conversationId,
         });
-    }
+    };
 
-    function shouldAbortStreamDoneProbe(context: StreamDoneProbeContext): boolean {
+    const shouldAbortStreamDoneProbe = (context: StreamDoneProbeContext): boolean => {
         return context.controller.signal.aborted || isAttemptDisposedOrSuperseded(context.attemptId);
-    }
+    };
 
-    async function fetchStreamDoneCandidate(
+    const fetchStreamDoneCandidate = async (
         context: StreamDoneProbeContext,
         apiUrl: string,
-    ): Promise<{ ok: boolean; parsed?: ConversationData; body?: string }> {
+    ): Promise<{ ok: boolean; parsed?: ConversationData; body?: string }> => {
         try {
             const response = await fetch(apiUrl, { credentials: 'include', signal: context.controller.signal });
             if (!response.ok) {
@@ -1816,19 +1809,19 @@ export function runPlatform(): void {
         } catch {
             return { ok: false };
         }
-    }
+    };
 
-    function emitStreamDoneProbeSuccessPanel(context: StreamDoneProbeContext, body: string): void {
+    const emitStreamDoneProbeSuccessPanel = (context: StreamDoneProbeContext, body: string) => {
         if (lastStreamProbeKey !== context.probeKey) {
             return;
         }
         setStreamDonePanelWithMirror(context.conversationId, 'stream-done: fetched full text', body);
-    }
+    };
 
-    async function tryRunStreamDoneCandidateFetches(
+    const tryRunStreamDoneCandidateFetches = async (
         context: StreamDoneProbeContext,
         apiUrls: string[],
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         for (const apiUrl of apiUrls) {
             if (shouldAbortStreamDoneProbe(context)) {
                 return true;
@@ -1846,9 +1839,9 @@ export function runPlatform(): void {
             return true;
         }
         return false;
-    }
+    };
 
-    async function tryShowStreamDoneFallbackPanel(context: StreamDoneProbeContext): Promise<void> {
+    const tryShowStreamDoneFallbackPanel = async (context: StreamDoneProbeContext) => {
         if (isStreamProbeKeyStale(context.probeKey)) {
             return;
         }
@@ -1868,7 +1861,7 @@ export function runPlatform(): void {
             'stream-done: awaiting canonical capture',
             `Conversation stream completed for ${context.conversationId}. Waiting for canonical capture.`,
         );
-    }
+    };
 
     function isStreamProbeKeyStale(probeKey: string): boolean {
         return lastStreamProbeKey !== probeKey;
@@ -1885,7 +1878,7 @@ export function runPlatform(): void {
         return true;
     }
 
-    function showStreamDoneSnapshotPanel(conversationId: string): void {
+    function showStreamDoneSnapshotPanel(conversationId: string) {
         const snapshotCached = interceptionManager.getConversation(conversationId);
         const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
         const snapshotBody = snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
@@ -1896,7 +1889,7 @@ export function runPlatform(): void {
         );
     }
 
-    function finalizeStreamDoneProbe(context: StreamDoneProbeContext): void {
+    const finalizeStreamDoneProbe = (context: StreamDoneProbeContext) => {
         streamProbeControllers.delete(context.attemptId);
         void probeLease.release(context.conversationId, context.attemptId).catch((error) => {
             logger.debug('Probe lease release failed after stream-done probe finalize', {
@@ -1905,9 +1898,9 @@ export function runPlatform(): void {
                 error: error instanceof Error ? error.message : String(error),
             });
         });
-    }
+    };
 
-    async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string): Promise<void> {
+    async function runStreamDoneProbe(conversationId: string, hintedAttemptId?: string) {
         const context = await createStreamDoneProbeContext(conversationId, hintedAttemptId);
         if (!context) {
             return;
@@ -1936,7 +1929,7 @@ export function runPlatform(): void {
         }
     }
 
-    function buildExportPayloadForFormat(data: ConversationData, format: ExportFormat): unknown {
+    const buildExportPayloadForFormat = (data: ConversationData, format: ExportFormat): unknown => {
         if (format !== 'common') {
             return data;
         }
@@ -1947,9 +1940,9 @@ export function runPlatform(): void {
             logger.error('Failed to build common export format, falling back to original.', error);
             return data;
         }
-    }
+    };
 
-    function attachExportMeta(payload: unknown, meta: ExportMeta): unknown {
+    const attachExportMeta = (payload: unknown, meta: ExportMeta): unknown => {
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
             return payload;
         }
@@ -1965,17 +1958,17 @@ export function runPlatform(): void {
                 exportMeta: meta,
             },
         };
-    }
+    };
 
-    async function buildExportPayload(data: ConversationData, meta: ExportMeta): Promise<unknown> {
+    const buildExportPayload = async (data: ConversationData, meta: ExportMeta): Promise<unknown> => {
         const format = await getExportFormat();
         const payload = buildExportPayloadForFormat(data, format);
         return attachExportMeta(payload, meta);
-    }
+    };
 
-    function resolveSaveReadiness(
+    const resolveSaveReadiness = (
         conversationId: string | null,
-    ): { conversationId: string; decision: ReadinessDecision; allowDegraded: boolean } | null {
+    ): { conversationId: string; decision: ReadinessDecision; allowDegraded: boolean } | null => {
         if (!conversationId) {
             return null;
         }
@@ -1985,9 +1978,9 @@ export function runPlatform(): void {
             decision,
             allowDegraded: decision.mode === 'degraded_manual_only',
         };
-    }
+    };
 
-    function maybeIngestFreshSnapshotForForceSave(conversationId: string, freshSnapshot: unknown): boolean {
+    const maybeIngestFreshSnapshotForForceSave = (conversationId: string, freshSnapshot: unknown): boolean => {
         if (!freshSnapshot || !isConversationDataLike(freshSnapshot)) {
             return false;
         }
@@ -2007,9 +2000,9 @@ export function runPlatform(): void {
             conversationId,
         });
         return true;
-    }
+    };
 
-    async function recoverCanonicalBeforeForceSave(conversationId: string): Promise<boolean> {
+    const recoverCanonicalBeforeForceSave = async (conversationId: string): Promise<boolean> => {
         const freshSnapshot = await requestPageSnapshot(conversationId);
         if (maybeIngestFreshSnapshotForForceSave(conversationId, freshSnapshot)) {
             return true;
@@ -2019,16 +2012,16 @@ export function runPlatform(): void {
         refreshButtonState(conversationId);
         const nextDecision = resolveReadinessDecision(conversationId);
         return nextDecision.mode !== 'degraded_manual_only';
-    }
+    };
 
-    function confirmDegradedForceSave(): boolean {
+    const confirmDegradedForceSave = (): boolean => {
         if (typeof window.confirm !== 'function') {
             return true;
         }
         return window.confirm('Force Save may export partial data because canonical capture timed out. Continue?');
-    }
+    };
 
-    async function handleSaveClick(): Promise<void> {
+    async function handleSaveClick() {
         if (!currentAdapter) {
             return;
         }
@@ -2054,7 +2047,7 @@ export function runPlatform(): void {
         await saveConversation(data, { allowDegraded });
     }
 
-    async function handleCalibrationClick(): Promise<void> {
+    async function handleCalibrationClick() {
         if (calibrationState === 'capturing') {
             return;
         }
@@ -2068,7 +2061,7 @@ export function runPlatform(): void {
         logger.info('Calibration armed. Click Done when response is complete.');
     }
 
-    function setCalibrationStatus(status: 'idle' | 'waiting' | 'capturing' | 'success' | 'error'): void {
+    function setCalibrationStatus(status: 'idle' | 'waiting' | 'capturing' | 'success' | 'error') {
         calibrationState = status;
         runnerState.calibrationState = status;
         buttonManager.setCalibrationState(status, {
@@ -2077,15 +2070,15 @@ export function runPlatform(): void {
         });
     }
 
-    function markCalibrationSuccess(conversationId: string): void {
+    const markCalibrationSuccess = (conversationId: string) => {
         setCalibrationStatus('success');
         refreshButtonState(conversationId);
-    }
+    };
 
-    function markCalibrationError(message: string, data?: unknown): void {
+    const markCalibrationError = (message: string, data?: unknown) => {
         setCalibrationStatus('error');
         logger.warn(message, data);
-    }
+    };
 
     function getFetchUrlCandidates(adapter: LLMPlatform, conversationId: string): string[] {
         const urls: string[] = [];
@@ -2124,11 +2117,11 @@ export function runPlatform(): void {
         return [];
     }
 
-    async function tryWarmFetchCandidate(
+    const tryWarmFetchCandidate = async (
         conversationId: string,
         reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
         apiUrl: string,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), WARM_FETCH_REQUEST_TIMEOUT_MS);
         try {
@@ -2169,12 +2162,12 @@ export function runPlatform(): void {
         } finally {
             clearTimeout(timeoutId);
         }
-    }
+    };
 
-    async function executeWarmFetchCandidates(
+    const executeWarmFetchCandidates = async (
         conversationId: string,
         reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         if (!currentAdapter) {
             return false;
         }
@@ -2193,7 +2186,7 @@ export function runPlatform(): void {
 
         logger.info('Warm fetch all candidates failed', { conversationId, reason });
         return false;
-    }
+    };
 
     async function warmFetchConversationSnapshot(
         conversationId: string,
@@ -2229,13 +2222,13 @@ export function runPlatform(): void {
         return run;
     }
 
-    async function tryCalibrationFetch(
+    const tryCalibrationFetch = async (
         conversationId: string,
         apiUrl: string,
         attempt: number,
         platformName: string,
         mode: CalibrationMode,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         try {
             const response = await fetch(apiUrl, { credentials: 'include' });
             logger.info('Calibration fetch response', {
@@ -2261,9 +2254,9 @@ export function runPlatform(): void {
             logger.error('Calibration fetch error', error);
             return false;
         }
-    }
+    };
 
-    function prepareCalibrationContext(): { adapter: LLMPlatform; conversationId: string } | null {
+    const prepareCalibrationContext = (): { adapter: LLMPlatform; conversationId: string } | null => {
         if (!currentAdapter) {
             return null;
         }
@@ -2275,14 +2268,14 @@ export function runPlatform(): void {
         }
 
         return { adapter: currentAdapter, conversationId };
-    }
+    };
 
-    async function runCalibrationRetries(
+    const runCalibrationRetries = async (
         adapter: LLMPlatform,
         conversationId: string,
         backoff: number[],
         mode: CalibrationMode,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         const urls = getFetchUrlCandidates(adapter, conversationId);
         if (urls.length === 0) {
             logger.info('Calibration retries skipped: no fetch URL candidates', {
@@ -2306,7 +2299,7 @@ export function runPlatform(): void {
             }
         }
         return false;
-    }
+    };
 
     async function requestPageSnapshot(conversationId: string): Promise<unknown | null> {
         const requestId =
@@ -2360,9 +2353,9 @@ export function runPlatform(): void {
         });
     }
 
-    function hasCapturedConversation(conversationId: string): boolean {
+    const hasCapturedConversation = (conversationId: string): boolean => {
         return !!interceptionManager.getConversation(conversationId);
-    }
+    };
 
     function isCalibrationCaptureSatisfied(conversationId: string, mode: CalibrationMode): boolean {
         if (mode === 'auto') {
@@ -2398,11 +2391,11 @@ export function runPlatform(): void {
         );
     }
 
-    function normalizeSnapshotText(text: string): string {
+    const normalizeSnapshotText = (text: string): string => {
         return text.replace(/\s+/g, ' ').trim();
-    }
+    };
 
-    function queryAllFromRoot(root: ParentNode, selector: string): Element[] {
+    const queryAllFromRoot = (root: ParentNode, selector: string): Element[] => {
         if (!root || typeof (root as { querySelectorAll?: unknown }).querySelectorAll !== 'function') {
             return [];
         }
@@ -2411,9 +2404,9 @@ export function runPlatform(): void {
         } catch {
             return [];
         }
-    }
+    };
 
-    function safeQuerySelector(selector: string): Element | null {
+    const safeQuerySelector = (selector: string): Element | null => {
         if (typeof document.querySelector !== 'function') {
             return null;
         }
@@ -2422,9 +2415,9 @@ export function runPlatform(): void {
         } catch {
             return null;
         }
-    }
+    };
 
-    function collectSnapshotMessageCandidates(root: ParentNode): SnapshotMessageCandidate[] {
+    const collectSnapshotMessageCandidates = (root: ParentNode): SnapshotMessageCandidate[] => {
         const selectors: Array<{ selector: string; role: 'user' | 'assistant' }> = [
             { selector: '[data-message-author-role="user"]', role: 'user' },
             { selector: '[data-message-author-role="assistant"]', role: 'assistant' },
@@ -2459,9 +2452,9 @@ export function runPlatform(): void {
         }
 
         return deduped;
-    }
+    };
 
-    function collectLooseGrokCandidates(root: ParentNode): SnapshotMessageCandidate[] {
+    const collectLooseGrokCandidates = (root: ParentNode): SnapshotMessageCandidate[] => {
         const nodes = queryAllFromRoot(
             root,
             'main article, main [data-testid*="message"], main [class*="message"], main [class*="response"]',
@@ -2486,27 +2479,27 @@ export function runPlatform(): void {
             role: index % 2 === 0 ? 'user' : 'assistant',
             text,
         }));
-    }
+    };
 
-    function resolveTreeWalkerContext(root: ParentNode): { ownerDocument: Document; walkerRoot: Node } | null {
+    const resolveTreeWalkerContext = (root: ParentNode): { ownerDocument: Document; walkerRoot: Node } | null => {
         const ownerDocument = root instanceof Document ? root : root.ownerDocument;
         const walkerRoot = root instanceof Element || root instanceof Document ? root : ownerDocument?.body;
         if (!ownerDocument || !walkerRoot) {
             return null;
         }
         return { ownerDocument, walkerRoot };
-    }
+    };
 
-    function createSnapshotContainerFilter(allowedTags: Set<string>): NodeFilter {
+    const createSnapshotContainerFilter = (allowedTags: Set<string>): NodeFilter => {
         return {
             acceptNode: (candidate: Node) =>
                 candidate instanceof Element && allowedTags.has(candidate.tagName)
                     ? NodeFilter.FILTER_ACCEPT
                     : NodeFilter.FILTER_SKIP,
         };
-    }
+    };
 
-    function collectTreeWalkerSnippets(walker: TreeWalker, snippets: string[], maxNodesScanned: number): void {
+    const collectTreeWalkerSnippets = (walker: TreeWalker, snippets: string[], maxNodesScanned: number) => {
         let scanned = 0;
         let node = walker.nextNode();
         while (node && snippets.length < 6 && scanned < maxNodesScanned) {
@@ -2517,9 +2510,9 @@ export function runPlatform(): void {
             }
             node = walker.nextNode();
         }
-    }
+    };
 
-    function collectLastResortCandidatesViaTreeWalker(root: ParentNode, snippets: string[]): boolean {
+    const collectLastResortCandidatesViaTreeWalker = (root: ParentNode, snippets: string[]): boolean => {
         const context = resolveTreeWalkerContext(root);
         if (!context) {
             return false;
@@ -2532,9 +2525,9 @@ export function runPlatform(): void {
         );
         collectTreeWalkerSnippets(walker, snippets, 220);
         return true;
-    }
+    };
 
-    function collectLastResortCandidatesViaSelectors(root: ParentNode, snippets: string[]): void {
+    const collectLastResortCandidatesViaSelectors = (root: ParentNode, snippets: string[]) => {
         const containers = queryAllFromRoot(root, 'main, article, section, div');
         for (const node of containers) {
             const text = normalizeSnapshotText((node.textContent ?? '').trim());
@@ -2546,9 +2539,9 @@ export function runPlatform(): void {
                 return;
             }
         }
-    }
+    };
 
-    function buildFallbackRoleCandidates(uniqueTexts: string[]): SnapshotMessageCandidate[] {
+    const buildFallbackRoleCandidates = (uniqueTexts: string[]): SnapshotMessageCandidate[] => {
         if (uniqueTexts.length === 0) {
             return [];
         }
@@ -2562,9 +2555,9 @@ export function runPlatform(): void {
             role: index % 2 === 0 ? 'user' : 'assistant',
             text,
         }));
-    }
+    };
 
-    function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
+    const collectLastResortTextCandidates = (root: ParentNode): SnapshotMessageCandidate[] => {
         const snippets: string[] = [];
         const usedTreeWalker = collectLastResortCandidatesViaTreeWalker(root, snippets);
         if (!usedTreeWalker || snippets.length === 0) {
@@ -2573,21 +2566,21 @@ export function runPlatform(): void {
 
         const unique = Array.from(new Set(snippets));
         return buildFallbackRoleCandidates(unique);
-    }
+    };
 
-    function buildConversationDataFromMessages(
+    const buildConversationDataFromMessages = (
         conversationId: string,
         platformName: string,
         messages: SnapshotMessageCandidate[],
-    ): ConversationData | null {
+    ): ConversationData | null => {
         return buildRunnerSnapshotConversationData(conversationId, platformName, messages, document.title);
-    }
+    };
 
-    function buildPrimarySnapshotFromRoot(
+    const buildPrimarySnapshotFromRoot = (
         adapter: LLMPlatform,
         conversationId: string,
         root: ParentNode,
-    ): ConversationData | null {
+    ): ConversationData | null => {
         const candidates = collectSnapshotMessageCandidates(root);
         if (candidates.length < 2) {
             return null;
@@ -2598,13 +2591,13 @@ export function runPlatform(): void {
             count: candidates.length,
         });
         return buildConversationDataFromMessages(conversationId, adapter.name, candidates);
-    }
+    };
 
-    function buildGrokFallbackSnapshotFromRoot(
+    const buildGrokFallbackSnapshotFromRoot = (
         adapter: LLMPlatform,
         conversationId: string,
         root: ParentNode,
-    ): ConversationData | null {
+    ): ConversationData | null => {
         const looseCandidates = collectLooseGrokCandidates(root);
         if (looseCandidates.length >= 2) {
             logger.info('Calibration isolated DOM Grok fallback candidates found', {
@@ -2625,13 +2618,13 @@ export function runPlatform(): void {
             count: lastResortCandidates.length,
         });
         return buildConversationDataFromMessages(conversationId, adapter.name, lastResortCandidates);
-    }
+    };
 
-    function buildSnapshotFromRoot(
+    const buildSnapshotFromRoot = (
         adapter: LLMPlatform,
         conversationId: string,
         root: ParentNode,
-    ): ConversationData | null {
+    ): ConversationData | null => {
         const primarySnapshot = buildPrimarySnapshotFromRoot(adapter, conversationId, root);
         if (primarySnapshot) {
             return primarySnapshot;
@@ -2640,7 +2633,7 @@ export function runPlatform(): void {
             return null;
         }
         return buildGrokFallbackSnapshotFromRoot(adapter, conversationId, root);
-    }
+    };
 
     function buildIsolatedDomSnapshot(adapter: LLMPlatform, conversationId: string): ConversationData | null {
         const roots: ParentNode[] = [];
@@ -2693,7 +2686,7 @@ export function runPlatform(): void {
         return urls;
     }
 
-    function getCalibrationPassiveWaitMs(adapter: LLMPlatform): number {
+    const getCalibrationPassiveWaitMs = (adapter: LLMPlatform): number => {
         if (adapter.name === 'ChatGPT') {
             return 1200;
         }
@@ -2701,13 +2694,13 @@ export function runPlatform(): void {
             return 3500;
         }
         return 2000;
-    }
+    };
 
-    async function waitForPassiveCapture(
+    const waitForPassiveCapture = async (
         adapter: LLMPlatform,
         conversationId: string,
         mode: CalibrationMode,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         const timeoutMs = getCalibrationPassiveWaitMs(adapter);
         const intervalMs = 250;
 
@@ -2736,14 +2729,14 @@ export function runPlatform(): void {
             platform: adapter.name,
         });
         return false;
-    }
+    };
 
-    async function waitForDomQuietPeriod(
+    const waitForDomQuietPeriod = async (
         adapter: LLMPlatform,
         conversationId: string,
         quietMs: number,
         maxWaitMs: number,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         const root = safeQuerySelector('main') ?? document.body;
         if (!root) {
             return true;
@@ -2798,13 +2791,13 @@ export function runPlatform(): void {
                 }
             }, 250);
         });
-    }
+    };
 
-    async function captureFromSnapshot(
+    const captureFromSnapshot = async (
         adapter: LLMPlatform,
         conversationId: string,
         mode: CalibrationMode,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         const mayProceed = await ensureSnapshotQuietPeriodIfNeeded(adapter, conversationId, mode);
         if (!mayProceed) {
             return false;
@@ -2838,7 +2831,7 @@ export function runPlatform(): void {
         }
 
         return isCalibrationCaptureSatisfied(conversationId, mode);
-    }
+    };
 
     async function ensureSnapshotQuietPeriodIfNeeded(
         adapter: LLMPlatform,
@@ -2888,7 +2881,7 @@ export function runPlatform(): void {
         conversationId: string,
         mode: CalibrationMode,
         effectiveSnapshot: unknown,
-    ): void {
+    ) {
         try {
             if (isConversationDataLike(effectiveSnapshot)) {
                 interceptionManager.ingestConversationData(effectiveSnapshot, 'calibration-snapshot');
@@ -2915,7 +2908,7 @@ export function runPlatform(): void {
         conversationId: string,
         mode: CalibrationMode,
         snapshot: RawCaptureSnapshot,
-    ): void {
+    ) {
         const replayUrls = getRawSnapshotReplayUrls(adapter, conversationId, snapshot);
         logger.info('Calibration using raw capture snapshot', {
             conversationId,
@@ -2948,19 +2941,16 @@ export function runPlatform(): void {
         }
     }
 
-    async function captureFromRetries(
+    const captureFromRetries = async (
         adapter: LLMPlatform,
         conversationId: string,
         mode: CalibrationMode,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         const backoff = [0, 1500, 3000, 5000, 8000, 12000];
         return await runCalibrationRetries(adapter, conversationId, backoff, mode);
-    }
+    };
 
-    async function runCalibrationCapture(
-        mode: CalibrationMode = 'manual',
-        hintedConversationId?: string,
-    ): Promise<void> {
+    async function runCalibrationCapture(mode: CalibrationMode = 'manual', hintedConversationId?: string) {
         if (calibrationState === 'capturing') {
             return;
         }
@@ -2988,7 +2978,7 @@ export function runPlatform(): void {
         logger.warn('Calibration capture failed after retries', { conversationId });
     }
 
-    function enterCalibrationCaptureState(_mode: CalibrationMode): void {
+    function enterCalibrationCaptureState(_mode: CalibrationMode) {
         setCalibrationStatus('capturing');
     }
 
@@ -3008,12 +2998,12 @@ export function runPlatform(): void {
         return strategyOrder;
     }
 
-    async function runCalibrationStep(
+    const runCalibrationStep = async (
         step: CalibrationStep,
         adapter: LLMPlatform,
         conversationId: string,
         mode: CalibrationMode,
-    ): Promise<boolean> {
+    ): Promise<boolean> => {
         if (step === 'queue-flush') {
             interceptionManager.flushQueuedMessages();
             return isCalibrationCaptureSatisfied(conversationId, mode);
@@ -3025,7 +3015,7 @@ export function runPlatform(): void {
             return await captureFromRetries(adapter, conversationId, mode);
         }
         return await captureFromSnapshot(adapter, conversationId, mode);
-    }
+    };
 
     async function runCalibrationStrategySteps(
         adapter: LLMPlatform,
@@ -3042,7 +3032,7 @@ export function runPlatform(): void {
         return null;
     }
 
-    function applyCalibrationSuccess(mode: CalibrationMode, conversationId: string): void {
+    function applyCalibrationSuccess(mode: CalibrationMode, conversationId: string) {
         if (mode === 'manual') {
             markCalibrationSuccess(conversationId);
             return;
@@ -3051,7 +3041,7 @@ export function runPlatform(): void {
         refreshButtonState(conversationId);
     }
 
-    function applyCalibrationFailure(mode: CalibrationMode, conversationId: string): void {
+    function applyCalibrationFailure(mode: CalibrationMode, conversationId: string) {
         if (mode === 'manual') {
             setCalibrationStatus('error');
             refreshButtonState(conversationId);
@@ -3127,7 +3117,7 @@ export function runPlatform(): void {
         return false;
     }
 
-    function applyTitleDomFallbackIfNeeded(conversationId: string, data: ConversationData): void {
+    function applyTitleDomFallbackIfNeeded(conversationId: string, data: ConversationData) {
         if (!currentAdapter?.extractTitleFromDom || !currentAdapter.defaultTitles) {
             return;
         }
@@ -3164,14 +3154,14 @@ export function runPlatform(): void {
         data.title = titleDecision.title;
     }
 
-    function handleError(action: 'save' | 'copy', error: unknown, silent?: boolean) {
+    const handleError = (action: 'save' | 'copy', error: unknown, silent?: boolean) => {
         logger.error(`Failed to ${action} conversation:`, error);
         if (!silent) {
             alert(`Failed to ${action} conversation. Check console for details.`);
         }
-    }
+    };
 
-    function buildExportMetaForSave(conversationId: string, allowDegraded?: boolean): ExportMeta {
+    const buildExportMetaForSave = (conversationId: string, allowDegraded?: boolean): ExportMeta => {
         if (allowDegraded === true) {
             return {
                 captureSource: 'dom_snapshot_degraded',
@@ -3180,9 +3170,9 @@ export function runPlatform(): void {
             };
         }
         return getCaptureMeta(conversationId);
-    }
+    };
 
-    function emitForceSaveDegradedAudit(conversationId: string, allowDegraded?: boolean): void {
+    const emitForceSaveDegradedAudit = (conversationId: string, allowDegraded?: boolean) => {
         if (allowDegraded !== true) {
             return;
         }
@@ -3195,7 +3185,7 @@ export function runPlatform(): void {
             { conversationId },
             `force-save-degraded:${conversationId}`,
         );
-    }
+    };
 
     async function saveConversation(
         data: ConversationData,
@@ -3244,11 +3234,11 @@ export function runPlatform(): void {
      * otherwise reset lifecycle to idle when conversationId is null —
      * a legitimate state during Grok's new-conversation flow.
      */
-    function isLifecycleActiveGeneration(): boolean {
+    const isLifecycleActiveGeneration = (): boolean => {
         return lifecycleState === 'prompt-sent' || lifecycleState === 'streaming';
-    }
+    };
 
-    function injectSaveButton(): void {
+    const injectSaveButton = () => {
         const conversationId = extractConversationIdFromLocation();
         const target = currentAdapter?.getButtonInjectionTarget();
         if (!target) {
@@ -3286,9 +3276,9 @@ export function runPlatform(): void {
 
         refreshButtonState(conversationId);
         scheduleButtonRefresh(conversationId);
-    }
+    };
 
-    function handleNavigationChange(): void {
+    function handleNavigationChange() {
         if (!currentAdapter) {
             return;
         }
@@ -3307,7 +3297,7 @@ export function runPlatform(): void {
         }
     }
 
-    function disposeInFlightAttemptsOnNavigation(preserveConversationId?: string | null): void {
+    const disposeInFlightAttemptsOnNavigation = (preserveConversationId?: string | null) => {
         const disposedAttemptIds = sfe
             .getAttemptTracker()
             .disposeAllForRouteChange(Date.now(), preserveConversationId ?? undefined);
@@ -3324,13 +3314,13 @@ export function runPlatform(): void {
             clearProbeLeaseRetry(attemptId);
             emitAttemptDisposed(attemptId, 'navigation');
         }
-    }
+    };
 
-    function shouldPreserveLifecycleOnNullToConversationSwitch(newId: string | null): boolean {
+    const shouldPreserveLifecycleOnNullToConversationSwitch = (newId: string | null): boolean => {
         return !currentConversationId && isLifecycleActiveGeneration() && !!newId;
-    }
+    };
 
-    function maybeSwitchAdapterForConversation(): void {
+    const maybeSwitchAdapterForConversation = () => {
         const newAdapter = getPlatformAdapter(window.location.href);
         if (!newAdapter || !currentAdapter || newAdapter.name === currentAdapter.name) {
             return;
@@ -3341,9 +3331,9 @@ export function runPlatform(): void {
         calibrationPreferenceLoaded = false;
         calibrationPreferenceLoading = null;
         void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-    }
+    };
 
-    function applyConversationSwitchLifecycle(newId: string, isPreserved: boolean): void {
+    const applyConversationSwitchLifecycle = (newId: string, isPreserved: boolean) => {
         if (isPreserved) {
             logger.info('Conversation switch -> preserving active lifecycle', {
                 newId,
@@ -3358,16 +3348,16 @@ export function runPlatform(): void {
             previousState: lifecycleState,
         });
         setLifecycleState('idle', newId);
-    }
+    };
 
-    function schedulePostConversationSwitchCapture(newId: string): void {
+    const schedulePostConversationSwitchCapture = (newId: string) => {
         void warmFetchConversationSnapshot(newId, 'conversation-switch');
         setTimeout(() => {
             maybeRunAutoCapture(newId, 'navigation');
         }, 1800);
-    }
+    };
 
-    function handleConversationSwitch(newId: string | null): void {
+    function handleConversationSwitch(newId: string | null) {
         const isNewConversationNavigation = shouldPreserveLifecycleOnNullToConversationSwitch(newId);
         // For null→new-conversation SPA nav during active generation,
         // skip disposal so the interceptor stream monitor keeps running.
@@ -3393,11 +3383,11 @@ export function runPlatform(): void {
         schedulePostConversationSwitchCapture(newId);
     }
 
-    function updateManagers(): void {
+    function updateManagers() {
         interceptionManager.updateAdapter(currentAdapter);
     }
 
-    function resetButtonStateForNoConversation(): void {
+    const resetButtonStateForNoConversation = () => {
         setCurrentConversation(null);
         // Do not clobber active lifecycle — Grok emits lifecycle signals
         // before the conversation ID is resolved via SPA navigation.
@@ -3407,9 +3397,9 @@ export function runPlatform(): void {
         buttonManager.setSaveButtonMode('default');
         buttonManager.setActionButtonsEnabled(false);
         buttonManager.setOpacity('0.6');
-    }
+    };
 
-    function shouldDisableActionsForActiveGeneration(conversationId: string): boolean {
+    const shouldDisableActionsForActiveGeneration = (conversationId: string): boolean => {
         if (
             (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') &&
             (!currentConversationId || conversationId === currentConversationId)
@@ -3420,24 +3410,24 @@ export function runPlatform(): void {
             return true;
         }
         return false;
-    }
+    };
 
-    function applyDisabledButtonState(conversationId: string): void {
+    const applyDisabledButtonState = (conversationId: string) => {
         buttonManager.setSaveButtonMode('default');
         buttonManager.setActionButtonsEnabled(false);
         buttonManager.setOpacity('0.6');
         logButtonStateIfChanged(conversationId, false, '0.6');
-    }
+    };
 
-    function ensureCanonicalSampleForConversation(conversationId: string): void {
+    const ensureCanonicalSampleForConversation = (conversationId: string) => {
         const cached = interceptionManager.getConversation(conversationId);
         const captureMeta = getCaptureMeta(conversationId);
         if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
             ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
         }
-    }
+    };
 
-    function applyActionButtonModeFromDecision(decision: ReadinessDecision, isCanonicalReady: boolean): void {
+    const applyActionButtonModeFromDecision = (decision: ReadinessDecision, isCanonicalReady: boolean) => {
         const isDegraded = decision.mode === 'degraded_manual_only';
         buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
         if (isDegraded) {
@@ -3445,9 +3435,9 @@ export function runPlatform(): void {
             return;
         }
         buttonManager.setActionButtonsEnabled(isCanonicalReady);
-    }
+    };
 
-    function maybeLogHasDataTransition(conversationId: string, decision: ReadinessDecision, hasData: boolean): void {
+    const maybeLogHasDataTransition = (conversationId: string, decision: ReadinessDecision, hasData: boolean) => {
         const prevKey = lastButtonStateLog;
         const opacity = hasData ? '1' : '0.6';
         const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
@@ -3467,9 +3457,9 @@ export function runPlatform(): void {
             retries,
             hasPendingTimer,
         });
-    }
+    };
 
-    function applyReadyButtonState(conversationId: string, decision: ReadinessDecision): void {
+    const applyReadyButtonState = (conversationId: string, decision: ReadinessDecision) => {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         const isDegraded = decision.mode === 'degraded_manual_only';
         const hasData = isCanonicalReady || isDegraded;
@@ -3481,9 +3471,9 @@ export function runPlatform(): void {
         buttonManager.setOpacity(opacity);
         maybeLogHasDataTransition(conversationId, decision, hasData);
         logButtonStateIfChanged(conversationId, hasData, opacity);
-    }
+    };
 
-    function syncCalibrationDisplayFromDecision(decision: ReadinessDecision): void {
+    const syncCalibrationDisplayFromDecision = (decision: ReadinessDecision) => {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         if (isCanonicalReady && calibrationState !== 'capturing') {
             setCalibrationStatus('success');
@@ -3494,9 +3484,9 @@ export function runPlatform(): void {
             setCalibrationStatus('idle');
             syncCalibrationButtonDisplay();
         }
-    }
+    };
 
-    function refreshButtonState(forConversationId?: string): void {
+    function refreshButtonState(forConversationId?: string) {
         if (!buttonManager.exists() || !currentAdapter) {
             return;
         }
@@ -3516,7 +3506,7 @@ export function runPlatform(): void {
         syncCalibrationDisplayFromDecision(decision);
     }
 
-    function scheduleButtonRefresh(conversationId: string): void {
+    function scheduleButtonRefresh(conversationId: string) {
         let attempts = 0;
         const maxAttempts = 6;
         const intervalMs = 500;
@@ -3543,7 +3533,7 @@ export function runPlatform(): void {
         setTimeout(tick, intervalMs);
     }
 
-    function isChatGPTGeneratingFallback(): boolean {
+    const isChatGPTGeneratingFallback = (): boolean => {
         const stopSelectors = [
             '[data-testid="stop-button"]',
             'button[aria-label*="Stop generating"]',
@@ -3559,9 +3549,9 @@ export function runPlatform(): void {
         }
 
         return !!safeQuerySelector('[data-is-streaming="true"], [data-testid*="streaming"]');
-    }
+    };
 
-    function isPlatformGenerating(adapter: LLMPlatform | null): boolean {
+    const isPlatformGenerating = (adapter: LLMPlatform | null): boolean => {
         if (!adapter) {
             return false;
         }
@@ -3572,9 +3562,9 @@ export function runPlatform(): void {
             return isChatGPTGeneratingFallback();
         }
         return false;
-    }
+    };
 
-    function isLifecycleGenerationPhase(conversationId: string): boolean {
+    const isLifecycleGenerationPhase = (conversationId: string): boolean => {
         if (lifecycleState !== 'prompt-sent' && lifecycleState !== 'streaming') {
             return false;
         }
@@ -3582,7 +3572,7 @@ export function runPlatform(): void {
             return true;
         }
         return currentConversationId === conversationId;
-    }
+    };
 
     function shouldBlockActionsForGeneration(conversationId: string): boolean {
         if (isLifecycleGenerationPhase(conversationId)) {
@@ -3594,7 +3584,7 @@ export function runPlatform(): void {
         return isPlatformGenerating(currentAdapter);
     }
 
-    function shouldLogCanonicalReadyDecision(conversationId: string): boolean {
+    const shouldLogCanonicalReadyDecision = (conversationId: string): boolean => {
         const now = Date.now();
         const lastLoggedAt = lastCanonicalReadyLogAtByConversation.get(conversationId);
         if (lastLoggedAt !== undefined && now - lastLoggedAt < CANONICAL_READY_LOG_TTL_MS) {
@@ -3602,7 +3592,7 @@ export function runPlatform(): void {
         }
         setBoundedMapValue(lastCanonicalReadyLogAtByConversation, conversationId, now, MAX_CONVERSATION_ATTEMPTS);
         return true;
-    }
+    };
 
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
         const captureMeta = getCaptureMeta(conversationId);
@@ -3669,12 +3659,12 @@ export function runPlatform(): void {
         return null;
     }
 
-    function resolveActiveConversationId(hintedConversationId?: string): string | null {
+    const resolveActiveConversationId = (hintedConversationId?: string): string | null => {
         if (hintedConversationId) {
             return hintedConversationId;
         }
         return extractConversationIdFromLocation();
-    }
+    };
 
     function getCaptureMeta(conversationId: string): ExportMeta {
         const stored = captureMetaByConversation.get(conversationId);
@@ -3688,19 +3678,19 @@ export function runPlatform(): void {
         };
     }
 
-    function shouldApplyChatGptGenerationGuard(source: 'network' | 'dom', conversationId: string): boolean {
+    const shouldApplyChatGptGenerationGuard = (source: 'network' | 'dom', conversationId: string): boolean => {
         const shouldApplyNetworkGenerationGuard = currentAdapter?.name === 'ChatGPT';
         if (source !== 'network' || !shouldApplyNetworkGenerationGuard) {
             return false;
         }
         return shouldBlockActionsForGeneration(conversationId);
-    }
+    };
 
-    function resolveFinishedSignalDebounce(
+    const resolveFinishedSignalDebounce = (
         conversationId: string,
         source: 'network' | 'dom',
         attemptId: string | null,
-    ): { minIntervalMs: number; effectiveAttemptId: string } {
+    ): { minIntervalMs: number; effectiveAttemptId: string } => {
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
         const effectiveAttemptId = attemptId ?? '';
         const isNewAttemptInSameConversation =
@@ -3712,13 +3702,13 @@ export function runPlatform(): void {
             minIntervalMs: source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500,
             effectiveAttemptId,
         };
-    }
+    };
 
-    function shouldProcessFinishedSignal(
+    const shouldProcessFinishedSignal = (
         conversationId: string | null,
         source: 'network' | 'dom',
         attemptId: string | null,
-    ): boolean {
+    ): boolean => {
         if (!conversationId) {
             logger.info('Finished signal ignored: missing conversation context', { source });
             return false;
@@ -3746,21 +3736,21 @@ export function runPlatform(): void {
             lastResponseFinishedAttemptId = effectiveAttemptId;
         }
         return true;
-    }
+    };
 
-    function shouldSkipAutoCapture(conversationId: string): boolean {
+    const shouldSkipAutoCapture = (conversationId: string): boolean => {
         return (
             !currentAdapter ||
             calibrationState !== 'idle' ||
             isConversationReadyForActions(conversationId, { includeDegraded: true })
         );
-    }
+    };
 
-    function scheduleDeferredAutoCapture(
+    const scheduleDeferredAutoCapture = (
         attemptKey: string,
         conversationId: string,
         reason: 'response-finished' | 'navigation',
-    ): void {
+    ) => {
         if (autoCaptureRetryTimers.has(attemptKey)) {
             return;
         }
@@ -3777,9 +3767,9 @@ export function runPlatform(): void {
             maybeRunAutoCapture(conversationId, reason);
         }, 4000);
         autoCaptureRetryTimers.set(attemptKey, timerId);
-    }
+    };
 
-    function shouldThrottleAutoCapture(attemptKey: string): boolean {
+    const shouldThrottleAutoCapture = (attemptKey: string): boolean => {
         const now = Date.now();
         const lastAttempt = autoCaptureAttempts.get(attemptKey) ?? 0;
         if (now - lastAttempt < 12000) {
@@ -3787,9 +3777,9 @@ export function runPlatform(): void {
         }
         setBoundedMapValue(autoCaptureAttempts, attemptKey, now, MAX_AUTOCAPTURE_KEYS);
         return false;
-    }
+    };
 
-    function runAutoCaptureFromPreference(conversationId: string, reason: 'response-finished' | 'navigation'): void {
+    const runAutoCaptureFromPreference = (conversationId: string, reason: 'response-finished' | 'navigation') => {
         const run = () => {
             if (shouldSkipAutoCapture(conversationId)) {
                 return;
@@ -3814,9 +3804,9 @@ export function runPlatform(): void {
             return;
         }
         void ensureCalibrationPreferenceLoaded(currentAdapter.name).then(run);
-    }
+    };
 
-    function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation'): void {
+    function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation') {
         if (shouldSkipAutoCapture(conversationId)) {
             return;
         }
@@ -3844,17 +3834,17 @@ export function runPlatform(): void {
         runAutoCaptureFromPreference(conversationId, reason);
     }
 
-    function applyCompletedLifecycleState(conversationId: string, attemptId: string): void {
+    const applyCompletedLifecycleState = (conversationId: string, attemptId: string) => {
         lifecycleAttemptId = attemptId;
         lifecycleConversationId = conversationId;
         setLifecycleState('completed', conversationId);
-    }
+    };
 
-    function shouldPromoteGrokFromCanonicalCapture(
+    const shouldPromoteGrokFromCanonicalCapture = (
         source: 'network' | 'dom',
         cachedReady: boolean,
         lifecycle: LifecycleUiState,
-    ): boolean {
+    ): boolean => {
         if (source !== 'network' || currentAdapter?.name !== 'Grok' || !cachedReady) {
             return false;
         }
@@ -3862,9 +3852,9 @@ export function runPlatform(): void {
         // navigation before conversation ID resolution, the lifecycle resets to idle.
         // The canonical capture arriving on a fresh attempt is the only remaining signal.
         return lifecycle === 'idle' || lifecycle === 'prompt-sent' || lifecycle === 'streaming';
-    }
+    };
 
-    function handleFinishedConversation(conversationId: string, attemptId: string, source: 'network' | 'dom'): void {
+    const handleFinishedConversation = (conversationId: string, attemptId: string, source: 'network' | 'dom') => {
         // When the SSE stream didn't deliver a "completed" lifecycle phase
         // (e.g. tab was backgrounded and stream reader stalled), the DOM
         // completion watcher is the only signal. In that case there may be
@@ -3892,9 +3882,9 @@ export function runPlatform(): void {
         refreshButtonState(conversationId);
         scheduleButtonRefresh(conversationId);
         maybeRunAutoCapture(conversationId, 'response-finished');
-    }
+    };
 
-    function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
+    function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string) {
         const conversationId = resolveActiveConversationId(hintedConversationId);
         const peekedAttemptId = conversationId ? peekAttemptId(conversationId) : null;
         if (!shouldProcessFinishedSignal(conversationId, source, peekedAttemptId)) {
@@ -3928,7 +3918,7 @@ export function runPlatform(): void {
         }
     }
 
-    function registerCompletionWatcher(): () => void {
+    const registerCompletionWatcher = (): (() => void) => {
         if (currentAdapter?.name !== 'ChatGPT') {
             return () => {};
         }
@@ -3961,13 +3951,13 @@ export function runPlatform(): void {
             observer.disconnect();
             clearInterval(intervalId);
         };
-    }
+    };
 
-    function isSameWindowOrigin(event: MessageEvent): boolean {
+    const isSameWindowOrigin = (event: MessageEvent): boolean => {
         return event.source === window && event.origin === window.location.origin;
-    }
+    };
 
-    function handleTitleResolvedMessage(message: unknown): boolean {
+    const handleTitleResolvedMessage = (message: unknown): boolean => {
         if (
             (message as TitleResolvedMessage | undefined)?.type !== 'BLACKIYA_TITLE_RESOLVED' ||
             typeof (message as TitleResolvedMessage).conversationId !== 'string' ||
@@ -4010,9 +4000,9 @@ export function runPlatform(): void {
             source: streamDecision.source,
         });
         return true;
-    }
+    };
 
-    function handleResponseFinishedMessage(message: unknown): boolean {
+    const handleResponseFinishedMessage = (message: unknown): boolean => {
         if (
             (message as ResponseFinishedMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_FINISHED' ||
             typeof (message as ResponseFinishedMessage).attemptId !== 'string'
@@ -4039,9 +4029,9 @@ export function runPlatform(): void {
         }
         handleResponseFinished('network', resolvedConversationId);
         return true;
-    }
+    };
 
-    function attachFinishedAttemptContext(conversationId: string, attemptId: string): void {
+    function attachFinishedAttemptContext(conversationId: string, attemptId: string) {
         setActiveAttempt(attemptId);
         bindAttempt(conversationId, attemptId);
     }
@@ -4070,11 +4060,11 @@ export function runPlatform(): void {
         return true;
     }
 
-    function ingestSfeLifecycleFromWirePhase(
+    const ingestSfeLifecycleFromWirePhase = (
         phase: ResponseLifecycleMessage['phase'],
         attemptId: string,
         conversationId?: string | null,
-    ): void {
+    ) => {
         if (phase === 'prompt-sent') {
             ingestSfeLifecycle('prompt_sent', attemptId, conversationId ?? null);
             return;
@@ -4090,15 +4080,15 @@ export function runPlatform(): void {
         if (phase === 'terminated') {
             ingestSfeLifecycle('terminated_partial', attemptId, conversationId ?? null);
         }
-    }
+    };
 
-    function applyLifecyclePhaseForConversation(
+    const applyLifecyclePhaseForConversation = (
         phase: ResponseLifecycleMessage['phase'],
         platform: string,
         attemptId: string,
         conversationId: string,
         source: 'direct' | 'replayed',
-    ): void {
+    ) => {
         logger.info('Lifecycle phase', {
             platform,
             phase,
@@ -4119,14 +4109,14 @@ export function runPlatform(): void {
         }
 
         applyCompletedLifecyclePhase(conversationId, attemptId);
-    }
+    };
 
-    function shouldBlockLifecycleRegression(
+    const shouldBlockLifecycleRegression = (
         phase: 'prompt-sent' | 'streaming',
         attemptId: string,
         conversationId: string,
         source: 'direct' | 'replayed',
-    ): boolean {
+    ): boolean => {
         if (
             lifecycleState !== 'completed' ||
             lifecycleConversationId !== conversationId ||
@@ -4142,14 +4132,14 @@ export function runPlatform(): void {
             source,
         });
         return true;
-    }
+    };
 
     function applyActiveLifecyclePhase(
         phase: 'prompt-sent' | 'streaming',
         attemptId: string,
         conversationId: string,
         source: 'direct' | 'replayed',
-    ): void {
+    ) {
         if (shouldBlockLifecycleRegression(phase, attemptId, conversationId, source)) {
             return;
         }
@@ -4162,7 +4152,7 @@ export function runPlatform(): void {
         setLifecycleState(phase, conversationId);
     }
 
-    function applyCompletedLifecyclePhase(conversationId: string, attemptId: string): void {
+    function applyCompletedLifecyclePhase(conversationId: string, attemptId: string) {
         lifecycleAttemptId = attemptId;
         lifecycleConversationId = conversationId;
         setLifecycleState('completed', conversationId);
@@ -4183,22 +4173,24 @@ export function runPlatform(): void {
         void runStreamDoneProbe(conversationId, attemptId);
     }
 
-    function replayPendingLifecycleSignal(attemptId: string, conversationId: string): void {
+    const replayPendingLifecycleSignal = (attemptId: string, conversationId: string) => {
         const pending = pendingLifecycleByAttempt.get(attemptId);
         if (!pending) {
             return;
         }
         pendingLifecycleByAttempt.delete(attemptId);
         applyLifecyclePhaseForConversation(pending.phase, pending.platform, attemptId, conversationId, 'replayed');
-    }
+    };
 
-    function parseLifecycleMessage(message: unknown): {
+    const parseLifecycleMessage = (
+        message: unknown,
+    ): {
         phase: 'prompt-sent' | 'streaming' | 'completed' | 'terminated';
         platform: string;
         conversationId?: string;
         attemptId: string;
         originalAttemptId: string;
-    } | null {
+    } | null => {
         if (
             (message as ResponseLifecycleMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_LIFECYCLE' ||
             typeof (message as ResponseLifecycleMessage).attemptId !== 'string'
@@ -4219,14 +4211,14 @@ export function runPlatform(): void {
             attemptId: resolveAliasedAttemptId(typed.attemptId),
             originalAttemptId: typed.attemptId,
         };
-    }
+    };
 
-    function handleResolvedLifecycleConversation(
+    const handleResolvedLifecycleConversation = (
         phase: 'prompt-sent' | 'streaming' | 'completed' | 'terminated',
         platform: string,
         attemptId: string,
         conversationId: string,
-    ): void {
+    ) => {
         if (phase === 'prompt-sent') {
             bindAttempt(conversationId, attemptId);
         }
@@ -4239,9 +4231,9 @@ export function runPlatform(): void {
         bindAttempt(conversationId, attemptId);
         setActiveAttempt(attemptId);
         applyLifecyclePhaseForConversation(phase, platform, attemptId, conversationId, 'direct');
-    }
+    };
 
-    function handleLifecycleMessage(message: unknown): boolean {
+    const handleLifecycleMessage = (message: unknown): boolean => {
         const parsed = parseLifecycleMessage(message);
         if (!parsed) {
             return false;
@@ -4260,7 +4252,7 @@ export function runPlatform(): void {
         handleResolvedLifecycleConversation(parsed.phase, parsed.platform, parsed.attemptId, parsed.conversationId);
 
         return true;
-    }
+    };
 
     function isSupportedLifecyclePhase(
         phase: ResponseLifecycleMessage['phase'],
@@ -4273,7 +4265,7 @@ export function runPlatform(): void {
         phase: 'prompt-sent' | 'streaming' | 'completed' | 'terminated',
         platform: string,
         originalAttemptId: string,
-    ): void {
+    ) {
         cachePendingLifecycleSignal(attemptId, phase, platform);
         ingestSfeLifecycleFromWirePhase(phase, attemptId, null);
         logger.info('Lifecycle pending conversation resolution', {
@@ -4291,7 +4283,7 @@ export function runPlatform(): void {
         }
     }
 
-    function parseStreamDeltaPayload(message: unknown): StreamDeltaMessage | null {
+    const parseStreamDeltaPayload = (message: unknown): StreamDeltaMessage | null => {
         const candidate = message as StreamDeltaMessage | undefined;
         if (candidate?.type !== 'BLACKIYA_STREAM_DELTA' || typeof candidate.attemptId !== 'string') {
             return null;
@@ -4300,24 +4292,24 @@ export function runPlatform(): void {
             return null;
         }
         return candidate;
-    }
+    };
 
-    function resolveDeltaConversationId(typed: StreamDeltaMessage): string | null {
+    const resolveDeltaConversationId = (typed: StreamDeltaMessage): string | null => {
         if (typeof typed.conversationId === 'string' && typed.conversationId.length > 0) {
             return typed.conversationId;
         }
         return currentConversationId;
-    }
+    };
 
-    function handlePendingConversationDelta(attemptId: string, text: string): void {
+    const handlePendingConversationDelta = (attemptId: string, text: string) => {
         if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
             lifecycleAttemptId = attemptId;
             setLifecycleState('streaming');
         }
         appendPendingStreamProbeText(attemptId, text);
-    }
+    };
 
-    function handleStreamDeltaMessage(message: unknown): boolean {
+    const handleStreamDeltaMessage = (message: unknown): boolean => {
         const typed = parseStreamDeltaPayload(message);
         if (!typed) {
             return false;
@@ -4340,9 +4332,9 @@ export function runPlatform(): void {
         bindAttempt(conversationId, attemptId);
         appendLiveStreamProbeText(conversationId, text);
         return true;
-    }
+    };
 
-    function handleStreamDumpFrameMessage(message: unknown): boolean {
+    const handleStreamDumpFrameMessage = (message: unknown): boolean => {
         if ((message as StreamDumpFrameMessage | undefined)?.type !== 'BLACKIYA_STREAM_DUMP_FRAME') {
             return false;
         }
@@ -4377,9 +4369,9 @@ export function runPlatform(): void {
         });
 
         return true;
-    }
+    };
 
-    function handleConversationIdResolvedMessage(message: unknown): boolean {
+    const handleConversationIdResolvedMessage = (message: unknown): boolean => {
         if ((message as ConversationIdResolvedMessage | undefined)?.type !== 'BLACKIYA_CONVERSATION_ID_RESOLVED') {
             return false;
         }
@@ -4403,9 +4395,9 @@ export function runPlatform(): void {
         replayPendingLifecycleSignal(canonicalAttemptId, typed.conversationId);
         refreshButtonState(typed.conversationId);
         return true;
-    }
+    };
 
-    function handleAttemptDisposedMessage(message: unknown): boolean {
+    const handleAttemptDisposedMessage = (message: unknown): boolean => {
         if ((message as AttemptDisposedMessage | undefined)?.type !== 'BLACKIYA_ATTEMPT_DISPOSED') {
             return false;
         }
@@ -4431,13 +4423,13 @@ export function runPlatform(): void {
             setActiveAttempt(null);
         }
         return true;
-    }
+    };
 
-    function postWindowBridgeResponse(
+    const postWindowBridgeResponse = (
         requestId: string,
         success: boolean,
         options?: { data?: unknown; error?: string },
-    ): void {
+    ) => {
         window.postMessage(
             stampToken({
                 type: 'BLACKIYA_GET_JSON_RESPONSE',
@@ -4448,9 +4440,9 @@ export function runPlatform(): void {
             }),
             window.location.origin,
         );
-    }
+    };
 
-    function handleJsonBridgeRequest(message: unknown): void {
+    const handleJsonBridgeRequest = (message: unknown) => {
         const typedMessage = (message as { type?: unknown; requestId?: unknown; format?: unknown } | null) ?? null;
         if (typedMessage?.type !== 'BLACKIYA_GET_JSON_REQUEST') {
             return;
@@ -4475,9 +4467,9 @@ export function runPlatform(): void {
                 logger.error('Failed to handle window get request:', error);
                 postWindowBridgeResponse(requestId, false, { error: 'INTERNAL_ERROR' });
             });
-    }
+    };
 
-    function dispatchWindowBridgeMessage(message: unknown): void {
+    const dispatchWindowBridgeMessage = (message: unknown) => {
         const handled = dispatchRunnerMessage(message, [
             handleAttemptDisposedMessage,
             handleConversationIdResolvedMessage,
@@ -4490,9 +4482,9 @@ export function runPlatform(): void {
         if (!handled) {
             handleJsonBridgeRequest(message);
         }
-    }
+    };
 
-    function registerWindowBridge(): () => void {
+    const registerWindowBridge = (): (() => void) => {
         const handler = (event: MessageEvent) => {
             if (!isSameWindowOrigin(event)) {
                 return;
@@ -4513,9 +4505,9 @@ export function runPlatform(): void {
 
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }
+    };
 
-    function registerButtonHealthCheck(): () => void {
+    const registerButtonHealthCheck = (): (() => void) => {
         const healthCheckIntervalMs =
             typeof (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS === 'number' &&
             Number.isFinite((window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS) &&
@@ -4542,9 +4534,9 @@ export function runPlatform(): void {
         }, healthCheckIntervalMs);
 
         return () => clearInterval(intervalId);
-    }
+    };
 
-    function logButtonStateIfChanged(conversationId: string, hasData: boolean, opacity: string): void {
+    function logButtonStateIfChanged(conversationId: string, hasData: boolean, opacity: string) {
         const key = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
         if (lastButtonStateLog === key) {
             return;
@@ -4585,7 +4577,7 @@ export function runPlatform(): void {
 
     type StorageChangeMap = Parameters<Parameters<typeof browser.storage.onChanged.addListener>[0]>[0];
 
-    const handleDiagnosticsStreamDumpSettingChange = (changes: StorageChangeMap): void => {
+    const handleDiagnosticsStreamDumpSettingChange = (changes: StorageChangeMap) => {
         if (!changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
             return;
         }
@@ -4593,7 +4585,7 @@ export function runPlatform(): void {
         emitStreamDumpConfig();
     };
 
-    const handleStreamProbeVisibilitySettingChange = (changes: StorageChangeMap): void => {
+    const handleStreamProbeVisibilitySettingChange = (changes: StorageChangeMap) => {
         if (!changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]) {
             return;
         }
@@ -4603,7 +4595,7 @@ export function runPlatform(): void {
         }
     };
 
-    const handleSfeSettingChange = (changes: StorageChangeMap): void => {
+    const handleSfeSettingChange = (changes: StorageChangeMap) => {
         if (!changes[STORAGE_KEYS.SFE_ENABLED]) {
             return;
         }
@@ -4611,7 +4603,7 @@ export function runPlatform(): void {
         refreshButtonState(currentConversationId ?? undefined);
     };
 
-    const handleCalibrationProfilesSettingChange = (changes: StorageChangeMap): void => {
+    const handleCalibrationProfilesSettingChange = (changes: StorageChangeMap) => {
         if (!changes[STORAGE_KEYS.CALIBRATION_PROFILES] || !currentAdapter) {
             return;
         }
@@ -4718,7 +4710,7 @@ export function runPlatform(): void {
     let cleanedUp = false;
     let beforeUnloadHandler: (() => void) | null = null;
 
-    function disposeTeardownAttempts(): void {
+    const disposeTeardownAttempts = () => {
         const disposed = sfe.disposeAll();
         for (const attemptId of disposed) {
             cancelStreamDoneProbe(attemptId, 'teardown');
@@ -4726,9 +4718,9 @@ export function runPlatform(): void {
             clearProbeLeaseRetry(attemptId);
             emitAttemptDisposed(attemptId, 'teardown');
         }
-    }
+    };
 
-    function clearRunnerRetryTimers(): void {
+    const clearRunnerRetryTimers = () => {
         for (const timerId of autoCaptureRetryTimers.values()) {
             clearTimeout(timerId);
         }
@@ -4745,9 +4737,9 @@ export function runPlatform(): void {
             clearTimeout(timerId);
         }
         probeLeaseRetryTimers.clear();
-    }
+    };
 
-    function cancelAllStreamProbeControllers(): void {
+    const cancelAllStreamProbeControllers = () => {
         for (const controller of streamProbeControllers.values()) {
             try {
                 controller.abort();
@@ -4756,31 +4748,31 @@ export function runPlatform(): void {
             }
         }
         streamProbeControllers.clear();
-    }
+    };
 
-    function clearStartupRetryTimeouts(): void {
+    const clearStartupRetryTimeouts = () => {
         for (const timeoutId of retryTimeoutIds) {
             clearTimeout(timeoutId);
         }
         retryTimeoutIds.length = 0;
-    }
+    };
 
-    function detachBeforeUnload(): void {
+    const detachBeforeUnload = () => {
         if (!beforeUnloadHandler) {
             return;
         }
         window.removeEventListener('beforeunload', beforeUnloadHandler);
         beforeUnloadHandler = null;
-    }
+    };
 
-    function clearRunnerControlHandle(): void {
+    const clearRunnerControlHandle = () => {
         const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
             | RunnerControl
             | undefined;
         if (globalControl === runnerControl) {
             delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
         }
-    }
+    };
 
     const cleanupRuntime = () => {
         if (cleanedUp) {
@@ -4812,4 +4804,4 @@ export function runPlatform(): void {
     beforeUnloadHandler = cleanupRuntime;
     window.addEventListener('beforeunload', cleanupRuntime);
     runnerControl.cleanup = cleanupRuntime;
-}
+};

@@ -23,7 +23,7 @@ export class ButtonManager {
         this.injectStyles();
     }
 
-    public inject(target: HTMLElement, conversationId: string | null): void {
+    public inject(target: HTMLElement, conversationId: string | null) {
         if (this.container && document.contains(this.container)) {
             this.cleanupDuplicateControlIds(this.container);
             return;
@@ -57,7 +57,7 @@ export class ButtonManager {
         }
     }
 
-    public remove(): void {
+    public remove() {
         this.disconnectDedupeObserver();
         if (this.container?.parentElement) {
             this.container.parentElement.removeChild(this.container);
@@ -72,14 +72,14 @@ export class ButtonManager {
         return !!this.container && document.contains(this.container);
     }
 
-    public setReadinessSource(source: 'legacy' | 'sfe'): void {
+    public setReadinessSource(source: 'legacy' | 'sfe') {
         if (!this.container) {
             return;
         }
         this.container.setAttribute('data-readiness-source', source);
     }
 
-    public setLoading(loading: boolean, _action: 'save'): void {
+    public setLoading(loading: boolean, _action: 'save') {
         if (!this.saveStartButton) {
             return;
         }
@@ -99,19 +99,19 @@ export class ButtonManager {
         }
     }
 
-    public setOpacity(opacity: string): void {
+    public setOpacity(opacity: string) {
         if (this.saveStartButton) {
             this.saveStartButton.style.opacity = opacity;
         }
     }
 
-    public setActionButtonsEnabled(enabled: boolean): void {
+    public setActionButtonsEnabled(enabled: boolean) {
         if (this.saveStartButton) {
             this.saveStartButton.disabled = !enabled;
         }
     }
 
-    public setButtonEnabled(action: 'save', enabled: boolean): void {
+    public setButtonEnabled(action: 'save', enabled: boolean) {
         const target = action === 'save' ? this.saveStartButton : null;
         if (!target) {
             return;
@@ -119,7 +119,7 @@ export class ButtonManager {
         target.disabled = !enabled;
     }
 
-    public setSaveButtonMode(mode: 'default' | 'force-degraded'): void {
+    public setSaveButtonMode(mode: 'default' | 'force-degraded') {
         this.saveButtonMode = mode;
         this.renderDefaultButton('save');
     }
@@ -127,7 +127,7 @@ export class ButtonManager {
     public setCalibrationState(
         state: 'idle' | 'waiting' | 'capturing' | 'success' | 'error',
         options?: { timestampLabel?: string | null },
-    ): void {
+    ) {
         if (!this.calibrateButton) {
             return;
         }
@@ -162,7 +162,7 @@ export class ButtonManager {
         }
     }
 
-    public setLifecycleState(state: 'idle' | 'prompt-sent' | 'streaming' | 'completed'): void {
+    public setLifecycleState(state: 'idle' | 'prompt-sent' | 'streaming' | 'completed') {
         if (!this.lifecycleBadge) {
             return;
         }
@@ -237,7 +237,7 @@ export class ButtonManager {
         return null;
     }
 
-    private detachNode(node: HTMLElement): void {
+    private detachNode(node: HTMLElement) {
         const parent = node.parentNode;
         if (parent) {
             parent.removeChild(node);
@@ -284,7 +284,9 @@ export class ButtonManager {
             return this.collectElements(root).filter((element) => element.id === id);
         }
         if (selector === '[data-blackiya-controls="1"]') {
-            return this.collectElements(root).filter((element) => element.getAttribute('data-blackiya-controls') === '1');
+            return this.collectElements(root).filter(
+                (element) => element.getAttribute('data-blackiya-controls') === '1',
+            );
         }
         return [];
     }
@@ -375,7 +377,7 @@ export class ButtonManager {
         return keep;
     }
 
-    private removeDuplicateContainers(activeContainer: HTMLElement): void {
+    private removeDuplicateContainers(activeContainer: HTMLElement) {
         const allContainers = this.queryControlContainersAcrossRoots();
         for (const container of allContainers) {
             if (container === activeContainer) {
@@ -385,7 +387,7 @@ export class ButtonManager {
         }
     }
 
-    private removeDuplicateControlById(id: string, keep: Set<HTMLElement>, activeContainer: HTMLElement): void {
+    private removeDuplicateControlById(id: string, keep: Set<HTMLElement>, activeContainer: HTMLElement) {
         const matches = this.queryAllAcrossRoots(`#${id}`);
         for (const match of matches) {
             if (activeContainer.contains(match)) {
@@ -407,7 +409,7 @@ export class ButtonManager {
         }
     }
 
-    private cleanupOrphanedControls(): void {
+    private cleanupOrphanedControls() {
         // V2.1-034 hardening: extension reloads can leave stale controls with
         // older DOM shapes. Remove all known control roots before injecting.
         const staleContainers = this.queryControlContainersAcrossRoots();
@@ -426,7 +428,7 @@ export class ButtonManager {
         }
     }
 
-    private cleanupDuplicateControlIds(activeContainer: HTMLElement): void {
+    private cleanupDuplicateControlIds(activeContainer: HTMLElement) {
         const keep = this.collectPrimaryControls(activeContainer);
         this.removeDuplicateContainers(activeContainer);
         for (const id of this.controlIds) {
@@ -434,7 +436,7 @@ export class ButtonManager {
         }
     }
 
-    private ensureDedupeObserver(): void {
+    private ensureDedupeObserver() {
         if (this.dedupeObserver || !this.container || !document.body || typeof MutationObserver === 'undefined') {
             return;
         }
@@ -451,7 +453,7 @@ export class ButtonManager {
         });
     }
 
-    private disconnectDedupeObserver(): void {
+    private disconnectDedupeObserver() {
         if (!this.dedupeObserver) {
             return;
         }
@@ -509,7 +511,7 @@ export class ButtonManager {
         return button;
     }
 
-    private updateContainerStyles(): void {
+    private updateContainerStyles() {
         if (!this.container) {
             return;
         }
@@ -568,7 +570,7 @@ export class ButtonManager {
         `;
     }
 
-    public setSuccess(_action: 'save'): void {
+    public setSuccess(_action: 'save') {
         const activeBtn = this.saveStartButton;
         if (!activeBtn) {
             return;
@@ -591,7 +593,7 @@ export class ButtonManager {
         return '💾';
     }
 
-    private renderDefaultButton(action: 'save'): void {
+    private renderDefaultButton(action: 'save') {
         const button = this.saveStartButton;
         if (!button) {
             return;
@@ -607,7 +609,7 @@ export class ButtonManager {
         button.setAttribute('aria-label', button.title);
     }
 
-    private injectStyles(): void {
+    private injectStyles() {
         const styleId = 'blackiya-button-styles';
         if (document.getElementById(styleId)) {
             return;

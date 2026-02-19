@@ -1,8 +1,8 @@
-export function normalizeHashInput(value: string): string {
+export const normalizeHashInput = (value: string): string => {
     return value.trim().normalize('NFC');
-}
+};
 
-export function hashText(value: string): string {
+export const hashText = (value: string): string => {
     const normalized = normalizeHashInput(value);
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
@@ -10,4 +10,4 @@ export function hashText(value: string): string {
         hash |= 0;
     }
     return `${hash}`;
-}
+};

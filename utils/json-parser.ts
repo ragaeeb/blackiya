@@ -13,7 +13,7 @@
  * @param startFrom - Optional index to start searching from
  * @returns The extracted JSON string or null if not found
  */
-export function extractBalancedJsonArray(data: string, startFrom = 0): string | null {
+export const extractBalancedJsonArray = (data: string, startFrom = 0): string | null => {
     const startBracket = data.indexOf('[', startFrom);
     if (startBracket === -1) {
         return null;
@@ -25,13 +25,13 @@ export function extractBalancedJsonArray(data: string, startFrom = 0): string | 
     }
 
     return null;
-}
+};
 
-interface ParserState {
+type ParserState = {
     balance: number;
     insideString: boolean;
     isEscaped: boolean;
-}
+};
 
 function scanForClosingBracket(data: string, start: number): number {
     const state: ParserState = { balance: 0, insideString: false, isEscaped: false };

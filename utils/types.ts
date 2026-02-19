@@ -7,16 +7,16 @@
 /**
  * Author information for a message in a ChatGPT conversation
  */
-export interface Author {
+export type Author = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     name: string | null;
     metadata: Record<string, unknown>;
-}
+};
 
 /**
  * Content of a message - can be text, thoughts, or other content types
  */
-export interface MessageContent {
+export type MessageContent = {
     content_type: 'text' | 'thoughts' | 'reasoning_recap' | 'code' | 'execution_output';
     parts?: string[];
     thoughts?: Array<{
@@ -26,12 +26,12 @@ export interface MessageContent {
         finished: boolean;
     }>;
     content?: string;
-}
+};
 
 /**
  * A single message in a conversation
  */
-export interface Message {
+export type Message = {
     id: string;
     author: Author;
     create_time: number | null;
@@ -43,22 +43,22 @@ export interface Message {
     metadata: Record<string, unknown>;
     recipient: string;
     channel: string | null;
-}
+};
 
 /**
  * A node in the conversation message tree
  */
-export interface MessageNode {
+export type MessageNode = {
     id: string;
     message: Message | null;
     parent: string | null;
     children: string[];
-}
+};
 
 /**
  * Full conversation data structure from ChatGPT API
  */
-export interface ConversationData {
+export type ConversationData = {
     title: string;
     create_time: number;
     update_time: number;
@@ -73,4 +73,4 @@ export interface ConversationData {
     default_model_slug: string;
     safe_urls: string[];
     blocked_urls: string[];
-}
+};

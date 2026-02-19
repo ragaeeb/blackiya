@@ -78,7 +78,7 @@ const extractConversationIdFromEvent = (event: Record<string, unknown>): string 
     return null;
 };
 
-const updateMessageTiming = (message: Message, stats: { create: number; update: number }): void => {
+const updateMessageTiming = (message: Message, stats: { create: number; update: number }) => {
     const messageCreate = normalizeNumber(message.create_time);
     const messageUpdate = normalizeNumber(message.update_time);
     if (messageCreate !== null) {

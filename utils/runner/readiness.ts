@@ -10,7 +10,7 @@ type SfeConversationResolution = {
     blockingConditions: string[];
 } | null;
 
-export interface ResolveRunnerReadinessInput {
+export type ResolveRunnerReadinessInput = {
     conversationId: string;
     data: ConversationData | null;
     sfeEnabled: boolean;
@@ -25,22 +25,22 @@ export interface ResolveRunnerReadinessInput {
     shouldLogCanonicalReadyDecision: (conversationId: string) => boolean;
     clearCanonicalReadyLogStamp: (conversationId: string) => void;
     loggerDebug?: LoggerDebug;
-}
+};
 
-function createMissingDataReadinessDecision(): ReadinessDecision {
+const createMissingDataReadinessDecision = (): ReadinessDecision => {
     return {
         ready: false,
         mode: 'awaiting_stabilization',
         reason: 'no_canonical_data',
     };
-}
+};
 
-function createLegacyReadinessDecision(
+const createLegacyReadinessDecision = (
     conversationId: string,
     readiness: PlatformReadiness,
     captureMeta: ExportMeta,
     loggerDebug?: LoggerDebug,
-): ReadinessDecision {
+): ReadinessDecision => {
     const ready = readiness.ready;
     if (ready) {
         loggerDebug?.('Readiness decision: SFE disabled, legacy ready', {
@@ -54,12 +54,12 @@ function createLegacyReadinessDecision(
         mode: ready ? 'canonical_ready' : 'awaiting_stabilization',
         reason: ready ? 'legacy_ready' : readiness.reason,
     };
-}
+};
 
-function createTimeoutReadinessDecision(
+const createTimeoutReadinessDecision = (
     input: ResolveRunnerReadinessInput,
     attemptId: string,
-): ReadinessDecision | null {
+): ReadinessDecision | null => {
     const hasTimeout =
         input.sfeResolution?.blockingConditions.includes('stabilization_timeout') === true ||
         (input.captureMeta.fidelity === 'degraded' && input.hasCanonicalStabilizationTimedOut(attemptId));
@@ -77,9 +77,9 @@ function createTimeoutReadinessDecision(
         mode: 'degraded_manual_only',
         reason: 'stabilization_timeout',
     };
-}
+};
 
-export function resolveRunnerReadinessDecision(input: ResolveRunnerReadinessInput): ReadinessDecision {
+export const resolveRunnerReadinessDecision = (input: ResolveRunnerReadinessInput): ReadinessDecision => {
     if (!input.data) {
         input.clearCanonicalReadyLogStamp(input.conversationId);
         return createMissingDataReadinessDecision();
@@ -132,4 +132,4 @@ export function resolveRunnerReadinessDecision(input: ResolveRunnerReadinessInpu
         mode: 'awaiting_stabilization',
         reason: input.sfeResolution?.reason ?? readiness.reason,
     };
-}
+};

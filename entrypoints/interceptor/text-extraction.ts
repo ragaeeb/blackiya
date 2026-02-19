@@ -25,20 +25,20 @@ const isLikelyReadableToken = (value: string): boolean => {
 
 const isCollectionLimitReached = (depth: number, out: string[]): boolean => depth > 8 || out.length > 80;
 
-const collectStringValue = (value: string, out: string[]): void => {
+const collectStringValue = (value: string, out: string[]) => {
     if (!isLikelyReadableToken(value)) {
         return;
     }
     out.push(value.trim());
 };
 
-const collectArrayValues = (items: unknown[], out: string[], depth: number): void => {
+const collectArrayValues = (items: unknown[], out: string[], depth: number) => {
     for (const child of items) {
         collectLikelyTextValues(child, out, depth + 1);
     }
 };
 
-const collectPreferredObjectValues = (obj: Record<string, unknown>, out: string[], depth: number): void => {
+const collectPreferredObjectValues = (obj: Record<string, unknown>, out: string[], depth: number) => {
     for (const key of PREFERRED_TEXT_KEYS) {
         if (key in obj) {
             collectLikelyTextValues(obj[key], out, depth + 1);
@@ -46,7 +46,7 @@ const collectPreferredObjectValues = (obj: Record<string, unknown>, out: string[
     }
 };
 
-const collectFallbackObjectValues = (obj: Record<string, unknown>, out: string[], depth: number): void => {
+const collectFallbackObjectValues = (obj: Record<string, unknown>, out: string[], depth: number) => {
     for (const [key, value] of Object.entries(obj)) {
         if (PREFERRED_TEXT_KEY_SET.has(key)) {
             continue;
@@ -55,7 +55,7 @@ const collectFallbackObjectValues = (obj: Record<string, unknown>, out: string[]
     }
 };
 
-const collectLikelyTextValues = (node: unknown, out: string[], depth = 0): void => {
+const collectLikelyTextValues = (node: unknown, out: string[], depth = 0) => {
     if (isCollectionLimitReached(depth, out)) {
         return;
     }

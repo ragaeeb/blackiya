@@ -28,7 +28,7 @@ export class LRUCache<K, V> {
         return value;
     }
 
-    set(key: K, value: V): void {
+    set(key: K, value: V) {
         if (this.cache.has(key)) {
             // If exists, refresh position
             this.cache.delete(key);
@@ -49,7 +49,7 @@ export class LRUCache<K, V> {
         return this.cache.delete(key);
     }
 
-    clear(): void {
+    clear() {
         this.cache.clear();
     }
 

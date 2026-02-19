@@ -39,7 +39,7 @@ export const hydrateGeminiTitleCandidatesFromRpcResults = (
     url: string,
     titlesCache: LRUCache<string, string>,
     onTitleUpdated?: (conversationId: string, title: string) => void,
-): void => {
+) => {
     const sourcePathConversationId = extractConversationIdFromSourcePath(url);
 
     for (const rpcResult of rpcResults) {

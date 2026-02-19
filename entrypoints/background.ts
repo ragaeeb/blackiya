@@ -20,11 +20,11 @@ import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 
 type BackgroundLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>;
 
-function isLogContext(value: unknown): value is LogEntry['context'] {
+const isLogContext = (value: unknown): value is LogEntry['context'] => {
     return value === 'background' || value === 'content' || value === 'popup' || value === 'unknown';
-}
+};
 
-function isLogEntryPayload(payload: unknown): payload is LogEntry {
+const isLogEntryPayload = (payload: unknown): payload is LogEntry => {
     if (!payload || typeof payload !== 'object') {
         return false;
     }
@@ -36,7 +36,7 @@ function isLogEntryPayload(payload: unknown): payload is LogEntry {
         return false;
     }
     return candidate.data === undefined || Array.isArray(candidate.data);
-}
+};
 
 type BackgroundMessageHandlerDeps = {
     saveLog: (payload: LogEntry) => Promise<void>;
@@ -44,12 +44,12 @@ type BackgroundMessageHandlerDeps = {
     logger: BackgroundLogger;
 };
 
-function handleGenericBackgroundMessage(
+const handleGenericBackgroundMessage = (
     message: unknown,
     sender: { tab?: { url?: string } },
     sendResponse: (response: unknown) => void,
     loggerInstance: BackgroundLogger,
-): true {
+): true => {
     const type =
         typeof message === 'object' && message !== null && typeof (message as { type?: unknown }).type === 'string'
             ? (message as { type: string }).type
@@ -65,9 +65,9 @@ function handleGenericBackgroundMessage(
     loggerInstance.warn('Unknown message type:', type);
     sendResponse({ success: false, error: 'Unknown message type' });
     return true;
-}
+};
 
-export function createBackgroundMessageHandler(deps: BackgroundMessageHandlerDeps) {
+export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDeps) => {
     return (message: unknown, sender: { tab?: { url?: string } }, sendResponse: (response: unknown) => void) => {
         if (isProbeLeaseClaimRequest(message)) {
             void deps.leaseCoordinator
@@ -122,7 +122,7 @@ export function createBackgroundMessageHandler(deps: BackgroundMessageHandlerDep
 
         return handleGenericBackgroundMessage(message, sender, sendResponse, deps.logger);
     };
-}
+};
 
 export default defineBackground(() => {
     const leaseCoordinator = new ProbeLeaseCoordinator({

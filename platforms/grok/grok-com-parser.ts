@@ -77,7 +77,7 @@ export const attachGrokComNodeToParent = (
     nodeId: string,
     parentId: string,
     rootId: string,
-): void => {
+) => {
     const parentKey = parentId || rootId;
     const node = ensureGrokComNode(conversation, nodeId, rootId);
 

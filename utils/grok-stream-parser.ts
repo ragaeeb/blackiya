@@ -7,7 +7,7 @@ const GROK_METADATA_KEYS_TO_SKIP = new Set(['responseId', 'messageTag', 'message
 const GROK_PREFERRED_TEXT_KEYS = ['message', 'text', 'delta', 'content', 'output_text', 'summary', 'final_message'];
 const GROK_PREFERRED_TEXT_KEYS_SET = new Set(GROK_PREFERRED_TEXT_KEYS);
 
-function extractToolUsageCardMessage(value: string): string | null {
+const extractToolUsageCardMessage = (value: string): string | null => {
     if (!value.includes('<xai:tool_usage_card')) {
         return null;
     }
@@ -25,13 +25,13 @@ function extractToolUsageCardMessage(value: string): string | null {
         return null;
     }
     return null;
-}
+};
 
-function normalizeCandidateText(value: string): string {
+const normalizeCandidateText = (value: string): string => {
     return extractToolUsageCardMessage(value) ?? value;
-}
+};
 
-function isLikelyGrokText(value: string): boolean {
+const isLikelyGrokText = (value: string): boolean => {
     const trimmed = value.trim();
     if (trimmed.length < 2 || trimmed.length > 14000) {
         return false;
@@ -55,35 +55,35 @@ function isLikelyGrokText(value: string): boolean {
         return false;
     }
     return true;
-}
+};
 
-function appendLikelyTextCandidate(value: string, out: string[]): void {
+const appendLikelyTextCandidate = (value: string, out: string[]) => {
     const normalized = normalizeCandidateText(value).replace(/\r\n/g, '\n');
     if (!isLikelyGrokText(normalized)) {
         return;
     }
     out.push(normalized);
-}
+};
 
-function collectLikelyTextValuesFromArray(values: unknown[], out: string[], depth: number): void {
+const collectLikelyTextValuesFromArray = (values: unknown[], out: string[], depth: number) => {
     for (const child of values) {
         if (out.length > 160) {
             break;
         }
         collectLikelyTextValues(child, out, depth + 1);
     }
-}
+};
 
-function collectPreferredTextSlots(obj: Record<string, unknown>, out: string[], depth: number): void {
+const collectPreferredTextSlots = (obj: Record<string, unknown>, out: string[], depth: number) => {
     for (const key of GROK_PREFERRED_TEXT_KEYS) {
         if (!(key in obj)) {
             continue;
         }
         collectLikelyTextValues(obj[key], out, depth + 1);
     }
-}
+};
 
-function collectObjectTextValues(obj: Record<string, unknown>, out: string[], depth: number): void {
+const collectObjectTextValues = (obj: Record<string, unknown>, out: string[], depth: number) => {
     const shouldSkipThinkingToken = obj.isThinking === true && typeof obj.token === 'string';
     for (const [key, value] of Object.entries(obj)) {
         if (GROK_METADATA_KEYS_TO_SKIP.has(key)) {
@@ -97,9 +97,9 @@ function collectObjectTextValues(obj: Record<string, unknown>, out: string[], de
         }
         collectLikelyTextValues(value, out, depth + 1);
     }
-}
+};
 
-function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void {
+function collectLikelyTextValues(node: unknown, out: string[], depth = 0) {
     if (depth > 9 || out.length > 160) {
         return;
     }
@@ -119,18 +119,18 @@ function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void 
     collectObjectTextValues(obj, out, depth);
 }
 
-function pushReasoningIfText(value: unknown, out: string[]): void {
+const pushReasoningIfText = (value: unknown, out: string[]) => {
     if (typeof value !== 'string' || !isLikelyGrokText(value)) {
         return;
     }
     out.push(value.trim());
-}
+};
 
-function resolveHeaderTitle(headerObj: Record<string, unknown>): string {
+const resolveHeaderTitle = (headerObj: Record<string, unknown>): string => {
     return typeof headerObj.header === 'string' ? headerObj.header.trim() : '';
-}
+};
 
-function collectDeepSearchStepMessages(headerTitle: string, steps: unknown[], out: string[]): void {
+const collectDeepSearchStepMessages = (headerTitle: string, steps: unknown[], out: string[]) => {
     for (const step of steps) {
         if (!step || typeof step !== 'object') {
             continue;
@@ -142,9 +142,9 @@ function collectDeepSearchStepMessages(headerTitle: string, steps: unknown[], ou
         const body = finalMessage.trim();
         out.push(headerTitle.length > 0 ? `${headerTitle}: ${body}` : body);
     }
-}
+};
 
-function collectDeepSearchHeaderReasoning(header: unknown, out: string[]): void {
+const collectDeepSearchHeaderReasoning = (header: unknown, out: string[]) => {
     if (!header || typeof header !== 'object') {
         return;
     }
@@ -155,27 +155,27 @@ function collectDeepSearchHeaderReasoning(header: unknown, out: string[]): void 
     }
     const headerTitle = resolveHeaderTitle(headerObj);
     collectDeepSearchStepMessages(headerTitle, steps, out);
-}
+};
 
-function collectDeepSearchReasoning(headers: unknown, out: string[]): void {
+const collectDeepSearchReasoning = (headers: unknown, out: string[]) => {
     if (!Array.isArray(headers)) {
         return;
     }
     for (const header of headers) {
         collectDeepSearchHeaderReasoning(header, out);
     }
-}
+};
 
-function collectReasoningFromObject(obj: Record<string, unknown>, out: string[]): void {
+const collectReasoningFromObject = (obj: Record<string, unknown>, out: string[]) => {
     pushReasoningIfText(obj.thinking_trace, out);
     pushReasoningIfText(obj.reasoning, out);
     if (obj.isThinking === true && typeof obj.token === 'string') {
         pushReasoningIfText(normalizeCandidateText(obj.token), out);
     }
     collectDeepSearchReasoning(obj.deepsearch_headers, out);
-}
+};
 
-function collectReasoningValues(node: unknown, out: string[], depth = 0): void {
+const collectReasoningValues = (node: unknown, out: string[], depth = 0) => {
     if (depth > 9 || out.length > 120 || !node || typeof node !== 'object') {
         return;
     }
@@ -191,9 +191,9 @@ function collectReasoningValues(node: unknown, out: string[], depth = 0): void {
     for (const value of Object.values(obj)) {
         collectReasoningValues(value, out, depth + 1);
     }
-}
+};
 
-function extractConversationIdFromNode(node: unknown): string | undefined {
+const extractConversationIdFromNode = (node: unknown): string | undefined => {
     if (!node || typeof node !== 'object') {
         return undefined;
     }
@@ -224,9 +224,9 @@ function extractConversationIdFromNode(node: unknown): string | undefined {
         }
     }
     return undefined;
-}
+};
 
-function normalizeNdjsonLine(rawLine: string): string {
+const normalizeNdjsonLine = (rawLine: string): string => {
     const trimmed = rawLine.trim();
     if (!trimmed) {
         return '';
@@ -235,7 +235,7 @@ function normalizeNdjsonLine(rawLine: string): string {
         return trimmed.slice('data:'.length).trim();
     }
     return trimmed;
-}
+};
 
 export type GrokStreamSignals = {
     conversationId?: string;
@@ -245,7 +245,7 @@ export type GrokStreamSignals = {
     seenPayloadKeys: string[];
 };
 
-export function extractGrokStreamSignalsFromBuffer(buffer: string, seenPayloads: Set<string>): GrokStreamSignals {
+export const extractGrokStreamSignalsFromBuffer = (buffer: string, seenPayloads: Set<string>): GrokStreamSignals => {
     const normalized = buffer.replace(/\r\n/g, '\n');
     const lines = normalized.split('\n');
     const remainingBuffer = lines.pop() ?? '';
@@ -285,4 +285,4 @@ export function extractGrokStreamSignalsFromBuffer(buffer: string, seenPayloads:
         remainingBuffer,
         seenPayloadKeys,
     };
-}
+};

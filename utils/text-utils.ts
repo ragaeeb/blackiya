@@ -16,7 +16,7 @@ import { GOOGLE_SECURITY_PREFIX } from '../platforms/constants';
  * @example
  * stripMagicHeader(")]}'\n\n[1,2,3]") // returns "[1,2,3]"
  */
-export function stripMagicHeader(text: string): string {
+export const stripMagicHeader = (text: string): string => {
     if (!text) {
         return '';
     }
@@ -34,7 +34,7 @@ export function stripMagicHeader(text: string): string {
     }
 
     return cleanText;
-}
+};
 
 /**
  * Standardizes a JSON string by removing common garbage characters.
@@ -43,14 +43,14 @@ export function stripMagicHeader(text: string): string {
  * @param text - The text to clean
  * @returns Cleaned text
  */
-export function cleanJsonString(text: string): string {
+export const cleanJsonString = (text: string): string => {
     return text.trim();
-}
+};
 
 /**
  * Removes duplicate string entries while keeping first-seen ordering.
  */
-export function dedupePreserveOrder(values: string[]): string[] {
+export const dedupePreserveOrder = (values: string[]): string[] => {
     const out: string[] = [];
     const seen = new Set<string>();
     for (const value of values) {
@@ -61,12 +61,12 @@ export function dedupePreserveOrder(values: string[]): string[] {
         out.push(value);
     }
     return out;
-}
+};
 
 /**
  * Returns a copy of the list limited to its newest entries.
  */
-export function keepMostRecentEntries<T>(values: T[], maxEntries: number): T[] {
+export const keepMostRecentEntries = <T>(values: T[], maxEntries: number): T[] => {
     if (maxEntries <= 0) {
         return [];
     }
@@ -74,4 +74,4 @@ export function keepMostRecentEntries<T>(values: T[], maxEntries: number): T[] {
         return [...values];
     }
     return values.slice(values.length - maxEntries);
-}
+};

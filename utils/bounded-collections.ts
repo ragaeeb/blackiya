@@ -3,7 +3,7 @@
  * and evicts the oldest entry when size would exceed {`@link` maxEntries}.
  * No-op when maxEntries ≤ 0.
  */
-export function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number) {
+export const setBoundedMapValue = <K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number) => {
     if (maxEntries <= 0) {
         return;
     }
@@ -19,7 +19,7 @@ export function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEn
         }
         map.delete(oldest);
     }
-}
+};
 
 /**
  * Adds {`@link` value} to {`@link` set} if not already present.
@@ -27,7 +27,7 @@ export function setBoundedMapValue<K, V>(map: Map<K, V>, key: K, value: V, maxEn
  * Evicts oldest entries when size would exceed {`@link` maxEntries}.
  * No-op when maxEntries ≤ 0.
  */
-export function addBoundedSetValue<T>(set: Set<T>, value: T, maxEntries: number) {
+export const addBoundedSetValue = <T>(set: Set<T>, value: T, maxEntries: number) => {
     if (maxEntries <= 0) {
         return;
     }
@@ -43,4 +43,4 @@ export function addBoundedSetValue<T>(set: Set<T>, value: T, maxEntries: number)
         }
         set.delete(oldest);
     }
-}
+};

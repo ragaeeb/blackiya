@@ -14,9 +14,9 @@ mock.module('@/utils/logger', () => ({
 
 import { NavigationManager } from './navigation-manager';
 
-function wait(ms: number): Promise<void> {
+const wait = (ms: number): Promise<void> => {
     return new Promise((resolve) => setTimeout(resolve, ms));
-}
+};
 
 describe('NavigationManager', () => {
     let windowInstance: Window;

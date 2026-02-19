@@ -1,8 +1,8 @@
 export type ChatgptSseChunkHandler = (chunk: string) => void;
 
-export function monitorChatgptSseChunk(chunk: string, onChunk: ChatgptSseChunkHandler): void {
+export const monitorChatgptSseChunk = (chunk: string, onChunk: ChatgptSseChunkHandler) => {
     if (!chunk || chunk.trim().length === 0) {
         return;
     }
     onChunk(chunk);
-}
+};

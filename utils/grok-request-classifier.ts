@@ -6,17 +6,17 @@ const getNormalizedPath = (url: string) => {
     }
 };
 
-export function isGrokGenerationEndpoint(url: string): boolean {
+export const isGrokGenerationEndpoint = (url: string): boolean => {
     const path = getNormalizedPath(url);
     return path.includes('/rest/app-chat/conversations/new') || path.includes('/2/grok/add_response.json');
-}
+};
 
-export function isGrokStreamingEndpoint(url: string): boolean {
+export const isGrokStreamingEndpoint = (url: string): boolean => {
     const path = getNormalizedPath(url);
     return isGrokGenerationEndpoint(url) || path.includes('/rest/app-chat/conversations/reconnect-response-v2/');
-}
+};
 
-export function isGrokCompletionCandidateEndpoint(url: string): boolean {
+export const isGrokCompletionCandidateEndpoint = (url: string): boolean => {
     const path = getNormalizedPath(url);
     if (path.includes('/rest/app-chat/conversations/new')) {
         return false;
@@ -28,12 +28,12 @@ export function isGrokCompletionCandidateEndpoint(url: string): boolean {
         path.includes('/rest/app-chat/conversations/') &&
         (path.includes('/load-responses') || path.includes('/response-node'))
     );
-}
+};
 
-export function shouldEmitGrokLifecycle(url: string): boolean {
+export const shouldEmitGrokLifecycle = (url: string): boolean => {
     return isGrokGenerationEndpoint(url);
-}
+};
 
-export function shouldEmitGrokCompletion(url: string): boolean {
+export const shouldEmitGrokCompletion = (url: string): boolean => {
     return isGrokCompletionCandidateEndpoint(url);
-}
+};

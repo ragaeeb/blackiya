@@ -1,20 +1,20 @@
 import { type LogLevel, logger } from '@/utils/logger';
 
-interface AttemptBudgetState {
+type AttemptBudgetState = {
     debug: number;
     info: number;
     budgetWarningEmitted: boolean;
-}
+};
 
-interface DedupeItem {
+type DedupeItem = {
     lastAt: number;
-}
+};
 
-interface StructuredLoggerOptions {
+type StructuredLoggerOptions = {
     debugBudget?: number;
     infoBudget?: number;
     dedupeTtlMs?: number;
-}
+};
 
 export class StructuredAttemptLogger {
     private readonly debugBudget: number;
@@ -36,7 +36,7 @@ export class StructuredAttemptLogger {
         message: string,
         data?: unknown,
         dedupeKey?: string,
-    ): void {
+    ) {
         if (!this.withinBudget(attemptId, level)) {
             return;
         }

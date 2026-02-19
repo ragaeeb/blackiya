@@ -1,6 +1,6 @@
 export type FetchInterceptor = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-function resolveRequestUrl(input: RequestInfo | URL) {
+const resolveRequestUrl = (input: RequestInfo | URL) => {
     if (typeof input === 'string') {
         return input;
     }
@@ -11,9 +11,9 @@ function resolveRequestUrl(input: RequestInfo | URL) {
         return (input as Request).url;
     }
     return '[unknown-url]';
-}
+};
 
-function resolveRequestMethod(input: RequestInfo | URL, init?: RequestInit) {
+const resolveRequestMethod = (input: RequestInfo | URL, init?: RequestInit) => {
     if (typeof init?.method === 'string' && init.method.length > 0) {
         return init.method;
     }
@@ -21,9 +21,9 @@ function resolveRequestMethod(input: RequestInfo | URL, init?: RequestInit) {
         return input.method;
     }
     return 'GET';
-}
+};
 
-export function createFetchInterceptor(originalFetch: typeof fetch, interceptor: FetchInterceptor) {
+export const createFetchInterceptor = (originalFetch: typeof fetch, interceptor: FetchInterceptor) => {
     return (async (input: RequestInfo | URL, init?: RequestInit) => {
         try {
             return await interceptor(input, init);
@@ -34,4 +34,4 @@ export function createFetchInterceptor(originalFetch: typeof fetch, interceptor:
             return originalFetch(input, init);
         }
     }) as typeof fetch;
-}
+};

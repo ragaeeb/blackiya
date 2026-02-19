@@ -227,7 +227,7 @@ export const parseInterceptedDataMock = (raw: string): object | null => {
  */
 export const makePostStampedMessage =
     (win: Window & typeof globalThis, getToken: () => string | null | undefined) =>
-    (data: Record<string, unknown>, origin: string): void => {
+    (data: Record<string, unknown>, origin: string) => {
         const token = getToken();
         win.postMessage(token ? { ...data, __blackiyaToken: token } : data, origin);
     };
@@ -235,7 +235,7 @@ export const makePostStampedMessage =
 export const waitFor = async (
     predicate: () => boolean,
     { timeout = 2000, interval = 10 }: { timeout?: number; interval?: number } = {},
-): Promise<void> => {
+) => {
     const start = Date.now();
     while (!predicate()) {
         if (Date.now() - start > timeout) {

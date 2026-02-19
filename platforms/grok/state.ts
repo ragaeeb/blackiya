@@ -13,7 +13,7 @@ export class GrokAdapterState {
     /** Most recently active grok.com conversation ID (last-resort fallback) */
     lastActiveConversationId: string | null = null;
 
-    reset(): void {
+    reset() {
         this.conversationTitles.clear();
         this.activeConversations.clear();
         this.lastActiveConversationId = null;
@@ -22,6 +22,6 @@ export class GrokAdapterState {
 
 export const grokState = new GrokAdapterState();
 
-export const resetGrokAdapterState = (): void => {
+export const resetGrokAdapterState = () => {
     grokState.reset();
 };

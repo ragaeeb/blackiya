@@ -60,7 +60,7 @@ const TRANSITIONS: Record<LifecyclePhase, Partial<Record<LifecyclePhase, Lifecyc
     disposed: {},
 };
 
-interface SignalFusionEngineOptions {
+type SignalFusionEngineOptions = {
     tracker?: AttemptTracker;
     probeScheduler?: ProbeScheduler;
     readinessGate?: ReadinessGate;
@@ -68,17 +68,17 @@ interface SignalFusionEngineOptions {
     maxResolutions?: number;
     terminalResolutionTtlMs?: number;
     pruneMinIntervalMs?: number;
-}
+};
 
-function isRegressive(current: LifecyclePhase, next: LifecyclePhase): boolean {
+const isRegressive = (current: LifecyclePhase, next: LifecyclePhase): boolean => {
     if (current === next) {
         return false;
     }
     const allowed = TRANSITIONS[current];
     return !allowed[next];
-}
+};
 
-function buildDefaultResolution(descriptor: AttemptDescriptor): CaptureResolution {
+const buildDefaultResolution = (descriptor: AttemptDescriptor): CaptureResolution => {
     return {
         attemptId: descriptor.attemptId,
         platform: descriptor.platform,
@@ -90,13 +90,13 @@ function buildDefaultResolution(descriptor: AttemptDescriptor): CaptureResolutio
         blockingConditions: ['no_canonical_data'],
         updatedAtMs: descriptor.updatedAtMs,
     };
-}
+};
 
-function resolutionFromPhase(
+const resolutionFromPhase = (
     descriptor: AttemptDescriptor,
     existing: CaptureResolution,
     blocking: CaptureResolution['blockingConditions'],
-): CaptureResolution {
+): CaptureResolution => {
     const phase = descriptor.phase;
 
     if (phase === 'captured_ready') {
@@ -149,7 +149,7 @@ function resolutionFromPhase(
         blockingConditions: blocking,
         updatedAtMs: descriptor.updatedAtMs,
     };
-}
+};
 
 export class SignalFusionEngine {
     private readonly tracker: AttemptTracker;
@@ -344,7 +344,7 @@ export class SignalFusionEngine {
         return next;
     }
 
-    private pruneResolutionCache(): void {
+    private pruneResolutionCache() {
         const now = this.now();
         if (now - this.lastPruneAtMs < this.pruneMinIntervalMs) {
             return;

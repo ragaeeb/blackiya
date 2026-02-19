@@ -16,7 +16,7 @@
  * @param jsonString - Pre-serialized JSON content
  * @param filename  - Full filename including extension (e.g. `"chat.json"`)
  */
-export const downloadStringAsJsonFile = (jsonString: string, filename: string): void => {
+export const downloadStringAsJsonFile = (jsonString: string, filename: string) => {
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     let link: HTMLAnchorElement | null = null;

@@ -6,16 +6,16 @@ import {
     type ProbeLeaseRuntimeMessage,
 } from '@/utils/sfe/probe-lease-protocol';
 
-export interface ProbeLeaseClaimResult {
+export type ProbeLeaseClaimResult = {
     acquired: boolean;
     ownerAttemptId: string | null;
     expiresAtMs: number | null;
-}
+};
 
-export interface CrossTabProbeLeaseOptions {
+export type CrossTabProbeLeaseOptions = {
     now?: () => number;
     sendMessage?: (message: ProbeLeaseRuntimeMessage) => Promise<unknown>;
-}
+};
 
 export class CrossTabProbeLease {
     private readonly now: () => number;
@@ -63,7 +63,7 @@ export class CrossTabProbeLease {
         return this.failOpenClaim(attemptId, ttlMs);
     }
 
-    public async release(conversationId: string, attemptId: string): Promise<void> {
+    public async release(conversationId: string, attemptId: string) {
         const message: ProbeLeaseRuntimeMessage = {
             type: 'BLACKIYA_PROBE_LEASE_RELEASE',
             conversationId,
@@ -87,7 +87,7 @@ export class CrossTabProbeLease {
         }
     }
 
-    public dispose(): void {
+    public dispose() {
         // Reserved for future abort/signal cleanup hooks.
     }
 

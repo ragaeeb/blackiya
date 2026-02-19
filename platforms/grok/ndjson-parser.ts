@@ -125,7 +125,7 @@ const extractAddResponseModelSlug = (line: any): string | null => {
     return null;
 };
 
-const ensureRootNode = (conversation: ConversationData, rootId: string): void => {
+const ensureRootNode = (conversation: ConversationData, rootId: string) => {
     if (!conversation.mapping[rootId]) {
         conversation.mapping[rootId] = { id: rootId, message: null, parent: null, children: [] };
     }
@@ -194,7 +194,7 @@ const collectAddResponseStreamState = (
 const hasAddResponseContent = (finalText: string, reasoningChunks: string[]): boolean =>
     finalText.length > 0 || reasoningChunks.length > 0;
 
-const ensureNode = (conversation: ConversationData, nodeId: string, parentId: string): void => {
+const ensureNode = (conversation: ConversationData, nodeId: string, parentId: string) => {
     if (!conversation.mapping[nodeId]) {
         conversation.mapping[nodeId] = {
             id: nodeId,

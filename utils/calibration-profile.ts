@@ -4,7 +4,7 @@ import type { SignalSource } from '@/utils/sfe/types';
 
 export type CalibrationStrategy = 'aggressive' | 'balanced' | 'conservative' | 'snapshot';
 
-export interface CalibrationProfileV2 {
+export type CalibrationProfileV2 = {
     schemaVersion: 2;
     platform: string;
     strategy: CalibrationStrategy;
@@ -21,7 +21,7 @@ export interface CalibrationProfileV2 {
     };
     updatedAt: string;
     lastModifiedBy: 'manual' | 'auto';
-}
+};
 
 export type CalibrationProfileV2Store = Record<string, CalibrationProfileV2>;
 
@@ -35,18 +35,18 @@ const ALLOWED_SOURCE_SET = new Set<SignalSource>([
 
 const ALLOWED_STRATEGY_SET = new Set<CalibrationStrategy>(['aggressive', 'balanced', 'conservative', 'snapshot']);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+const isRecord = (value: unknown): value is Record<string, unknown> => {
     return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+};
 
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
         return fallback;
     }
     return Math.max(min, Math.min(max, value));
-}
+};
 
-function normalizeSignalSources(value: unknown, fallback: SignalSource[]): SignalSource[] {
+const normalizeSignalSources = (value: unknown, fallback: SignalSource[]): SignalSource[] => {
     if (!Array.isArray(value)) {
         return [...fallback];
     }
@@ -59,9 +59,9 @@ function normalizeSignalSources(value: unknown, fallback: SignalSource[]): Signa
         return [...fallback];
     }
     return deduped;
-}
+};
 
-function strategyDefaults(strategy: CalibrationStrategy): CalibrationProfileV2 {
+const strategyDefaults = (strategy: CalibrationStrategy): CalibrationProfileV2 => {
     if (strategy === 'aggressive') {
         return {
             schemaVersion: 2,
@@ -122,25 +122,25 @@ function strategyDefaults(strategy: CalibrationStrategy): CalibrationProfileV2 {
         updatedAt: new Date(0).toISOString(),
         lastModifiedBy: 'manual',
     };
-}
+};
 
-export function buildDefaultCalibrationProfile(
+export const buildDefaultCalibrationProfile = (
     platform: string,
     strategy: CalibrationStrategy = 'conservative',
-): CalibrationProfileV2 {
+): CalibrationProfileV2 => {
     const defaults = strategyDefaults(strategy);
     return {
         ...defaults,
         platform,
         updatedAt: new Date().toISOString(),
     };
-}
+};
 
 // ── CalibrationStep-based builder (manual-strict policy) ──────────────
 
 export type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
 
-export function strategyFromStep(step: CalibrationStep): CalibrationStrategy {
+export const strategyFromStep = (step: CalibrationStep): CalibrationStrategy => {
     if (step === 'passive-wait') {
         return 'aggressive';
     }
@@ -151,9 +151,9 @@ export function strategyFromStep(step: CalibrationStep): CalibrationStrategy {
         return 'snapshot';
     }
     return 'conservative';
-}
+};
 
-export function stepFromStrategy(strategy: CalibrationStrategy): CalibrationStep {
+export const stepFromStrategy = (strategy: CalibrationStrategy): CalibrationStep => {
     if (strategy === 'aggressive') {
         return 'passive-wait';
     }
@@ -164,14 +164,14 @@ export function stepFromStrategy(strategy: CalibrationStrategy): CalibrationStep
         return 'page-snapshot';
     }
     return 'queue-flush';
-}
+};
 
 /**
  * Manual-strict policy timings. These intentionally differ from the generic
  * strategy defaults in conservative/domQuietWindow (800 vs 1200) to provide
  * tighter DOM quiet windows when the user has explicitly chosen/calibrated.
  */
-function manualStrictTimings(step: CalibrationStep): CalibrationProfileV2['timingsMs'] {
+const manualStrictTimings = (step: CalibrationStep): CalibrationProfileV2['timingsMs'] => {
     if (step === 'passive-wait') {
         return { passiveWait: 900, domQuietWindow: 500, maxStabilizationWait: 12_000 };
     }
@@ -179,9 +179,9 @@ function manualStrictTimings(step: CalibrationStep): CalibrationProfileV2['timin
         return { passiveWait: 1400, domQuietWindow: 800, maxStabilizationWait: 18_000 };
     }
     return { passiveWait: 2200, domQuietWindow: 800, maxStabilizationWait: 30_000 };
-}
+};
 
-function manualStrictRetry(step: CalibrationStep): CalibrationProfileV2['retry'] {
+const manualStrictRetry = (step: CalibrationStep): CalibrationProfileV2['retry'] => {
     if (step === 'passive-wait') {
         return { maxAttempts: 3, backoffMs: [300, 800, 1300], hardTimeoutMs: 12_000 };
     }
@@ -193,7 +193,7 @@ function manualStrictRetry(step: CalibrationStep): CalibrationProfileV2['retry']
         backoffMs: [800, 1600, 2600, 3800, 5200, 7000],
         hardTimeoutMs: 30_000,
     };
-}
+};
 
 /**
  * Build a calibration profile from a CalibrationStep using the manual-strict
@@ -205,7 +205,7 @@ function manualStrictRetry(step: CalibrationStep): CalibrationProfileV2['retry']
  * - Disables `['dom_hint', 'snapshot_fallback']`
  * - Uses tighter domQuietWindow for conservative (800ms vs 1200ms in generic defaults)
  */
-export function buildCalibrationProfileFromStep(platform: string, step: CalibrationStep): CalibrationProfileV2 {
+export const buildCalibrationProfileFromStep = (platform: string, step: CalibrationStep): CalibrationProfileV2 => {
     return {
         schemaVersion: 2,
         platform,
@@ -216,9 +216,9 @@ export function buildCalibrationProfileFromStep(platform: string, step: Calibrat
         updatedAt: new Date().toISOString(),
         lastModifiedBy: 'manual',
     };
-}
+};
 
-export function validateCalibrationProfileV2(input: unknown, platform: string): CalibrationProfileV2 {
+export const validateCalibrationProfileV2 = (input: unknown, platform: string): CalibrationProfileV2 => {
     if (!isRecord(input)) {
         return buildDefaultCalibrationProfile(platform, 'conservative');
     }
@@ -261,12 +261,12 @@ export function validateCalibrationProfileV2(input: unknown, platform: string): 
         updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : new Date().toISOString(),
         lastModifiedBy: input.lastModifiedBy === 'auto' ? 'auto' : 'manual',
     };
-}
+};
 
-export async function loadCalibrationProfileV2(platform: string): Promise<CalibrationProfileV2> {
+export const loadCalibrationProfileV2 = async (platform: string): Promise<CalibrationProfileV2> => {
     const existing = await loadCalibrationProfileV2IfPresent(platform);
     return existing ?? buildDefaultCalibrationProfile(platform, 'conservative');
-}
+};
 
 export async function loadCalibrationProfileV2IfPresent(platform: string): Promise<CalibrationProfileV2 | null> {
     const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
@@ -277,7 +277,7 @@ export async function loadCalibrationProfileV2IfPresent(platform: string): Promi
     return validateCalibrationProfileV2(store[platform], platform);
 }
 
-export async function saveCalibrationProfileV2(profile: CalibrationProfileV2): Promise<void> {
+export const saveCalibrationProfileV2 = async (profile: CalibrationProfileV2) => {
     const normalized = validateCalibrationProfileV2(profile, profile.platform);
     const result = await browser.storage.local.get(STORAGE_KEYS.CALIBRATION_PROFILES);
     const store = (result[STORAGE_KEYS.CALIBRATION_PROFILES] as CalibrationProfileV2Store | undefined) ?? {};
@@ -288,4 +288,4 @@ export async function saveCalibrationProfileV2(profile: CalibrationProfileV2): P
     await browser.storage.local.set({
         [STORAGE_KEYS.CALIBRATION_PROFILES]: store,
     });
-}
+};

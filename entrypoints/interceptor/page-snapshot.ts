@@ -45,7 +45,7 @@ const pickConversationCandidate = (item: unknown, conversationId: string): unkno
     return null;
 };
 
-const enqueueObjectChildren = (item: unknown, queue: unknown[]): void => {
+const enqueueObjectChildren = (item: unknown, queue: unknown[]) => {
     if (Array.isArray(item)) {
         queue.push(...item);
         return;

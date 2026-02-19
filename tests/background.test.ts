@@ -22,11 +22,11 @@ describe('background message handler', () => {
     let savedLogs: unknown[];
     let now: number;
 
-    async function flushAsyncWork() {
+    const flushAsyncWork = async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    };
 
-    async function waitForResponse(responses: unknown[], expectedLength: number) {
+    const waitForResponse = async (responses: unknown[], expectedLength: number) => {
         const maxAttempts = 200;
         for (let i = 0; i < maxAttempts; i += 1) {
             if (responses.length >= expectedLength) {
@@ -36,7 +36,7 @@ describe('background message handler', () => {
             await new Promise((resolve) => setTimeout(resolve, 5));
         }
         throw new Error(`Timed out waiting for ${expectedLength} responses; received ${responses.length}`);
-    }
+    };
 
     beforeAll(async () => {
         (globalThis as any).defineBackground = (factory: unknown) => factory;

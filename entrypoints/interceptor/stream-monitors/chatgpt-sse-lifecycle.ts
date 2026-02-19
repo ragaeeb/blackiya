@@ -206,7 +206,7 @@ export const monitorChatGptSseLifecycle = async (
     attemptId: string,
     emit: StreamMonitorEmitter,
     conversationId?: string,
-): Promise<void> => {
+) => {
     if (!response.body) {
         return;
     }

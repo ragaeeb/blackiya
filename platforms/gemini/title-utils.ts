@@ -33,7 +33,7 @@ export const normalizeGeminiTitleCandidate = (rawTitle: unknown): string | null 
 
 // ── Payload title candidate collection ────────────────────────────────────────
 
-const collectTitleCandidates = (node: unknown, out: string[], depth = 0): void => {
+const collectTitleCandidates = (node: unknown, out: string[], depth = 0) => {
     if (depth > 8 || out.length >= 16 || !node || typeof node !== 'object') {
         return;
     }
@@ -111,7 +111,10 @@ const firstValidTitleFromPredicateList = (predicates: Array<(node: Element) => b
 
 const HEADING_PREDICATES: Array<(node: Element) => boolean> = [
     (node) => node.tagName === 'H1' && hasAncestorTag(node, 'MAIN'),
-    (node) => node.getAttribute('role') === 'heading' && node.getAttribute('aria-level') === '1' && hasAncestorTag(node, 'MAIN'),
+    (node) =>
+        node.getAttribute('role') === 'heading' &&
+        node.getAttribute('aria-level') === '1' &&
+        hasAncestorTag(node, 'MAIN'),
     (node) => node.getAttribute('role') === 'heading' && hasAncestorTag(node, 'MAIN'),
     (node) => node.tagName === 'H1' && hasAncestorTag(node, 'HEADER'),
     (node) => node.tagName === 'H1',
@@ -121,7 +124,8 @@ const ACTIVE_NAV_PREDICATES: Array<(node: Element) => boolean> = [
     (node) => node.tagName === 'A' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'NAV'),
     (node) => node.tagName === 'BUTTON' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'NAV'),
     (node) => node.tagName === 'A' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'ASIDE'),
-    (node) => node.tagName === 'BUTTON' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'ASIDE'),
+    (node) =>
+        node.tagName === 'BUTTON' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'ASIDE'),
     (node) => node.getAttribute('role') === 'tab' && node.getAttribute('aria-selected') === 'true',
     (node) => node.getAttribute('aria-selected') === 'true' && hasAncestorTag(node, 'NAV'),
 ];

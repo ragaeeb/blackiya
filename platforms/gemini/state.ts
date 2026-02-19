@@ -9,7 +9,7 @@ export class GeminiAdapterState {
     readonly conversationTitles = new LRUCache<string, string>(50);
     readonly activeConversations = new LRUCache<string, ConversationData>(50);
 
-    reset(): void {
+    reset() {
         this.conversationTitles.clear();
         this.activeConversations.clear();
     }
@@ -17,6 +17,6 @@ export class GeminiAdapterState {
 
 export const geminiState = new GeminiAdapterState();
 
-export const resetGeminiAdapterState = (): void => {
+export const resetGeminiAdapterState = () => {
     geminiState.reset();
 };

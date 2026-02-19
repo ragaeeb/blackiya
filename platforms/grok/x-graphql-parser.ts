@@ -122,7 +122,7 @@ const updateConversationFromItem = (
     parsedItem: NonNullable<ReturnType<typeof parseGrokItem>>,
     index: number,
     conversationIdOverride?: string,
-): void => {
+) => {
     if (index === 0) {
         state.conversationId = getConversationId(conversationIdOverride, parsedItem.chatItemId);
         const titleCandidate = getTitleFromFirstItem(

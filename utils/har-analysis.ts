@@ -491,10 +491,7 @@ const collectEventHintMatches = (
     return allMatches;
 };
 
-const updateEndpointAccumulatorFromEvent = (
-    endpointMap: Map<string, EndpointAccumulator>,
-    event: HarTimelineEvent,
-): void => {
+const updateEndpointAccumulatorFromEvent = (endpointMap: Map<string, EndpointAccumulator>, event: HarTimelineEvent) => {
     const endpointKey = createEndpointKey(event.method, event.host, event.path);
     const endpoint = endpointMap.get(endpointKey) ?? createEndpointAccumulator(event.method, event.host, event.path);
 
@@ -557,7 +554,7 @@ const processHarEntry = (
     entryIndex: number,
     options: NormalizedHarAnalysisOptions,
     accumulator: HarScanAccumulator,
-): void => {
+) => {
     const method = String(entry.request?.method ?? 'GET').toUpperCase();
     const rawUrl = String(entry.request?.url ?? '');
     if (!rawUrl) {
@@ -697,7 +694,7 @@ export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = 
 
 const renderCount = (value: number): string => String(value).padStart(4, ' ');
 
-const appendSummarySection = (lines: string[], analysis: HarAnalysisResult): void => {
+const appendSummarySection = (lines: string[], analysis: HarAnalysisResult) => {
     lines.push('## Summary');
     lines.push(`- Entries in HAR: ${analysis.stats.totalEntries}`);
     lines.push(`- Entries scanned: ${analysis.stats.entriesScanned}`);
@@ -709,7 +706,7 @@ const appendSummarySection = (lines: string[], analysis: HarAnalysisResult): voi
     lines.push('');
 };
 
-const appendLikelyStreamingSection = (lines: string[], analysis: HarAnalysisResult): void => {
+const appendLikelyStreamingSection = (lines: string[], analysis: HarAnalysisResult) => {
     lines.push('## Likely Streaming Endpoints');
     if (analysis.likelyStreamingEndpoints.length === 0) {
         lines.push('- none');
@@ -724,7 +721,7 @@ const appendLikelyStreamingSection = (lines: string[], analysis: HarAnalysisResu
     lines.push('');
 };
 
-const appendHintMatchesSection = (lines: string[], analysis: HarAnalysisResult): void => {
+const appendHintMatchesSection = (lines: string[], analysis: HarAnalysisResult) => {
     lines.push('## Hint Matches');
     if (analysis.hintMatches.length === 0) {
         lines.push('- none');
@@ -739,7 +736,7 @@ const appendHintMatchesSection = (lines: string[], analysis: HarAnalysisResult):
     lines.push('');
 };
 
-const appendTimelineSection = (lines: string[], analysis: HarAnalysisResult): void => {
+const appendTimelineSection = (lines: string[], analysis: HarAnalysisResult) => {
     lines.push('## Timeline Highlights');
     for (const event of analysis.timeline) {
         const flags: string[] = [];
@@ -760,7 +757,7 @@ const appendTimelineSection = (lines: string[], analysis: HarAnalysisResult): vo
     lines.push('');
 };
 
-const appendEndpointInventorySection = (lines: string[], analysis: HarAnalysisResult): void => {
+const appendEndpointInventorySection = (lines: string[], analysis: HarAnalysisResult) => {
     lines.push('## Endpoint Inventory');
     for (const endpoint of analysis.endpointSummary) {
         const statusText = endpoint.statuses.length > 0 ? endpoint.statuses.join(',') : 'n/a';

@@ -1,27 +1,27 @@
-export interface ProbeLeaseClaimRequest {
+export type ProbeLeaseClaimRequest = {
     type: 'BLACKIYA_PROBE_LEASE_CLAIM';
     conversationId: string;
     attemptId: string;
     ttlMs: number;
-}
+};
 
-export interface ProbeLeaseReleaseRequest {
+export type ProbeLeaseReleaseRequest = {
     type: 'BLACKIYA_PROBE_LEASE_RELEASE';
     conversationId: string;
     attemptId: string;
-}
+};
 
-export interface ProbeLeaseClaimResponse {
+export type ProbeLeaseClaimResponse = {
     type: 'BLACKIYA_PROBE_LEASE_CLAIM_RESULT';
     acquired: boolean;
     ownerAttemptId: string | null;
     expiresAtMs: number | null;
-}
+};
 
-export interface ProbeLeaseReleaseResponse {
+export type ProbeLeaseReleaseResponse = {
     type: 'BLACKIYA_PROBE_LEASE_RELEASE_RESULT';
     released: boolean;
-}
+};
 
 export type ProbeLeaseRuntimeMessage = ProbeLeaseClaimRequest | ProbeLeaseReleaseRequest;
 export type ProbeLeaseRuntimeResponse = ProbeLeaseClaimResponse | ProbeLeaseReleaseResponse;

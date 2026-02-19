@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { type ResolveRunnerReadinessInput, resolveRunnerReadinessDecision } from '@/utils/runner/readiness';
 import type { ConversationData } from '@/utils/types';
 
-function createInput(overrides: Partial<ResolveRunnerReadinessInput> = {}): ResolveRunnerReadinessInput {
+const createInput = (overrides: Partial<ResolveRunnerReadinessInput> = {}): ResolveRunnerReadinessInput => {
     const data = {
         conversation_id: 'conv-1',
         title: 'Title',
@@ -50,7 +50,7 @@ function createInput(overrides: Partial<ResolveRunnerReadinessInput> = {}): Reso
         clearCanonicalReadyLogStamp: () => {},
         ...overrides,
     };
-}
+};
 
 describe('runner readiness resolver', () => {
     it('returns missing-data readiness when no conversation data is available', () => {

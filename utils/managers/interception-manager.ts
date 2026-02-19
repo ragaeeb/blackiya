@@ -55,7 +55,7 @@ export class InterceptionManager {
         this.currentAdapter = adapter;
     }
 
-    public start(): void {
+    public start() {
         this.windowRef.addEventListener('message', this.handleMessage);
         this.processQueuedMessages();
         this.processQueuedLogMessages();
@@ -73,12 +73,12 @@ export class InterceptionManager {
         // #endregion
     }
 
-    public flushQueuedMessages(): void {
+    public flushQueuedMessages() {
         this.processQueuedMessages();
         this.processPendingTokenRevalidationMessages();
     }
 
-    public stop(): void {
+    public stop() {
         this.windowRef.removeEventListener('message', this.handleMessage);
         if (this.pendingTokenRevalidationTimer !== null) {
             clearTimeout(this.pendingTokenRevalidationTimer);
@@ -97,14 +97,14 @@ export class InterceptionManager {
         return cached;
     }
 
-    public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }): void {
+    public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }) {
         this.handleInterceptedData({
             type: 'LLM_CAPTURE_DATA_INTERCEPTED',
             ...message,
         });
     }
 
-    public ingestConversationData(data: ConversationData, source = 'snapshot'): void {
+    public ingestConversationData(data: ConversationData, source = 'snapshot') {
         if (!this.isValidConversationData(data)) {
             logger.warn('Ignoring invalid ConversationData payload', { source });
             return;
@@ -168,7 +168,7 @@ export class InterceptionManager {
         return isConversationReady(data);
     }
 
-    private handleMessage = (event: MessageEvent): void => {
+    private handleMessage = (event: MessageEvent) => {
         if (event.source !== this.windowRef) {
             return;
         }
@@ -203,7 +203,7 @@ export class InterceptionManager {
         }
     };
 
-    private handleLogEntry(payload: any): void {
+    private handleLogEntry(payload: any) {
         if (!payload || typeof payload.message !== 'string') {
             logger.warn('Malformed LLM_LOG_ENTRY payload', payload);
             return;
@@ -227,7 +227,7 @@ export class InterceptionManager {
         }
     }
 
-    private logTokenValidationDrop(messageType: string, reason: string): void {
+    private logTokenValidationDrop(messageType: string, reason: string) {
         const now = Date.now();
         if (now - this.lastInvalidTokenLogAtMs <= 1500) {
             return;
@@ -257,7 +257,7 @@ export class InterceptionManager {
         return true;
     }
 
-    private schedulePendingTokenRevalidation(): void {
+    private schedulePendingTokenRevalidation() {
         if (this.pendingTokenRevalidationTimer !== null) {
             return;
         }
@@ -267,7 +267,7 @@ export class InterceptionManager {
         }, 50);
     }
 
-    private processPendingTokenRevalidationMessages(): void {
+    private processPendingTokenRevalidationMessages() {
         if (this.pendingTokenRevalidationMessages.length === 0) {
             return;
         }
@@ -325,7 +325,7 @@ export class InterceptionManager {
         return true;
     }
 
-    private processPendingTokenRevalidationMessage(message: Record<string, unknown>): void {
+    private processPendingTokenRevalidationMessage(message: Record<string, unknown>) {
         const messageType = typeof message.type === 'string' ? message.type : '';
         const tokenFailureReason = resolveTokenValidationFailureReason(message);
         if (tokenFailureReason !== null) {
@@ -372,7 +372,7 @@ export class InterceptionManager {
         return tokenFailureReason;
     }
 
-    private handleInterceptedData(message: any): void {
+    private handleInterceptedData(message: any) {
         logger.info('Intercepted payload received', {
             platform: this.currentAdapter?.name ?? 'unknown',
             size: typeof message.data === 'string' ? message.data.length : 0,
@@ -443,7 +443,7 @@ export class InterceptionManager {
         return isExpectedAuxMiss ? 'info' : 'warn';
     }
 
-    private rememberSpecificTitle(conversationId: string, title: string, source: string): void {
+    private rememberSpecificTitle(conversationId: string, title: string, source: string) {
         const previousTitle = this.specificTitleCache.get(conversationId) ?? null;
         if (previousTitle === title) {
             return;
@@ -462,7 +462,7 @@ export class InterceptionManager {
         incoming: ConversationData,
         source: string,
         existing?: ConversationData,
-    ): void {
+    ) {
         const platformDefaultTitles = this.currentAdapter?.defaultTitles;
         const existingSpecificTitle =
             existing && !isGenericConversationTitle(existing.title, { platformDefaultTitles }) ? existing.title : null;
@@ -486,7 +486,7 @@ export class InterceptionManager {
         }
     }
 
-    private processQueuedMessages(): void {
+    private processQueuedMessages() {
         const queue = this.getQueue('__BLACKIYA_CAPTURE_QUEUE__');
         if (queue.length === 0) {
             return;
@@ -510,7 +510,7 @@ export class InterceptionManager {
         }
     }
 
-    private processQueuedLogMessages(): void {
+    private processQueuedLogMessages() {
         const queue = this.getQueue('__BLACKIYA_LOG_QUEUE__');
         if (queue.length === 0) {
             return;

@@ -1,25 +1,25 @@
 import { createAttemptId } from '@/utils/protocol/messages';
 
-export function shouldRemoveDisposedAttemptBinding(
+export const shouldRemoveDisposedAttemptBinding = (
     mappedAttemptId: string,
     disposedAttemptId: string,
     resolveAttemptId: (attemptId: string) => string,
-) {
+) => {
     return resolveAttemptId(mappedAttemptId) === resolveAttemptId(disposedAttemptId);
-}
+};
 
-export interface ResolveRunnerAttemptIdInput {
+export type ResolveRunnerAttemptIdInput = {
     conversationId?: string;
     activeAttemptId: string | null;
     adapterName?: string;
     attemptByConversation: Map<string, string>;
     resolveAliasedAttemptId: (attemptId: string) => string;
-}
+};
 
-export interface ResolveRunnerAttemptIdResult {
+export type ResolveRunnerAttemptIdResult = {
     attemptId: string;
     nextActiveAttemptId: string | null;
-}
+};
 
 /**
  * Pure read-only lookup: returns the existing attempt ID for a conversation
@@ -29,12 +29,12 @@ export interface ResolveRunnerAttemptIdResult {
  * Use this for logging, display, throttle-key lookups, and any other
  * read-path that should NOT mutate runner state.
  */
-export function peekRunnerAttemptId(input: {
+export const peekRunnerAttemptId = (input: {
     conversationId?: string;
     activeAttemptId: string | null;
     attemptByConversation: Map<string, string>;
     resolveAliasedAttemptId: (attemptId: string) => string;
-}): string | null {
+}): string | null => {
     const { conversationId, attemptByConversation, resolveAliasedAttemptId } = input;
     if (conversationId) {
         const mapped = attemptByConversation.get(conversationId);
@@ -46,7 +46,7 @@ export function peekRunnerAttemptId(input: {
         return resolveAliasedAttemptId(input.activeAttemptId);
     }
     return null;
-}
+};
 
 /**
  * Mutating resolve: returns the existing attempt ID or creates a new one.
@@ -55,7 +55,7 @@ export function peekRunnerAttemptId(input: {
  * Use this only for write paths that intentionally create or bind attempts
  * (e.g., response-finished, stream-done probe setup, force-save recovery).
  */
-export function resolveRunnerAttemptId(input: ResolveRunnerAttemptIdInput): ResolveRunnerAttemptIdResult {
+export const resolveRunnerAttemptId = (input: ResolveRunnerAttemptIdInput): ResolveRunnerAttemptIdResult => {
     const { conversationId, attemptByConversation, resolveAliasedAttemptId } = input;
     if (conversationId) {
         const mapped = attemptByConversation.get(conversationId);
@@ -78,14 +78,14 @@ export function resolveRunnerAttemptId(input: ResolveRunnerAttemptIdInput): Reso
         attemptId: created,
         nextActiveAttemptId: created,
     };
-}
+};
 
-export function getConversationAttemptMismatch(
+export const getConversationAttemptMismatch = (
     canonicalAttemptId: string,
     conversationId: string | undefined,
     attemptByConversation: Map<string, string>,
     resolveAliasedAttemptId: (attemptId: string) => string,
-): string | null {
+): string | null => {
     if (!conversationId) {
         return null;
     }
@@ -95,4 +95,4 @@ export function getConversationAttemptMismatch(
         return null;
     }
     return canonicalMapped;
-}
+};

@@ -103,15 +103,15 @@ export type BlackiyaMessage =
     | LogEntryMessage
     | SessionInitMessage;
 
-function hasString(value: unknown): value is string {
+const hasString = (value: unknown): value is string => {
     return typeof value === 'string' && value.length > 0;
-}
+};
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+const isRecord = (value: unknown): value is Record<string, unknown> => {
     return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+};
 
-export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
+export const isBlackiyaMessage = (value: unknown): value is BlackiyaMessage => {
     if (!isRecord(value) || !hasString(value.type)) {
         return false;
     }
@@ -152,11 +152,11 @@ export function isBlackiyaMessage(value: unknown): value is BlackiyaMessage {
         default:
             return false;
     }
-}
+};
 
-export function createAttemptId(prefix = 'attempt'): string {
+export const createAttemptId = (prefix = 'attempt'): string => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
         return `${prefix}:${crypto.randomUUID()}`;
     }
     return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+};

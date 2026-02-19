@@ -78,21 +78,21 @@ export {
 } from '@/entrypoints/interceptor/signal-emitter';
 export { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
 
-interface PageSnapshotRequest {
+type PageSnapshotRequest = {
     type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST';
     requestId: string;
     conversationId: string;
     __blackiyaToken?: string;
-}
+};
 
-interface PageSnapshotResponse {
+type PageSnapshotResponse = {
     type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE';
     requestId: string;
     success: boolean;
     data?: unknown;
     error?: string;
     __blackiyaToken?: string;
-}
+};
 
 const completionSignalCache = new Map<string, number>();
 const transientLogCache = new Map<string, number>();
@@ -129,7 +129,7 @@ const { bindAttemptToConversation, resolveAttemptIdForConversation, peekAttemptI
 
 // Cache pruning
 
-const maybePruneTimestampCaches = (nowMs = Date.now()): void => {
+const maybePruneTimestampCaches = (nowMs = Date.now()) => {
     if (nowMs - lastCachePruneAtMs < INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS) {
         return;
     }
@@ -182,7 +182,7 @@ const queueLogMessage = (payload: InterceptorLogPayload & { __blackiyaToken: str
     (window as any).__BLACKIYA_LOG_QUEUE__ = queue;
 };
 
-const cacheRawCapture = (payload: CapturePayload): void => {
+const cacheRawCapture = (payload: CapturePayload) => {
     const history = ((window as any).__BLACKIYA_RAW_CAPTURE_HISTORY__ as CapturePayload[] | undefined) ?? [];
     history.push(payload);
     if (history.length > 30) {
@@ -222,7 +222,7 @@ const shouldEmitCapturedPayload = (adapterName: string, url: string, payload: st
     return true;
 };
 
-const emitCapturePayload = (url: string, data: string, platform: string, attemptId?: string): void => {
+const emitCapturePayload = (url: string, data: string, platform: string, attemptId?: string) => {
     if (isAttemptDisposed(attemptId)) {
         return;
     }
@@ -238,11 +238,7 @@ const emitCapturePayload = (url: string, data: string, platform: string, attempt
     window.postMessage(stamped, window.location.origin);
 };
 
-const emitConversationIdResolvedSignal = (
-    attemptId: string,
-    conversationId: string,
-    platformOverride?: string,
-): void => {
+const emitConversationIdResolvedSignal = (attemptId: string, conversationId: string, platformOverride?: string) => {
     const key = `${attemptId}:${conversationId}`;
     const now = Date.now();
     maybePruneTimestampCaches(now);
@@ -278,7 +274,7 @@ const emitLifecycleSignal = (
     phase: ResponseLifecycleSignal['phase'],
     conversationId?: string,
     platformOverride?: string,
-): void => {
+) => {
     if (!shouldEmitLifecycleSignal(phase, conversationId) || isAttemptDisposed(attemptId)) {
         return;
     }
@@ -301,7 +297,7 @@ const emitTitleResolvedSignal = (
     conversationId: string,
     title: string,
     platformOverride?: string,
-): void => {
+) => {
     if (isAttemptDisposed(attemptId)) {
         return;
     }
@@ -321,7 +317,7 @@ const emitStreamDeltaSignal = (
     conversationId: string | undefined,
     text: string,
     platformOverride?: string,
-): void => {
+) => {
     const normalized = text.replace(/\r\n/g, '\n');
     const trimmed = normalized.trim();
     if (trimmed.length === 0 || /^v\d+$/i.test(trimmed) || isAttemptDisposed(attemptId)) {
@@ -345,7 +341,7 @@ const emitStreamDumpFrame = (
     text: string,
     chunkBytes?: number,
     platformOverride?: string,
-): void => {
+) => {
     if (!streamDumpEnabled || isAttemptDisposed(attemptId)) {
         return;
     }
@@ -384,7 +380,7 @@ const emitApiResponseDumpFrame = (
     responseText: string,
     attemptId: string,
     conversationId?: string,
-): void => {
+) => {
     if (!streamDumpEnabled) {
         return;
     }
@@ -397,7 +393,7 @@ const emitApiResponseDumpFrame = (
     emitStreamDumpFrame(attemptId, conversationId, 'snapshot', `${header}\n${body}`, responseText.length, adapterName);
 };
 
-const emitResponseFinishedSignal = (adapter: LLMPlatform, url: string): void => {
+const emitResponseFinishedSignal = (adapter: LLMPlatform, url: string) => {
     const conversationId = adapter.extractConversationIdFromUrl?.(url) ?? undefined;
     const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
     const dedupeKey = `${adapter.name}:${conversationId ?? safePathname(url)}`;
@@ -493,7 +489,7 @@ const emitNonChatGptStreamSnapshot = (
     attemptId: string,
     conversationId: string | undefined,
     parsed: ConversationData | null,
-): void => {
+) => {
     if (!parsed || adapter.name === 'ChatGPT') {
         return;
     }
@@ -513,7 +509,7 @@ const isDiscoveryModeHost = (hostname: string): boolean =>
 const isStaticAssetPath = (path: string): boolean =>
     !!path.match(/\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico)$/i);
 
-const emitDiscoveryDumpFrame = (label: string, path: string, text: string): void => {
+const emitDiscoveryDumpFrame = (label: string, path: string, text: string) => {
     if (!streamDumpEnabled || text.length <= 1000) {
         return;
     }
@@ -530,14 +526,14 @@ const emitDiscoveryDumpFrame = (label: string, path: string, text: string): void
     );
 };
 
-const logConversationSkip = (channel: 'API' | 'XHR', url: string): void => {
+const logConversationSkip = (channel: 'API' | 'XHR', url: string) => {
     const path = safePathname(url);
     if (shouldLogTransient(`${channel}:skip:${path}`, 2500)) {
         log('info', `${channel} skip conversation URL`, { host: window.location.hostname, path });
     }
 };
 
-const logDiscoveryFetch = (url: string, response: Response): void => {
+const logDiscoveryFetch = (url: string, response: Response) => {
     if (!isDiscoveryDiagnosticsEnabled()) {
         return;
     }
@@ -569,7 +565,7 @@ const logDiscoveryFetch = (url: string, response: Response): void => {
         .catch(() => {});
 };
 
-const logDiscoveryXhr = (url: string, responseText: string): void => {
+const logDiscoveryXhr = (url: string, responseText: string) => {
     if (!isDiscoveryDiagnosticsEnabled()) {
         return;
     }
@@ -614,7 +610,7 @@ const handleApiMatchFromFetch = (
     adapter: LLMPlatform,
     response: Response,
     deferredCompletionAdapter?: LLMPlatform,
-): void => {
+) => {
     const adapterName = adapter.name;
     if (shouldLogTransient(`api:match:${adapterName}:${safePathname(url)}`, 2500)) {
         log('info', `API match ${adapterName}`);
@@ -663,7 +659,7 @@ const handleApiMatchFromFetch = (
         });
 };
 
-const inspectAuxConversationFetch = (url: string, response: Response, adapter: LLMPlatform): void => {
+const inspectAuxConversationFetch = (url: string, response: Response, adapter: LLMPlatform) => {
     response
         .clone()
         .text()
@@ -689,7 +685,7 @@ const inspectAuxConversationFetch = (url: string, response: Response, adapter: L
         });
 };
 
-const handleFetchInterception = (args: Parameters<typeof fetch>, response: Response): void => {
+const handleFetchInterception = (args: Parameters<typeof fetch>, response: Response) => {
     const url = args[0] instanceof Request ? args[0].url : String(args[0]);
     const apiAdapter = getPlatformAdapterByApiUrl(url);
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
@@ -752,7 +748,7 @@ const processXhrApiMatch = (url: string, xhr: XMLHttpRequest, adapter: LLMPlatfo
     return true;
 };
 
-const processXhrAuxConversation = (url: string, xhr: XMLHttpRequest, adapter: LLMPlatform | null): void => {
+const processXhrAuxConversation = (url: string, xhr: XMLHttpRequest, adapter: LLMPlatform | null) => {
     if (!adapter) {
         return;
     }
@@ -768,7 +764,7 @@ const processXhrAuxConversation = (url: string, xhr: XMLHttpRequest, adapter: LL
     }
 };
 
-const handleXhrLoad = (xhr: XMLHttpRequest, method: string): void => {
+const handleXhrLoad = (xhr: XMLHttpRequest, method: string) => {
     const url = (xhr as any)._url;
     const adapter = getPlatformAdapterByApiUrl(url);
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
@@ -880,12 +876,7 @@ export default defineContentScript({
         const proactiveBackoffMs = [900, 1800, 3200, 5000, 7000, 9000, 12000, 15000];
         const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-        const logProactiveFetchStatus = (
-            conversationId: string,
-            apiUrl: string,
-            status: number,
-            attempt: number,
-        ): void => {
+        const logProactiveFetchStatus = (conversationId: string, apiUrl: string, status: number, attempt: number) => {
             const path = safePathname(apiUrl);
             if (!shouldLogTransient(`fetch:status:${conversationId}:${path}:${status}`, 5000)) {
                 return;
@@ -1037,7 +1028,7 @@ export default defineContentScript({
 
         // Fetch interceptor
 
-        const emitChatGptFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+        const emitChatGptFetchPromptLifecycle = (context: FetchInterceptorContext) => {
             if (!context.isChatGptPromptRequest || !context.lifecycleAttemptId) {
                 return;
             }
@@ -1055,7 +1046,7 @@ export default defineContentScript({
             emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
         };
 
-        const emitNonChatFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+        const emitNonChatFetchPromptLifecycle = (context: FetchInterceptorContext) => {
             if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter) {
                 return;
             }
@@ -1080,12 +1071,12 @@ export default defineContentScript({
             }
         };
 
-        const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+        const emitFetchPromptLifecycle = (context: FetchInterceptorContext) => {
             emitChatGptFetchPromptLifecycle(context);
             emitNonChatFetchPromptLifecycle(context);
         };
 
-        const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response): void => {
+        const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response) => {
             const contentType = response.headers.get('content-type') ?? '';
 
             if (context.isChatGptPromptRequest && contentType.includes('text/event-stream')) {
@@ -1212,7 +1203,7 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
-        const logGrokXhrRequest = (attemptId: string, context: XhrLifecycleContext): void => {
+        const logGrokXhrRequest = (attemptId: string, context: XhrLifecycleContext) => {
             if (!shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
                 return;
             }
@@ -1267,7 +1258,7 @@ export default defineContentScript({
             }
         };
 
-        const maybeLogGrokXhrResponse = (self: XMLHttpRequest, methodUpper: string, xhrUrl: string): void => {
+        const maybeLogGrokXhrResponse = (self: XMLHttpRequest, methodUpper: string, xhrUrl: string) => {
             if (methodUpper !== 'POST') {
                 return;
             }
@@ -1289,7 +1280,7 @@ export default defineContentScript({
             });
         };
 
-        const maybeLogGeminiXhrDiscovery = (self: XMLHttpRequest, methodUpper: string, xhrUrl: string): void => {
+        const maybeLogGeminiXhrDiscovery = (self: XMLHttpRequest, methodUpper: string, xhrUrl: string) => {
             if (!isDiscoveryDiagnosticsEnabled() || methodUpper !== 'POST' || self.status !== 200) {
                 return;
             }
@@ -1303,7 +1294,7 @@ export default defineContentScript({
             });
         };
 
-        const maybeRunCompletionFetchFromXhr = (self: XMLHttpRequest, xhrUrl: string): void => {
+        const maybeRunCompletionFetchFromXhr = (self: XMLHttpRequest, xhrUrl: string) => {
             const completionAdapter = getPlatformAdapterByCompletionUrl(xhrUrl);
             if (!completionAdapter) {
                 return;
@@ -1315,7 +1306,7 @@ export default defineContentScript({
             );
         };
 
-        const registerXhrLoadHandler = (xhr: XMLHttpRequest, methodUpper: string): void => {
+        const registerXhrLoadHandler = (xhr: XMLHttpRequest, methodUpper: string) => {
             xhr.addEventListener('load', function () {
                 const self = this as XMLHttpRequest;
                 const xhrUrl = ((self as any)._url as string | undefined) ?? '';

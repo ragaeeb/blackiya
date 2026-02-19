@@ -10,11 +10,11 @@ export type SnapshotMessageCandidate = {
  * This shape intentionally keeps a synthetic `root` node and zero-based `snapshot-0` IDs.
  * The runner calibration fallback uses `buildRunnerSnapshotConversationData` below.
  */
-export function buildConversationSnapshotFromMessages(
+export const buildConversationSnapshotFromMessages = (
     conversationId: string,
     title: string,
     messages: SnapshotMessageCandidate[],
-): ConversationData | null {
+): ConversationData | null => {
     if (!conversationId || messages.length === 0) {
         return null;
     }
@@ -65,14 +65,14 @@ export function buildConversationSnapshotFromMessages(
         blocked_urls: [],
         mapping,
     };
-}
+};
 
-export function buildRunnerSnapshotConversationData(
+export const buildRunnerSnapshotConversationData = (
     conversationId: string,
     platformName: string,
     messages: SnapshotMessageCandidate[],
     documentTitle?: string,
-): ConversationData | null {
+): ConversationData | null => {
     if (!conversationId || messages.length === 0) {
         return null;
     }
@@ -126,4 +126,4 @@ export function buildRunnerSnapshotConversationData(
         safe_urls: [],
         blocked_urls: [],
     };
-}
+};

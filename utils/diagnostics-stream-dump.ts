@@ -1,13 +1,13 @@
 import { browser } from 'wxt/browser';
 import { STORAGE_KEYS } from '@/utils/settings';
 
-interface StorageBackend {
+type StorageBackend = {
     get: (key: string) => Promise<Record<string, unknown>>;
     set: (value: Record<string, unknown>) => Promise<void>;
     remove: (key: string) => Promise<void>;
-}
+};
 
-function createInMemoryStorage(): StorageBackend {
+const createInMemoryStorage = (): StorageBackend => {
     const store = new Map<string, unknown>();
     return {
         async get(key: string) {
@@ -22,11 +22,11 @@ function createInMemoryStorage(): StorageBackend {
             store.delete(key);
         },
     };
-}
+};
 
 export type StreamDumpFrameKind = 'snapshot' | 'heuristic' | 'delta' | 'lifecycle';
 
-export interface StreamDumpFrameInput {
+export type StreamDumpFrameInput = {
     platform: string;
     attemptId: string;
     conversationId?: string | null;
@@ -35,9 +35,9 @@ export interface StreamDumpFrameInput {
     chunkBytes?: number;
     frameIndex?: number;
     timestampMs?: number;
-}
+};
 
-export interface StreamDumpFrame {
+export type StreamDumpFrame = {
     timestamp: string;
     platform: string;
     attemptId: string;
@@ -46,9 +46,9 @@ export interface StreamDumpFrame {
     text: string;
     chunkBytes?: number;
     frameIndex?: number;
-}
+};
 
-export interface StreamDumpSession {
+export type StreamDumpSession = {
     attemptId: string;
     platform: string;
     conversationId: string | null;
@@ -57,22 +57,22 @@ export interface StreamDumpSession {
     frameCount: number;
     truncated: boolean;
     frames: StreamDumpFrame[];
-}
+};
 
-export interface StreamDumpStore {
+export type StreamDumpStore = {
     schemaVersion: 1;
     createdAt: string;
     updatedAt: string;
     sessions: StreamDumpSession[];
-}
+};
 
-interface StreamDumpOptions {
+type StreamDumpOptions = {
     flushThreshold?: number;
     flushIntervalMs?: number;
     maxSessions?: number;
     maxFramesPerSession?: number;
     maxTextCharsPerFrame?: number;
-}
+};
 
 const DEFAULT_FLUSH_THRESHOLD = 10;
 const DEFAULT_FLUSH_INTERVAL_MS = 1500;
@@ -82,7 +82,7 @@ const DEFAULT_MAX_TEXT_CHARS_PER_FRAME = 900;
 
 const FRAME_TRUNCATION_SUFFIX = '...<truncated>';
 
-function createEmptyStore(): StreamDumpStore {
+const createEmptyStore = (): StreamDumpStore => {
     const now = new Date().toISOString();
     return {
         schemaVersion: 1,
@@ -90,13 +90,13 @@ function createEmptyStore(): StreamDumpStore {
         updatedAt: now,
         sessions: [],
     };
-}
+};
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+const isRecord = (value: unknown): value is Record<string, unknown> => {
     return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+};
 
-function asSession(value: unknown): StreamDumpSession | null {
+const asSession = (value: unknown): StreamDumpSession | null => {
     if (!isRecord(value)) {
         return null;
     }
@@ -124,9 +124,9 @@ function asSession(value: unknown): StreamDumpSession | null {
             );
         }),
     };
-}
+};
 
-function normalizeStore(raw: unknown): StreamDumpStore {
+const normalizeStore = (raw: unknown): StreamDumpStore => {
     if (!isRecord(raw)) {
         return createEmptyStore();
     }
@@ -139,16 +139,16 @@ function normalizeStore(raw: unknown): StreamDumpStore {
         updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now,
         sessions,
     };
-}
+};
 
-function redactSensitiveTokens(text: string): string {
+const redactSensitiveTokens = (text: string): string => {
     return text
         .replace(/\bBearer\s+[A-Za-z0-9._-]{12,}\b/gi, 'Bearer <redacted>')
         .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9._-]{8,}\.[A-Za-z0-9._-]{8,}\b/g, '<redacted:jwt>')
         .replace(/\b(authorization|cookie|token|api[_-]?key)\s*[:=]\s*[^\s"']+/gi, '$1=<redacted>');
-}
+};
 
-function sanitizeFrameText(text: string, maxChars: number): { text: string; truncated: boolean } {
+const sanitizeFrameText = (text: string, maxChars: number): { text: string; truncated: boolean } => {
     const normalized = redactSensitiveTokens(text.replace(/\0/g, '')).trim();
     if (maxChars <= 0) {
         return { text: '', truncated: normalized.length > 0 };
@@ -166,9 +166,9 @@ function sanitizeFrameText(text: string, maxChars: number): { text: string; trun
         text: `${normalized.slice(0, maxChars - FRAME_TRUNCATION_SUFFIX.length)}${FRAME_TRUNCATION_SUFFIX}`,
         truncated: true,
     };
-}
+};
 
-function asValidFrame(input: StreamDumpFrameInput): StreamDumpFrameInput | null {
+const asValidFrame = (input: StreamDumpFrameInput): StreamDumpFrameInput | null => {
     if (typeof input.platform !== 'string' || typeof input.attemptId !== 'string' || typeof input.text !== 'string') {
         return null;
     }
@@ -179,7 +179,7 @@ function asValidFrame(input: StreamDumpFrameInput): StreamDumpFrameInput | null 
         return null;
     }
     return input;
-}
+};
 
 export class BufferedStreamDumpStorage {
     private readonly storage: StorageBackend;
@@ -203,7 +203,7 @@ export class BufferedStreamDumpStorage {
         this.storageKey = STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_STORE;
     }
 
-    public async saveFrame(input: StreamDumpFrameInput): Promise<void> {
+    public async saveFrame(input: StreamDumpFrameInput) {
         const frame = asValidFrame(input);
         if (!frame) {
             return;
@@ -222,7 +222,7 @@ export class BufferedStreamDumpStorage {
         return normalizeStore(result[this.storageKey]);
     }
 
-    public async clearStore(): Promise<void> {
+    public async clearStore() {
         this.buffer = [];
         if (this.flushTimer) {
             clearTimeout(this.flushTimer);
@@ -231,7 +231,7 @@ export class BufferedStreamDumpStorage {
         await this.storage.remove(this.storageKey);
     }
 
-    private scheduleFlush(): void {
+    private scheduleFlush() {
         if (this.flushTimer) {
             return;
         }
@@ -285,7 +285,7 @@ export class BufferedStreamDumpStorage {
         return session;
     }
 
-    private pushFrameToSession(session: StreamDumpSession, input: StreamDumpFrameInput, nowIso: string): void {
+    private pushFrameToSession(session: StreamDumpSession, input: StreamDumpFrameInput, nowIso: string) {
         const { text, truncated } = sanitizeFrameText(input.text, this.maxTextCharsPerFrame);
         if (text.length === 0) {
             return;
@@ -337,14 +337,14 @@ export class BufferedStreamDumpStorage {
         return pruned;
     }
 
-    private restoreBatch(batch: StreamDumpFrameInput[]): void {
+    private restoreBatch(batch: StreamDumpFrameInput[]) {
         if (batch.length === 0) {
             return;
         }
         this.buffer = [...batch, ...this.buffer];
     }
 
-    private async flush(): Promise<void> {
+    private async flush() {
         const batch = this.beginFlushBatch();
         if (!batch) {
             return;

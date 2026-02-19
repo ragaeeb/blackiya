@@ -51,7 +51,7 @@ import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
-const waitUntil = async (predicate: () => boolean, timeout = 5000, interval = 20): Promise<void> => {
+const waitUntil = async (predicate: () => boolean, timeout = 5000, interval = 20) => {
     const start = Date.now();
     while (!predicate()) {
         if (Date.now() - start > timeout) {

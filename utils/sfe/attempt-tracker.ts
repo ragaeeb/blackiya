@@ -1,20 +1,20 @@
 import { createAttemptId } from '@/utils/protocol/messages';
 import type { AttemptDescriptor, LifecyclePhase } from '@/utils/sfe/types';
 
-interface CreateAttemptInput {
+type CreateAttemptInput = {
     attemptId?: string;
     platform: string;
     conversationId?: string | null;
     platformGenerationId?: string | null;
     phase?: LifecyclePhase;
     timestampMs?: number;
-}
+};
 
-interface AttemptTrackerOptions {
+type AttemptTrackerOptions = {
     maxEntries?: number;
     completedAttemptTtlMs?: number;
     now?: () => number;
-}
+};
 
 export class AttemptTracker {
     private attempts = new Map<string, AttemptDescriptor>();
@@ -193,14 +193,14 @@ export class AttemptTracker {
         );
     }
 
-    private removeAttempt(attempt: AttemptDescriptor): void {
+    private removeAttempt(attempt: AttemptDescriptor) {
         this.attempts.delete(attempt.attemptId);
         if (attempt.conversationId && this.activeByConversation.get(attempt.conversationId) === attempt.attemptId) {
             this.activeByConversation.delete(attempt.conversationId);
         }
     }
 
-    private cleanup(nowMs: number): void {
+    private cleanup(nowMs: number) {
         if (this.completedAttemptTtlMs <= 0) {
             return;
         }
@@ -221,7 +221,7 @@ export class AttemptTracker {
         }
     }
 
-    private trim(): void {
+    private trim() {
         if (this.attempts.size <= this.maxEntries) {
             return;
         }

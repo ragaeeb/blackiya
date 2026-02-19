@@ -11,7 +11,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Determine the current execution context
  */
-function getContext(): 'background' | 'content' | 'popup' {
+const getContext = (): 'background' | 'content' | 'popup' => {
     if (typeof window === 'undefined') {
         return 'background';
     }
@@ -30,7 +30,7 @@ function getContext(): 'background' | 'content' | 'popup' {
     }
 
     return 'background'; // Default to background if unsure
-}
+};
 
 /**
  * Extension Logger
@@ -146,7 +146,7 @@ class ExtensionLogger {
         this.logger.settings.minLevel = minLevel;
     }
 
-    private async hydrateLogLevelFromStorage(): Promise<void> {
+    private async hydrateLogLevelFromStorage() {
         if (!browser?.storage?.local?.get) {
             return;
         }
@@ -166,7 +166,7 @@ class ExtensionLogger {
         }
     }
 
-    private attachStorageListener(): void {
+    private attachStorageListener() {
         if (this.storageListenerAttached) {
             return;
         }

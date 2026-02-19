@@ -30,7 +30,7 @@ export { resetGeminiAdapterState } from './state';
 
 const MAX_TITLE_LENGTH = 80;
 
-const maybeUpdateActiveConversationTitle = (convId: string, title: string): void => {
+const maybeUpdateActiveConversationTitle = (convId: string, title: string) => {
     const activeObj = geminiState.activeConversations.get(convId);
     if (!activeObj?.title || activeObj.title === title) {
         return;

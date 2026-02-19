@@ -20,7 +20,7 @@ type GrokXhrStreamState = {
 
 // History-trimming helpers
 
-const trimPayloadHistory = (order: string[], set: Set<string>, max = 260): void => {
+const trimPayloadHistory = (order: string[], set: Set<string>, max = 260) => {
     while (order.length > max) {
         const oldest = order.shift();
         if (oldest) {
@@ -29,7 +29,7 @@ const trimPayloadHistory = (order: string[], set: Set<string>, max = 260): void 
     }
 };
 
-const trimSignalHistory = (order: string[], set: Set<string>, max = 360): void => {
+const trimSignalHistory = (order: string[], set: Set<string>, max = 360) => {
     while (order.length > max) {
         const oldest = order.shift();
         if (oldest) {
@@ -45,7 +45,7 @@ const appendGrokBuffer = (buffer: string, chunk: string): string => {
     return next.length <= 1_000_000 ? next : next.slice(-800_000);
 };
 
-const appendSeenPayloads = (seenPayloadOrder: string[], seenPayloads: Set<string>, payloads: string[]): void => {
+const appendSeenPayloads = (seenPayloadOrder: string[], seenPayloads: Set<string>, payloads: string[]) => {
     for (const payload of payloads) {
         seenPayloadOrder.push(payload);
     }
@@ -62,7 +62,7 @@ const emitStreamCandidates = (
     emittedSignals: Set<string>,
     emittedSignalOrder: string[],
     emit: StreamMonitorEmitter,
-): void => {
+) => {
     const emitOne = (candidate: string, kind: 'text' | 'thinking') => {
         const normalized = candidate.replace(/\r\n/g, '\n');
         if (!normalized.trim()) {
@@ -173,7 +173,7 @@ export const monitorGrokResponseStream = async (
     seedConversationId: string | undefined,
     requestUrl: string,
     emitLifecyclePhases: boolean,
-): Promise<void> => {
+) => {
     if (!response.body || emit.isAttemptDisposed(attemptId)) {
         return;
     }
@@ -251,7 +251,7 @@ const createXhrStreamState = (
     emittedStreaming: false,
 });
 
-const processXhrChunk = (state: GrokXhrStreamState, chunkText: string, emit: StreamMonitorEmitter): void => {
+const processXhrChunk = (state: GrokXhrStreamState, chunkText: string, emit: StreamMonitorEmitter) => {
     if (!chunkText || emit.isAttemptDisposed(state.attemptId)) {
         return;
     }
@@ -312,7 +312,7 @@ export const wireGrokXhrProgressMonitor = (
     emit: StreamMonitorEmitter,
     seedConversationId: string | undefined,
     requestUrl: string,
-): void => {
+) => {
     if (emit.shouldLogTransient(`grok:xhr-stream:start:${attemptId}`, 7000)) {
         emit.log('info', 'Grok XHR stream monitor start', { attemptId, conversationId: seedConversationId ?? null });
     }

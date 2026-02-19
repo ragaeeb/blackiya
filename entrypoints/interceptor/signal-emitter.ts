@@ -1,11 +1,11 @@
 import { shouldEmitGeminiCompletion } from '@/utils/gemini-request-classifier';
 
-export function shouldEmitXhrRequestLifecycle(context: {
+export const shouldEmitXhrRequestLifecycle = (context: {
     shouldEmitNonChatLifecycle: boolean;
     requestAdapter: { name: string } | null;
     attemptId?: string;
     conversationId?: string;
-}): boolean {
+}): boolean => {
     if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter || !context.attemptId) {
         return false;
     }
@@ -13,14 +13,14 @@ export function shouldEmitXhrRequestLifecycle(context: {
         return true;
     }
     return typeof context.conversationId === 'string' && context.conversationId.length > 0;
-}
+};
 
-export function tryEmitGeminiXhrLoadendCompletion(
+export const tryEmitGeminiXhrLoadendCompletion = (
     state: { emittedCompleted: boolean; emittedStreaming: boolean; seedConversationId?: string },
     requestUrl: string,
-) {
+) => {
     return tryMarkGeminiXhrLoadendCompleted(state, requestUrl);
-}
+};
 
 export function tryMarkGeminiXhrLoadendCompleted(
     state: { emittedCompleted: boolean; emittedStreaming: boolean; seedConversationId?: string },

@@ -23,9 +23,9 @@ const getPlatforms = () => {
  * @param url - The URL to check (either page URL or API URL)
  * @returns The matching platform adapter or null if not found
  */
-export function getPlatformAdapter(url: string): LLMPlatform | null {
+export const getPlatformAdapter = (url: string): LLMPlatform | null => {
     return getPlatforms().find((p) => p.isPlatformUrl(url)) || null;
-}
+};
 
 /**
  * Get the platform adapter that matches an API endpoint URL
@@ -33,9 +33,9 @@ export function getPlatformAdapter(url: string): LLMPlatform | null {
  * @param url - The intercepted API endpoint URL
  * @returns The matching platform adapter or null if not found
  */
-export function getPlatformAdapterByApiUrl(url: string): LLMPlatform | null {
+export const getPlatformAdapterByApiUrl = (url: string): LLMPlatform | null => {
     return getPlatforms().find((p) => p.apiEndpointPattern.test(url)) || null;
-}
+};
 
 /**
  * Get the platform adapter that matches a completion trigger URL.
@@ -43,6 +43,6 @@ export function getPlatformAdapterByApiUrl(url: string): LLMPlatform | null {
  * @param url - The intercepted completion-trigger URL
  * @returns The matching platform adapter or null if not found
  */
-export function getPlatformAdapterByCompletionUrl(url: string): LLMPlatform | null {
+export const getPlatformAdapterByCompletionUrl = (url: string): LLMPlatform | null => {
     return getPlatforms().find((p) => p.completionTriggerPattern?.test(url)) || null;
-}
+};
