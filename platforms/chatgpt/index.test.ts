@@ -22,7 +22,7 @@ describe('ChatGPT Platform Adapter', () => {
 
     beforeAll(async () => {
         // Dynamic import to ensure mocks apply
-        const module = await import('@/platforms/chatgpt');
+        const module = await import('./index');
         adapter = module.createChatGPTAdapter();
     });
 

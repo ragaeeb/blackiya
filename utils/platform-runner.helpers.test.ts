@@ -20,81 +20,6 @@ const createMockAdapter = () => ({
     parseInterceptedData: () => ({ conversation_id: '123' }),
 });
 
-const _buildConversation = (
-    conversationId: string,
-    assistantText: string,
-    options: { status: string; endTurn: boolean },
-) => ({
-    title: 'Test Conversation',
-    create_time: 1_700_000_000,
-    update_time: 1_700_000_120,
-    conversation_id: conversationId,
-    current_node: 'a1',
-    moderation_results: [],
-    plugin_ids: null,
-    gizmo_id: null,
-    gizmo_type: null,
-    is_archived: false,
-    default_model_slug: 'gpt',
-    safe_urls: [],
-    blocked_urls: [],
-    mapping: {
-        root: { id: 'root', message: null, parent: null, children: ['u1'] },
-        u1: {
-            id: 'u1',
-            parent: 'root',
-            children: ['a1'],
-            message: {
-                id: 'u1',
-                author: { role: 'user', name: null, metadata: {} },
-                create_time: 1_700_000_010,
-                update_time: 1_700_000_010,
-                content: { content_type: 'text', parts: ['Prompt'] },
-                status: 'finished_successfully',
-                end_turn: true,
-                weight: 1,
-                metadata: {},
-                recipient: 'all',
-                channel: null,
-            },
-        },
-        a1: {
-            id: 'a1',
-            parent: 'u1',
-            children: [],
-            message: {
-                id: 'a1',
-                author: { role: 'assistant', name: null, metadata: {} },
-                create_time: 1_700_000_020,
-                update_time: 1_700_000_020,
-                content: { content_type: 'text', parts: [assistantText] },
-                status: options.status,
-                end_turn: options.endTurn,
-                weight: 1,
-                metadata: {},
-                recipient: 'all',
-                channel: null,
-            },
-        },
-    },
-});
-
-const _evaluateReadinessMock = (data: any) => {
-    const assistants = Object.values(data?.mapping ?? {})
-        .map((node: any) => node?.message)
-        .filter((message: any) => message?.author?.role === 'assistant');
-    const latestAssistant = assistants[assistants.length - 1] as any;
-    const text = (latestAssistant?.content?.parts ?? []).join('').trim();
-    const terminal = latestAssistant?.status !== 'in_progress' && latestAssistant?.end_turn === true;
-    return {
-        ready: terminal && text.length > 0,
-        terminal,
-        reason: terminal ? 'terminal' : 'in-progress',
-        contentHash: text.length > 0 ? `h:${text.length}:${terminal ? 1 : 0}` : null,
-        latestAssistantTextLength: text.length,
-    };
-};
-
 // We need a mutable reference to control the mock return value
 const currentAdapterMock: any = createMockAdapter();
 const storageDataMock: Record<string, unknown> = {};
@@ -156,7 +81,6 @@ mock.module('wxt/browser', () => ({
     browser: browserMock,
 }));
 
-import { getSessionToken } from '@/utils/protocol/session-token';
 // Import subject under test AFTER mocking
 import {
     beginCanonicalStabilizationTick,
@@ -164,12 +88,6 @@ import {
     resolveShouldSkipCanonicalRetryAfterAwait,
     shouldRemoveDisposedAttemptBinding,
 } from './platform-runner';
-
-/** Stamps the session token onto a test message before posting via window.postMessage */
-const _postStampedMessage = (data: Record<string, unknown>, origin: string) => {
-    const token = getSessionToken();
-    window.postMessage(token ? { ...data, __blackiyaToken: token } : data, origin);
-};
 
 describe('shouldRemoveDisposedAttemptBinding', () => {
     const resolveFromMap = (aliases: Record<string, string>) => (attemptId: string) => {

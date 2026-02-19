@@ -59,6 +59,7 @@ test.describe('blackiya smoke harness', () => {
             await expect(page.locator('#logLevel')).toBeVisible();
             await expect(page.locator('#exportFormat')).toBeVisible();
             await expect(page.locator('#streamDumpEnabled')).toBeVisible();
+            await expect(page.locator('#streamProbeVisible')).toBeVisible();
             await expect(page.locator('text=Export Full Logs (JSON)')).toBeVisible();
             await expect(page.locator('text=Export Debug Report (TXT)')).toBeVisible();
             await expect(page.locator('text=Export Stream Dump (JSON)')).toBeVisible();

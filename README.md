@@ -405,9 +405,8 @@ The ZIP file will be in `.output/` directory.
 ### Basic Usage
 
 1. Navigate to ChatGPT, Gemini, or Grok and open a conversation
-2. Click the **Save** button to download the JSON file.
-3. The conversation JSON will download or be copied automatically.
-4. Download format: `{conversation-title}_{timestamp}.json`
+2. The conversation JSON will download or be copied automatically.
+3. Download format: `{conversation-title}_{timestamp}.json`
 
 ### Popup Tools
 

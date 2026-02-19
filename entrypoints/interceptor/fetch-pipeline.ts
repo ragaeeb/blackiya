@@ -31,10 +31,6 @@ export interface CreateFetchInterceptorContextDeps {
     safePathname: (url: string) => string;
 }
 
-const shouldRetainAdapterForRequest = (adapter: LLMPlatform | null, method: string, url: string) => {
-    return !!adapter && (method === 'POST' || (adapter.name === 'Grok' && isGrokStreamingEndpoint(url)));
-};
-
 const shouldResolveAttemptForRequest = (adapter: LLMPlatform | null, method: string, url: string) => {
     return !!adapter && (method === 'POST' || (adapter.name === 'Grok' && isGrokStreamingEndpoint(url)));
 };
@@ -63,7 +59,7 @@ export function createFetchInterceptorContext(
     const outgoingMethod = deps.getRequestMethod(args).toUpperCase();
     const outgoingPath = deps.safePathname(outgoingUrl);
     const detectedAdapter = deps.getPlatformAdapterByApiUrl(outgoingUrl);
-    const fetchApiAdapter = shouldRetainAdapterForRequest(detectedAdapter, outgoingMethod, outgoingUrl)
+    const fetchApiAdapter = shouldResolveAttemptForRequest(detectedAdapter, outgoingMethod, outgoingUrl)
         ? detectedAdapter
         : null;
     const isNonChatGptApiRequest = !!fetchApiAdapter && fetchApiAdapter.name !== deps.chatGptPlatformName;

@@ -177,6 +177,10 @@ function App() {
             </div>
 
             <div className="section">
+                <strong>Stream Toast</strong>
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                    Shows a small overlay during active streaming sessions
+                </div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
                     <input
                         id="streamProbeVisible"
@@ -184,7 +188,6 @@ function App() {
                         checked={streamProbeVisible}
                         onChange={handleStreamProbeVisibilityChange}
                     />
-                    Show in-page stream toast
                 </label>
             </div>
 
