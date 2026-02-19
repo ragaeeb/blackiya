@@ -244,6 +244,73 @@ export class ButtonManager {
         }
     }
 
+    private collectElements(root: ParentNode): Element[] {
+        const out: Element[] = [];
+        const queue: unknown[] = [root];
+
+        while (queue.length > 0) {
+            const current = queue.shift() as
+                | (ParentNode & { children?: HTMLCollection })
+                | (Element & { shadowRoot?: ShadowRoot | null })
+                | null
+                | undefined;
+            if (!current || typeof current !== 'object') {
+                continue;
+            }
+            if (this.isElementNode(current)) {
+                out.push(current);
+                if ('shadowRoot' in current && current.shadowRoot) {
+                    queue.push(current.shadowRoot);
+                }
+            }
+            const children = current.children;
+            if (!children || typeof children.length !== 'number') {
+                continue;
+            }
+            for (let i = 0; i < children.length; i += 1) {
+                queue.push(children.item(i));
+            }
+        }
+
+        return out;
+    }
+
+    private fallbackQuerySelectorAll(root: ParentNode, selector: string): Element[] {
+        if (selector === '*') {
+            return this.collectElements(root);
+        }
+        if (selector.startsWith('#') && selector.length > 1) {
+            const id = selector.slice(1);
+            return this.collectElements(root).filter((element) => element.id === id);
+        }
+        if (selector === '[data-blackiya-controls="1"]') {
+            return this.collectElements(root).filter((element) => element.getAttribute('data-blackiya-controls') === '1');
+        }
+        return [];
+    }
+
+    private safeQuerySelectorAll(root: ParentNode, selector: string): Element[] {
+        if (!root || typeof (root as { querySelectorAll?: unknown }).querySelectorAll !== 'function') {
+            return [];
+        }
+        try {
+            return Array.from((root as ParentNode).querySelectorAll(selector));
+        } catch {
+            return this.fallbackQuerySelectorAll(root, selector);
+        }
+    }
+
+    private safeQuerySelector(root: ParentNode, selector: string): Element | null {
+        if (!root || typeof (root as { querySelector?: unknown }).querySelector !== 'function') {
+            return null;
+        }
+        try {
+            return (root as ParentNode).querySelector(selector);
+        } catch {
+            return this.safeQuerySelectorAll(root, selector)[0] ?? null;
+        }
+    }
+
     private collectSearchRoots(): ParentNode[] {
         const roots: ParentNode[] = [];
         const queue: ParentNode[] = [document];
@@ -257,7 +324,7 @@ export class ButtonManager {
             visited.add(root);
             roots.push(root);
 
-            const elements = root.querySelectorAll('*');
+            const elements = this.safeQuerySelectorAll(root, '*');
             for (const element of elements) {
                 if (!this.isElementNode(element) || !('shadowRoot' in element) || !element.shadowRoot) {
                     continue;
@@ -272,7 +339,7 @@ export class ButtonManager {
     private queryAllAcrossRoots(selector: string): HTMLElement[] {
         const matches: HTMLElement[] = [];
         for (const root of this.collectSearchRoots()) {
-            const nodes = root.querySelectorAll(selector);
+            const nodes = this.safeQuerySelectorAll(root, selector);
             for (const node of nodes) {
                 if (this.isElementNode(node)) {
                     matches.push(node);
@@ -300,7 +367,7 @@ export class ButtonManager {
     private collectPrimaryControls(activeContainer: HTMLElement): Set<HTMLElement> {
         const keep = new Set<HTMLElement>();
         for (const id of this.controlIds) {
-            const primary = activeContainer.querySelector(`#${id}`);
+            const primary = this.safeQuerySelector(activeContainer, `#${id}`);
             if (this.isElementNode(primary)) {
                 keep.add(primary);
             }
@@ -321,6 +388,9 @@ export class ButtonManager {
     private removeDuplicateControlById(id: string, keep: Set<HTMLElement>, activeContainer: HTMLElement): void {
         const matches = this.queryAllAcrossRoots(`#${id}`);
         for (const match of matches) {
+            if (activeContainer.contains(match)) {
+                continue;
+            }
             if (keep.has(match)) {
                 continue;
             }
@@ -328,7 +398,7 @@ export class ButtonManager {
             this.detachNode(match);
             if (parentContainer && parentContainer !== activeContainer) {
                 const hasRemainingControls = this.controlIds.some(
-                    (controlId) => !!parentContainer.querySelector(`#${controlId}`),
+                    (controlId) => !!this.safeQuerySelector(parentContainer, `#${controlId}`),
                 );
                 if (!hasRemainingControls) {
                     this.detachNode(parentContainer);

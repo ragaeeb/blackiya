@@ -152,7 +152,7 @@ export const geminiAdapter: LLMPlatform = {
     },
 
     isPlatformGenerating() {
-        // TODO(v2.0.x): Implement Gemini DOM generation detection once selectors are stable.
+        // Gemini generation gating is driven by network lifecycle/SFE signals.
         return false;
     },
 

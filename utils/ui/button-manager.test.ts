@@ -17,6 +17,31 @@ import { ButtonManager } from './button-manager';
 describe('ButtonManager', () => {
     const windowInstance = new Window();
     const document = windowInstance.document;
+    const listById = (id: string, root: any = document): any[] => {
+        const matches: any[] = [];
+        const queue: any[] = [root];
+        while (queue.length > 0) {
+            const current = queue.shift();
+            if (!current || typeof current !== 'object') {
+                continue;
+            }
+            if (current.id === id) {
+                matches.push(current);
+            }
+            if (current.shadowRoot) {
+                queue.push(current.shadowRoot);
+            }
+            const children = current.children;
+            if (!children || typeof children.length !== 'number') {
+                continue;
+            }
+            for (let i = 0; i < children.length; i += 1) {
+                queue.push(children.item(i));
+            }
+        }
+        return matches;
+    };
+    const countById = (id: string, root: any = document): number => listById(id, root).length;
 
     beforeEach(() => {
         document.body.innerHTML = '';
@@ -86,7 +111,7 @@ describe('ButtonManager', () => {
         orphan2.textContent = 'orphan2';
         document.body.appendChild(orphan2);
 
-        expect(document.querySelectorAll('#blackiya-button-container').length).toBe(2);
+        expect(countById('blackiya-button-container')).toBe(2);
 
         const manager = new ButtonManager(
             async () => {},
@@ -95,7 +120,7 @@ describe('ButtonManager', () => {
         manager.inject(document.body as any, 'test-123');
 
         // After injection, there should be exactly ONE container (the new one)
-        const containers = document.querySelectorAll('#blackiya-button-container');
+        const containers = listById('blackiya-button-container');
         expect(containers.length).toBe(1);
         expect(containers[0]!.textContent).not.toContain('orphan');
         expect(containers[0]!.getAttribute('data-blackiya-controls')).toBe('1');
@@ -113,7 +138,7 @@ describe('ButtonManager', () => {
         );
         manager.inject(document.body as any, 'test-standalone');
 
-        const saveButtons = document.querySelectorAll('#blackiya-save-btn');
+        const saveButtons = listById('blackiya-save-btn');
         expect(saveButtons.length).toBe(1);
         expect(saveButtons[0]?.textContent?.includes('stale')).toBeFalse();
     });
@@ -131,7 +156,7 @@ describe('ButtonManager', () => {
         // Second inject should be a no-op
         manager.inject(document.body as any, 'test-456');
 
-        const containers = document.querySelectorAll('#blackiya-button-container');
+        const containers = listById('blackiya-button-container');
         expect(containers.length).toBe(1);
     });
 
@@ -148,12 +173,12 @@ describe('ButtonManager', () => {
         duplicateSave.textContent = 'duplicate save';
         document.body.appendChild(duplicateSave);
 
-        expect(document.querySelectorAll('#blackiya-save-btn').length).toBe(2);
+        expect(countById('blackiya-save-btn')).toBe(2);
 
         // Re-inject with same manager hits no-op path.
         manager.inject(document.body as any, 'test-dup-noop');
 
-        const saveButtons = document.querySelectorAll('#blackiya-save-btn');
+        const saveButtons = listById('blackiya-save-btn');
         expect(saveButtons.length).toBe(1);
         expect(saveButtons[0]?.textContent?.includes('duplicate')).toBeFalse();
     });
@@ -179,10 +204,10 @@ describe('ButtonManager', () => {
 
         manager.inject(document.body as any, 'shadow-dup');
 
-        const saveButtons = document.querySelectorAll('#blackiya-save-btn');
-        const shadowSaveButtons = shadow.querySelectorAll('#blackiya-save-btn');
-        const containers = document.querySelectorAll('#blackiya-button-container');
-        const shadowContainers = shadow.querySelectorAll('#blackiya-button-container');
+        const saveButtons = listById('blackiya-save-btn');
+        const shadowSaveButtons = listById('blackiya-save-btn', shadow);
+        const containers = listById('blackiya-button-container');
+        const shadowContainers = listById('blackiya-button-container', shadow);
 
         expect(saveButtons.length).toBe(1);
         expect(shadowSaveButtons.length).toBe(0);

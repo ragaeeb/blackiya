@@ -2402,6 +2402,28 @@ export function runPlatform(): void {
         return text.replace(/\s+/g, ' ').trim();
     }
 
+    function queryAllFromRoot(root: ParentNode, selector: string): Element[] {
+        if (!root || typeof (root as { querySelectorAll?: unknown }).querySelectorAll !== 'function') {
+            return [];
+        }
+        try {
+            return Array.from(root.querySelectorAll(selector));
+        } catch {
+            return [];
+        }
+    }
+
+    function safeQuerySelector(selector: string): Element | null {
+        if (typeof document.querySelector !== 'function') {
+            return null;
+        }
+        try {
+            return document.querySelector(selector);
+        } catch {
+            return null;
+        }
+    }
+
     function collectSnapshotMessageCandidates(root: ParentNode): SnapshotMessageCandidate[] {
         const selectors: Array<{ selector: string; role: 'user' | 'assistant' }> = [
             { selector: '[data-message-author-role="user"]', role: 'user' },
@@ -2414,7 +2436,7 @@ export function runPlatform(): void {
 
         const collected: SnapshotMessageCandidate[] = [];
         for (const entry of selectors) {
-            const nodes = root.querySelectorAll(entry.selector);
+            const nodes = queryAllFromRoot(root, entry.selector);
             for (const node of nodes) {
                 const text = normalizeSnapshotText((node.textContent ?? '').trim());
                 if (text.length < 2) {
@@ -2440,7 +2462,8 @@ export function runPlatform(): void {
     }
 
     function collectLooseGrokCandidates(root: ParentNode): SnapshotMessageCandidate[] {
-        const nodes = root.querySelectorAll(
+        const nodes = queryAllFromRoot(
+            root,
             'main article, main [data-testid*="message"], main [class*="message"], main [class*="response"]',
         );
 
@@ -2512,7 +2535,7 @@ export function runPlatform(): void {
     }
 
     function collectLastResortCandidatesViaSelectors(root: ParentNode, snippets: string[]): void {
-        const containers = root.querySelectorAll('main, article, section, div');
+        const containers = queryAllFromRoot(root, 'main, article, section, div');
         for (const node of containers) {
             const text = normalizeSnapshotText((node.textContent ?? '').trim());
             if (text.length < 40 || text.length > 1200) {
@@ -2621,11 +2644,18 @@ export function runPlatform(): void {
 
     function buildIsolatedDomSnapshot(adapter: LLMPlatform, conversationId: string): ConversationData | null {
         const roots: ParentNode[] = [];
-        const main = document.querySelector('main');
+        let main: Element | null = null;
+        try {
+            main = typeof document.querySelector === 'function' ? document.querySelector('main') : null;
+        } catch {
+            main = null;
+        }
         if (main) {
             roots.push(main);
         }
-        roots.push(document.body);
+        if (document.body) {
+            roots.push(document.body);
+        }
 
         for (const root of roots) {
             const snapshot = buildSnapshotFromRoot(adapter, conversationId, root);
@@ -2714,7 +2744,7 @@ export function runPlatform(): void {
         quietMs: number,
         maxWaitMs: number,
     ): Promise<boolean> {
-        const root = document.querySelector('main') ?? document.body;
+        const root = safeQuerySelector('main') ?? document.body;
         if (!root) {
             return true;
         }
@@ -3522,13 +3552,13 @@ export function runPlatform(): void {
         ];
 
         for (const selector of stopSelectors) {
-            const button = document.querySelector(selector) as HTMLButtonElement | null;
+            const button = safeQuerySelector(selector) as HTMLButtonElement | null;
             if (button && !button.disabled) {
                 return true;
             }
         }
 
-        return !!document.querySelector('[data-is-streaming="true"], [data-testid*="streaming"]');
+        return !!safeQuerySelector('[data-is-streaming="true"], [data-testid*="streaming"]');
     }
 
     function isPlatformGenerating(adapter: LLMPlatform | null): boolean {

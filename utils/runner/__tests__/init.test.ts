@@ -40,6 +40,9 @@ mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 import { runPlatform } from '@/utils/platform-runner';
 
 describe('Platform Runner – initialisation', () => {
+    const countById = (id: string): number =>
+        Array.from(document.getElementsByTagName('*')).filter((node) => node.id === id).length;
+
     beforeEach(() => {
         window.dispatchEvent(new (window as any).Event('beforeunload'));
         document.body.innerHTML = '';
@@ -65,9 +68,9 @@ describe('Platform Runner – initialisation', () => {
         runPlatform();
         await new Promise((r) => setTimeout(r, 80));
 
-        expect(document.querySelectorAll('#blackiya-button-container').length).toBe(1);
-        expect(document.querySelectorAll('#blackiya-save-btn').length).toBe(1);
-        expect(document.querySelectorAll('#blackiya-calibrate-btn').length).toBe(1);
+        expect(countById('blackiya-button-container')).toBe(1);
+        expect(countById('blackiya-save-btn')).toBe(1);
+        expect(countById('blackiya-calibrate-btn')).toBe(1);
     });
 
     it('should keep SFE readiness source enabled', async () => {

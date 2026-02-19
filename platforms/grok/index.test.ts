@@ -318,15 +318,17 @@ describe('Grok Adapter — formatFilename', () => {
 });
 
 describe('Grok Adapter — extractTitleFromDom', () => {
-    const withDocTitle = (title: string, fn: () => void) => {
+    const withDoc = (doc: { title?: string; querySelector?: (selector: string) => Element | null }, fn: () => void) => {
         const orig = (globalThis as any).document;
-        (globalThis as any).document = { title };
+        (globalThis as any).document = doc;
         try {
             fn();
         } finally {
             (globalThis as any).document = orig;
         }
     };
+
+    const withDocTitle = (title: string, fn: () => void) => withDoc({ title, querySelector: () => null }, fn);
 
     it('should have extractTitleFromDom defined', () => {
         expect(typeof grokAdapter.extractTitleFromDom).toBe('function');
@@ -335,6 +337,7 @@ describe('Grok Adapter — extractTitleFromDom', () => {
     it('should have the expected defaultTitles', () => {
         expect(grokAdapter.defaultTitles).toContain('New conversation');
         expect(grokAdapter.defaultTitles).toContain('Grok Conversation');
+        expect(grokAdapter.defaultTitles).toContain('Grok / X');
     });
 
     it('should strip "- Grok" suffix', () => {
@@ -355,6 +358,12 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         });
     });
 
+    it('should return null for generic "Grok / X" page title', () => {
+        withDocTitle('Grok / X', () => {
+            expect(grokAdapter.extractTitleFromDom()).toBeNull();
+        });
+    });
+
     it('should return null for empty document title', () => {
         withDocTitle('', () => {
             expect(grokAdapter.extractTitleFromDom()).toBeNull();
@@ -365,6 +374,22 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         withDocTitle('New conversation - Grok', () => {
             expect(grokAdapter.extractTitleFromDom()).toBeNull();
         });
+    });
+
+    it('should resolve title from x.com active conversation DOM when page title is generic', () => {
+        const activeConversationTitle = { textContent: 'Classical Islamic Text Translation Guidelines' } as Element;
+        withDoc(
+            {
+                title: 'Grok / X',
+                querySelector: (selector: string) =>
+                    selector === '[aria-current="page"][href*="/i/grok?conversation="] [dir="ltr"]'
+                        ? activeConversationTitle
+                        : null,
+            },
+            () => {
+                expect(grokAdapter.extractTitleFromDom()).toBe('Classical Islamic Text Translation Guidelines');
+            },
+        );
     });
 });
 

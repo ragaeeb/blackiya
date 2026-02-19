@@ -70,60 +70,83 @@ export const extractTitleCandidatesFromPayload = (payload: unknown): string[] =>
 
 // ── DOM title extraction ───────────────────────────────────────────────────────
 
-const HEADING_SELECTORS = [
-    'main h1',
-    'main [role="heading"][aria-level="1"]',
-    'main [role="heading"]',
-    'header h1',
-    'h1',
-];
+const hasAncestorTag = (node: Element, tagName: string): boolean => {
+    let current: Element | null = node.parentElement;
+    while (current) {
+        if (current.tagName === tagName) {
+            return true;
+        }
+        current = current.parentElement;
+    }
+    return false;
+};
 
-const ACTIVE_NAV_SELECTORS = [
-    'nav a[aria-current="page"]',
-    'nav button[aria-current="page"]',
-    'aside a[aria-current="page"]',
-    'aside button[aria-current="page"]',
-    '[role="tab"][aria-selected="true"]',
-    'nav [aria-selected="true"]',
-];
+const getDocumentElements = (): Element[] => {
+    if (typeof document === 'undefined' || typeof document.getElementsByTagName !== 'function') {
+        return [];
+    }
+    try {
+        return Array.from(document.getElementsByTagName('*'));
+    } catch {
+        return [];
+    }
+};
 
-const APP_HREF_SELECTORS = [
-    'nav a[href*="/app/"]',
-    'aside a[href*="/app/"]',
-    '[role="navigation"] a[href*="/app/"]',
-    'a[href*="/app/"]',
-];
-
-const firstValidTitleFromSelectors = (selectors: string[]): string | null => {
-    for (const selector of selectors) {
-        for (const node of document.querySelectorAll(selector)) {
-            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
-            if (candidate && !isGenericGeminiTitle(candidate)) {
-                return candidate;
+const firstValidTitleFromPredicateList = (predicates: Array<(node: Element) => boolean>): string | null => {
+    const nodes = getDocumentElements();
+    for (const predicate of predicates) {
+        for (const node of nodes) {
+            if (!predicate(node)) {
+                continue;
             }
+            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
+            if (!candidate || isGenericGeminiTitle(candidate)) {
+                continue;
+            }
+            return candidate;
         }
     }
     return null;
 };
 
+const HEADING_PREDICATES: Array<(node: Element) => boolean> = [
+    (node) => node.tagName === 'H1' && hasAncestorTag(node, 'MAIN'),
+    (node) => node.getAttribute('role') === 'heading' && node.getAttribute('aria-level') === '1' && hasAncestorTag(node, 'MAIN'),
+    (node) => node.getAttribute('role') === 'heading' && hasAncestorTag(node, 'MAIN'),
+    (node) => node.tagName === 'H1' && hasAncestorTag(node, 'HEADER'),
+    (node) => node.tagName === 'H1',
+];
+
+const ACTIVE_NAV_PREDICATES: Array<(node: Element) => boolean> = [
+    (node) => node.tagName === 'A' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'NAV'),
+    (node) => node.tagName === 'BUTTON' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'NAV'),
+    (node) => node.tagName === 'A' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'ASIDE'),
+    (node) => node.tagName === 'BUTTON' && node.getAttribute('aria-current') === 'page' && hasAncestorTag(node, 'ASIDE'),
+    (node) => node.getAttribute('role') === 'tab' && node.getAttribute('aria-selected') === 'true',
+    (node) => node.getAttribute('aria-selected') === 'true' && hasAncestorTag(node, 'NAV'),
+];
+
 const extractConversationIdFromAppHref = (href: string): string | null =>
     href.match(/\/app\/([a-zA-Z0-9_-]+)/i)?.[1] ?? null;
 
 const findTitleByConversationIdInHrefs = (conversationId: string): string | null => {
-    for (const selector of APP_HREF_SELECTORS) {
-        for (const node of document.querySelectorAll(selector)) {
-            const href = node.getAttribute('href');
-            if (!href) {
-                continue;
-            }
-            if (extractConversationIdFromAppHref(href) !== conversationId) {
-                continue;
-            }
-            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
-            if (candidate && !isGenericGeminiTitle(candidate)) {
-                return candidate;
-            }
+    const nodes = getDocumentElements();
+    for (const node of nodes) {
+        if (node.tagName !== 'A') {
+            continue;
         }
+        const href = node.getAttribute('href');
+        if (!href || !href.includes('/app/')) {
+            continue;
+        }
+        if (extractConversationIdFromAppHref(href) !== conversationId) {
+            continue;
+        }
+        const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
+        if (!candidate || isGenericGeminiTitle(candidate)) {
+            continue;
+        }
+        return candidate;
     }
     return null;
 };
@@ -149,12 +172,12 @@ export const extractTitleFromGeminiDom = (): string | null => {
         return tabTitle;
     }
 
-    const headingTitle = firstValidTitleFromSelectors(HEADING_SELECTORS);
+    const headingTitle = firstValidTitleFromPredicateList(HEADING_PREDICATES);
     if (headingTitle) {
         return headingTitle;
     }
 
-    const activeNavTitle = firstValidTitleFromSelectors(ACTIVE_NAV_SELECTORS);
+    const activeNavTitle = firstValidTitleFromPredicateList(ACTIVE_NAV_PREDICATES);
     if (activeNavTitle) {
         return activeNavTitle;
     }

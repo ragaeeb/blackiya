@@ -224,6 +224,12 @@ Title strategy:
 1. `conversations_v2`/history-derived titles.
 2. DOM fallback on save for placeholder titles like `New conversation`.
 
+Known limitation (x.com):
+- On `x.com/i/grok`, canonical response streams from `grok.x.com/2/grok/add_response.json` do not include conversation titles.
+- Conversation titles are typically populated only after `x.com/i/api/graphql/*/GrokHistory` is fetched (often triggered by opening the History panel).
+- If `GrokHistory` has not fired yet and no reliable DOM title is present, exports may retain a generic title (`Grok Conversation`/`Grok / X`).
+- This is currently a known gap; capture correctness is unaffected, but export title fidelity can lag until history metadata is fetched.
+
 Primary code:
 - `platforms/grok.ts`
 - `utils/grok-stream-parser.ts`
