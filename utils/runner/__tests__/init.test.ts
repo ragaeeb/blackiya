@@ -21,14 +21,14 @@ const document = window.document;
 
 import { buildBrowserMock, buildLoggerMock, createLoggerCalls, createMockAdapter } from './helpers';
 
-// ---- mutable state (closed over by mock factories) -----------------------
+
 let currentAdapterMock: any = createMockAdapter(document);
 const browserMockState = {
     storageData: {} as Record<string, unknown>,
     sendMessage: async (_: unknown) => undefined as unknown,
 };
 
-// ---- module mocks (must precede subject import) ---------------------------
+
 mock.module('@/platforms/factory', () => ({
     getPlatformAdapter: () => currentAdapterMock,
     getPlatformAdapterByApiUrl: () => currentAdapterMock,

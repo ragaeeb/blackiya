@@ -42,9 +42,7 @@ export const isConversationDataLike = (value: unknown): value is ConversationDat
     );
 };
 
-// ---------------------------------------------------------------------------
 // Injected dependencies
-// ---------------------------------------------------------------------------
 
 export type CalibrationCaptureDeps = {
     adapter: LLMPlatform;
@@ -66,9 +64,7 @@ export type CalibrationCaptureDeps = {
     getRawSnapshotReplayUrls: (conversationId: string, snapshot: { url: string }) => string[];
 };
 
-// ---------------------------------------------------------------------------
 // passive-wait
-// ---------------------------------------------------------------------------
 
 const PASSIVE_WAIT_TIMEOUT_BY_PLATFORM: Record<string, number> = {
     ChatGPT: 1200,
@@ -112,9 +108,7 @@ export const waitForPassiveCapture = async (
     return false;
 };
 
-// ---------------------------------------------------------------------------
 // page-snapshot
-// ---------------------------------------------------------------------------
 
 /**
  * Waits for the DOM to settle (`quietMs` of no mutations) or a hard
@@ -317,9 +311,7 @@ export const captureFromSnapshot = async (
     return deps.isCaptureSatisfied(conversationId, mode);
 };
 
-// ---------------------------------------------------------------------------
 // endpoint-retry
-// ---------------------------------------------------------------------------
 
 const tryCalibrationFetch = async (
     conversationId: string,
@@ -395,9 +387,7 @@ export const captureFromRetries = async (
     return false;
 };
 
-// ---------------------------------------------------------------------------
 // Composite step dispatcher
-// ---------------------------------------------------------------------------
 
 /**
  * Executes a single calibration step and returns `true` if the capture

@@ -52,6 +52,11 @@ import {
     shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry,
 } from '@/utils/runner/attempt-registry';
 import {
+    type AutoCaptureDeps,
+    type AutoCaptureReason,
+    maybeRunAutoCapture as maybeRunAutoCaptureCore,
+} from '@/utils/runner/auto-capture';
+import {
     type CalibrationCaptureDeps,
     isConversationDataLike,
     isRawCaptureSnapshot,
@@ -71,6 +76,13 @@ import {
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
 } from '@/utils/runner/canonical-stabilization';
+import {
+    type CanonicalStabilizationTickDeps,
+    clearCanonicalStabilizationRetry as clearCanonicalStabilizationRetryCore,
+    hasCanonicalStabilizationTimedOut as hasCanonicalStabilizationTimedOutCore,
+    maybeRestartCanonicalRecoveryAfterTimeout as maybeRestartCanonicalRecoveryAfterTimeoutCore,
+    scheduleCanonicalStabilizationRetry as scheduleCanonicalStabilizationRetryCore,
+} from '@/utils/runner/canonical-stabilization-tick';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import {
     attachExportMeta,
@@ -123,17 +135,13 @@ import {
 import type { ConversationData } from '@/utils/types';
 import { ButtonManager } from '@/utils/ui/button-manager';
 
-// ---------------------------------------------------------------------------
 // Local types
-// ---------------------------------------------------------------------------
 
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
 type InterceptionCaptureMeta = { attemptId?: string; source?: string };
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
 const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
@@ -151,9 +159,7 @@ const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
 
 type RunnerControl = { cleanup?: () => void };
 
-// ---------------------------------------------------------------------------
 // Public re-exports (consumed by platform-runner.ts compat shim)
-// ---------------------------------------------------------------------------
 
 export { beginCanonicalStabilizationTick, clearCanonicalStabilizationAttemptState };
 export type { CanonicalStabilizationAttemptState };
@@ -171,9 +177,7 @@ export const shouldRemoveDisposedAttemptBinding = (
 
 export { resolveShouldSkipCanonicalRetryAfterAwait };
 
-// ---------------------------------------------------------------------------
 // Main runner
-// ---------------------------------------------------------------------------
 
 export const runPlatform = (): void => {
     const globalRunnerControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
@@ -261,9 +265,7 @@ export const runPlatform = (): void => {
     let cleanedUp = false;
     let beforeUnloadHandler: (() => void) | null = null;
 
-    // -----------------------------------------------------------------------
     // Utility helpers
-    // -----------------------------------------------------------------------
 
     const resolveLocationConversationId = () => {
         if (!currentAdapter) {
@@ -413,9 +415,7 @@ export const runPlatform = (): void => {
         );
     };
 
-    // -----------------------------------------------------------------------
     // Manager initialisation
-    // -----------------------------------------------------------------------
 
     const buttonManager = new ButtonManager(handleSaveClick, handleCalibrationClick);
 
@@ -502,9 +502,7 @@ export const runPlatform = (): void => {
         handleNavigationChange();
     });
 
-    // -----------------------------------------------------------------------
     // Export format
-    // -----------------------------------------------------------------------
 
     const getExportFormat = async (): Promise<ExportFormat> => {
         try {
@@ -519,9 +517,7 @@ export const runPlatform = (): void => {
         return DEFAULT_EXPORT_FORMAT;
     };
 
-    // -----------------------------------------------------------------------
     // Attempt ID helpers
-    // -----------------------------------------------------------------------
 
     function peekAttemptId(conversationId?: string): string | null {
         return peekRunnerAttemptId({
@@ -663,9 +659,7 @@ export const runPlatform = (): void => {
         return false;
     };
 
-    // -----------------------------------------------------------------------
     // Stream done probe (delegates to stream-done-probe module)
-    // -----------------------------------------------------------------------
 
     function cancelStreamDoneProbe(attemptId: string, reason: 'superseded' | 'disposed' | 'navigation' | 'teardown') {
         const controller = streamProbeControllers.get(attemptId);
@@ -772,155 +766,69 @@ export const runPlatform = (): void => {
         return runStreamDoneProbeCore(conversationId, hintedAttemptId, buildStreamDoneProbeDeps());
     };
 
-    // -----------------------------------------------------------------------
-    // Canonical stabilisation
-    // -----------------------------------------------------------------------
+    // Canonical stabilization — wrappers around the extracted tick module
 
-    function clearCanonicalStabilizationRetry(attemptId: string) {
-        const hadTimer = canonicalStabilizationRetryTimers.has(attemptId);
-        if (hadTimer) {
-            logger.info('Stabilization retry cleared', { attemptId });
-        }
-        clearCanonicalStabilizationAttemptState(attemptId, {
-            timerIds: canonicalStabilizationRetryTimers,
-            retryCounts: canonicalStabilizationRetryCounts,
-            startedAt: canonicalStabilizationStartedAt,
-            timeoutWarnings: timeoutWarningByAttempt,
-            inProgress: canonicalStabilizationInProgress,
-        });
-    }
+    /**
+     * Builds the deps object for canonical-stabilization-tick functions.
+     * Cheap to call; all fields close over the runner closure by reference.
+     */
+    const buildCanonicalStabilizationTickDeps = (): CanonicalStabilizationTickDeps => ({
+        maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
+        retryDelayMs: CANONICAL_STABILIZATION_RETRY_DELAY_MS,
+        timeoutGraceMs: CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS,
+        retryTimers: canonicalStabilizationRetryTimers,
+        retryCounts: canonicalStabilizationRetryCounts,
+        startedAt: canonicalStabilizationStartedAt,
+        timeoutWarnings: timeoutWarningByAttempt,
+        inProgress: canonicalStabilizationInProgress,
+        attemptByConversation,
+        isAttemptDisposedOrSuperseded,
+        resolveAliasedAttemptId,
+        getSfePhase: (id) => sfe.resolve(id).phase,
+        sfeRestartCanonicalRecovery: (id, now) => sfe.restartCanonicalRecovery(id, now),
+        warmFetch: (cid) => warmFetchConversationSnapshot(cid, 'stabilization-retry'),
+        requestSnapshot: requestPageSnapshot,
+        buildIsolatedSnapshot: resolveIsolatedSnapshotData,
+        ingestSnapshot: ingestStabilizationRetrySnapshot,
+        getConversation: (cid) => interceptionManager.getConversation(cid),
+        evaluateReadiness: evaluateReadinessForData,
+        getCaptureMeta,
+        ingestSfeCanonicalSample,
+        markCanonicalCaptureMeta,
+        refreshButtonState,
+        emitWarn: (attemptId, event, message, payload, key) =>
+            structuredLogger.emit(attemptId, 'warn', event, message, payload, key),
+        emitInfo: (attemptId, event, message, payload, key) =>
+            structuredLogger.emit(attemptId, 'info', event, message, payload, key),
+    });
 
-    const emitTimeoutWarningOnce = (attemptId: string, conversationId: string) => {
-        if (timeoutWarningByAttempt.has(attemptId)) {
+    const clearCanonicalStabilizationRetry = (attemptId: string) =>
+        clearCanonicalStabilizationRetryCore(attemptId, buildCanonicalStabilizationTickDeps());
+
+    const hasCanonicalStabilizationTimedOut = (attemptId: string) =>
+        hasCanonicalStabilizationTimedOutCore(attemptId, buildCanonicalStabilizationTickDeps());
+
+    const scheduleCanonicalStabilizationRetry = (conversationId: string, attemptId: string) =>
+        scheduleCanonicalStabilizationRetryCore(conversationId, attemptId, buildCanonicalStabilizationTickDeps());
+
+    const maybeRestartCanonicalRecoveryAfterTimeout = (conversationId: string, attemptId: string) =>
+        maybeRestartCanonicalRecoveryAfterTimeoutCore(conversationId, attemptId, buildCanonicalStabilizationTickDeps());
+
+    /**
+     * Ingests a stabilization retry snapshot (ConversationData or raw bytes)
+     * into the interception cache, keyed by an internal URL for raw data.
+     */
+    const ingestStabilizationRetrySnapshot = (conversationId: string, data: unknown) => {
+        if (isConversationDataLike(data)) {
+            interceptionManager.ingestConversationData(data, 'stabilization-retry-snapshot');
             return;
         }
-        addBoundedSetValue(timeoutWarningByAttempt, attemptId, MAX_AUTOCAPTURE_KEYS);
-        structuredLogger.emit(
-            attemptId,
-            'warn',
-            'readiness_timeout_manual_only',
-            'Stabilization timed out; manual force save required',
-            { conversationId },
-            `readiness-timeout:${conversationId}`,
-        );
-    };
-
-    function maybeRestartCanonicalRecoveryAfterTimeout(conversationId: string, attemptId: string) {
-        if (!hasCanonicalStabilizationTimedOut(attemptId)) {
-            return;
-        }
-        clearCanonicalStabilizationRetry(attemptId);
-        const restarted = sfe.restartCanonicalRecovery(attemptId, Date.now());
-        if (!restarted) {
-            return;
-        }
-        structuredLogger.emit(
-            attemptId,
-            'info',
-            'canonical_recovery_rearmed',
-            'Re-armed canonical stabilization after timeout due to late canonical capture',
-            { conversationId },
-            `canonical-recovery-rearmed:${conversationId}`,
-        );
-    }
-
-    function hasCanonicalStabilizationTimedOut(attemptId: string): boolean {
-        const retries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
-        const hasPendingTimer = canonicalStabilizationRetryTimers.has(attemptId);
-        if (retries >= CANONICAL_STABILIZATION_MAX_RETRIES && !hasPendingTimer) {
-            if (!timeoutWarningByAttempt.has(attemptId)) {
-                logger.info('Timeout: max retries exhausted with no pending timer', {
-                    attemptId,
-                    retries,
-                    hasPendingTimer,
-                    maxRetries: CANONICAL_STABILIZATION_MAX_RETRIES,
-                });
-            }
-            return true;
-        }
-        if (hasPendingTimer) {
-            return false;
-        }
-        const startedAt = canonicalStabilizationStartedAt.get(attemptId);
-        if (!startedAt) {
-            return false;
-        }
-        const timeoutMs =
-            CANONICAL_STABILIZATION_RETRY_DELAY_MS * CANONICAL_STABILIZATION_MAX_RETRIES +
-            CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS;
-        const elapsed = Date.now() - startedAt;
-        if (elapsed >= timeoutMs && !timeoutWarningByAttempt.has(attemptId)) {
-            logger.info('Timeout: elapsed exceeded max wait', { attemptId, retries, elapsed, timeoutMs });
-        }
-        return elapsed >= timeoutMs;
-    }
-
-    const tryPromoteReadySnapshotAsCanonical = async (
-        conversationId: string,
-        attemptId: string,
-        retries: number,
-        fetchSucceeded: boolean,
-        readinessResult: PlatformReadiness,
-    ): Promise<boolean> => {
-        if (fetchSucceeded || !readinessResult.ready) {
-            return false;
-        }
-        logger.info('Promoting ready snapshot to canonical (API unreachable)', {
-            conversationId,
-            retries: retries + 1,
+        interceptionManager.ingestInterceptedData({
+            url: `stabilization-retry-snapshot://${currentAdapter?.name ?? 'unknown'}/${conversationId}`,
+            data: JSON.stringify(data),
+            platform: currentAdapter?.name ?? 'unknown',
         });
-        markCanonicalCaptureMeta(conversationId);
-        const cached = interceptionManager.getConversation(conversationId);
-        if (!cached) {
-            return false;
-        }
-        ingestSfeCanonicalSample(cached, attemptId);
-        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-        refreshButtonState(conversationId);
-        return true;
     };
-
-    const tryRefreshDegradedSnapshotAndPromote = async (
-        conversationId: string,
-        attemptId: string,
-        retries: number,
-        fetchSucceeded: boolean,
-        readinessResult: PlatformReadiness,
-    ): Promise<boolean> => {
-        if (fetchSucceeded || readinessResult.ready) {
-            return false;
-        }
-        logger.info('Snapshot promotion skipped: readiness check failed, re-requesting snapshot', {
-            conversationId,
-            retries: retries + 1,
-            reason: readinessResult.reason,
-            terminal: readinessResult.terminal,
-        });
-        const freshSnapshot = await requestPageSnapshot(conversationId);
-        const freshData = freshSnapshot ?? resolveIsolatedSnapshotData(conversationId);
-        if (!freshData) {
-            return false;
-        }
-        ingestStabilizationRetrySnapshot(conversationId, freshData);
-        const recheckCached = getReadyCachedConversation(conversationId);
-        if (!recheckCached) {
-            return false;
-        }
-        logger.info('Fresh snapshot promoted to canonical after re-request', { conversationId, retries: retries + 1 });
-        markCanonicalCaptureMeta(conversationId);
-        ingestSfeCanonicalSample(recheckCached, attemptId);
-        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-        refreshButtonState(conversationId);
-        return true;
-    };
-
-    function getReadyCachedConversation(conversationId: string): ConversationData | null {
-        const cached = interceptionManager.getConversation(conversationId);
-        if (!cached) {
-            return null;
-        }
-        return evaluateReadinessForData(cached).ready ? cached : null;
-    }
 
     function resolveIsolatedSnapshotData(conversationId: string): ConversationData | null {
         if (!currentAdapter) {
@@ -929,169 +837,7 @@ export const runPlatform = (): void => {
         return buildIsolatedDomSnapshot(currentAdapter, conversationId);
     }
 
-    function ingestStabilizationRetrySnapshot(
-        conversationId: string,
-        freshData: ConversationData | RawCaptureSnapshot | unknown,
-    ) {
-        if (isConversationDataLike(freshData)) {
-            interceptionManager.ingestConversationData(freshData, 'stabilization-retry-snapshot');
-            return;
-        }
-        interceptionManager.ingestInterceptedData({
-            url: `stabilization-retry-snapshot://${currentAdapter?.name ?? 'unknown'}/${conversationId}`,
-            data: JSON.stringify(freshData),
-            platform: currentAdapter?.name ?? 'unknown',
-        });
-    }
-
-    const handleDegradedCanonicalCandidate = async (
-        conversationId: string,
-        attemptId: string,
-        retries: number,
-        fetchSucceeded: boolean,
-        cached: ConversationData,
-    ) => {
-        const readinessResult = evaluateReadinessForData(cached);
-        if (
-            await tryPromoteReadySnapshotAsCanonical(
-                conversationId,
-                attemptId,
-                retries,
-                fetchSucceeded,
-                readinessResult,
-            )
-        ) {
-            return;
-        }
-        if (
-            await tryRefreshDegradedSnapshotAndPromote(
-                conversationId,
-                attemptId,
-                retries,
-                fetchSucceeded,
-                readinessResult,
-            )
-        ) {
-            return;
-        }
-        scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-        refreshButtonState(conversationId);
-    };
-
-    const shouldSkipCanonicalRetryTick = (conversationId: string, attemptId: string, retries: number): boolean => {
-        const disposed = isAttemptDisposedOrSuperseded(attemptId);
-        const mappedAttempt = attemptByConversation.get(conversationId);
-        const mappedMismatch = !!mappedAttempt && mappedAttempt !== attemptId;
-        logger.info('Stabilization retry tick', {
-            conversationId,
-            attemptId,
-            retries,
-            disposed,
-            mappedMismatch,
-            sfePhase: sfe.resolve(attemptId).phase,
-        });
-        return disposed || mappedMismatch;
-    };
-
-    const shouldSkipCanonicalRetryAfterAwait = (conversationId: string, attemptId: string): boolean => {
-        const mappedAttempt = attemptByConversation.get(conversationId);
-        const disposedOrSuperseded = isAttemptDisposedOrSuperseded(attemptId);
-        const shouldSkip = resolveShouldSkipCanonicalRetryAfterAwait(
-            attemptId,
-            disposedOrSuperseded,
-            mappedAttempt,
-            resolveAliasedAttemptId,
-        );
-        if (!shouldSkip) {
-            return false;
-        }
-        logger.info('Stabilization retry skip after await', {
-            conversationId,
-            attemptId,
-            disposedOrSuperseded,
-            mappedAttempt: mappedAttempt ?? null,
-        });
-        return true;
-    };
-
-    const processCanonicalStabilizationRetryTick = async (
-        conversationId: string,
-        attemptId: string,
-        retries: number,
-    ) => {
-        if (!beginCanonicalStabilizationTick(attemptId, canonicalStabilizationInProgress)) {
-            logger.info('Stabilization retry tick skipped: already in progress', { conversationId, attemptId });
-            return;
-        }
-        try {
-            canonicalStabilizationRetryTimers.delete(attemptId);
-            canonicalStabilizationRetryCounts.set(attemptId, retries + 1);
-            if (shouldSkipCanonicalRetryTick(conversationId, attemptId, retries)) {
-                return;
-            }
-            const fetchSucceeded = await warmFetchConversationSnapshot(conversationId, 'stabilization-retry');
-            if (shouldSkipCanonicalRetryAfterAwait(conversationId, attemptId)) {
-                return;
-            }
-            const cached = interceptionManager.getConversation(conversationId);
-            if (!cached) {
-                scheduleCanonicalStabilizationRetry(conversationId, attemptId);
-                return;
-            }
-            const captureMeta = getCaptureMeta(conversationId);
-            if (!shouldIngestAsCanonicalSample(captureMeta)) {
-                await handleDegradedCanonicalCandidate(conversationId, attemptId, retries, fetchSucceeded, cached);
-                if (shouldSkipCanonicalRetryAfterAwait(conversationId, attemptId)) {
-                    return;
-                }
-                return;
-            }
-            ingestSfeCanonicalSample(cached, attemptId);
-            refreshButtonState(conversationId);
-        } finally {
-            canonicalStabilizationInProgress.delete(attemptId);
-        }
-    };
-
-    function scheduleCanonicalStabilizationRetry(conversationId: string, attemptId: string) {
-        if (canonicalStabilizationRetryTimers.has(attemptId)) {
-            logger.info('Stabilization retry already scheduled (skip)', { conversationId, attemptId });
-            return;
-        }
-        if (isAttemptDisposedOrSuperseded(attemptId)) {
-            logger.info('Stabilization retry skip: attempt disposed/superseded', { conversationId, attemptId });
-            return;
-        }
-        const retries = canonicalStabilizationRetryCounts.get(attemptId) ?? 0;
-        if (retries >= CANONICAL_STABILIZATION_MAX_RETRIES) {
-            structuredLogger.emit(
-                attemptId,
-                'warn',
-                'canonical_stabilization_retry_exhausted',
-                'Canonical stabilization retries exhausted',
-                { conversationId, retries },
-                `canonical-stability-exhausted:${conversationId}:${retries}`,
-            );
-            return;
-        }
-        if (!canonicalStabilizationStartedAt.has(attemptId)) {
-            canonicalStabilizationStartedAt.set(attemptId, Date.now());
-        }
-        const timerId = window.setTimeout(() => {
-            void processCanonicalStabilizationRetryTick(conversationId, attemptId, retries);
-        }, CANONICAL_STABILIZATION_RETRY_DELAY_MS);
-        canonicalStabilizationRetryTimers.set(attemptId, timerId);
-        logger.info('Stabilization retry scheduled', {
-            conversationId,
-            attemptId,
-            retryNumber: retries + 1,
-            delayMs: CANONICAL_STABILIZATION_RETRY_DELAY_MS,
-        });
-    }
-
-    // -----------------------------------------------------------------------
     // Readiness evaluation
-    // -----------------------------------------------------------------------
 
     function evaluateReadinessForData(data: ConversationData): PlatformReadiness {
         if (!data || !data.mapping || typeof data.mapping !== 'object') {
@@ -1123,9 +869,7 @@ export const runPlatform = (): void => {
         };
     }
 
-    // -----------------------------------------------------------------------
     // SFE ingestion
-    // -----------------------------------------------------------------------
 
     const ingestSfeLifecycle = (phase: LifecyclePhase, attemptId: string, conversationId?: string | null) => {
         if (!sfeEnabled) {
@@ -1312,9 +1056,7 @@ export const runPlatform = (): void => {
         emitStreamDumpConfig();
     };
 
-    // -----------------------------------------------------------------------
     // Stream probe panel
-    // -----------------------------------------------------------------------
 
     const loadStreamProbeVisibilitySetting = async () => {
         try {
@@ -1383,9 +1125,7 @@ export const runPlatform = (): void => {
         setStreamProbePanel('stream: live mirror', capped);
     };
 
-    // -----------------------------------------------------------------------
     // Export pipeline
-    // -----------------------------------------------------------------------
 
     const buildExportPayloadForFormat = (data: ConversationData, format: ExportFormat): unknown =>
         buildExportPayloadForFormatPure(data, format, currentAdapter?.name ?? 'Unknown');
@@ -1395,9 +1135,7 @@ export const runPlatform = (): void => {
         return attachExportMeta(buildExportPayloadForFormat(data, format), meta);
     };
 
-    // -----------------------------------------------------------------------
     // Save readiness and force-save
-    // -----------------------------------------------------------------------
 
     const resolveSaveReadiness = (
         conversationId: string | null,
@@ -1438,9 +1176,7 @@ export const runPlatform = (): void => {
         return resolveReadinessDecision(conversationId).mode !== 'degraded_manual_only';
     };
 
-    // -----------------------------------------------------------------------
     // Save / calibration click handlers
-    // -----------------------------------------------------------------------
 
     async function handleSaveClick() {
         if (!currentAdapter) {
@@ -1491,9 +1227,7 @@ export const runPlatform = (): void => {
         refreshButtonState(conversationId);
     };
 
-    // -----------------------------------------------------------------------
     // URL candidate helpers
-    // -----------------------------------------------------------------------
 
     function getFetchUrlCandidates(adapter: LLMPlatform, conversationId: string): string[] {
         const urls: string[] = [];
@@ -1537,9 +1271,7 @@ export const runPlatform = (): void => {
         return urls;
     }
 
-    // -----------------------------------------------------------------------
     // Warm fetch
-    // -----------------------------------------------------------------------
 
     const buildWarmFetchDeps = (): WarmFetchDeps => ({
         platformName: currentAdapter?.name ?? 'Unknown',
@@ -1554,9 +1286,7 @@ export const runPlatform = (): void => {
     const warmFetchConversationSnapshot = (conversationId: string, reason: WarmFetchReason): Promise<boolean> =>
         warmFetchConversationSnapshotCore(conversationId, reason, buildWarmFetchDeps(), warmFetchInFlight);
 
-    // -----------------------------------------------------------------------
     // Calibration capture
-    // -----------------------------------------------------------------------
 
     const buildCalibrationCaptureDeps = (conversationId: string): CalibrationCaptureDeps => ({
         adapter: currentAdapter!,
@@ -1578,9 +1308,7 @@ export const runPlatform = (): void => {
     ): Promise<boolean> =>
         runCalibrationStepPure(step, conversationId, mode, buildCalibrationCaptureDeps(conversationId));
 
-    // -----------------------------------------------------------------------
     // Calibration orchestration
-    // -----------------------------------------------------------------------
 
     const loadSfeSettings = async () => {
         try {
@@ -1705,9 +1433,33 @@ export const runPlatform = (): void => {
         }
     }
 
-    // -----------------------------------------------------------------------
+    // Auto-capture — wrappers around the extracted auto-capture module
+
+    /**
+     * Builds the deps object for auto-capture functions.
+     * Cheap to call; all fields close over the runner closure by reference.
+     */
+    const buildAutoCaptureDeps = (): AutoCaptureDeps => ({
+        getAdapter: () => currentAdapter,
+        getCalibrationState: () => calibrationState,
+        isConversationReadyForActions,
+        isPlatformGenerating: (adapter) => detectPlatformGenerating(adapter),
+        peekAttemptId: (cid) => peekAttemptId(cid),
+        resolveAttemptId: (cid) => resolveAttemptId(cid),
+        getRememberedPreferredStep: () => rememberedPreferredStep,
+        isCalibrationPreferenceLoaded: () => calibrationPreferenceLoaded,
+        ensureCalibrationPreferenceLoaded,
+        runCalibrationCapture,
+        autoCaptureAttempts,
+        autoCaptureRetryTimers,
+        autoCaptureDeferredLogged,
+        maxKeys: MAX_AUTOCAPTURE_KEYS,
+    });
+
+    const maybeRunAutoCapture = (conversationId: string, reason: AutoCaptureReason) =>
+        maybeRunAutoCaptureCore(conversationId, reason, buildAutoCaptureDeps());
+
     // Conversation data retrieval and export
-    // -----------------------------------------------------------------------
 
     async function getConversationData(options: { silent?: boolean; allowDegraded?: boolean } = {}) {
         if (!currentAdapter) {
@@ -1859,9 +1611,7 @@ export const runPlatform = (): void => {
         }
     }
 
-    // -----------------------------------------------------------------------
     // Page snapshot bridge
-    // -----------------------------------------------------------------------
 
     async function requestPageSnapshot(conversationId: string): Promise<unknown | null> {
         const requestId =
@@ -1900,9 +1650,7 @@ export const runPlatform = (): void => {
         });
     }
 
-    // -----------------------------------------------------------------------
     // Lifecycle state management
-    // -----------------------------------------------------------------------
 
     const isLifecycleActiveGeneration = (): boolean =>
         lifecycleState === 'prompt-sent' || lifecycleState === 'streaming';
@@ -1938,9 +1686,7 @@ export const runPlatform = (): void => {
         emitPublicStatusSnapshot(resolvedConversationId);
     };
 
-    // -----------------------------------------------------------------------
     // Generation guard
-    // -----------------------------------------------------------------------
 
     const isPlatformGenerating = (adapter: LLMPlatform | null): boolean => detectPlatformGenerating(adapter);
 
@@ -1964,9 +1710,7 @@ export const runPlatform = (): void => {
         return isPlatformGenerating(currentAdapter);
     }
 
-    // -----------------------------------------------------------------------
     // Button state
-    // -----------------------------------------------------------------------
 
     const injectSaveButton = () => {
         const conversationId = extractConversationIdFromLocation();
@@ -2021,6 +1765,21 @@ export const runPlatform = (): void => {
         }
         setBoundedMapValue(lastCanonicalReadyLogAtByConversation, conversationId, now, MAX_CONVERSATION_ATTEMPTS);
         return true;
+    };
+
+    const emitTimeoutWarningOnce = (attemptId: string, conversationId: string) => {
+        if (timeoutWarningByAttempt.has(attemptId)) {
+            return;
+        }
+        addBoundedSetValue(timeoutWarningByAttempt, attemptId, MAX_AUTOCAPTURE_KEYS);
+        structuredLogger.emit(
+            attemptId,
+            'warn',
+            'readiness_timeout_manual_only',
+            'Stabilization timed out; manual force save required',
+            { conversationId },
+            `readiness-timeout:${conversationId}`,
+        );
     };
 
     function resolveReadinessDecision(conversationId: string): ReadinessDecision {
@@ -2167,99 +1926,7 @@ export const runPlatform = (): void => {
         });
     }
 
-    // -----------------------------------------------------------------------
-    // Auto-capture
-    // -----------------------------------------------------------------------
-
-    const shouldSkipAutoCapture = (conversationId: string): boolean =>
-        !currentAdapter ||
-        calibrationState !== 'idle' ||
-        isConversationReadyForActions(conversationId, { includeDegraded: true });
-
-    const scheduleDeferredAutoCapture = (
-        attemptKey: string,
-        conversationId: string,
-        reason: 'response-finished' | 'navigation',
-    ) => {
-        if (autoCaptureRetryTimers.has(attemptKey)) {
-            return;
-        }
-        if (!autoCaptureDeferredLogged.has(attemptKey)) {
-            logger.info('Auto calibration deferred: response still generating', {
-                platform: currentAdapter?.name ?? 'Unknown',
-                conversationId,
-                reason,
-            });
-            addBoundedSetValue(autoCaptureDeferredLogged, attemptKey, MAX_AUTOCAPTURE_KEYS);
-        }
-        const timerId = window.setTimeout(() => {
-            autoCaptureRetryTimers.delete(attemptKey);
-            maybeRunAutoCapture(conversationId, reason);
-        }, 4000);
-        autoCaptureRetryTimers.set(attemptKey, timerId);
-    };
-
-    const shouldThrottleAutoCapture = (attemptKey: string): boolean => {
-        const now = Date.now();
-        const lastAttempt = autoCaptureAttempts.get(attemptKey) ?? 0;
-        if (now - lastAttempt < 12000) {
-            return true;
-        }
-        setBoundedMapValue(autoCaptureAttempts, attemptKey, now, MAX_AUTOCAPTURE_KEYS);
-        return false;
-    };
-
-    const runAutoCaptureFromPreference = (conversationId: string, reason: 'response-finished' | 'navigation') => {
-        const run = () => {
-            if (shouldSkipAutoCapture(conversationId) || !rememberedPreferredStep) {
-                return;
-            }
-            logger.info('Auto calibration run from remembered strategy', {
-                platform: currentAdapter?.name ?? 'Unknown',
-                conversationId,
-                preferredStep: rememberedPreferredStep,
-                reason,
-            });
-            void runCalibrationCapture('auto', conversationId);
-        };
-        if (rememberedPreferredStep || calibrationPreferenceLoaded) {
-            run();
-            return;
-        }
-        if (!currentAdapter) {
-            return;
-        }
-        void ensureCalibrationPreferenceLoaded(currentAdapter.name).then(run);
-    };
-
-    function maybeRunAutoCapture(conversationId: string, reason: 'response-finished' | 'navigation') {
-        if (shouldSkipAutoCapture(conversationId)) {
-            return;
-        }
-        const adapter = currentAdapter;
-        if (!adapter) {
-            return;
-        }
-        let attemptKey = peekAttemptId(conversationId);
-        if (adapter.name === 'ChatGPT' && isPlatformGenerating(adapter)) {
-            if (!attemptKey) {
-                attemptKey = resolveAttemptId(conversationId);
-            }
-            scheduleDeferredAutoCapture(attemptKey, conversationId, reason);
-            return;
-        }
-        if (attemptKey) {
-            autoCaptureDeferredLogged.delete(attemptKey);
-        }
-        if (attemptKey && shouldThrottleAutoCapture(attemptKey)) {
-            return;
-        }
-        runAutoCaptureFromPreference(conversationId, reason);
-    }
-
-    // -----------------------------------------------------------------------
     // Response finished signal handling
-    // -----------------------------------------------------------------------
 
     const applyCompletedLifecycleState = (conversationId: string, attemptId: string) => {
         lifecycleAttemptId = attemptId;
@@ -2365,9 +2032,7 @@ export const runPlatform = (): void => {
         }
     }
 
-    // -----------------------------------------------------------------------
     // Wire message handlers
-    // -----------------------------------------------------------------------
 
     const handleTitleResolvedMessage = (message: unknown): boolean => {
         const typed = message as TitleResolvedMessage | undefined;
@@ -2743,9 +2408,7 @@ export const runPlatform = (): void => {
             });
     };
 
-    // -----------------------------------------------------------------------
     // Window bridge / completion watcher
-    // -----------------------------------------------------------------------
 
     const isSameWindowOrigin = (event: MessageEvent): boolean =>
         event.source === window && event.origin === window.location.origin;
@@ -2835,9 +2498,7 @@ export const runPlatform = (): void => {
         return () => clearInterval(intervalId);
     };
 
-    // -----------------------------------------------------------------------
     // Navigation
-    // -----------------------------------------------------------------------
 
     function handleNavigationChange() {
         if (!currentAdapter) {
@@ -2917,9 +2578,7 @@ export const runPlatform = (): void => {
         }, 1800);
     }
 
-    // -----------------------------------------------------------------------
     // Helpers
-    // -----------------------------------------------------------------------
 
     function extractConversationIdFromLocation(): string | null {
         if (!currentAdapter) {
@@ -2949,9 +2608,7 @@ export const runPlatform = (): void => {
         );
     }
 
-    // -----------------------------------------------------------------------
     // Boot sequence
-    // -----------------------------------------------------------------------
 
     const url = window.location.href;
     currentAdapter = getPlatformAdapter(url);
@@ -3061,9 +2718,7 @@ export const runPlatform = (): void => {
         );
     }
 
-    // -----------------------------------------------------------------------
     // Cleanup / teardown
-    // -----------------------------------------------------------------------
 
     const cleanupRuntime = () => {
         if (cleanedUp) {

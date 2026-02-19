@@ -10,9 +10,7 @@
 import { isConversationDataLike, isRawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import type { ConversationData } from '@/utils/types';
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export type StreamDoneProbeDeps = {
     /** Adapter / platform name for URL construction, logging, and ingestion. */
@@ -77,9 +75,7 @@ type ProbeContext = {
     controller: AbortController;
 };
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 
 const createProbeContext = async (
     conversationId: string,
@@ -278,9 +274,7 @@ const showFallbackPanel = async (context: ProbeContext, deps: StreamDoneProbeDep
     );
 };
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Orchestrates the post-stream canonical capture probe for a conversation.

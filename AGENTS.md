@@ -79,6 +79,7 @@ Supporting modules:
 - Prefer inferred function return types; add explicit return types only when they materially improve clarity/safety.
 - Prefer `type` aliases over `interface` in TypeScript unless interface-specific behavior is required.
 - Prefer arrow functions over classic `function` declarations for new code.
+- Do not add decorative section-divider comments (for example `// ----` blocks); they add noise and waste tokens. Use meaningful names and concise functional comments only when needed.
 - Keep platform logic isolated to adapter/parser/classifier modules.
 - Avoid broad DOM heuristics as lifecycle source of truth for non-ChatGPT platforms.
 - No silent behavior changes without tests.

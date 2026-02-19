@@ -12,18 +12,14 @@ import type { LLMPlatform } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import type { ConversationData } from '@/utils/types';
 
-// ---------------------------------------------------------------------------
 // Shared types
-// ---------------------------------------------------------------------------
 
 export type SnapshotMessageCandidate = {
     role: 'user' | 'assistant';
     text: string;
 };
 
-// ---------------------------------------------------------------------------
 // Pure builders
-// ---------------------------------------------------------------------------
 
 /**
  * Build a lightweight root-anchored chain snapshot used by targeted probe helpers.
@@ -148,9 +144,7 @@ export const buildRunnerSnapshotConversationData = (
     };
 };
 
-// ---------------------------------------------------------------------------
 // DOM collection utilities
-// ---------------------------------------------------------------------------
 
 export const normalizeSnapshotText = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
@@ -301,9 +295,7 @@ export const collectLastResortTextCandidates = (root: ParentNode): SnapshotMessa
     }));
 };
 
-// ---------------------------------------------------------------------------
 // Snapshot builders that use DOM collection
-// ---------------------------------------------------------------------------
 
 const buildPrimarySnapshotFromRoot = (
     adapter: LLMPlatform,
