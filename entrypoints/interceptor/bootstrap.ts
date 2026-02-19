@@ -902,6 +902,57 @@ export default defineContentScript({
         const proactiveBackoffMs = [900, 1800, 3200, 5000, 7000, 9000, 12000, 15000];
         const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+        const logProactiveFetchStatus = (
+            conversationId: string,
+            apiUrl: string,
+            status: number,
+            attempt: number,
+        ): void => {
+            const path = safePathname(apiUrl);
+            if (!shouldLogTransient(`fetch:status:${conversationId}:${path}:${status}`, 5000)) {
+                return;
+            }
+            log('info', 'fetch response', { conversationId, ok: false, status, attempt });
+        };
+
+        const parseFetchedConversation = (
+            adapter: LLMPlatform,
+            apiUrl: string,
+            text: string,
+        ): ConversationData | null => {
+            try {
+                return adapter.parseInterceptedData(text, apiUrl);
+            } catch (error) {
+                if (shouldLogTransient(`fetch:parse:${adapter.name}:${safePathname(apiUrl)}`, 5000)) {
+                    log('warn', `fetch parse err ${adapter.name}`, {
+                        path: safePathname(apiUrl),
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
+                return null;
+            }
+        };
+
+        const emitFetchedConversationPayload = (
+            adapter: LLMPlatform,
+            parsed: ConversationData,
+            apiUrl: string,
+            conversationId: string,
+            attemptId: string,
+            byteSize: number,
+        ): boolean => {
+            if (!isCapturedConversationReady(adapter, parsed)) {
+                return false;
+            }
+            const payload = JSON.stringify(parsed);
+            if (!shouldEmitCapturedPayload(adapter.name, apiUrl, payload, 3000)) {
+                return false;
+            }
+            log('info', `fetched ${conversationId} ${byteSize}b`, { path: safePathname(apiUrl) });
+            emitCapturePayload(apiUrl, payload, adapter.name, attemptId);
+            return true;
+        };
+
         // ------------------------------------------------------------------
         // Proactive fetch
         // ------------------------------------------------------------------
@@ -920,34 +971,15 @@ export default defineContentScript({
             try {
                 const response = await originalFetch(apiUrl, { credentials: 'include', headers: requestHeaders });
                 if (!response.ok) {
-                    const path = safePathname(apiUrl);
-                    if (shouldLogTransient(`fetch:status:${conversationId}:${path}:${response.status}`, 5000)) {
-                        log('info', 'fetch response', { conversationId, ok: false, status: response.status, attempt });
-                    }
+                    logProactiveFetchStatus(conversationId, apiUrl, response.status, attempt);
                     return false;
                 }
                 const text = await response.text();
-                try {
-                    const parsed = adapter.parseInterceptedData(text, apiUrl);
-                    if (!isCapturedConversationReady(adapter, parsed)) {
-                        return false;
-                    }
-                    const payload = JSON.stringify(parsed);
-                    if (!shouldEmitCapturedPayload(adapter.name, apiUrl, payload, 3000)) {
-                        return false;
-                    }
-                    log('info', `fetched ${conversationId} ${text.length}b`, { path: safePathname(apiUrl) });
-                    emitCapturePayload(apiUrl, payload, adapter.name, attemptId);
-                    return true;
-                } catch (error) {
-                    if (shouldLogTransient(`fetch:parse:${adapter.name}:${safePathname(apiUrl)}`, 5000)) {
-                        log('warn', `fetch parse err ${adapter.name}`, {
-                            path: safePathname(apiUrl),
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                    }
+                const parsed = parseFetchedConversation(adapter, apiUrl, text);
+                if (!parsed) {
                     return false;
                 }
+                return emitFetchedConversationPayload(adapter, parsed, apiUrl, conversationId, attemptId, text.length);
             } catch (error) {
                 if (shouldLogTransient(`fetch:error:${conversationId}`, 5000)) {
                     log('warn', `fetch err ${conversationId}`, {
@@ -1031,24 +1063,25 @@ export default defineContentScript({
         // Fetch interceptor
         // ------------------------------------------------------------------
 
-        const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
-            // ChatGPT path
-            if (context.isChatGptPromptRequest && context.lifecycleAttemptId) {
-                setBoundedMapValue(
-                    latestAttemptIdByPlatform,
-                    chatGPTAdapter.name,
-                    context.lifecycleAttemptId,
-                    MAX_INTERCEPTOR_ATTEMPT_BINDINGS,
-                );
-                disposedAttemptIds.delete(context.lifecycleAttemptId);
-                bindAttemptToConversation(context.lifecycleAttemptId, context.lifecycleConversationId);
-                if (context.lifecycleConversationId) {
-                    emitConversationIdResolvedSignal(context.lifecycleAttemptId, context.lifecycleConversationId);
-                }
-                emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
+        const emitChatGptFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+            if (!context.isChatGptPromptRequest || !context.lifecycleAttemptId) {
+                return;
             }
+            setBoundedMapValue(
+                latestAttemptIdByPlatform,
+                chatGPTAdapter.name,
+                context.lifecycleAttemptId,
+                MAX_INTERCEPTOR_ATTEMPT_BINDINGS,
+            );
+            disposedAttemptIds.delete(context.lifecycleAttemptId);
+            bindAttemptToConversation(context.lifecycleAttemptId, context.lifecycleConversationId);
+            if (context.lifecycleConversationId) {
+                emitConversationIdResolvedSignal(context.lifecycleAttemptId, context.lifecycleConversationId);
+            }
+            emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
+        };
 
-            // Non-ChatGPT path
+        const emitNonChatFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
             if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter) {
                 return;
             }
@@ -1059,12 +1092,10 @@ export default defineContentScript({
             if (!attemptId) {
                 return;
             }
-
             emitLifecycleSignal(attemptId, 'prompt-sent', context.nonChatConversationId, adapter.name);
             if (adapter.name !== 'Gemini') {
                 emitLifecycleSignal(attemptId, 'streaming', context.nonChatConversationId, adapter.name);
             }
-
             if (adapter.name === 'Grok' && shouldLogTransient(`grok:fetch:request:${attemptId}`, 3000)) {
                 log('info', 'Grok fetch request intercepted', {
                     attemptId,
@@ -1073,6 +1104,11 @@ export default defineContentScript({
                     path: context.outgoingPath,
                 });
             }
+        };
+
+        const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+            emitChatGptFetchPromptLifecycle(context);
+            emitNonChatFetchPromptLifecycle(context);
         };
 
         const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response): void => {
@@ -1204,6 +1240,38 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
+        const logGrokXhrRequest = (attemptId: string, context: XhrLifecycleContext): void => {
+            if (!shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
+                return;
+            }
+            log('info', 'Grok XHR request intercepted', {
+                attemptId,
+                conversationId: context.conversationId,
+                method: context.methodUpper,
+                path: safePathname(context.requestUrl),
+            });
+        };
+
+        const handleAdapterSpecificXhrRequestLifecycle = (
+            xhr: XMLHttpRequest,
+            context: XhrLifecycleContext,
+            attemptId: string,
+        ): boolean => {
+            if (!context.requestAdapter) {
+                return true;
+            }
+            if (context.requestAdapter.name === 'Gemini') {
+                wireGeminiXhrProgressMonitor(xhr, attemptId, emit, context.conversationId, context.requestUrl);
+                return true;
+            }
+            if (context.requestAdapter.name === 'Grok' && context.conversationId) {
+                wireGrokXhrProgressMonitor(xhr, attemptId, emit, context.conversationId);
+                logGrokXhrRequest(attemptId, context);
+                return true;
+            }
+            return false;
+        };
+
         const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext) => {
             if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter) {
                 return;
@@ -1219,21 +1287,7 @@ export default defineContentScript({
             }
 
             emitLifecycleSignal(attemptId, 'prompt-sent', context.conversationId, context.requestAdapter.name);
-
-            if (context.requestAdapter.name === 'Gemini') {
-                wireGeminiXhrProgressMonitor(xhr, attemptId, emit, context.conversationId, context.requestUrl);
-                return;
-            }
-            if (context.requestAdapter.name === 'Grok' && context.conversationId) {
-                wireGrokXhrProgressMonitor(xhr, attemptId, emit, context.conversationId);
-                if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
-                    log('info', 'Grok XHR request intercepted', {
-                        attemptId,
-                        conversationId: context.conversationId,
-                        method: context.methodUpper,
-                        path: safePathname(context.requestUrl),
-                    });
-                }
+            if (handleAdapterSpecificXhrRequestLifecycle(xhr, context, attemptId)) {
                 return;
             }
             if (context.requestAdapter && context.conversationId) {
@@ -1241,53 +1295,61 @@ export default defineContentScript({
             }
         };
 
+        const maybeLogGrokXhrResponse = (self: XMLHttpRequest, methodUpper: string, xhrUrl: string): void => {
+            if (methodUpper !== 'POST') {
+                return;
+            }
+            const xhrAdapter = getPlatformAdapterByApiUrl(xhrUrl);
+            if (xhrAdapter?.name !== 'Grok') {
+                return;
+            }
+            const conversationId = resolveRequestConversationId(xhrAdapter, xhrUrl);
+            const attemptId = resolveAttemptIdForConversation(conversationId, 'Grok');
+            if (!shouldLogTransient(`grok:xhr:response:${attemptId}`, 3000)) {
+                return;
+            }
+            log('info', 'Grok XHR response intercepted', {
+                attemptId,
+                conversationId: conversationId ?? null,
+                status: self.status,
+                size: self.responseText?.length ?? 0,
+                path: safePathname(xhrUrl),
+            });
+        };
+
+        const maybeLogGeminiXhrDiscovery = (self: XMLHttpRequest, methodUpper: string, xhrUrl: string): void => {
+            if (!isDiscoveryDiagnosticsEnabled() || methodUpper !== 'POST' || self.status !== 200) {
+                return;
+            }
+            if (!window.location.hostname.includes('gemini.google.com')) {
+                return;
+            }
+            log('info', '[DISCOVERY] Gemini XHR POST', {
+                path: safePathname(xhrUrl),
+                status: self.status,
+                size: self.responseText?.length ?? 0,
+            });
+        };
+
+        const maybeRunCompletionFetchFromXhr = (self: XMLHttpRequest, xhrUrl: string): void => {
+            const completionAdapter = getPlatformAdapterByCompletionUrl(xhrUrl);
+            if (!completionAdapter) {
+                return;
+            }
+            void fetchFullConversationWithBackoff(
+                completionAdapter,
+                xhrUrl,
+                toForwardableHeaderRecord((self as any)._headers),
+            );
+        };
+
         const registerXhrLoadHandler = (xhr: XMLHttpRequest, methodUpper: string): void => {
             xhr.addEventListener('load', function () {
                 const self = this as XMLHttpRequest;
                 const xhrUrl = ((self as any)._url as string | undefined) ?? '';
-
-                // Grok XHR response logging
-                if (methodUpper === 'POST') {
-                    const xhrAdapter = getPlatformAdapterByApiUrl(xhrUrl);
-                    if (xhrAdapter?.name === 'Grok') {
-                        const conversationId = resolveRequestConversationId(xhrAdapter, xhrUrl);
-                        const attemptId = resolveAttemptIdForConversation(conversationId, 'Grok');
-                        if (shouldLogTransient(`grok:xhr:response:${attemptId}`, 3000)) {
-                            log('info', 'Grok XHR response intercepted', {
-                                attemptId,
-                                conversationId: conversationId ?? null,
-                                status: self.status,
-                                size: self.responseText?.length ?? 0,
-                                path: safePathname(xhrUrl),
-                            });
-                        }
-                    }
-                }
-
-                // Gemini XHR discovery
-                if (
-                    isDiscoveryDiagnosticsEnabled() &&
-                    window.location.hostname.includes('gemini.google.com') &&
-                    methodUpper === 'POST' &&
-                    self.status === 200
-                ) {
-                    log('info', '[DISCOVERY] Gemini XHR POST', {
-                        path: safePathname(xhrUrl),
-                        status: self.status,
-                        size: self.responseText?.length ?? 0,
-                    });
-                }
-
-                // Proactive completion fetch
-                const completionAdapter = getPlatformAdapterByCompletionUrl(xhrUrl);
-                if (completionAdapter) {
-                    void fetchFullConversationWithBackoff(
-                        completionAdapter,
-                        xhrUrl,
-                        toForwardableHeaderRecord((self as any)._headers),
-                    );
-                }
-
+                maybeLogGrokXhrResponse(self, methodUpper, xhrUrl);
+                maybeLogGeminiXhrDiscovery(self, methodUpper, xhrUrl);
+                maybeRunCompletionFetchFromXhr(self, xhrUrl);
                 handleXhrLoad(self, methodUpper);
             });
         };

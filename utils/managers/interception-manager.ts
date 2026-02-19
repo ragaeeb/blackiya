@@ -10,7 +10,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { logger } from '@/utils/logger';
 import { LRUCache } from '@/utils/lru-cache';
-import { resolveTokenValidationFailureReason } from '@/utils/protocol/session-token';
+import { getSessionToken, resolveTokenValidationFailureReason } from '@/utils/protocol/session-token';
 import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
@@ -22,6 +22,8 @@ export class InterceptionManager {
     private readonly windowRef: Window;
     private readonly globalRef: typeof globalThis;
     private lastInvalidTokenLogAtMs = 0;
+    private pendingTokenRevalidationMessages: Array<Record<string, unknown>> = [];
+    private pendingTokenRevalidationTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
     private onDataCaptured: (
@@ -53,10 +55,12 @@ export class InterceptionManager {
         this.windowRef.addEventListener('message', this.handleMessage);
         this.processQueuedMessages();
         this.processQueuedLogMessages();
+        this.processPendingTokenRevalidationMessages();
         // In case queued messages are added before the listener is attached
         setTimeout(() => {
             this.processQueuedMessages();
             this.processQueuedLogMessages();
+            this.processPendingTokenRevalidationMessages();
         }, 0);
         // #region agent log — diagnostic: confirm message listener is attached
         logger.info('[InterceptionManager] Message listener attached', {
@@ -67,10 +71,15 @@ export class InterceptionManager {
 
     public flushQueuedMessages(): void {
         this.processQueuedMessages();
+        this.processPendingTokenRevalidationMessages();
     }
 
     public stop(): void {
         this.windowRef.removeEventListener('message', this.handleMessage);
+        if (this.pendingTokenRevalidationTimer !== null) {
+            clearTimeout(this.pendingTokenRevalidationTimer);
+            this.pendingTokenRevalidationTimer = null;
+        }
     }
 
     public getConversation(id: string): ConversationData | undefined {
@@ -168,14 +177,10 @@ export class InterceptionManager {
         if (messageType === 'LLM_LOG_ENTRY' || messageType === 'LLM_CAPTURE_DATA_INTERCEPTED') {
             const tokenFailureReason = resolveTokenValidationFailureReason(message);
             if (tokenFailureReason !== null) {
-                const now = Date.now();
-                if (now - this.lastInvalidTokenLogAtMs > 1500) {
-                    this.lastInvalidTokenLogAtMs = now;
-                    logger.debug('Dropped interceptor message due to token validation failure', {
-                        reason: tokenFailureReason,
-                        messageType,
-                    });
+                if (this.tryQueueMessageForTokenRevalidation(message, messageType, tokenFailureReason)) {
+                    return;
                 }
+                this.logTokenValidationDrop(messageType, tokenFailureReason);
                 return;
             }
         }
@@ -214,6 +219,122 @@ export class InterceptionManager {
         } else {
             logger.info(prefixedMsg, ...extra);
         }
+    }
+
+    private logTokenValidationDrop(messageType: string, reason: string): void {
+        const now = Date.now();
+        if (now - this.lastInvalidTokenLogAtMs <= 1500) {
+            return;
+        }
+        this.lastInvalidTokenLogAtMs = now;
+        logger.debug('Dropped interceptor message due to token validation failure', {
+            reason,
+            messageType,
+        });
+    }
+
+    private tryQueueMessageForTokenRevalidation(
+        message: Record<string, unknown> | null,
+        messageType: string,
+        reason: string,
+    ): boolean {
+        if (!message || reason !== 'missing-message-token') {
+            return false;
+        }
+        this.pendingTokenRevalidationMessages.push(message);
+        this.logTokenValidationDrop(messageType, 'missing-message-token-queued-for-revalidation');
+        this.schedulePendingTokenRevalidation();
+        return true;
+    }
+
+    private schedulePendingTokenRevalidation(): void {
+        if (this.pendingTokenRevalidationTimer !== null) {
+            return;
+        }
+        this.pendingTokenRevalidationTimer = setTimeout(() => {
+            this.pendingTokenRevalidationTimer = null;
+            this.processPendingTokenRevalidationMessages();
+        }, 50);
+    }
+
+    private processPendingTokenRevalidationMessages(): void {
+        if (this.pendingTokenRevalidationMessages.length === 0) {
+            return;
+        }
+        const sessionToken = this.resolvePendingRevalidationSessionToken();
+        if (!sessionToken) {
+            return;
+        }
+
+        const pending = this.pendingTokenRevalidationMessages;
+        this.pendingTokenRevalidationMessages = [];
+        for (const typed of pending) {
+            this.applyMissingTokenIfNeeded(typed, sessionToken);
+            this.processPendingTokenRevalidationMessage(typed);
+        }
+    }
+
+    private resolvePendingRevalidationSessionToken(): string | null {
+        const sessionToken = getSessionToken();
+        if (sessionToken) {
+            return sessionToken;
+        }
+        this.schedulePendingTokenRevalidation();
+        return null;
+    }
+
+    private applyMissingTokenIfNeeded(message: Record<string, unknown>, sessionToken: string): void {
+        if (typeof message.__blackiyaToken === 'string' && message.__blackiyaToken.length > 0) {
+            return;
+        }
+        message.__blackiyaToken = sessionToken;
+    }
+
+    private processPendingTokenRevalidationMessage(message: Record<string, unknown>): void {
+        const messageType = typeof message.type === 'string' ? message.type : '';
+        const tokenFailureReason = resolveTokenValidationFailureReason(message);
+        if (tokenFailureReason !== null) {
+            this.logTokenValidationDrop(messageType, tokenFailureReason);
+            return;
+        }
+
+        try {
+            if (messageType === 'LLM_CAPTURE_DATA_INTERCEPTED' && typeof message.data === 'string') {
+                this.handleInterceptedData(message);
+            } else if (messageType === 'LLM_LOG_ENTRY') {
+                this.handleLogEntry((message as { payload?: unknown }).payload);
+            }
+        } catch (error) {
+            logger.warn('Failed to process pending token revalidation message', {
+                error: error instanceof Error ? error.message : String(error),
+                messageType,
+            });
+        }
+    }
+
+    private getQueue(queueKey: '__BLACKIYA_CAPTURE_QUEUE__' | '__BLACKIYA_LOG_QUEUE__'): unknown[] {
+        const globalQueue = (this.globalRef as any)[queueKey];
+        const windowQueue = (this.windowRef as any)[queueKey];
+        const queue = (Array.isArray(globalQueue) ? globalQueue : windowQueue) as unknown[];
+        if (!Array.isArray(queue) || queue.length === 0) {
+            return [];
+        }
+
+        (this.globalRef as any)[queueKey] = [];
+        (this.windowRef as any)[queueKey] = [];
+        return queue;
+    }
+
+    private getTokenValidationFailure(typed: Record<string, unknown>): string | null {
+        const tokenFailureReason = resolveTokenValidationFailureReason(typed);
+        if (tokenFailureReason === null) {
+            return null;
+        }
+        const messageType = String(typed.type ?? '');
+        if (!this.tryQueueMessageForTokenRevalidation(typed, messageType, tokenFailureReason)) {
+            this.logTokenValidationDrop(messageType, tokenFailureReason);
+        }
+        return tokenFailureReason;
     }
 
     private handleInterceptedData(message: any): void {
@@ -331,57 +452,49 @@ export class InterceptionManager {
     }
 
     private processQueuedMessages(): void {
-        const globalQueue = (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__;
-        const windowQueue = (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__;
-        const queue = (Array.isArray(globalQueue) ? globalQueue : windowQueue) as unknown[];
-        if (!Array.isArray(queue) || queue.length === 0) {
+        const queue = this.getQueue('__BLACKIYA_CAPTURE_QUEUE__');
+        if (queue.length === 0) {
             return;
         }
 
-        // Take ownership up front so retries don't double-process already-dequeued messages.
-        (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
-        (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
-
         for (const message of queue) {
             const typed = message as Record<string, unknown> | null;
-            if (
-                typed?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' &&
-                typeof typed.data === 'string' &&
-                resolveTokenValidationFailureReason(typed) === null
-            ) {
-                try {
-                    this.handleInterceptedData(typed);
-                } catch (error) {
-                    logger.warn('Failed to process queued intercepted message', {
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                }
+            if (typed?.type !== 'LLM_CAPTURE_DATA_INTERCEPTED' || typeof typed.data !== 'string') {
+                continue;
+            }
+            if (this.getTokenValidationFailure(typed) !== null) {
+                continue;
+            }
+            try {
+                this.handleInterceptedData(typed);
+            } catch (error) {
+                logger.warn('Failed to process queued intercepted message', {
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         }
     }
 
     private processQueuedLogMessages(): void {
-        const globalQueue = (this.globalRef as any).__BLACKIYA_LOG_QUEUE__;
-        const windowQueue = (this.windowRef as any).__BLACKIYA_LOG_QUEUE__;
-        const queue = (Array.isArray(globalQueue) ? globalQueue : windowQueue) as unknown[];
-        if (!Array.isArray(queue) || queue.length === 0) {
+        const queue = this.getQueue('__BLACKIYA_LOG_QUEUE__');
+        if (queue.length === 0) {
             return;
         }
 
-        // Take ownership up front so retries don't double-process already-dequeued messages.
-        (this.globalRef as any).__BLACKIYA_LOG_QUEUE__ = [];
-        (this.windowRef as any).__BLACKIYA_LOG_QUEUE__ = [];
-
         for (const message of queue) {
             const typed = message as Record<string, unknown> | null;
-            if (typed?.type === 'LLM_LOG_ENTRY' && resolveTokenValidationFailureReason(typed) === null) {
-                try {
-                    this.handleLogEntry((typed as { payload?: unknown }).payload);
-                } catch (error) {
-                    logger.warn('Failed to process queued log message', {
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                }
+            if (typed?.type !== 'LLM_LOG_ENTRY') {
+                continue;
+            }
+            if (this.getTokenValidationFailure(typed) !== null) {
+                continue;
+            }
+            try {
+                this.handleLogEntry((typed as { payload?: unknown }).payload);
+            } catch (error) {
+                logger.warn('Failed to process queued log message', {
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         }
     }

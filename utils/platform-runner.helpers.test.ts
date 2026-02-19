@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
+import { createMockAdapter } from './runner/__tests__/helpers';
 
 // Configure Happy DOM
 const window = new Window();
@@ -11,17 +12,8 @@ const document = window.document;
 (global as any).HTMLButtonElement = window.HTMLButtonElement;
 (global as any).MutationObserver = window.MutationObserver;
 
-// Mock dependencies
-const createMockAdapter = () => ({
-    name: 'TestPlatform',
-    extractConversationId: () => '123',
-    getButtonInjectionTarget: () => document.body,
-    formatFilename: () => 'test.json',
-    parseInterceptedData: () => ({ conversation_id: '123' }),
-});
-
 // We need a mutable reference to control the mock return value
-const currentAdapterMock: any = createMockAdapter();
+const currentAdapterMock: any = createMockAdapter(document);
 const storageDataMock: Record<string, unknown> = {};
 const runtimeSendMessageMock: (message: unknown) => Promise<unknown> = async () => undefined;
 

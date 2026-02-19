@@ -38,15 +38,11 @@ const shouldResolveAttemptForRequest = (adapter: LLMPlatform | null, method: str
 const resolveNonChatAttemptId = (
     adapter: LLMPlatform,
     conversationId: string | undefined,
-    shouldResolveAttempt: boolean,
     deps: Pick<CreateFetchInterceptorContextDeps, 'peekAttemptIdForConversation' | 'resolveAttemptIdForConversation'>,
 ) => {
     const peeked = deps.peekAttemptIdForConversation(conversationId, adapter.name);
     if (peeked) {
         return peeked;
-    }
-    if (!shouldResolveAttempt) {
-        return undefined;
     }
     return deps.resolveAttemptIdForConversation(conversationId, adapter.name);
 };
@@ -71,10 +67,9 @@ export function createFetchInterceptorContext(
         isNonChatGptApiRequest && fetchApiAdapter
             ? deps.resolveRequestConversationId(fetchApiAdapter, outgoingUrl)
             : undefined;
-    const shouldResolveAttempt = shouldResolveAttemptForRequest(fetchApiAdapter, outgoingMethod, outgoingUrl);
     const nonChatAttemptId =
         isNonChatGptApiRequest && fetchApiAdapter
-            ? resolveNonChatAttemptId(fetchApiAdapter, nonChatConversationId, shouldResolveAttempt, deps)
+            ? resolveNonChatAttemptId(fetchApiAdapter, nonChatConversationId, deps)
             : undefined;
     const isChatGptPromptRequest = outgoingMethod === 'POST' && CHATGPT_PROMPT_REQUEST_PATH_PATTERN.test(outgoingPath);
     const lifecycleConversationId = isChatGptPromptRequest ? deps.resolveLifecycleConversationId(args) : undefined;

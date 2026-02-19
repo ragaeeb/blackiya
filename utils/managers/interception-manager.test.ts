@@ -250,7 +250,62 @@ describe('InterceptionManager', () => {
         expect(handled).toEqual(['first', 'second', 'third']);
     });
 
-    it('should drop queued capture/log messages when token is missing or mismatched', () => {
+    it('should revalidate queued messages with missing token once session token is available', () => {
+        const captured: string[] = [];
+        const globalRef = {} as any;
+        const manager = new InterceptionManager((id) => captured.push(id), {
+            window: windowInstance as any,
+            global: globalRef,
+        });
+
+        manager.updateAdapter({
+            parseInterceptedData: () => ({
+                title: 'Queued',
+                create_time: 1,
+                update_time: 1,
+                mapping: {},
+                conversation_id: 'queued-missing-token',
+                current_node: 'node-1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'model',
+                safe_urls: [],
+                blocked_urls: [],
+            }),
+        } as any);
+
+        (windowInstance as any).__BLACKIYA_SESSION_TOKEN__ = undefined;
+        globalRef.__BLACKIYA_CAPTURE_QUEUE__ = [
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/conversation/queued-missing-token',
+                data: '{}',
+            },
+        ];
+        globalRef.__BLACKIYA_LOG_QUEUE__ = [
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'missing-token', context: 'interceptor', data: [] },
+            },
+        ];
+
+        manager.flushQueuedMessages();
+        (manager as any).processQueuedLogMessages();
+        expect(captured).toEqual([]);
+        expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] missing-token');
+
+        setSessionToken('bk:test-interception-token');
+        manager.flushQueuedMessages();
+        expect(captured).toEqual(['queued-missing-token']);
+
+        (manager as any).processPendingTokenRevalidationMessages();
+        expect(loggerSpies.info).toHaveBeenCalledWith('[i] missing-token');
+    });
+
+    it('should drop queued capture/log messages when token is mismatched', () => {
         const captured: string[] = [];
         const globalRef = {} as any;
         const manager = new InterceptionManager((id) => captured.push(id), {
@@ -280,11 +335,6 @@ describe('InterceptionManager', () => {
         globalRef.__BLACKIYA_CAPTURE_QUEUE__ = [
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
-                url: 'https://chatgpt.com/backend-api/conversation/queued-1',
-                data: '{}',
-            },
-            {
-                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 url: 'https://chatgpt.com/backend-api/conversation/queued-2',
                 data: '{}',
                 __blackiyaToken: 'bk:wrong-token',
@@ -292,10 +342,6 @@ describe('InterceptionManager', () => {
         ];
 
         globalRef.__BLACKIYA_LOG_QUEUE__ = [
-            {
-                type: 'LLM_LOG_ENTRY',
-                payload: { level: 'info', message: 'missing-token', context: 'interceptor', data: [] },
-            },
             {
                 type: 'LLM_LOG_ENTRY',
                 payload: { level: 'info', message: 'wrong-token', context: 'interceptor', data: [] },
@@ -307,7 +353,6 @@ describe('InterceptionManager', () => {
         (manager as any).processQueuedLogMessages();
 
         expect(captured).toEqual([]);
-        expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] missing-token');
         expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] wrong-token');
     });
 

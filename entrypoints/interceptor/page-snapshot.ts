@@ -29,6 +29,18 @@ const pickConversationCandidate = (item: unknown, conversationId: string): unkno
     return null;
 };
 
+const enqueueObjectChildren = (item: unknown, queue: unknown[]): void => {
+    if (Array.isArray(item)) {
+        queue.push(...item);
+        return;
+    }
+    queue.push(...Object.values(item as Record<string, unknown>));
+};
+
+const shouldSkipScanItem = (item: unknown, seen: Set<unknown>): boolean => {
+    return !item || typeof item !== 'object' || seen.has(item);
+};
+
 /**
  * BFS through an arbitrary JS object tree looking for a node that resembles a
  * conversation payload for the given ID. Bounded to 6 000 nodes to stay safe.
@@ -41,7 +53,7 @@ const findConversationInGlobals = (root: unknown, conversationId: string): unkno
     while (queue.length > 0 && scanned < 6000) {
         const item = queue.shift();
         scanned += 1;
-        if (!item || typeof item !== 'object' || seen.has(item)) {
+        if (shouldSkipScanItem(item, seen)) {
             continue;
         }
         seen.add(item);
@@ -51,15 +63,7 @@ const findConversationInGlobals = (root: unknown, conversationId: string): unkno
             return candidate;
         }
 
-        if (Array.isArray(item)) {
-            for (const child of item) {
-                queue.push(child);
-            }
-        } else {
-            for (const value of Object.values(item as Record<string, unknown>)) {
-                queue.push(value);
-            }
-        }
+        enqueueObjectChildren(item, queue);
     }
     return null;
 };

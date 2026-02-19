@@ -11,7 +11,7 @@ import type { ConversationData, Message, MessageNode } from '@/utils/types';
 import {
     getConversationCandidate,
     normalizeConversationCandidate,
-    normalizeConversationTitle,
+    resolveConversationTitle,
 } from './conversation-normalizer';
 import { normalizeMessage } from './message-normalizer';
 import {
@@ -212,7 +212,7 @@ export const buildConversationFromSsePayloads = (payloads: unknown[]): Conversat
     const normalizedUpdate = timing.update > 0 ? timing.update : normalizedCreate;
 
     return {
-        title: normalizeConversationTitle(title, mapping),
+        title: resolveConversationTitle(title, mapping),
         create_time: normalizedCreate,
         update_time: normalizedUpdate,
         mapping,

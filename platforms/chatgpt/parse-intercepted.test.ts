@@ -11,6 +11,7 @@ mock.module('@/utils/logger', () => ({
 }));
 
 const VALID_ID = '696bc3d5-fa84-8328-b209-4d65cb229e59';
+const BACKEND_API_URL = 'https://chatgpt.com/backend-api/f/conversation';
 
 const minimalMapping = () => ({
     root: { id: 'root', message: null, parent: null, children: [] },
@@ -265,7 +266,7 @@ describe('ChatGPT parseInterceptedData', () => {
                 'data: [DONE]',
             ].join('\n');
 
-            const result = adapter.parseInterceptedData(sseText, 'https://chatgpt.com/backend-api/f/conversation');
+            const result = adapter.parseInterceptedData(sseText, BACKEND_API_URL);
             expect(result).not.toBeNull();
             expect(result.conversation_id).toBe(VALID_ID);
             expect(result.title).toBe('What is calibration?');
@@ -281,7 +282,7 @@ describe('ChatGPT parseInterceptedData', () => {
                 'data: [DONE]',
             ].join('\n');
 
-            const result = adapter.parseInterceptedData(sseText, 'https://chatgpt.com/backend-api/f/conversation');
+            const result = adapter.parseInterceptedData(sseText, BACKEND_API_URL);
             expect(result?.title).toBe('From SSE');
         });
 
@@ -292,7 +293,7 @@ describe('ChatGPT parseInterceptedData', () => {
                 '',
                 'data: [DONE]',
             ].join('\n');
-            expect(adapter.parseInterceptedData(sseText, 'url')).toBeNull();
+            expect(adapter.parseInterceptedData(sseText, BACKEND_API_URL)).toBeNull();
         });
 
         it('should ignore SSE events where message payload is not an object', () => {
@@ -302,7 +303,7 @@ describe('ChatGPT parseInterceptedData', () => {
                 '',
                 'data: [DONE]',
             ].join('\n');
-            expect(adapter.parseInterceptedData(sseText, 'url')).toBeNull();
+            expect(adapter.parseInterceptedData(sseText, BACKEND_API_URL)).toBeNull();
         });
 
         it('should normalize unknown author roles to assistant and non-object content to empty text', () => {
@@ -312,9 +313,9 @@ describe('ChatGPT parseInterceptedData', () => {
                 '',
                 'data: [DONE]',
             ].join('\n');
-            const result = adapter.parseInterceptedData(sseText, 'url');
+            const result = adapter.parseInterceptedData(sseText, BACKEND_API_URL);
             expect(result).not.toBeNull();
-            const message = result.mapping['a1']?.message;
+            const message = result.mapping.a1?.message;
             expect(message?.author.role).toBe('assistant');
             expect(message?.content.parts).toEqual([]);
         });

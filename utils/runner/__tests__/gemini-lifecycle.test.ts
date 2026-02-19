@@ -80,6 +80,7 @@ describe('Platform Runner – Gemini lifecycle', () => {
         window.localStorage.clear();
         (globalThis as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
         (globalThis as any).__BLACKIYA_LOG_QUEUE__ = [];
+        delete (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS;
     });
 
     afterEach(() => {
@@ -329,6 +330,7 @@ describe('Platform Runner – Gemini lifecycle', () => {
     });
 
     it('should not spam identical canonical_ready readiness logs during periodic health checks', async () => {
+        (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS = 120;
         currentAdapterMock = {
             ...geminiAdapter(),
             extractConversationId: () => 'gem-ready-log',
@@ -395,7 +397,7 @@ describe('Platform Runner – Gemini lifecycle', () => {
         ).length;
         expect(countBefore).toBeGreaterThan(0);
 
-        await new Promise((r) => setTimeout(r, 3900));
+        await new Promise((r) => setTimeout(r, 420));
 
         const countAfter = logCalls.debug.filter(
             (e) =>

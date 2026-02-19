@@ -95,17 +95,17 @@ export const resolveGeminiConversationTitle = (
 
 // ── Message parsing ────────────────────────────────────────────────────────────
 
-const extractGeminiTextNode = (node: any): string => {
+const extractGeminiTextNode = (node: any, depth = 0, maxDepth = 50): string => {
     if (typeof node === 'string') {
         return node;
     }
-    if (!Array.isArray(node) || node.length === 0) {
+    if (!Array.isArray(node) || node.length === 0 || depth >= maxDepth) {
         return '';
     }
     if (node.length >= 3 && node[0] === null && typeof node[2] === 'string') {
         return node[2];
     }
-    return extractGeminiTextNode(node[0]);
+    return extractGeminiTextNode(node[0], depth + 1, maxDepth);
 };
 
 const parseGeminiThoughts = (assistantCandidate: any[]): any[] => {
@@ -170,15 +170,14 @@ export const extractGeminiModelName = (conversationRoot: any[], isStreamFormat: 
         return defaultModelName;
     }
     const modelName = `gemini-${modelSlug.toLowerCase().replace(/\s+/g, '-')}`;
-    logger.info('[Blackiya/Gemini] Extracted model name:', modelName);
+    logger.debug('[Blackiya/Gemini] Extracted model name:', modelName);
     return modelName;
 };
 
 // ── Conversation data builder ──────────────────────────────────────────────────
 
-const buildGeminiConversationMapping = (parsedMessages: any[]): Record<string, MessageNode> => {
+const buildGeminiConversationMapping = (parsedMessages: any[], now: number): Record<string, MessageNode> => {
     const mapping: Record<string, MessageNode> = {};
-    const now = Date.now() / 1000;
     parsedMessages.forEach((msg, index) => {
         const id = `segment-${index}`;
         mapping[id] = {
@@ -212,8 +211,8 @@ const buildGeminiConversationData = (
     conversationTitle: string,
     mapping: Record<string, MessageNode>,
     modelName: string,
+    now: number,
 ): ConversationData => {
-    const now = Date.now() / 1000;
     return {
         title: conversationTitle,
         create_time: now,
@@ -255,12 +254,13 @@ export const parseConversationPayload = (
     });
 
     const parsedMessages = parseGeminiMessages(conversationRoot, isStreamFormat);
-    const mapping = buildGeminiConversationMapping(parsedMessages);
+    const now = Date.now() / 1000;
+    const mapping = buildGeminiConversationMapping(parsedMessages, now);
     const modelName = extractGeminiModelName(conversationRoot, isStreamFormat);
 
     logger.info('[Blackiya/Gemini] Successfully parsed conversation with', Object.keys(mapping).length, 'messages');
 
-    const conversationData = buildGeminiConversationData(conversationId, conversationTitle, mapping, modelName);
+    const conversationData = buildGeminiConversationData(conversationId, conversationTitle, mapping, modelName, now);
     if (conversationId) {
         activeConvos.set(conversationId, conversationData);
     }

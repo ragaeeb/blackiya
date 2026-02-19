@@ -4,6 +4,8 @@ const GROK_CONVERSATION_ID_REGEX = /^[a-zA-Z0-9-]{8,128}$/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 const TOOL_USAGE_CARD_ARGS_REGEX = /<xai:tool_args><!\[CDATA\[([\s\S]*?)\]\]><\/xai:tool_args>/i;
 const GROK_METADATA_KEYS_TO_SKIP = new Set(['responseId', 'messageTag', 'messageStepId', 'toolUsageCardId']);
+const GROK_PREFERRED_TEXT_KEYS = ['message', 'text', 'delta', 'content', 'output_text', 'summary', 'final_message'];
+const GROK_PREFERRED_TEXT_KEYS_SET = new Set(GROK_PREFERRED_TEXT_KEYS);
 
 function extractToolUsageCardMessage(value: string): string | null {
     if (!value.includes('<xai:tool_usage_card')) {
@@ -70,8 +72,7 @@ function collectLikelyTextValuesFromArray(values: unknown[], out: string[], dept
 }
 
 function collectPreferredTextSlots(obj: Record<string, unknown>, out: string[], depth: number): void {
-    const preferredKeys = ['message', 'text', 'delta', 'content', 'output_text', 'summary', 'final_message'];
-    for (const key of preferredKeys) {
+    for (const key of GROK_PREFERRED_TEXT_KEYS) {
         if (!(key in obj)) {
             continue;
         }
@@ -83,6 +84,9 @@ function collectObjectTextValues(obj: Record<string, unknown>, out: string[], de
     const shouldSkipThinkingToken = obj.isThinking === true && typeof obj.token === 'string';
     for (const [key, value] of Object.entries(obj)) {
         if (GROK_METADATA_KEYS_TO_SKIP.has(key)) {
+            continue;
+        }
+        if (GROK_PREFERRED_TEXT_KEYS_SET.has(key)) {
             continue;
         }
         if (shouldSkipThinkingToken && key === 'token') {

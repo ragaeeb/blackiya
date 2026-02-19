@@ -47,7 +47,7 @@ const collectTitleCandidates = (node: unknown, out: string[], depth = 0): void =
 
     const obj = node as Record<string, unknown>;
 
-    for (const slot of [obj['11'], obj['title']]) {
+    for (const slot of [obj['11'], obj.title]) {
         const candidates = Array.isArray(slot) ? slot : [slot];
         for (const c of candidates) {
             const norm = normalizeGeminiTitleCandidate(c);

@@ -56,6 +56,30 @@ button.secondary:hover {
     margin-top: 14px;
 }
 
+.section-heading {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f3f4f6;
+    margin-bottom: 4px;
+}
+
+.section-description {
+    font-size: 13px;
+    color: #9ca3af;
+    line-height: 1.35;
+    margin-bottom: 10px;
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: #e5e7eb;
+}
+
 label {
     display: block;
     margin-bottom: 8px;

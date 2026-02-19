@@ -51,6 +51,21 @@ import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
+const waitUntil = async (predicate: () => boolean, timeout = 5000, interval = 20): Promise<void> => {
+    const start = Date.now();
+    while (!predicate()) {
+        if (Date.now() - start > timeout) {
+            throw new Error('waitUntil timed out');
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+};
+
+const waitForRunnerReady = () => waitUntil(() => !!document.getElementById('blackiya-save-btn'));
+
+const waitForLifecycleState = (label: 'Prompt Sent' | 'Streaming' | 'Completed') =>
+    waitUntil(() => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes(label) === true);
+
 describe('Platform Runner – SPA navigation', () => {
     beforeEach(() => {
         window.dispatchEvent(new (window as any).Event('beforeunload'));
@@ -88,7 +103,7 @@ describe('Platform Runner – SPA navigation', () => {
             },
         };
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -100,7 +115,7 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitForLifecycleState('Prompt Sent');
 
         const postedMessages: any[] = [];
         const origPost = window.postMessage.bind(window);
@@ -114,7 +129,24 @@ describe('Platform Runner – SPA navigation', () => {
             delete (window as any).location;
             (window as any).location = { href: 'https://chatgpt.com/c/conv-h01-b', origin: 'https://chatgpt.com' };
             window.dispatchEvent(new (window as any).Event('popstate'));
-            await new Promise((r) => setTimeout(r, 100));
+            postStampedMessage(
+                {
+                    type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                    platform: 'ChatGPT',
+                    attemptId: 'attempt:h01-next',
+                    phase: 'prompt-sent',
+                    conversationId: 'conv-h01-b',
+                },
+                window.location.origin,
+            );
+            await waitUntil(() =>
+                postedMessages.some(
+                    (p) =>
+                        p?.type === 'BLACKIYA_RESPONSE_LIFECYCLE' &&
+                        p?.attemptId === 'attempt:h01-next' &&
+                        p?.conversationId === 'conv-h01-b',
+                ),
+            );
         } finally {
             (window as any).postMessage = origPost;
         }
@@ -133,7 +165,7 @@ describe('Platform Runner – SPA navigation', () => {
         (window as any).location = { href: 'https://chatgpt.com/', origin: 'https://chatgpt.com' };
 
         runPlatform();
-        await new Promise((r) => setTimeout(r, 100));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -145,11 +177,11 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitForLifecycleState('Streaming');
 
         (window as any).location.href = 'https://chatgpt.com/c/conv-same-nav';
         window.dispatchEvent(new (window as any).Event('popstate'));
-        await new Promise((r) => setTimeout(r, 30));
+        await waitUntil(() => (window as any).location.href.includes('/c/conv-same-nav'));
 
         postStampedMessage(
             {
@@ -162,7 +194,12 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 30));
+        await waitUntil(
+            () =>
+                document
+                    .getElementById('blackiya-stream-probe')
+                    ?.textContent?.includes('delta-after-same-conversation-navigation') === true,
+        );
 
         expect(
             document
@@ -181,7 +218,7 @@ describe('Platform Runner – SPA navigation', () => {
         (window as any).location = { href: 'https://chatgpt.com/c/conv-old', origin: 'https://chatgpt.com' };
 
         runPlatform();
-        await new Promise((r) => setTimeout(r, 100));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -193,11 +230,11 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitForLifecycleState('Streaming');
 
         (window as any).location.href = 'https://chatgpt.com/c/conv-new';
         window.dispatchEvent(new (window as any).Event('popstate'));
-        await new Promise((r) => setTimeout(r, 30));
+        await waitUntil(() => (window as any).location.href.includes('/c/conv-new'));
 
         postStampedMessage(
             {
@@ -210,7 +247,18 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 30));
+        const infoLogsBeforeRecovery = logCalls.info.length;
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:nav-new-active',
+                phase: 'streaming',
+                conversationId: 'conv-new',
+            },
+            window.location.origin,
+        );
+        await waitUntil(() => logCalls.info.length > infoLogsBeforeRecovery);
 
         expect(
             document
@@ -230,11 +278,20 @@ describe('Platform Runner – SPA navigation', () => {
         (window as any).location = { href: 'https://chatgpt.com/c/conv-old', origin: 'https://chatgpt.com' };
 
         runPlatform();
-        await new Promise((r) => setTimeout(r, 100));
+        await waitForRunnerReady();
 
         (window as any).location.href = 'https://chatgpt.com/c/conv-new';
         window.dispatchEvent(new (window as any).Event('popstate'));
-        await new Promise((r) => setTimeout(r, 2100));
+        await waitUntil(
+            () =>
+                logCalls.info.some(
+                    (e) =>
+                        e.message === 'Auto calibration deferred: response still generating' &&
+                        (e.args?.[0] as any)?.conversationId === 'conv-new',
+                ),
+            4500,
+            20,
+        );
 
         const deferred = logCalls.info.find(
             (e) =>
@@ -269,7 +326,7 @@ describe('Platform Runner – SPA navigation', () => {
         };
 
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -280,7 +337,7 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitForLifecycleState('Prompt Sent');
         postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
@@ -291,7 +348,7 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitForLifecycleState('Streaming');
         postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_FINISHED',
@@ -301,7 +358,9 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 50));
+        await waitUntil(() =>
+            logCalls.info.some((entry) => String(entry.message).includes('Response finished signal')),
+        );
 
         // Degraded snapshot triggers stabilisation retry
         postStampedMessage(
@@ -314,7 +373,10 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 100));
+        await waitUntil(() => {
+            const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            return !!saveButton && saveButton.disabled;
+        });
 
         // First canonical sample
         postStampedMessage(
@@ -327,7 +389,10 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 1200));
+        await waitUntil(() => {
+            const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+            return !!saveButton && saveButton.disabled;
+        });
 
         // Second canonical sample for SFE stability
         postStampedMessage(
@@ -340,7 +405,14 @@ describe('Platform Runner – SPA navigation', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 1500));
+        await waitUntil(
+            () => {
+                const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
+                return !!saveButton && !saveButton.disabled;
+            },
+            8000,
+            20,
+        );
 
         const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveButton).not.toBeNull();

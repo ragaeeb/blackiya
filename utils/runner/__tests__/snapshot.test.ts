@@ -50,6 +50,14 @@ import { runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
+const parseInterceptedDataMock = (raw: string) => {
+    try {
+        const p = JSON.parse(raw);
+        return p?.conversation_id ? p : null;
+    } catch {
+        return null;
+    }
+};
 
 /** Helper: attach a snapshot response listener that replies with the given data. */
 const attachSnapshotResponder = (makeData: (requestCount: number) => unknown) => {
@@ -99,94 +107,22 @@ describe('Platform Runner – snapshot capture', () => {
             ...createMockAdapter(document),
             name: 'ChatGPT',
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         // First snapshot: user-only (assistant-missing). Subsequent: full conversation.
-        const responder = attachSnapshotResponder((count) => ({
-            title: 'Thinking Model Response',
-            create_time: 1_700_000_000,
-            update_time: 1_700_000_120,
-            conversation_id: '123',
-            current_node: count <= 1 ? 'u1' : 'a1',
-            moderation_results: [],
-            plugin_ids: null,
-            gizmo_id: null,
-            gizmo_type: null,
-            is_archived: false,
-            default_model_slug: 'gpt',
-            safe_urls: [],
-            blocked_urls: [],
-            mapping:
-                count <= 1
-                    ? {
-                          root: { id: 'root', message: null, parent: null, children: ['u1'] },
-                          u1: {
-                              id: 'u1',
-                              parent: 'root',
-                              children: [],
-                              message: {
-                                  id: 'u1',
-                                  author: { role: 'user', name: null, metadata: {} },
-                                  create_time: 1_700_000_010,
-                                  update_time: 1_700_000_010,
-                                  content: { content_type: 'text', parts: ['Prompt for thinking model'] },
-                                  status: 'finished_successfully',
-                                  end_turn: true,
-                                  weight: 1,
-                                  metadata: {},
-                                  recipient: 'all',
-                                  channel: null,
-                              },
-                          },
-                      }
-                    : {
-                          root: { id: 'root', message: null, parent: null, children: ['u1'] },
-                          u1: {
-                              id: 'u1',
-                              parent: 'root',
-                              children: ['a1'],
-                              message: {
-                                  id: 'u1',
-                                  author: { role: 'user', name: null, metadata: {} },
-                                  create_time: 1_700_000_010,
-                                  update_time: 1_700_000_010,
-                                  content: { content_type: 'text', parts: ['Prompt for thinking model'] },
-                                  status: 'finished_successfully',
-                                  end_turn: true,
-                                  weight: 1,
-                                  metadata: {},
-                                  recipient: 'all',
-                                  channel: null,
-                              },
-                          },
-                          a1: {
-                              id: 'a1',
-                              parent: 'u1',
-                              children: [],
-                              message: {
-                                  id: 'a1',
-                                  author: { role: 'assistant', name: null, metadata: {} },
-                                  create_time: 1_700_000_020,
-                                  update_time: 1_700_000_020,
-                                  content: { content_type: 'text', parts: ['Thinking model final answer'] },
-                                  status: 'finished_successfully',
-                                  end_turn: true,
-                                  weight: 1,
-                                  metadata: {},
-                                  recipient: 'all',
-                                  channel: null,
-                              },
-                          },
-                      },
-        }));
+        const responder = attachSnapshotResponder((count) =>
+            buildConversation(
+                '123',
+                'Thinking model final answer',
+                { status: 'finished_successfully', endTurn: true },
+                {
+                    title: 'Thinking Model Response',
+                    userText: 'Prompt for thinking model',
+                    omitAssistant: count <= 1,
+                },
+            ),
+        );
 
         try {
             runPlatform();
@@ -294,14 +230,7 @@ describe('Platform Runner – snapshot capture', () => {
             ...createMockAdapter(document),
             name: 'ChatGPT',
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         const responder = attachSnapshotResponder(() =>
@@ -358,14 +287,7 @@ describe('Platform Runner – snapshot capture', () => {
             name: 'ChatGPT',
             buildApiUrls: () => [],
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         const responder = attachSnapshotResponder(() =>
@@ -441,14 +363,7 @@ describe('Platform Runner – snapshot capture', () => {
             name: 'ChatGPT',
             buildApiUrls: () => [],
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         const responder = attachSnapshotResponder(() =>
@@ -516,14 +431,7 @@ describe('Platform Runner – snapshot capture', () => {
             name: 'ChatGPT',
             buildApiUrls: () => [],
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         const responder = attachSnapshotResponder(() => degraded);

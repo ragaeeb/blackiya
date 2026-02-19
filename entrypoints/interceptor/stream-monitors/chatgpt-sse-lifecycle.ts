@@ -103,6 +103,87 @@ const processSseFrame = (context: SseFrameContext, emit: StreamMonitorEmitter): 
     return { doneSignalSeen: false, sseBufferForAdapter, lastDelta, sampledFrames };
 };
 
+type SseChunkState = {
+    lifecycleConversationId: string | undefined;
+    sawContent: boolean;
+    doneSignalSeen: boolean;
+    streamBuffer: string;
+    sseBufferForAdapter: string;
+    lastDelta: string;
+    sampledFrames: number;
+    sampledFrameLimit: number;
+};
+
+const resolveConversationIdFromChunk = (chunk: string, currentConversationId?: string): string | undefined => {
+    if (currentConversationId) {
+        return currentConversationId;
+    }
+    const idMatch = chunk.match(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i);
+    return idMatch?.[0] ?? currentConversationId;
+};
+
+const processSseFrames = (
+    state: SseChunkState,
+    attemptId: string,
+    emit: StreamMonitorEmitter,
+    frames: string[],
+): SseChunkState => {
+    const nextState = { ...state };
+    for (const frame of frames) {
+        const dataPayload = extractSseDataPayload(frame);
+        if (!dataPayload) {
+            continue;
+        }
+        const result = processSseFrame(
+            {
+                attemptId,
+                dataPayload,
+                conversationId: nextState.lifecycleConversationId,
+                sseBufferForAdapter: nextState.sseBufferForAdapter,
+                lastDelta: nextState.lastDelta,
+                sampledFrames: nextState.sampledFrames,
+                sampledFrameLimit: nextState.sampledFrameLimit,
+            },
+            emit,
+        );
+        nextState.doneSignalSeen = nextState.doneSignalSeen || result.doneSignalSeen;
+        nextState.sseBufferForAdapter = result.sseBufferForAdapter;
+        nextState.lastDelta = result.lastDelta;
+        nextState.sampledFrames = result.sampledFrames;
+    }
+    return nextState;
+};
+
+const processChunkText = (
+    chunk: string,
+    state: SseChunkState,
+    attemptId: string,
+    emit: StreamMonitorEmitter,
+): SseChunkState => {
+    const nextConversationId = resolveConversationIdFromChunk(chunk, state.lifecycleConversationId);
+    if (!state.lifecycleConversationId && nextConversationId) {
+        emit.conversationIdResolved(attemptId, nextConversationId, 'ChatGPT');
+    }
+    const shouldMarkStreaming = !state.sawContent && chunk.trim().length > 0;
+    if (shouldMarkStreaming) {
+        emit.lifecycle(attemptId, 'streaming', nextConversationId);
+    }
+
+    const combinedBuffer = state.streamBuffer + chunk;
+    const { frames, remainingBuffer } = extractSseFramesFromBuffer(combinedBuffer);
+    return processSseFrames(
+        {
+            ...state,
+            lifecycleConversationId: nextConversationId,
+            sawContent: state.sawContent || shouldMarkStreaming,
+            streamBuffer: remainingBuffer,
+        },
+        attemptId,
+        emit,
+        frames,
+    );
+};
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -124,72 +205,32 @@ export const monitorChatGptSseLifecycle = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    let lifecycleConversationId = conversationId;
-    let sawContent = false;
-    let doneSignalSeen = false;
-    let streamBuffer = '';
-    let sseBufferForAdapter = '';
-    let lastDelta = '';
-    let sampledFrames = 0;
-    const sampledFrameLimit = 3;
+    let state: SseChunkState = {
+        lifecycleConversationId: conversationId,
+        sawContent: false,
+        doneSignalSeen: false,
+        streamBuffer: '',
+        sseBufferForAdapter: '',
+        lastDelta: '',
+        sampledFrames: 0,
+        sampledFrameLimit: 3,
+    };
 
-    if (lifecycleConversationId) {
-        emit.conversationIdResolved(attemptId, lifecycleConversationId, 'ChatGPT');
+    if (state.lifecycleConversationId) {
+        emit.conversationIdResolved(attemptId, state.lifecycleConversationId, 'ChatGPT');
     }
 
     try {
         await consumeReadableStreamChunks(reader, decoder, attemptId, emit.isAttemptDisposed, (chunkText) => {
             monitorChatgptSseChunk(chunkText, (chunk) => {
-                // Conversation ID resolution from stream content
-                if (!lifecycleConversationId) {
-                    const idMatch = chunk.match(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i);
-                    if (idMatch?.[0]) {
-                        lifecycleConversationId = idMatch[0];
-                        emit.conversationIdResolved(attemptId, lifecycleConversationId, 'ChatGPT');
-                    }
-                }
-
-                // Streaming lifecycle on first non-empty chunk
-                if (!sawContent && chunk.trim().length > 0) {
-                    emit.lifecycle(attemptId, 'streaming', lifecycleConversationId);
-                    sawContent = true;
-                }
-
-                streamBuffer += chunk;
-                const { frames, remainingBuffer } = extractSseFramesFromBuffer(streamBuffer);
-                streamBuffer = remainingBuffer;
-
-                for (const frame of frames) {
-                    const dataPayload = extractSseDataPayload(frame);
-                    if (!dataPayload) {
-                        continue;
-                    }
-
-                    const result = processSseFrame(
-                        {
-                            attemptId,
-                            dataPayload,
-                            conversationId: lifecycleConversationId,
-                            sseBufferForAdapter,
-                            lastDelta,
-                            sampledFrames,
-                            sampledFrameLimit,
-                        },
-                        emit,
-                    );
-
-                    doneSignalSeen = doneSignalSeen || result.doneSignalSeen;
-                    sseBufferForAdapter = result.sseBufferForAdapter;
-                    lastDelta = result.lastDelta;
-                    sampledFrames = result.sampledFrames;
-                }
+                state = processChunkText(chunk, state, attemptId, emit);
             });
         });
     } catch {
         // Ignore stream read errors; fallback completion signals handle final state.
     } finally {
-        if (!doneSignalSeen && streamBuffer.includes('data: [DONE]')) {
-            emit.lifecycle(attemptId, 'completed', lifecycleConversationId);
+        if (!state.doneSignalSeen && state.streamBuffer.includes('data: [DONE]')) {
+            emit.lifecycle(attemptId, 'completed', state.lifecycleConversationId);
         }
         reader.releaseLock();
     }

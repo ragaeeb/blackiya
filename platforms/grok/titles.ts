@@ -2,11 +2,7 @@ import { logger } from '@/utils/logger';
 import { grokState } from './state';
 
 export const isTitlesEndpoint = (url: string): boolean => {
-    const isTitles = url.includes('GrokHistory');
-    if (isTitles) {
-        logger.info('[Blackiya/Grok/Titles] Detected titles endpoint');
-    }
-    return isTitles;
+    return url.includes('GrokHistory');
 };
 
 /**
@@ -59,6 +55,7 @@ export const tryHandleGrokTitlesEndpoint = (data: string | any, url: string): bo
     if (!isTitlesEndpoint(url)) {
         return false;
     }
+    logger.info('[Blackiya/Grok/Titles] Detected titles endpoint');
 
     const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
     const titles = parseTitlesResponse(dataStr, url);

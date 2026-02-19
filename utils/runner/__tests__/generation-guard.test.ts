@@ -80,8 +80,12 @@ describe('Platform Runner – generation guard', () => {
             ...createMockAdapter(document),
             evaluateReadiness: evaluateReadinessMock,
             parseInterceptedData: (raw: string) => {
-                const p = JSON.parse(raw);
-                return p?.conversation_id ? p : null;
+                try {
+                    const p = JSON.parse(raw);
+                    return p?.conversation_id ? p : null;
+                } catch {
+                    return null;
+                }
             },
         };
 

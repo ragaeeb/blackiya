@@ -119,13 +119,12 @@ export const grokAdapter: LLMPlatform = {
     },
 
     parseInterceptedData(data: string | any, url: string): ConversationData | null {
-        const _dbgPath = (() => {
-            try {
-                return new URL(url).pathname;
-            } catch {
-                return url.slice(0, 120);
-            }
-        })();
+        let _dbgPath: string;
+        try {
+            _dbgPath = new URL(url).pathname;
+        } catch {
+            _dbgPath = url.slice(0, 120);
+        }
         logger.info('[Blackiya/Grok] parseInterceptedData entry', {
             path: _dbgPath,
             dataLen: typeof data === 'string' ? data.length : -1,

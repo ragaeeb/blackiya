@@ -29,6 +29,7 @@ import {
 } from './helpers';
 
 let currentAdapterMock: any = createMockAdapter(document);
+const logCalls = createLoggerCalls();
 const browserMockState = {
     storageData: {} as Record<string, unknown>,
     sendMessage: async (_: unknown) => undefined as unknown,
@@ -39,13 +40,28 @@ mock.module('@/platforms/factory', () => ({
     getPlatformAdapterByApiUrl: () => currentAdapterMock,
 }));
 mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
-mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
+mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
 import { runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
+
+const waitUntil = async (predicate: () => boolean, timeout = 2000, interval = 10): Promise<void> => {
+    const start = Date.now();
+    while (!predicate()) {
+        if (Date.now() - start > timeout) {
+            throw new Error('waitUntil timed out');
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+};
+
+const waitForRunnerReady = () => waitUntil(() => !!document.getElementById('blackiya-save-btn'));
+
+const waitForLifecyclePromptSent = () =>
+    waitUntil(() => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Prompt Sent') === true);
 
 const jsonParsingAdapter = () => ({
     ...createMockAdapter(document),
@@ -73,6 +89,10 @@ describe('Platform Runner – attempt registry', () => {
         window.localStorage.clear();
         (globalThis as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
         (globalThis as any).__BLACKIYA_LOG_QUEUE__ = [];
+        logCalls.debug.length = 0;
+        logCalls.info.length = 0;
+        logCalls.warn.length = 0;
+        logCalls.error.length = 0;
     });
 
     afterEach(() => {
@@ -82,9 +102,10 @@ describe('Platform Runner – attempt registry', () => {
     it('should clear aliased conversation bindings when disposing an upstream alias attempt', async () => {
         currentAdapterMock = jsonParsingAdapter();
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         const postLifecycle = async (attemptId: string, conversationId: string) => {
+            const logsBefore = logCalls.info.length;
             postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
@@ -95,7 +116,8 @@ describe('Platform Runner – attempt registry', () => {
                 },
                 window.location.origin,
             );
-            await new Promise((r) => setTimeout(r, 15));
+            await waitForLifecyclePromptSent();
+            await waitUntil(() => logCalls.info.length > logsBefore);
         };
 
         // Build alias chain A → B, bind conv-2 to raw A
@@ -114,7 +136,11 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 30));
+        await waitUntil(() =>
+            logCalls.info.some((entry) =>
+                String(entry.message).includes('Successfully captured/cached data for conversation: conv-2'),
+            ),
+        );
 
         // Extend alias chain to A → B → C
         await postLifecycle('attempt:chain-c', 'conv-1');
@@ -128,7 +154,9 @@ describe('Platform Runner – attempt registry', () => {
 
         try {
             await postLifecycle('attempt:chain-d', 'conv-2');
-            await new Promise((r) => setTimeout(r, 40));
+            await waitUntil(() =>
+                postedMessages.some((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED' && p?.reason === 'superseded'),
+            );
         } finally {
             (window as any).postMessage = origPost;
         }
@@ -142,9 +170,10 @@ describe('Platform Runner – attempt registry', () => {
     it('should not supersede when rebinding resolves to the same canonical attempt', async () => {
         currentAdapterMock = jsonParsingAdapter();
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         const postLifecycle = async (attemptId: string, conversationId: string) => {
+            const logsBefore = logCalls.info.length;
             postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_LIFECYCLE',
@@ -155,7 +184,8 @@ describe('Platform Runner – attempt registry', () => {
                 },
                 window.location.origin,
             );
-            await new Promise((r) => setTimeout(r, 15));
+            await waitForLifecyclePromptSent();
+            await waitUntil(() => logCalls.info.length > logsBefore);
         };
 
         // Establish alias: alias-a → canon-a
@@ -173,7 +203,11 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 30));
+        await waitUntil(() =>
+            logCalls.info.some((entry) =>
+                String(entry.message).includes('Successfully captured/cached data for conversation: conv-2'),
+            ),
+        );
 
         const postedMessages: any[] = [];
         const origPost = window.postMessage.bind(window);
@@ -184,7 +218,7 @@ describe('Platform Runner – attempt registry', () => {
 
         try {
             await postLifecycle('attempt:alias-a', 'conv-2');
-            await new Promise((r) => setTimeout(r, 30));
+            await waitForLifecyclePromptSent();
         } finally {
             (window as any).postMessage = origPost;
         }
@@ -197,7 +231,7 @@ describe('Platform Runner – attempt registry', () => {
 
     it('should ignore stale stream delta from a superseded attempt', async () => {
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         // Establish a newer active attempt
         postStampedMessage(
@@ -210,7 +244,9 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitUntil(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') === true,
+        );
 
         // Emit a delta from an older superseded attempt
         postStampedMessage(
@@ -224,7 +260,19 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:new-active',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await waitUntil(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Completed') === true,
+        );
 
         expect(
             document.getElementById('blackiya-stream-probe')?.textContent?.includes('Should not render'),

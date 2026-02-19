@@ -47,9 +47,23 @@ import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
+const waitFor = async (
+    condition: () => boolean,
+    { timeout = 2000, interval = 10 }: { timeout?: number; interval?: number } = {},
+): Promise<void> => {
+    const deadline = Date.now() + timeout;
+    while (!condition()) {
+        if (Date.now() > deadline) {
+            throw new Error('waitFor timed out');
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+};
+
+const waitForRunnerReady = () => waitFor(() => !!document.getElementById('blackiya-save-btn'));
+
 describe('Platform Runner – lifecycle badge', () => {
     beforeEach(() => {
-        window.dispatchEvent(new (window as any).Event('beforeunload'));
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter(document);
         browserMockState.storageData = { [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: true };
@@ -69,7 +83,7 @@ describe('Platform Runner – lifecycle badge', () => {
 
     it('should process typed lifecycle messages that include attemptId', async () => {
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
         postStampedMessage(
             {
                 type: 'BLACKIYA_RESPONSE_LIFECYCLE',
@@ -80,13 +94,15 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') ?? false,
+        );
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
     });
 
     it('should update lifecycle badge for each phase in sequence', async () => {
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         const badge = () => document.getElementById('blackiya-lifecycle-badge')?.textContent ?? '';
         expect(badge()).toContain('Idle');
@@ -101,7 +117,7 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => badge().includes('Prompt Sent'));
         expect(badge()).toContain('Prompt Sent');
 
         postStampedMessage(
@@ -114,7 +130,7 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => badge().includes('Streaming'));
         expect(badge()).toContain('Streaming');
 
         postStampedMessage(
@@ -127,13 +143,13 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => badge().includes('Completed'));
         expect(badge()).toContain('Completed');
     });
 
     it('should block lifecycle regression from completed to streaming for same attempt and conversation', async () => {
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -145,7 +161,9 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Completed') ?? false,
+        );
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
 
         postStampedMessage(
@@ -158,13 +176,15 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Completed') ?? false,
+        );
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
     it('should update badge but keep save disabled when conversationId is null', async () => {
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -186,7 +206,9 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitFor(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') ?? false,
+        );
 
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
         expect((document.getElementById('blackiya-save-btn') as HTMLButtonElement | null)?.disabled).toBeTrue();
@@ -194,7 +216,7 @@ describe('Platform Runner – lifecycle badge', () => {
 
     it('should ignore lifecycle messages from disposed attempts', async () => {
         runPlatform();
-        await new Promise((r) => setTimeout(r, 80));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -206,14 +228,15 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(
+            () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') ?? false,
+        );
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
 
         postStampedMessage(
             { type: 'BLACKIYA_ATTEMPT_DISPOSED', attemptId: 'attempt:stale', reason: 'navigation' },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 10));
 
         postStampedMessage(
             {
@@ -225,7 +248,7 @@ describe('Platform Runner – lifecycle badge', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 20));
+        await waitFor(() => !document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Completed'));
 
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).not.toContain('Completed');
     });

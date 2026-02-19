@@ -329,6 +329,25 @@ export const parseGrokComLoadResponsesPayload = (
     return result;
 };
 
+const resolveGrokComEndpointContext = (
+    data: string | any,
+    url: string,
+    options: { parsePayload: boolean },
+): { conversationId: string; parsed: any } | { conversationId: string; parsed: string | any } | null => {
+    const conversationId = extractGrokComConversationIdFromUrl(url);
+    if (!conversationId) {
+        return null;
+    }
+    if (!options.parsePayload) {
+        return { conversationId, parsed: data };
+    }
+    const parsed = tryParseJsonIfNeeded(data);
+    if (!parsed) {
+        return null;
+    }
+    return { conversationId, parsed };
+};
+
 /**
  * Dispatch to the correct grok.com REST endpoint parser.
  * Returns `undefined` when the URL does not match any known grok.com REST path,
@@ -336,35 +355,18 @@ export const parseGrokComLoadResponsesPayload = (
  */
 export const tryParseGrokComRestEndpoint = (data: string | any, url: string): ConversationData | null | undefined => {
     if (isGrokComMetaEndpoint(url)) {
-        const conversationId = extractGrokComConversationIdFromUrl(url);
-        if (!conversationId) {
-            return null;
-        }
-        const parsed = tryParseJsonIfNeeded(data);
-        if (!parsed) {
-            return null;
-        }
-        return parseGrokComConversationMeta(parsed, conversationId);
+        const context = resolveGrokComEndpointContext(data, url, { parsePayload: true });
+        return context ? parseGrokComConversationMeta(context.parsed, context.conversationId) : null;
     }
 
     if (isGrokComResponseNodesEndpoint(url)) {
-        const conversationId = extractGrokComConversationIdFromUrl(url);
-        if (!conversationId) {
-            return null;
-        }
-        const parsed = tryParseJsonIfNeeded(data);
-        if (!parsed) {
-            return null;
-        }
-        return parseGrokComResponseNodes(parsed, conversationId);
+        const context = resolveGrokComEndpointContext(data, url, { parsePayload: true });
+        return context ? parseGrokComResponseNodes(context.parsed, context.conversationId) : null;
     }
 
     if (isGrokComLoadResponsesEndpoint(url)) {
-        const conversationId = extractGrokComConversationIdFromUrl(url);
-        if (!conversationId) {
-            return null;
-        }
-        return parseGrokComLoadResponsesPayload(data, conversationId);
+        const context = resolveGrokComEndpointContext(data, url, { parsePayload: false });
+        return context ? parseGrokComLoadResponsesPayload(context.parsed, context.conversationId) : null;
     }
 
     return undefined;

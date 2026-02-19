@@ -34,6 +34,12 @@ export type ConversationOptions = {
     endTurn: boolean;
 };
 
+export type ConversationBuildOverrides = {
+    omitAssistant?: boolean;
+    userText?: string;
+    title?: string;
+};
+
 export type ReadinessResult = {
     ready: boolean;
     terminal: boolean;
@@ -51,60 +57,74 @@ export type ReadinessResult = {
  * assistant turn.  Re-used across every test suite that exercises readiness,
  * stabilisation, snapshot, and export flows.
  */
-export const buildConversation = (conversationId: string, assistantText: string, options: ConversationOptions) => ({
-    title: 'Test Conversation',
-    create_time: 1_700_000_000,
-    update_time: 1_700_000_120,
-    conversation_id: conversationId,
-    current_node: 'a1',
-    moderation_results: [],
-    plugin_ids: null,
-    gizmo_id: null,
-    gizmo_type: null,
-    is_archived: false,
-    default_model_slug: 'gpt',
-    safe_urls: [],
-    blocked_urls: [],
-    mapping: {
-        root: { id: 'root', message: null, parent: null, children: ['u1'] },
-        u1: {
-            id: 'u1',
-            parent: 'root',
-            children: ['a1'],
-            message: {
+export const buildConversation = (
+    conversationId: string,
+    assistantText: string,
+    options: ConversationOptions,
+    overrides: ConversationBuildOverrides = {},
+) => {
+    const userText = overrides.userText ?? 'Prompt';
+    const includeAssistant = overrides.omitAssistant !== true;
+
+    return {
+        title: overrides.title ?? 'Test Conversation',
+        create_time: 1_700_000_000,
+        update_time: 1_700_000_120,
+        conversation_id: conversationId,
+        current_node: includeAssistant ? 'a1' : 'u1',
+        moderation_results: [],
+        plugin_ids: null,
+        gizmo_id: null,
+        gizmo_type: null,
+        is_archived: false,
+        default_model_slug: 'gpt',
+        safe_urls: [],
+        blocked_urls: [],
+        mapping: {
+            root: { id: 'root', message: null, parent: null, children: ['u1'] },
+            u1: {
                 id: 'u1',
-                author: { role: 'user', name: null, metadata: {} },
-                create_time: 1_700_000_010,
-                update_time: 1_700_000_010,
-                content: { content_type: 'text', parts: ['Prompt'] },
-                status: 'finished_successfully',
-                end_turn: true,
-                weight: 1,
-                metadata: {},
-                recipient: 'all',
-                channel: null,
+                parent: 'root',
+                children: includeAssistant ? ['a1'] : [],
+                message: {
+                    id: 'u1',
+                    author: { role: 'user', name: null, metadata: {} },
+                    create_time: 1_700_000_010,
+                    update_time: 1_700_000_010,
+                    content: { content_type: 'text', parts: [userText] },
+                    status: 'finished_successfully',
+                    end_turn: true,
+                    weight: 1,
+                    metadata: {},
+                    recipient: 'all',
+                    channel: null,
+                },
             },
+            ...(includeAssistant
+                ? {
+                      a1: {
+                          id: 'a1',
+                          parent: 'u1',
+                          children: [],
+                          message: {
+                              id: 'a1',
+                              author: { role: 'assistant', name: null, metadata: {} },
+                              create_time: 1_700_000_020,
+                              update_time: 1_700_000_020,
+                              content: { content_type: 'text', parts: [assistantText] },
+                              status: options.status,
+                              end_turn: options.endTurn,
+                              weight: 1,
+                              metadata: {},
+                              recipient: 'all',
+                              channel: null,
+                          },
+                      },
+                  }
+                : {}),
         },
-        a1: {
-            id: 'a1',
-            parent: 'u1',
-            children: [],
-            message: {
-                id: 'a1',
-                author: { role: 'assistant', name: null, metadata: {} },
-                create_time: 1_700_000_020,
-                update_time: 1_700_000_020,
-                content: { content_type: 'text', parts: [assistantText] },
-                status: options.status,
-                end_turn: options.endTurn,
-                weight: 1,
-                metadata: {},
-                recipient: 'all',
-                channel: null,
-            },
-        },
-    },
-});
+    };
+};
 
 // ---------------------------------------------------------------------------
 // Readiness evaluator (mirrors the real adapter contract)
@@ -140,10 +160,12 @@ export const evaluateReadinessMock = (data: unknown): ReadinessResult => {
  * Accepts the test-file's local `document` so the injection target is wired
  * to the right Happy DOM instance.
  */
-export const createMockAdapter = (document: Document): MockAdapter => ({
+type DocumentLike = { body: unknown };
+
+export const createMockAdapter = (document: DocumentLike): MockAdapter => ({
     name: 'TestPlatform',
     extractConversationId: () => '123',
-    getButtonInjectionTarget: () => document.body,
+    getButtonInjectionTarget: () => document.body as Element,
     formatFilename: () => 'test.json',
     parseInterceptedData: () => ({ conversation_id: '123' }),
 });

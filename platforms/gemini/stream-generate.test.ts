@@ -7,7 +7,7 @@ mock.module('@/utils/logger', () => ({
 const STREAM_URL =
     'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
 
-const buildStreamResponse = (...chunks: string[]) => `)]}'\n\n` + chunks.map((c) => `${c.length}\n${c}\n`).join('');
+const buildStreamResponse = (...chunks: string[]) => `)]}'\n\n${chunks.map((c) => `${c.length}\n${c}\n`).join('')}`;
 
 const buildChunk = (payload: unknown) => JSON.stringify([['wrb.fr', null, JSON.stringify(payload), null]]);
 

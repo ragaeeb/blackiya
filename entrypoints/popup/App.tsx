@@ -177,17 +177,16 @@ function App() {
             </div>
 
             <div className="section">
-                <strong>Stream Toast</strong>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
-                    Shows a small overlay during active streaming sessions
-                </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <div className="section-heading">Stream Toast</div>
+                <div className="section-description">Shows a small overlay during active streaming sessions.</div>
+                <label htmlFor="streamProbeVisible" className="checkbox-row">
                     <input
                         id="streamProbeVisible"
                         type="checkbox"
                         checked={streamProbeVisible}
                         onChange={handleStreamProbeVisibilityChange}
                     />
+                    Enable stream toast overlay
                 </label>
             </div>
 
@@ -200,11 +199,11 @@ function App() {
             </button>
 
             <div className="section diagnostics-section">
-                <strong>Diagnostics Stream Dump</strong>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                <div className="section-heading">Diagnostics Stream Dump</div>
+                <div className="section-description">
                     Opt-in bounded capture of streaming frame text for forensic debugging.
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <label htmlFor="streamDumpEnabled" className="checkbox-row">
                     <input
                         id="streamDumpEnabled"
                         type="checkbox"

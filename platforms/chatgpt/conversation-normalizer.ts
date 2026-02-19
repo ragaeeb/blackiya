@@ -149,7 +149,7 @@ export const deriveTitleFromFirstUserMessage = (mapping: Record<string, MessageN
  * Returns the given title unless it is a placeholder, in which case it tries
  * to derive a title from the first user message.
  */
-export const normalizeConversationTitle = (title: unknown, mapping: Record<string, MessageNode>): string => {
+export const resolveConversationTitle = (title: unknown, mapping: Record<string, MessageNode>): string => {
     const normalized = normalizeText(title) ?? '';
     if (!isPlaceholderTitle(normalized)) {
         return normalized;
@@ -181,7 +181,7 @@ export const normalizeConversationCandidate = (candidate: unknown): Conversation
         return null;
     }
 
-    const mapping = mappingValue as Record<string, MessageNode>;
+    const mapping = { ...(mappingValue as Record<string, MessageNode>) };
     if (!mapping.root) {
         mapping.root = { id: 'root', message: null, parent: null, children: [] };
     }
@@ -192,7 +192,7 @@ export const normalizeConversationCandidate = (candidate: unknown): Conversation
         currentNodeCandidate && mapping[currentNodeCandidate] ? currentNodeCandidate : deriveCurrentNode(mapping);
 
     return {
-        title: normalizeConversationTitle(candidate.title, mapping),
+        title: resolveConversationTitle(candidate.title, mapping),
         create_time: normalizeNumber(candidate.create_time) ?? times.create,
         update_time: normalizeNumber(candidate.update_time) ?? times.update,
         mapping,

@@ -102,7 +102,7 @@ type ConversationBuildState = {
 
 const updateConversationFromItem = (
     state: ConversationBuildState,
-    parsedItem: ReturnType<typeof parseGrokItem> & {},
+    parsedItem: NonNullable<ReturnType<typeof parseGrokItem>>,
     index: number,
     conversationIdOverride?: string,
 ): void => {

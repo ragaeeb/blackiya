@@ -17,13 +17,8 @@ export class ButtonManager {
     private onSaveClick: () => Promise<void>;
     private onCalibrateClick: () => Promise<void>;
 
-    constructor(
-        onSaveClick: () => Promise<void>,
-        onCopyClick: () => Promise<void>,
-        onCalibrateClick: () => Promise<void>,
-    ) {
+    constructor(onSaveClick: () => Promise<void>, onCalibrateClick: () => Promise<void>) {
         this.onSaveClick = onSaveClick;
-        void onCopyClick;
         this.onCalibrateClick = onCalibrateClick;
         this.injectStyles();
     }
@@ -503,8 +498,7 @@ export class ButtonManager {
         `;
     }
 
-    public setSuccess(action: 'save'): void {
-        void action;
+    public setSuccess(_action: 'save'): void {
         const activeBtn = this.saveStartButton;
         if (!activeBtn) {
             return;
@@ -523,8 +517,7 @@ export class ButtonManager {
         }, 2000);
     }
 
-    private getDefaultLabel(action: 'save'): string {
-        void action;
+    private getDefaultLabel(_action: 'save'): string {
         return '💾';
     }
 

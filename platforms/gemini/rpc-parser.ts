@@ -7,7 +7,7 @@ import { extractTitleCandidatesFromPayload } from './title-utils';
 
 // ── Titles endpoint detection ──────────────────────────────────────────────────
 
-export const isTitlesEndpoint = (url: string) => url.includes('rpcids=MaZiqc');
+export const isTitlesEndpoint = (url: string) => url.includes(`rpcids=${GEMINI_RPC_IDS.TITLES}`);
 
 // ── Conversation ID extraction from URL ───────────────────────────────────────
 

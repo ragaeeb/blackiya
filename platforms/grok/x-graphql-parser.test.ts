@@ -82,10 +82,9 @@ describe('Grok Adapter — x.com GraphQL parsing', () => {
         const thoughtNodes = (Object.values(result!.mapping) as MessageNode[]).filter(
             (n) => n.message?.content.content_type === 'thoughts',
         );
-        if (thoughtNodes.length > 0) {
-            for (const node of thoughtNodes) {
-                expect(Array.isArray(node.message?.content.thoughts)).toBeTrue();
-            }
+        expect(thoughtNodes.length).toBeGreaterThan(0);
+        for (const node of thoughtNodes) {
+            expect(Array.isArray(node.message?.content.thoughts)).toBeTrue();
         }
     });
 });

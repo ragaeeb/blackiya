@@ -324,7 +324,7 @@ export function runPlatform(): void {
     // -- Manager Initialization --
 
     // 1. UI Manager
-    const buttonManager = new ButtonManager(handleSaveClick, async () => {}, handleCalibrationClick);
+    const buttonManager = new ButtonManager(handleSaveClick, handleCalibrationClick);
 
     function applyStreamResolvedTitleIfNeeded(conversationId: string, data: ConversationData): void {
         const streamTitle = streamResolvedTitles.get(conversationId);
@@ -1499,9 +1499,9 @@ export function runPlatform(): void {
         panel.style.overscrollBehavior = 'contain';
     }
 
-    function ensureStreamProbePanel(): HTMLDivElement {
+    function ensureStreamProbePanel(): HTMLDivElement | null {
         if (!streamProbeVisible) {
-            throw new Error('Stream probe panel is disabled by user settings');
+            return null;
         }
         const existing = document.getElementById('blackiya-stream-probe') as HTMLDivElement | null;
         if (existing) {
@@ -1547,6 +1547,9 @@ export function runPlatform(): void {
             return;
         }
         const panel = ensureStreamProbePanel();
+        if (!panel) {
+            return;
+        }
         const now = new Date().toLocaleTimeString();
         panel.textContent = `[Blackiya Stream Probe] ${status} @ ${now}\n\n${body}`;
     }
@@ -2541,7 +2544,7 @@ export function runPlatform(): void {
     function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
         const snippets: string[] = [];
         const usedTreeWalker = collectLastResortCandidatesViaTreeWalker(root, snippets);
-        if (!usedTreeWalker) {
+        if (!usedTreeWalker || snippets.length === 0) {
             collectLastResortCandidatesViaSelectors(root, snippets);
         }
 
@@ -3850,7 +3853,9 @@ export function runPlatform(): void {
         }
 
         if (!cached || !cachedReady) {
-            applyCompletedLifecycleState(conversationId, attemptId);
+            if (!shouldPromoteGenericCompleted) {
+                applyCompletedLifecycleState(conversationId, attemptId);
+            }
             void runStreamDoneProbe(conversationId, attemptId);
         }
 
@@ -4481,6 +4486,12 @@ export function runPlatform(): void {
     }
 
     function registerButtonHealthCheck(): () => void {
+        const healthCheckIntervalMs =
+            typeof (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS === 'number' &&
+            Number.isFinite((window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS) &&
+            (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS > 0
+                ? (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS
+                : 1800;
         const intervalId = window.setInterval(() => {
             if (!currentAdapter) {
                 return;
@@ -4498,7 +4509,7 @@ export function runPlatform(): void {
             }
 
             refreshButtonState(activeConversationId);
-        }, 1800);
+        }, healthCheckIntervalMs);
 
         return () => clearInterval(intervalId);
     }
