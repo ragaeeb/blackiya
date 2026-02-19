@@ -61,8 +61,6 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         appendToCaptureQueue,
     } = deps;
 
-    // ── Cache maintenance ────────────────────────────────────────────────────
-
     const maybePruneTimestampCaches = (nowMs = Date.now()) => {
         if (nowMs - state.lastCachePruneAtMs < cachePruneIntervalMs) {
             return;
@@ -74,8 +72,6 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         pruneTimestampCache(state.lifecycleSignalCache, cacheTtlMs, nowMs);
         pruneTimestampCache(state.conversationResolvedSignalCache, cacheTtlMs, nowMs);
     };
-
-    // ── Logging ──────────────────────────────────────────────────────────────
 
     const log = (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => {
         const displayData = data ? ` ${JSON.stringify(data)}` : '';
@@ -105,8 +101,6 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         return true;
     };
 
-    // ── Deduplication guards ─────────────────────────────────────────────────
-
     const shouldEmitCapturedPayload = (adapterName: string, url: string, payload: string, intervalMs = 5000) => {
         const path = safePathname(url);
         const suffix = payload.length > 128 ? payload.slice(payload.length - 128) : payload;
@@ -132,8 +126,6 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         setBoundedMapValue(state.lifecycleSignalCache, key, now, maxDedupeEntries);
         return true;
     };
-
-    // ── Signal emitters ──────────────────────────────────────────────────────
 
     const emitCapturePayload = (url: string, data: string, platform: string, attemptId?: string) => {
         if (isAttemptDisposed(attemptId)) {

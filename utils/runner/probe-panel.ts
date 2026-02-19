@@ -5,7 +5,7 @@
  * only deals with logical state (visible/hidden, status strings).
  */
 
-type StreamProbeDockPosition = 'bottom-left' | 'top-left';
+export type StreamProbeDockPosition = 'bottom-left' | 'top-left';
 
 /**
  * Resolves the on-screen docking position for the stream probe panel.
@@ -51,6 +51,7 @@ export const ensureStreamProbePanel = (
     dockPosition: StreamProbeDockPosition,
 ): HTMLDivElement | null => {
     if (!visible) {
+        removeStreamProbePanel();
         return null;
     }
     const existing = document.getElementById(PANEL_ID) as HTMLDivElement | null;

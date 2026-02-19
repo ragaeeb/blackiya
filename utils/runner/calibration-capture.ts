@@ -216,12 +216,15 @@ const ingestEffectiveSnapshot = (
     effectiveSnapshot: unknown,
     deps: CalibrationCaptureDeps,
 ) => {
+    let ingestStep: 'conversation' | 'raw-capture' | 'intercepted-json' = 'intercepted-json';
     try {
         if (isConversationDataLike(effectiveSnapshot)) {
+            ingestStep = 'conversation';
             deps.ingestConversationData(effectiveSnapshot, 'calibration-snapshot');
             return;
         }
         if (isRawCaptureSnapshot(effectiveSnapshot)) {
+            ingestStep = 'raw-capture';
             ingestCalibrationRawSnapshot(conversationId, mode, effectiveSnapshot, deps);
             return;
         }
@@ -230,8 +233,16 @@ const ingestEffectiveSnapshot = (
             data: JSON.stringify(effectiveSnapshot),
             platform: deps.adapter.name,
         });
-    } catch {
+    } catch (error) {
         // Swallow ingestion errors; caller checks cache directly.
+        logger.error('Calibration ingest snapshot error', {
+            conversationId,
+            platform: deps.adapter.name,
+            mode,
+            ingestStep,
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+        });
     }
 };
 
@@ -306,8 +317,11 @@ const tryCalibrationFetch = async (
     mode: CalibrationMode,
     deps: CalibrationCaptureDeps,
 ): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeoutMs = 15_000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(apiUrl, { credentials: 'include' });
+        const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
         logger.info('Calibration fetch response', {
             attempt,
             conversationId,
@@ -321,8 +335,19 @@ const tryCalibrationFetch = async (
         deps.ingestInterceptedData({ url: apiUrl, data: text, platform: deps.adapter.name });
         return deps.isCaptureSatisfied(conversationId, mode);
     } catch (error) {
-        logger.error('Calibration fetch error', error);
+        if ((error as Error)?.name === 'AbortError') {
+            logger.error('Calibration fetch timeout', {
+                attempt,
+                conversationId,
+                apiUrl,
+                timeoutMs,
+            });
+        } else {
+            logger.error('Calibration fetch error', error);
+        }
         return false;
+    } finally {
+        clearTimeout(timeoutId);
     }
 };
 

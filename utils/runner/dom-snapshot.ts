@@ -152,8 +152,7 @@ export const buildRunnerSnapshotConversationData = (
 // DOM collection utilities
 // ---------------------------------------------------------------------------
 
-export const normalizeSnapshotText = (text: string): string =>
-    text.replace(/\s+/g, ' ').trim();
+export const normalizeSnapshotText = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 export const queryAllFromRoot = (root: ParentNode, selector: string): Element[] => {
     if (!root || typeof (root as { querySelectorAll?: unknown }).querySelectorAll !== 'function') {
@@ -294,10 +293,7 @@ export const collectLastResortTextCandidates = (root: ParentNode): SnapshotMessa
         return [];
     }
     if (unique.length === 1) {
-        return [
-            { role: 'user', text: 'Captured via calibration fallback' },
-            { role: 'assistant', text: unique[0] },
-        ];
+        return [];
     }
     return unique.slice(0, 6).map((text, index) => ({
         role: index % 2 === 0 ? 'user' : 'assistant',
@@ -373,10 +369,7 @@ const buildSnapshotFromRoot = (
  * `<main>` first, then `document.body`. Returns `null` if no usable candidates
  * are found in either root.
  */
-export const buildIsolatedDomSnapshot = (
-    adapter: LLMPlatform,
-    conversationId: string,
-): ConversationData | null => {
+export const buildIsolatedDomSnapshot = (adapter: LLMPlatform, conversationId: string): ConversationData | null => {
     const roots: ParentNode[] = [];
     try {
         const main = typeof document.querySelector === 'function' ? document.querySelector('main') : null;

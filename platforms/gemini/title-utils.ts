@@ -31,8 +31,6 @@ export const normalizeGeminiTitleCandidate = (rawTitle: unknown): string | null 
     return normalized;
 };
 
-// ── Payload title candidate collection ────────────────────────────────────────
-
 const collectTitleCandidates = (node: unknown, out: string[], depth = 0) => {
     if (depth > 8 || out.length >= 16 || !node || typeof node !== 'object') {
         return;
@@ -67,8 +65,6 @@ export const extractTitleCandidatesFromPayload = (payload: unknown): string[] =>
     collectTitleCandidates(payload, candidates);
     return candidates;
 };
-
-// ── DOM title extraction ───────────────────────────────────────────────────────
 
 const hasAncestorTag = (node: Element, tagName: string): boolean => {
     let current: Element | null = node.parentElement;

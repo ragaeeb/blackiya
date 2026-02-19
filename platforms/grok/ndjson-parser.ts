@@ -63,8 +63,6 @@ export const resolveGrokNdjsonConversationId = (url: string, parsedLines: any[])
     return null;
 };
 
-// ── Conversation building from NDJSON lines ────────────────────────────────────
-
 const parseNdjsonConversation = (parsedLines: any[], conversationId: string): ConversationData | null => {
     const conversation = getOrCreateGrokComConversation(conversationId);
     let foundMessages = false;
@@ -270,8 +268,6 @@ const parseXAddResponseNdjson = (parsedLines: any[], conversationId: string): Co
     }
     return conversation;
 };
-
-// ── Public entry point ─────────────────────────────────────────────────────────
 
 /**
  * Resilient NDJSON parser for Grok streaming endpoints.

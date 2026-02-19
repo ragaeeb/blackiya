@@ -97,8 +97,6 @@ export const attachGrokComNodeToParent = (
 export const hasGrokComMessages = (conversation: ConversationData): boolean =>
     Object.values(conversation.mapping).some((node) => node.message !== null);
 
-// ── Message building ───────────────────────────────────────────────────────────
-
 const createGrokComAuthor = (sender: string): Author => ({
     role: sender === 'human' ? 'user' : 'assistant',
     name: sender === 'human' ? 'User' : 'Grok',
@@ -131,8 +129,6 @@ export const buildGrokComMessage = (
     recipient: 'all',
     channel: null,
 });
-
-// ── Response normalization ─────────────────────────────────────────────────────
 
 const normalizeFromGrokComObject = (data: any): any[] | null => {
     if (typeof data.responseId === 'string') {
@@ -182,8 +178,6 @@ export const normalizeGrokComResponses = (data: any): any[] | null => {
     return null;
 };
 
-// ── Individual response item parsing ──────────────────────────────────────────
-
 export const parseGrokComResponseItem = (response: any, rootId: string) => {
     const responseId = typeof response?.responseId === 'string' ? response.responseId : null;
     if (!responseId) {
@@ -205,8 +199,6 @@ export const parseGrokComResponseItem = (response: any, rootId: string) => {
         messageObj: buildGrokComMessage(responseId, sender, createdAt, isPartial, messageText, response),
     };
 };
-
-// ── Endpoint parsers ───────────────────────────────────────────────────────────
 
 export const parseGrokComResponses = (data: any, conversationId: string): ConversationData | null => {
     const responses = normalizeGrokComResponses(data);

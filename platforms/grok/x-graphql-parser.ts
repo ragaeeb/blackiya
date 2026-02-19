@@ -161,8 +161,6 @@ const updateConversationFromItem = (
     state.previousNodeId = parsedItem.chatItemId;
 };
 
-// ── GraphQL conversation parser ────────────────────────────────────────────────
-
 /**
  * Parse a GrokConversationItemsByRestId GraphQL response into ConversationData.
  * `conversationIdOverride` is supplied when the ID can be read from the request URL.

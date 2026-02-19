@@ -76,8 +76,6 @@ export const resolveGeminiConversationEnvelope = (payload: unknown): Conversatio
     return null;
 };
 
-// ── Field extractors ───────────────────────────────────────────────────────────
-
 const normalizeConversationId = (rawConversationId: unknown): string | null => {
     if (typeof rawConversationId !== 'string' || rawConversationId.length === 0) {
         return null;
@@ -98,8 +96,6 @@ export const resolveGeminiConversationTitle = (
     titlesCache: LRUCache<string, string>,
 ): string =>
     conversationId && titlesCache.has(conversationId) ? titlesCache.get(conversationId)! : 'Gemini Conversation';
-
-// ── Message parsing ────────────────────────────────────────────────────────────
 
 const extractGeminiTextNode = (node: unknown, depth = 0, maxDepth = 50): string => {
     if (typeof node === 'string') {
@@ -257,8 +253,6 @@ export const extractGeminiModelName = (conversationRoot: unknown, isStreamFormat
     return modelName;
 };
 
-// ── Conversation data builder ──────────────────────────────────────────────────
-
 const buildGeminiConversationMapping = (
     parsedMessages: ParsedGeminiMessage[],
     now: number,
@@ -352,8 +346,6 @@ export const parseConversationPayload = (
     }
     return conversationData;
 };
-
-// ── Readiness evaluation ───────────────────────────────────────────────────────
 
 export const evaluateGeminiReadiness = (data: ConversationData): PlatformReadiness => {
     const messages = Object.values(data.mapping)

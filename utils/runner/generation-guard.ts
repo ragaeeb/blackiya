@@ -35,7 +35,7 @@ export const detectChatGPTGenerating = (): boolean => {
             return true;
         }
     }
-    return !!safeQuerySelector('[data-is-streaming="true"], [data-testid*="streaming"]');
+    return !!safeQuerySelector('[data-is-streaming="true"], [data-testid="streaming"]');
 };
 
 /**

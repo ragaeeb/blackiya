@@ -1770,7 +1770,7 @@ export const runPlatform = (): void => {
         getFetchUrlCandidates: (conversationId) =>
             currentAdapter ? getFetchUrlCandidates(currentAdapter, conversationId) : [],
         ingestInterceptedData: (args) => interceptionManager.ingestInterceptedData(args),
-        getConversation: (conversationId) => interceptionManager.getConversation(conversationId),
+        getConversation: (conversationId) => interceptionManager.getConversation(conversationId) ?? null,
         evaluateReadiness: (data) => evaluateReadinessForData(data),
         getCaptureMeta: (conversationId) => getCaptureMeta(conversationId),
     });

@@ -5,11 +5,7 @@ import { logger } from '@/utils/logger';
 import type { LRUCache } from '@/utils/lru-cache';
 import { extractTitleCandidatesFromPayload } from './title-utils';
 
-// ── Titles endpoint detection ──────────────────────────────────────────────────
-
 export const isTitlesEndpoint = (url: string) => url.includes(`rpcids=${GEMINI_RPC_IDS.TITLES}`);
-
-// ── Conversation ID extraction from URL ───────────────────────────────────────
 
 const CONVERSATION_ID_IN_PAYLOAD_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 
@@ -31,8 +27,6 @@ export const extractConversationIdFromSourcePath = (url: string): string | null 
 
 const extractConversationIdFromRawPayload = (rawPayload: string): string | null =>
     rawPayload.match(CONVERSATION_ID_IN_PAYLOAD_REGEX)?.[1] ?? null;
-
-// ── RPC title hydration ────────────────────────────────────────────────────────
 
 export const hydrateGeminiTitleCandidatesFromRpcResults = (
     rpcResults: BatchexecuteResult[],
@@ -82,8 +76,6 @@ export const hydrateGeminiTitleCandidatesFromRpcResults = (
         });
     }
 };
-
-// ── Conversation-list titles (MaZiqc) ─────────────────────────────────────────
 
 const parseGeminiTitlesPayload = (data: string): unknown => {
     const rpcResults = parseBatchexecuteResponse(data);
@@ -151,8 +143,6 @@ export const parseTitlesResponse = (
         return null;
     }
 };
-
-// ── Conversation RPC finding ───────────────────────────────────────────────────
 
 const parseRpcPayload = (payload: string, rpcId: string): unknown => {
     try {

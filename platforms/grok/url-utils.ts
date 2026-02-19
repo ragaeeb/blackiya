@@ -8,8 +8,6 @@ export const X_CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
 /** UUID v4 — grok.com conversation IDs */
 export const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
-// ── Endpoint classifiers ───────────────────────────────────────────────────────
-
 export const isGrokComMetaEndpoint = (url: string) => url.includes('/rest/app-chat/conversations_v2/');
 
 export const isGrokComResponseNodesEndpoint = (url: string) =>
@@ -19,8 +17,6 @@ export const isGrokComLoadResponsesEndpoint = (url: string) =>
     url.includes('/rest/app-chat/conversations/') && url.includes('/load-responses');
 
 export const isXGraphqlEndpoint = (url: string) => url.includes('/i/api/graphql/');
-
-// ── Conversation ID extraction ─────────────────────────────────────────────────
 
 /** Extract a grok.com UUID conversation ID from a REST URL path. */
 export const extractGrokComConversationIdFromUrl = (url: string): string | null => {

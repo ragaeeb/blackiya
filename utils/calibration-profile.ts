@@ -136,8 +136,6 @@ export const buildDefaultCalibrationProfile = (
     };
 };
 
-// ── CalibrationStep-based builder (manual-strict policy) ──────────────
-
 export type CalibrationStep = 'queue-flush' | 'passive-wait' | 'endpoint-retry' | 'page-snapshot';
 
 export const strategyFromStep = (step: CalibrationStep): CalibrationStrategy => {
