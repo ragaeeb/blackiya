@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
+import { STORAGE_KEYS } from '@/utils/settings';
 
 // Configure Happy DOM
 const window = new Window();
@@ -172,7 +173,9 @@ describe('Platform Runner', () => {
         // Reset DOM
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter();
-        storageDataMock = {};
+        storageDataMock = {
+            [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: true,
+        };
         runtimeSendMessageMock = async () => undefined;
         downloadCalls.length = 0;
         loggerDebugCalls.length = 0;
@@ -209,7 +212,6 @@ describe('Platform Runner', () => {
 
         expect(document.querySelectorAll('#blackiya-button-container').length).toBe(1);
         expect(document.querySelectorAll('#blackiya-save-btn').length).toBe(1);
-        expect(document.querySelectorAll('#blackiya-copy-btn').length).toBe(1);
         expect(document.querySelectorAll('#blackiya-calibrate-btn').length).toBe(1);
     });
 
@@ -629,8 +631,8 @@ describe('Platform Runner', () => {
         const saveFallback = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         const copyFallback = document.getElementById('blackiya-copy-btn') as HTMLButtonElement | null;
         expect(saveFallback?.disabled).toBeFalse();
-        expect(saveFallback?.textContent).toContain('Force Save');
-        expect(copyFallback?.disabled).toBeTrue();
+        expect(saveFallback?.title).toContain('Force Save');
+        expect(copyFallback).toBeNull();
     }, 15_000);
 
     it('should keep Save disabled for ChatGPT thoughts-only captures even after fallback window', async () => {
@@ -999,7 +1001,7 @@ describe('Platform Runner', () => {
             const saveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(saveButton).not.toBeNull();
             expect(saveButton?.disabled).toBeFalse();
-            expect(saveButton?.textContent?.includes('Force Save')).toBeFalse();
+            expect(saveButton?.title?.includes('Force Save')).toBeFalse();
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -1076,7 +1078,7 @@ describe('Platform Runner', () => {
             await new Promise((resolve) => setTimeout(resolve, 700));
             const degradedSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(degradedSaveButton?.disabled).toBeTrue();
-            expect(degradedSaveButton?.textContent?.includes('Force Save')).toBeFalse();
+            expect(degradedSaveButton?.title?.includes('Force Save')).toBeFalse();
 
             postStampedMessage(
                 {
@@ -1103,7 +1105,7 @@ describe('Platform Runner', () => {
 
             const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(recoveredSaveButton?.disabled).toBeFalse();
-            expect(recoveredSaveButton?.textContent).not.toContain('Force Save');
+            expect(recoveredSaveButton?.title).not.toContain('Force Save');
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -1212,7 +1214,7 @@ describe('Platform Runner', () => {
             // Save button should be enabled in canonical_ready mode (not Force Save)
             const recoveredSaveButton = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(recoveredSaveButton?.disabled).toBeFalse();
-            expect(recoveredSaveButton?.textContent).not.toContain('Force Save');
+            expect(recoveredSaveButton?.title).not.toContain('Force Save');
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }
@@ -1524,7 +1526,7 @@ describe('Platform Runner', () => {
 
         const saveAfterDomCompletion = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
         expect(saveAfterDomCompletion?.disabled).toBeFalse();
-        expect(saveAfterDomCompletion?.textContent?.includes('Force Save')).toBeFalse();
+        expect(saveAfterDomCompletion?.title?.includes('Force Save')).toBeFalse();
     }, 12_000);
 
     it('should keep Save disabled during active generation despite repeated network finished hints', async () => {
@@ -1696,7 +1698,7 @@ describe('Platform Runner', () => {
 
             const saveAfterSnapshot = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
             expect(saveAfterSnapshot?.disabled).toBeFalse();
-            expect(saveAfterSnapshot?.textContent?.includes('Force Save')).toBeFalse();
+            expect(saveAfterSnapshot?.title?.includes('Force Save')).toBeFalse();
         } finally {
             window.removeEventListener('message', snapshotResponseHandler as any);
         }

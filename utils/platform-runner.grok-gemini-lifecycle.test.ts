@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
+import { STORAGE_KEYS } from '@/utils/settings';
 
 // Configure Happy DOM
 const window = new Window();
@@ -172,7 +173,9 @@ describe('Platform Runner', () => {
         // Reset DOM
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter();
-        storageDataMock = {};
+        storageDataMock = {
+            [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: true,
+        };
         runtimeSendMessageMock = async () => undefined;
         downloadCalls.length = 0;
         loggerDebugCalls.length = 0;

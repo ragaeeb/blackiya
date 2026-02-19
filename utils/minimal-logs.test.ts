@@ -137,7 +137,7 @@ describe('Minimal Debug Report', () => {
             {
                 timestamp: '',
                 level: 'info',
-                message: 'Save/Copy buttons injected for conversation: 698f9bd8-1754-832e-a2f2-10e697b65849',
+                message: 'Save/Calibrate buttons injected for conversation: 698f9bd8-1754-832e-a2f2-10e697b65849',
                 context: 'content',
             },
             {
@@ -153,7 +153,7 @@ describe('Minimal Debug Report', () => {
 
         expect(report).toContain('## Diagnostics');
         expect(report).toContain('Content script running for ChatGPT');
-        expect(report).toContain('Save/Copy buttons injected');
+        expect(report).toContain('Save/Calibrate buttons injected');
         expect(report).toContain('Button state');
     });
 
@@ -168,7 +168,7 @@ describe('Minimal Debug Report', () => {
             {
                 timestamp: '',
                 level: 'info',
-                message: 'Save/Copy buttons injected for conversation: eb720ccfdc22abd5',
+                message: 'Save/Calibrate buttons injected for conversation: eb720ccfdc22abd5',
                 context: 'content',
             },
         ];

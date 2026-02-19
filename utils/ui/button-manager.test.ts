@@ -36,11 +36,9 @@ describe('ButtonManager', () => {
         manager.setCalibrationState('idle');
 
         const saveBtn = document.getElementById('blackiya-save-btn') as HTMLButtonElement | null;
-        const copyBtn = document.getElementById('blackiya-copy-btn') as HTMLButtonElement | null;
         const calibrateBtn = document.getElementById('blackiya-calibrate-btn') as HTMLButtonElement | null;
 
         expect(saveBtn?.disabled).toBeTrue();
-        expect(copyBtn?.disabled).toBeTrue();
         expect(calibrateBtn?.disabled).toBeFalse();
         expect(calibrateBtn?.style.opacity).toBe('1');
     });
@@ -74,8 +72,8 @@ describe('ButtonManager', () => {
         manager.setCalibrationState('success', { timestampLabel: '5m ago' });
         const calibrateBtn = document.getElementById('blackiya-calibrate-btn') as HTMLButtonElement | null;
 
-        expect(calibrateBtn?.textContent).toContain('Captured');
-        expect(calibrateBtn?.textContent).toContain('5m ago');
+        expect(calibrateBtn?.textContent).toContain('✅');
+        expect(calibrateBtn?.title).toContain('5m ago');
     });
 
     it('cleans up orphaned containers from previous extension contexts (V2.1-034)', () => {
@@ -113,11 +111,6 @@ describe('ButtonManager', () => {
         staleSave.textContent = 'stale save';
         document.body.appendChild(staleSave);
 
-        const staleCopy = document.createElement('button');
-        staleCopy.id = 'blackiya-copy-btn';
-        staleCopy.textContent = 'stale copy';
-        document.body.appendChild(staleCopy);
-
         const manager = new ButtonManager(
             async () => {},
             async () => {},
@@ -126,11 +119,8 @@ describe('ButtonManager', () => {
         manager.inject(document.body as any, 'test-standalone');
 
         const saveButtons = document.querySelectorAll('#blackiya-save-btn');
-        const copyButtons = document.querySelectorAll('#blackiya-copy-btn');
         expect(saveButtons.length).toBe(1);
-        expect(copyButtons.length).toBe(1);
         expect(saveButtons[0]?.textContent?.includes('stale')).toBeFalse();
-        expect(copyButtons[0]?.textContent?.includes('stale')).toBeFalse();
     });
 
     it('does not re-inject when container already exists in DOM', () => {

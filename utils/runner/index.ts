@@ -187,6 +187,7 @@ export function runPlatform(): void {
         maxEntries: MAX_STREAM_PREVIEWS,
     };
     let streamDumpEnabled = false;
+    let streamProbeVisible = false;
     const streamProbeControllers = new Map<string, AbortController>();
     const probeLeaseRetryTimers = new Map<string, number>();
     const canonicalStabilizationRetryTimers = new Map<string, number>();
@@ -323,7 +324,7 @@ export function runPlatform(): void {
     // -- Manager Initialization --
 
     // 1. UI Manager
-    const buttonManager = new ButtonManager(handleSaveClick, handleCopyClick, handleCalibrationClick);
+    const buttonManager = new ButtonManager(handleSaveClick, async () => {}, handleCalibrationClick);
 
     function applyStreamResolvedTitleIfNeeded(conversationId: string, data: ConversationData): void {
         const streamTitle = streamResolvedTitles.get(conversationId);
@@ -1272,6 +1273,27 @@ export function runPlatform(): void {
         emitStreamDumpConfig();
     }
 
+    function removeStreamProbePanel(): void {
+        const panel = document.getElementById('blackiya-stream-probe');
+        if (!panel || !panel.parentNode) {
+            return;
+        }
+        panel.parentNode.removeChild(panel);
+    }
+
+    async function loadStreamProbeVisibilitySetting(): Promise<void> {
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.STREAM_PROBE_VISIBLE);
+            streamProbeVisible = result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true;
+        } catch (error) {
+            logger.warn('Failed to load stream probe visibility setting', error);
+            streamProbeVisible = false;
+        }
+        if (!streamProbeVisible) {
+            removeStreamProbePanel();
+        }
+    }
+
     async function loadSfeSettings(): Promise<void> {
         try {
             const result = await browser.storage.local.get([STORAGE_KEYS.SFE_ENABLED]);
@@ -1469,9 +1491,21 @@ export function runPlatform(): void {
         panel.style.bottom = '16px';
     }
 
+    function normalizeStreamProbePanelInteraction(panel: HTMLDivElement): void {
+        panel.style.maxHeight = '42vh';
+        panel.style.overflow = 'auto';
+        panel.style.pointerEvents = 'auto';
+        panel.style.touchAction = 'pan-y';
+        panel.style.overscrollBehavior = 'contain';
+    }
+
     function ensureStreamProbePanel(): HTMLDivElement {
+        if (!streamProbeVisible) {
+            throw new Error('Stream probe panel is disabled by user settings');
+        }
         const existing = document.getElementById('blackiya-stream-probe') as HTMLDivElement | null;
         if (existing) {
+            normalizeStreamProbePanelInteraction(existing);
             applyStreamProbeDocking(existing);
             return existing;
         }
@@ -1497,8 +1531,9 @@ export function runPlatform(): void {
             padding: 10px;
             white-space: pre-wrap;
             word-break: break-word;
-            pointer-events: none;
+            pointer-events: auto;
         `;
+        normalizeStreamProbePanelInteraction(panel);
         applyStreamProbeDocking(panel);
         document.body.appendChild(panel);
         return panel;
@@ -1506,6 +1541,9 @@ export function runPlatform(): void {
 
     function setStreamProbePanel(status: string, body: string): void {
         if (cleanedUp) {
+            return;
+        }
+        if (!streamProbeVisible) {
             return;
         }
         const panel = ensureStreamProbePanel();
@@ -2011,26 +2049,6 @@ export function runPlatform(): void {
             return;
         }
         await saveConversation(data, { allowDegraded });
-    }
-
-    async function handleCopyClick(): Promise<void> {
-        if (!currentAdapter) {
-            return;
-        }
-        const data = await getConversationData();
-        if (!data) {
-            return;
-        }
-
-        try {
-            const exportPayload = await buildExportPayload(data, getCaptureMeta(data.conversation_id));
-            await navigator.clipboard.writeText(JSON.stringify(exportPayload, null, 2));
-            logger.info('Copied conversation to clipboard');
-            buttonManager.setSuccess('copy');
-        } catch (error) {
-            handleError('copy', error);
-            buttonManager.setLoading(false, 'copy');
-        }
     }
 
     async function handleCalibrationClick(): Promise<void> {
@@ -3391,7 +3409,6 @@ export function runPlatform(): void {
         buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
         if (isDegraded) {
             buttonManager.setButtonEnabled('save', true);
-            buttonManager.setButtonEnabled('copy', false);
             return;
         }
         buttonManager.setActionButtonsEnabled(isCanonicalReady);
@@ -3827,7 +3844,7 @@ export function runPlatform(): void {
         }
 
         const shouldPromoteGenericCompleted =
-            lifecycleState !== 'completed' && (source === 'dom' || currentAdapter?.name !== 'ChatGPT');
+            lifecycleState !== 'completed' && source === 'dom' && currentAdapter?.name === 'ChatGPT';
         if (shouldPromoteGenericCompleted) {
             applyCompletedLifecycleState(conversationId, attemptId);
         }
@@ -4523,30 +4540,59 @@ export function runPlatform(): void {
     void ensureCalibrationPreferenceLoaded(currentAdapter.name);
     void loadSfeSettings();
     void loadStreamDumpSetting();
+    void loadStreamProbeVisibilitySetting();
+
+    type StorageChangeMap = Parameters<Parameters<typeof browser.storage.onChanged.addListener>[0]>[0];
+
+    const handleDiagnosticsStreamDumpSettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
+            return;
+        }
+        streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
+        emitStreamDumpConfig();
+    };
+
+    const handleStreamProbeVisibilitySettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]) {
+            return;
+        }
+        streamProbeVisible = changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]?.newValue === true;
+        if (!streamProbeVisible) {
+            removeStreamProbePanel();
+        }
+    };
+
+    const handleSfeSettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.SFE_ENABLED]) {
+            return;
+        }
+        sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
+        refreshButtonState(currentConversationId ?? undefined);
+    };
+
+    const handleCalibrationProfilesSettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.CALIBRATION_PROFILES] || !currentAdapter) {
+            return;
+        }
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        autoCaptureAttempts.clear();
+        autoCaptureDeferredLogged.clear();
+        for (const timerId of autoCaptureRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        autoCaptureRetryTimers.clear();
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    };
 
     const storageChangeListener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
         if (areaName !== 'local') {
             return;
         }
-        if (changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
-            streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
-            emitStreamDumpConfig();
-        }
-        if (changes[STORAGE_KEYS.SFE_ENABLED]) {
-            sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
-            refreshButtonState(currentConversationId ?? undefined);
-        }
-        if (changes[STORAGE_KEYS.CALIBRATION_PROFILES] && currentAdapter) {
-            calibrationPreferenceLoaded = false;
-            calibrationPreferenceLoading = null;
-            autoCaptureAttempts.clear();
-            autoCaptureDeferredLogged.clear();
-            for (const timerId of autoCaptureRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            autoCaptureRetryTimers.clear();
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
+        handleDiagnosticsStreamDumpSettingChange(changes);
+        handleStreamProbeVisibilitySettingChange(changes);
+        handleSfeSettingChange(changes);
+        handleCalibrationProfilesSettingChange(changes);
     };
     browser.storage.onChanged.addListener(storageChangeListener);
 

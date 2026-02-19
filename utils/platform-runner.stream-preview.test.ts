@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
+import { STORAGE_KEYS } from '@/utils/settings';
 
 // Configure Happy DOM
 const window = new Window();
@@ -18,65 +19,6 @@ const createMockAdapter = () => ({
     getButtonInjectionTarget: () => document.body,
     formatFilename: () => 'test.json',
     parseInterceptedData: () => ({ conversation_id: '123' }),
-});
-
-const _buildConversation = (
-    conversationId: string,
-    assistantText: string,
-    options: { status: string; endTurn: boolean },
-) => ({
-    title: 'Test Conversation',
-    create_time: 1_700_000_000,
-    update_time: 1_700_000_120,
-    conversation_id: conversationId,
-    current_node: 'a1',
-    moderation_results: [],
-    plugin_ids: null,
-    gizmo_id: null,
-    gizmo_type: null,
-    is_archived: false,
-    default_model_slug: 'gpt',
-    safe_urls: [],
-    blocked_urls: [],
-    mapping: {
-        root: { id: 'root', message: null, parent: null, children: ['u1'] },
-        u1: {
-            id: 'u1',
-            parent: 'root',
-            children: ['a1'],
-            message: {
-                id: 'u1',
-                author: { role: 'user', name: null, metadata: {} },
-                create_time: 1_700_000_010,
-                update_time: 1_700_000_010,
-                content: { content_type: 'text', parts: ['Prompt'] },
-                status: 'finished_successfully',
-                end_turn: true,
-                weight: 1,
-                metadata: {},
-                recipient: 'all',
-                channel: null,
-            },
-        },
-        a1: {
-            id: 'a1',
-            parent: 'u1',
-            children: [],
-            message: {
-                id: 'a1',
-                author: { role: 'assistant', name: null, metadata: {} },
-                create_time: 1_700_000_020,
-                update_time: 1_700_000_020,
-                content: { content_type: 'text', parts: [assistantText] },
-                status: options.status,
-                end_turn: options.endTurn,
-                weight: 1,
-                metadata: {},
-                recipient: 'all',
-                channel: null,
-            },
-        },
-    },
 });
 
 const evaluateReadinessMock = (data: any) => {
@@ -172,7 +114,9 @@ describe('Platform Runner', () => {
         // Reset DOM
         document.body.innerHTML = '';
         currentAdapterMock = createMockAdapter();
-        storageDataMock = {};
+        storageDataMock = {
+            [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: true,
+        };
         runtimeSendMessageMock = async () => undefined;
         downloadCalls.length = 0;
         loggerDebugCalls.length = 0;
@@ -255,6 +199,37 @@ describe('Platform Runner', () => {
         expect(panel).not.toBeNull();
         expect(panel?.textContent).toContain('stream: live mirror');
         expect(panel?.textContent).toContain('Gemini response chunk');
+    });
+
+    it('should normalize existing stream probe panel styles to keep scrolling enabled', async () => {
+        const stalePanel = document.createElement('div');
+        stalePanel.id = 'blackiya-stream-probe';
+        stalePanel.style.pointerEvents = 'none';
+        stalePanel.style.overflow = 'auto';
+        stalePanel.style.maxHeight = '42vh';
+        stalePanel.textContent = 'legacy panel';
+        document.body.appendChild(stalePanel);
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                source: 'network',
+                attemptId: 'attempt:test-panel-scroll-fix',
+                conversationId: '123',
+                text: 'scroll check',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const panel = document.getElementById('blackiya-stream-probe') as HTMLDivElement | null;
+        expect(panel).not.toBeNull();
+        expect(panel?.style.pointerEvents).toBe('auto');
+        expect(panel?.style.overflow).toBe('auto');
     });
 
     it('should dock stream probe panel to top-left on Gemini surfaces', async () => {

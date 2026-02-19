@@ -162,7 +162,7 @@ function pickFallbackDiagnosticLines(logs: LogEntry[]): string[] {
         'Content script running for',
         'Runner init',
         'NavigationManager started',
-        'Save/Copy buttons injected',
+        'Save/Calibrate buttons injected',
         'Calibration',
         'Button state',
         'Button target missing',

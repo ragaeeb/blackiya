@@ -27,7 +27,7 @@ describe('Minimal Debug Report Integration', () => {
                 timestamp: '2026-02-13T22:27:25.854Z',
                 level: 'info',
                 context: 'content',
-                message: 'Save/Copy buttons injected for conversation: 698fa54b-9004-8326-a25a-d9e8f90b7fbc',
+                message: 'Save/Calibrate buttons injected for conversation: 698fa54b-9004-8326-a25a-d9e8f90b7fbc',
                 data: [],
             },
         ];
@@ -37,7 +37,9 @@ describe('Minimal Debug Report Integration', () => {
         expect(report).toContain('No interception sessions');
         expect(report).toContain('## Diagnostics');
         expect(report).toContain('Content script running for ChatGPT');
-        expect(report).toContain('Save/Copy buttons injected for conversation: 698fa54b-9004-8326-a25a-d9e8f90b7fbc');
+        expect(report).toContain(
+            'Save/Calibrate buttons injected for conversation: 698fa54b-9004-8326-a25a-d9e8f90b7fbc',
+        );
     });
 
     it('should still prefer interception sessions when they exist', () => {

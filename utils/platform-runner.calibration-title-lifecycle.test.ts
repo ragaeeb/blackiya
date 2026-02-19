@@ -235,7 +235,7 @@ describe('Platform Runner', () => {
 
         const calibrateBtn = document.getElementById('blackiya-calibrate-btn');
         expect(calibrateBtn).not.toBeNull();
-        expect(calibrateBtn?.textContent).toContain('Captured');
+        expect(calibrateBtn?.textContent).toContain('✅');
     });
 
     it('should keep Captured calibration state on conversation route when profile exists but no data yet', async () => {
@@ -272,7 +272,7 @@ describe('Platform Runner', () => {
 
         const calibrateBtn = document.getElementById('blackiya-calibrate-btn');
         expect(calibrateBtn).not.toBeNull();
-        expect(calibrateBtn?.textContent).toContain('Captured');
+        expect(calibrateBtn?.textContent).toContain('✅');
     });
 
     it('should show friendly calibration timestamp when profile updatedAt exists', async () => {
@@ -308,10 +308,10 @@ describe('Platform Runner', () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 120));
 
-        const calibrateBtn = document.getElementById('blackiya-calibrate-btn');
+        const calibrateBtn = document.getElementById('blackiya-calibrate-btn') as HTMLButtonElement | null;
         expect(calibrateBtn).not.toBeNull();
-        expect(calibrateBtn?.textContent).toContain('Captured');
-        expect(calibrateBtn?.textContent).toContain('ago');
+        expect(calibrateBtn?.textContent).toContain('✅');
+        expect(calibrateBtn?.title).toContain('ago');
     });
 
     it('should inject button when valid adapter and ID found', async () => {
@@ -323,8 +323,8 @@ describe('Platform Runner', () => {
         const saveBtn = document.getElementById('blackiya-save-btn');
         const copyBtn = document.getElementById('blackiya-copy-btn');
         expect(saveBtn).not.toBeNull();
-        expect(copyBtn).not.toBeNull();
-        expect(saveBtn?.textContent).toContain('Save JSON');
+        expect(copyBtn).toBeNull();
+        expect(saveBtn?.textContent).toContain('💾');
     });
 
     it('should derive export title from first user message when title is generic', () => {
