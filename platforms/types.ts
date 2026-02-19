@@ -66,7 +66,7 @@ export interface LLMPlatform {
      * Optional helper to check if a payload contains conversation data
      * Useful for platforms with complex/nested responses (like Gemini)
      */
-    isConversationPayload?: (payload: any) => boolean;
+    isConversationPayload?: (payload: unknown) => boolean;
 
     /**
      * Optional regex pattern matching completion-signal endpoints.

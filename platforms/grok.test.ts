@@ -57,20 +57,20 @@ const buildConversationData = (overrides: Partial<ConversationData> = {}): Conve
 const hasMessageNode = (node: MessageNode): node is MessageNode & { message: NonNullable<MessageNode['message']> } =>
     node.message !== null;
 
+let grokAdapter: any;
+let resetGrokAdapterState: (() => void) | null = null;
+
+beforeAll(async () => {
+    const mod = await import('@/platforms/grok');
+    grokAdapter = mod.grokAdapter;
+    resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
+});
+
+beforeEach(() => {
+    resetGrokAdapterState?.();
+});
+
 describe('Grok Platform Adapter', () => {
-    let grokAdapter: any;
-    let resetGrokAdapterState: (() => void) | null = null;
-
-    beforeAll(async () => {
-        const mod = await import('@/platforms/grok');
-        grokAdapter = mod.grokAdapter;
-        resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
-    });
-
-    beforeEach(() => {
-        resetGrokAdapterState?.();
-    });
-
     describe('extractConversationId', () => {
         it('should extract conversation ID from standard Grok URL', () => {
             const url = 'https://x.com/i/grok?conversation=2013295304527827227';
@@ -750,19 +750,6 @@ describe('Grok Platform Adapter', () => {
 });
 
 describe('Grok Platform Adapter - ID Synchronization', () => {
-    let grokAdapter: any;
-    let resetGrokAdapterState: (() => void) | null = null;
-
-    beforeAll(async () => {
-        const mod = await import('@/platforms/grok');
-        grokAdapter = mod.grokAdapter;
-        resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
-    });
-
-    beforeEach(() => {
-        resetGrokAdapterState?.();
-    });
-
     it('should override conversation ID from URL params when present', () => {
         const urlId = '9999999999999999999';
         const variables = JSON.stringify({ restId: urlId });
@@ -796,13 +783,6 @@ describe('Grok Platform Adapter - ID Synchronization', () => {
 });
 
 describe('Grok Platform Adapter - evaluateReadiness', () => {
-    let grokAdapter: any;
-
-    beforeAll(async () => {
-        const mod = await import('@/platforms/grok');
-        grokAdapter = mod.grokAdapter;
-    });
-
     it('returns not-ready for partial assistant payloads', () => {
         const readiness = grokAdapter.evaluateReadiness?.({
             title: 'Grok Conversation',
@@ -890,19 +870,6 @@ describe('Grok Platform Adapter - evaluateReadiness', () => {
 });
 
 describe('Grok dual-match and metadata endpoints', () => {
-    let grokAdapter: any;
-    let resetGrokAdapterState: (() => void) | null = null;
-
-    beforeAll(async () => {
-        const mod = await import('@/platforms/grok');
-        grokAdapter = mod.grokAdapter;
-        resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
-    });
-
-    beforeEach(() => {
-        resetGrokAdapterState?.();
-    });
-
     describe('Dual-match: URLs matching both apiEndpointPattern AND completionTriggerPattern', () => {
         it('conversations/new matches BOTH patterns (root cause of premature completion)', () => {
             const url = 'https://grok.com/rest/app-chat/conversations/new';
@@ -1179,19 +1146,6 @@ describe('Grok dual-match and metadata endpoints', () => {
 });
 
 describe('Grok Adapter State Isolation (H-05)', () => {
-    let grokAdapter: any;
-    let resetGrokAdapterState: () => void;
-
-    beforeAll(async () => {
-        const mod = await import('@/platforms/grok');
-        grokAdapter = mod.grokAdapter;
-        resetGrokAdapterState = mod.resetGrokAdapterState;
-    });
-
-    beforeEach(() => {
-        resetGrokAdapterState();
-    });
-
     it('should reset all state when resetGrokAdapterState is called', () => {
         // Seed state via parsing
         const conversationId = '01cb0729-6455-471d-b33a-124b3de76a29';
@@ -1223,7 +1177,7 @@ describe('Grok Adapter State Isolation (H-05)', () => {
         );
 
         // Reset
-        resetGrokAdapterState();
+        resetGrokAdapterState?.();
 
         // After reset, a fresh parse should NOT find the previous conversation
         const freshResult = grokAdapter.parseInterceptedData(
@@ -1264,7 +1218,7 @@ describe('Grok Adapter State Isolation (H-05)', () => {
         grokAdapter.parseInterceptedData(JSON.stringify(historyData), sampleHistoryUrl);
 
         // Reset
-        resetGrokAdapterState();
+        resetGrokAdapterState?.();
 
         // Parse a new conversation with the same ID (metadata-only path may return null until messages exist)
         const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true`;

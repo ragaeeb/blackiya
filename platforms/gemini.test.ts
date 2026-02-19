@@ -19,11 +19,13 @@ describe('Gemini Platform Adapter', () => {
     let conversationResponseRaw: string;
     let titlesResponseRaw: string;
     let geminiAdapter: any;
+    let resetGeminiAdapterState: () => void = () => {};
 
     beforeAll(async () => {
         // Dynamic import to ensure mocks apply
         const module = await import('@/platforms/gemini');
         geminiAdapter = module.geminiAdapter;
+        resetGeminiAdapterState = module.resetGeminiAdapterState ?? (() => {});
 
         // Load test fixtures
         conversationResponseRaw = await Bun.file(
@@ -35,6 +37,7 @@ describe('Gemini Platform Adapter', () => {
     });
 
     beforeEach(() => {
+        resetGeminiAdapterState();
         loggerSpies.info.mockClear();
         loggerSpies.warn.mockClear();
         loggerSpies.error.mockClear();
@@ -861,6 +864,36 @@ describe('Gemini Platform Adapter', () => {
             } finally {
                 (globalThis as any).document = originalDocument;
             }
+        });
+    });
+
+    describe('State Isolation', () => {
+        it('should clear cached titles when resetGeminiAdapterState is called', () => {
+            const uniqueId = 'test_reset_title_cache';
+            const expectedTitle = 'Reset Isolation Title';
+
+            const modifiedTitles = titlesResponseRaw
+                .replace('c_69b38773dc8a64c7', `c_${uniqueId}`)
+                .replace('Scholars Discuss Fiqh and Hadith', expectedTitle);
+            geminiAdapter.parseInterceptedData(
+                modifiedTitles,
+                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc',
+            );
+
+            const modifiedConvData = conversationResponseRaw.replace('9cf87bbddf79d497', uniqueId);
+            const withCache = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
+            expect(withCache?.title).toBe(expectedTitle);
+
+            resetGeminiAdapterState();
+
+            const afterReset = geminiAdapter.parseInterceptedData(
+                modifiedConvData,
+                `https://gemini.google.com/app/${uniqueId}`,
+            );
+            expect(afterReset?.title).toBe('Gemini Conversation');
         });
     });
 });

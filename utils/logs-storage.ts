@@ -104,8 +104,9 @@ export class BufferedLogsStorage {
             this.flushTimer = null;
         }
 
+        let batch: LogEntry[] = [];
         try {
-            const batch = [...this.buffer];
+            batch = [...this.buffer];
             this.buffer = [];
 
             const result = await this.storage.get(STORAGE_KEY);
@@ -121,7 +122,11 @@ export class BufferedLogsStorage {
             await this.storage.set({ [STORAGE_KEY]: mergedLogs });
         } catch (e) {
             console.error('Failed to flush logs to storage', e);
-            // Put batch back in buffer? Simple retry strategy for now is just basic error logging
+            // Restore failed batch ahead of newly buffered entries.
+            this.buffer = [...batch, ...this.buffer];
+            if (this.buffer.length > MAX_LOGS) {
+                this.buffer = this.buffer.slice(this.buffer.length - MAX_LOGS);
+            }
         } finally {
             this.isFlushing = false;
         }

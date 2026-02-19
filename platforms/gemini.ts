@@ -23,16 +23,24 @@ const MAX_TITLE_LENGTH = 80;
 import { LRUCache } from '@/utils/lru-cache';
 
 /**
- * We keep a small cache of message-titles to apply them
- * if they arrive *before* the message data.
+ * Encapsulates mutable Gemini adapter state so tests can reliably reset
+ * singleton caches between cases.
  */
-const conversationTitles = new LRUCache<string, string>(50);
+export class GeminiAdapterState {
+    readonly conversationTitles = new LRUCache<string, string>(50);
+    readonly activeConversations = new LRUCache<string, ConversationData>(50);
 
-/**
- * We also keep a reference to active conversations so we can update
- * their titles retroactively if the title arrives *after* the data.
- */
-const activeConversations = new LRUCache<string, ConversationData>(50);
+    reset(): void {
+        this.conversationTitles.clear();
+        this.activeConversations.clear();
+    }
+}
+
+const geminiState = new GeminiAdapterState();
+
+export const resetGeminiAdapterState = (): void => {
+    geminiState.reset();
+};
 
 const GEMINI_DEFAULT_TITLES = ['Gemini Conversation', 'Google Gemini', 'Conversation with Gemini'];
 
@@ -306,7 +314,7 @@ function getGeminiConversationList(payload: unknown): unknown[] | null {
 }
 
 function maybeUpdateActiveGeminiConversationTitle(convId: string, title: string): void {
-    const activeObj = activeConversations.get(convId);
+    const activeObj = geminiState.activeConversations.get(convId);
     if (!activeObj?.title || activeObj.title === title) {
         return;
     }
@@ -374,8 +382,8 @@ function isTitlesEndpoint(url: string): boolean {
  */
 function findConversationRpc(
     results: BatchexecuteResult[],
-    isConversationPayload?: (payload: any) => boolean,
-): { rpcId: string; payload: any } | null {
+    isConversationPayload?: (payload: unknown) => boolean,
+): { rpcId: string; payload: unknown } | null {
     // Priority 1: Exact RPC ID match
     const exactMatch = results.find((res) => res.rpcId === GEMINI_RPC_IDS.CONVERSATION && res.payload);
     if (exactMatch?.payload) {
@@ -383,7 +391,12 @@ function findConversationRpc(
             const payload = JSON.parse(exactMatch.payload);
             logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${exactMatch.rpcId}`);
             return { rpcId: exactMatch.rpcId, payload };
-        } catch {}
+        } catch (error) {
+            logger.debug('[Blackiya/Gemini] Failed to parse exact-match RPC payload', {
+                rpcId: exactMatch.rpcId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     // Priority 2: Heuristic match — search from END for richest StreamGenerate chunk
@@ -401,7 +414,13 @@ function findConversationRpc(
                 );
                 return { rpcId: res.rpcId, payload };
             }
-        } catch {}
+        } catch (error) {
+            logger.debug('[Blackiya/Gemini] Failed to parse heuristic RPC payload', {
+                rpcId: res.rpcId,
+                index: i,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     return null;
@@ -811,14 +830,16 @@ export const geminiAdapter: LLMPlatform = {
             if (titles) {
                 // Merge into global cache
                 for (const [id, title] of titles) {
-                    conversationTitles.set(id, title);
+                    geminiState.conversationTitles.set(id, title);
                 }
-                logger.info(`[Blackiya/Gemini] Title cache now contains ${conversationTitles.size} entries`);
+                logger.info(
+                    `[Blackiya/Gemini] Title cache now contains ${geminiState.conversationTitles.size} entries`,
+                );
 
                 // Log current cache contents for debugging
                 logger.info(
                     '[Blackiya/Gemini] Current cached conversation IDs:',
-                    Array.from(conversationTitles.keys()).slice(0, 5),
+                    Array.from(geminiState.conversationTitles.keys()).slice(0, 5),
                 );
             } else {
                 logger.info('[Blackiya/Gemini/Titles] Failed to extract titles from this response');
@@ -832,7 +853,7 @@ export const geminiAdapter: LLMPlatform = {
             logger.info('[Blackiya/Gemini] Attempting to parse response from:', url);
 
             const rpcResults = parseBatchexecuteResponse(data);
-            hydrateGeminiTitleCandidatesFromRpcResults(rpcResults, url, conversationTitles);
+            hydrateGeminiTitleCandidatesFromRpcResults(rpcResults, url, geminiState.conversationTitles);
 
             const conversationRpc = findConversationRpc(rpcResults, this.isConversationPayload);
             if (!conversationRpc) {
@@ -842,7 +863,11 @@ export const geminiAdapter: LLMPlatform = {
 
             logger.info(`[Blackiya/Gemini] Using RPC ID: ${conversationRpc.rpcId}`);
 
-            return parseConversationPayload(conversationRpc.payload, conversationTitles, activeConversations);
+            return parseConversationPayload(
+                conversationRpc.payload,
+                geminiState.conversationTitles,
+                geminiState.activeConversations,
+            );
         } catch (e) {
             logger.error('[Blackiya/Gemini] Failed to parse:', e);
             if (e instanceof Error) {
@@ -855,7 +880,7 @@ export const geminiAdapter: LLMPlatform = {
     /**
      * Helper to detect if a payload contains conversation data
      */
-    isConversationPayload(payload: any): boolean {
+    isConversationPayload(payload: unknown): boolean {
         try {
             return hasGeminiBatchexecuteConversationShape(payload) || hasGeminiStreamGenerateConversationShape(payload);
         } catch {

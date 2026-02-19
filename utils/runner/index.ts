@@ -109,6 +109,8 @@ const MAX_CONVERSATION_ATTEMPTS = 250;
 const MAX_PENDING_LIFECYCLE_ATTEMPTS = 320;
 const MAX_STREAM_PREVIEWS = 150;
 const MAX_AUTOCAPTURE_KEYS = 400;
+const MAX_STREAM_RESOLVED_TITLES = MAX_CONVERSATION_ATTEMPTS;
+const WARM_FETCH_REQUEST_TIMEOUT_MS = 15_000;
 const CANONICAL_READY_LOG_TTL_MS = 15_000;
 const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
 
@@ -2076,8 +2078,10 @@ export function runPlatform(): void {
         reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
         apiUrl: string,
     ): Promise<boolean> {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), WARM_FETCH_REQUEST_TIMEOUT_MS);
         try {
-            const response = await fetch(apiUrl, { credentials: 'include' });
+            const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
             if (!response.ok) {
                 logger.info('Warm fetch HTTP error', {
                     conversationId,
@@ -2111,6 +2115,8 @@ export function runPlatform(): void {
                 error: err instanceof Error ? err.message : String(err),
             });
             return false;
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 
@@ -2860,11 +2866,7 @@ export function runPlatform(): void {
         logger.warn('Calibration capture failed after retries', { conversationId });
     }
 
-    function enterCalibrationCaptureState(mode: CalibrationMode): void {
-        if (mode === 'manual') {
-            setCalibrationStatus('capturing');
-            return;
-        }
+    function enterCalibrationCaptureState(_mode: CalibrationMode): void {
         setCalibrationStatus('capturing');
     }
 
@@ -3829,7 +3831,7 @@ export function runPlatform(): void {
             fallbackTitle: title,
             platformDefaultTitles,
         });
-        streamResolvedTitles.set(conversationId, streamDecision.title);
+        setBoundedMapValue(streamResolvedTitles, conversationId, streamDecision.title, MAX_STREAM_RESOLVED_TITLES);
 
         if (cached) {
             const cacheDecision = resolveConversationTitleByPrecedence({

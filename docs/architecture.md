@@ -1,6 +1,5 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-18 (v2.0.7 P2 completion wave)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -186,6 +185,10 @@ Title strategy:
 Primary code:
 - `platforms/gemini.ts`
 - `utils/gemini-stream-parser.ts`
+
+State management:
+- Mutable Gemini adapter state (title cache + active conversation cache) is encapsulated in `GeminiAdapterState`.
+- `resetGeminiAdapterState()` is exported for deterministic test isolation.
 
 ### 6.3 Grok
 
