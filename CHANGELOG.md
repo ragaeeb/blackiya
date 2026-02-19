@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/ragaeeb/blackiya/compare/v2.0.7...v2.1.0) (2026-02-19)
+
+
+### Features
+
+* **toast:** Refactor code to break up into smaller files ([#28](https://github.com/ragaeeb/blackiya/issues/28)) ([b9d74f1](https://github.com/ragaeeb/blackiya/commit/b9d74f19a683ac144c7c7aa0c6ecfda23a757055))
+
 ## [2.0.7](https://github.com/ragaeeb/blackiya/compare/v2.0.6...v2.0.7) (2026-02-19)
 
 
