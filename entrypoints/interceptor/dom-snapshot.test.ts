@@ -58,4 +58,33 @@ describe('dom-snapshot', () => {
             finished: true,
         });
     });
+
+    it('should fall back to manual turn discovery when attribute-prefix selector is unsupported', () => {
+        const { document } = windowInstance;
+        document.title = 'Mixed Turn - ChatGPT';
+
+        const turn = document.createElement('div');
+        turn.setAttribute('data-testid', 'conversation-turn-1');
+
+        const role = document.createElement('div');
+        role.setAttribute('data-message-author-role', 'assistant');
+
+        const textNode = document.createElement('div');
+        textNode.setAttribute('data-message-content', '');
+        textNode.textContent = 'Final answer text';
+        role.appendChild(textNode);
+        turn.appendChild(role);
+        document.body.appendChild(turn);
+
+        const originalQuerySelectorAll = document.querySelectorAll.bind(document);
+        (document as any).querySelectorAll = (selector: string) => {
+            if (selector === '[data-testid^="conversation-turn-"]') {
+                throw new SyntaxError('Unsupported selector');
+            }
+            return originalQuerySelectorAll(selector);
+        };
+
+        const snapshot = buildDomConversationSnapshot('conv-1') as any;
+        expect(snapshot).not.toBeNull();
+    });
 });

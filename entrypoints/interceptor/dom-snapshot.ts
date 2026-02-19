@@ -63,12 +63,29 @@ const buildDomMessageContent = (text: string, thoughtFragments: string[]): Recor
 
 // Public API
 
+const findConversationTurns = (): Element[] => {
+    try {
+        const turns = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"]'));
+        if (turns.length > 0) {
+            return turns;
+        }
+    } catch {
+        // Fall through to manual scan for selector-engine incompatibilities.
+    }
+
+    const allElements = Array.from(document.getElementsByTagName('*'));
+    return allElements.filter((element) => {
+        const testId = element.getAttribute('data-testid');
+        return typeof testId === 'string' && testId.startsWith('conversation-turn-');
+    });
+};
+
 /**
  * Walks the ChatGPT DOM and constructs a synthetic conversation payload in the
  * canonical mapping format. Returns null when the page has no conversation turns.
  */
 export const buildDomConversationSnapshot = (conversationId: string): unknown | null => {
-    const turns = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"]'));
+    const turns = findConversationTurns();
     if (turns.length === 0) {
         return null;
     }
