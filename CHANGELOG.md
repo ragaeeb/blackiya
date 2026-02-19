@@ -1,3 +1,10 @@
+## [2.0.7](https://github.com/ragaeeb/blackiya/compare/v2.0.6...v2.0.7) (2026-02-19)
+
+
+### Bug Fixes
+
+* **p2:** Lease store extraction ([bcae4c2](https://github.com/ragaeeb/blackiya/commit/bcae4c2e32c8241c5e1589b370201cf16657d999))
+
 ## [2.0.6](https://github.com/ragaeeb/blackiya/compare/v2.0.5...v2.0.6) (2026-02-18)
 
 
