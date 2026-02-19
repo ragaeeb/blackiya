@@ -198,6 +198,7 @@ State management:
 Surfaces:
 - `grok.com` REST/NDJSON
 - `x.com` Grok endpoint variants
+- `grok.x.com` x-surface streaming host (`/2/grok/add_response.json`)
 
 Generation and completion classification:
 - `utils/grok-request-classifier.ts`

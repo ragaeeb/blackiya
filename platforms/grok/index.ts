@@ -157,6 +157,15 @@ export const grokAdapter: LLMPlatform = {
     },
 
     getButtonInjectionTarget(): HTMLElement | null {
+        try {
+            const { hostname, pathname } = window.location;
+            if (hostname === 'x.com' && pathname.startsWith('/i/grok')) {
+                return document.body ?? document.documentElement;
+            }
+        } catch {
+            // Fallback to selector-based target resolution.
+        }
+
         const selectors = ['[data-testid="grok-header"]', '[role="banner"]', 'header nav', 'header', 'body'];
         for (const selector of selectors) {
             const target = document.querySelector(selector);

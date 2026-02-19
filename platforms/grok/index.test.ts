@@ -13,6 +13,31 @@ mock.module('@/utils/logger', () => ({
 import sampleConversation from '@/data/grok/sample_grok_conversation.json';
 import sampleHistory from '@/data/grok/sample_grok_history.json';
 
+const withMockDom = (
+    href: string,
+    body: HTMLElement,
+    querySelector: (selector: string) => Element | null,
+    fn: () => void,
+) => {
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    const originalWindow = (globalThis as { window?: unknown }).window;
+
+    (globalThis as { document?: unknown }).document = {
+        body,
+        querySelector,
+    };
+    (globalThis as { window?: unknown }).window = {
+        location: new URL(href),
+    };
+
+    try {
+        fn();
+    } finally {
+        (globalThis as { document?: unknown }).document = originalDocument;
+        (globalThis as { window?: unknown }).window = originalWindow;
+    }
+};
+
 let grokAdapter: any;
 let resetGrokAdapterState: (() => void) | null = null;
 
@@ -340,5 +365,22 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         withDocTitle('New conversation - Grok', () => {
             expect(grokAdapter.extractTitleFromDom()).toBeNull();
         });
+    });
+});
+
+describe('Grok Adapter — getButtonInjectionTarget', () => {
+    it('should force body injection for x.com Grok conversation pages', () => {
+        const body = {} as HTMLElement;
+        const bannerParent = {} as HTMLElement;
+        const banner = { parentElement: bannerParent } as HTMLElement;
+
+        withMockDom(
+            'https://x.com/i/grok?conversation=2024522069224943757',
+            body,
+            () => banner,
+            () => {
+                expect(grokAdapter.getButtonInjectionTarget()).toBe(body);
+            },
+        );
     });
 });
