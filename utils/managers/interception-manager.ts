@@ -10,6 +10,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import { logger } from '@/utils/logger';
 import { LRUCache } from '@/utils/lru-cache';
+import { resolveTokenValidationFailureReason } from '@/utils/protocol/session-token';
 import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
@@ -20,6 +21,7 @@ export class InterceptionManager {
     private currentAdapter: LLMPlatform | null = null;
     private readonly windowRef: Window;
     private readonly globalRef: typeof globalThis;
+    private lastInvalidTokenLogAtMs = 0;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
     private onDataCaptured: (
@@ -160,16 +162,32 @@ export class InterceptionManager {
             return;
         }
 
-        const message = event.data;
+        const message = event.data as Record<string, unknown> | null;
+        const messageType = typeof message?.type === 'string' ? message.type : '';
+
+        if (messageType === 'LLM_LOG_ENTRY' || messageType === 'LLM_CAPTURE_DATA_INTERCEPTED') {
+            const tokenFailureReason = resolveTokenValidationFailureReason(message);
+            if (tokenFailureReason !== null) {
+                const now = Date.now();
+                if (now - this.lastInvalidTokenLogAtMs > 1500) {
+                    this.lastInvalidTokenLogAtMs = now;
+                    logger.debug('Dropped interceptor message due to token validation failure', {
+                        reason: tokenFailureReason,
+                        messageType,
+                    });
+                }
+                return;
+            }
+        }
 
         // Handle logs
-        if (message?.type === 'LLM_LOG_ENTRY') {
-            this.handleLogEntry(message.payload);
+        if (messageType === 'LLM_LOG_ENTRY') {
+            this.handleLogEntry((message as { payload?: unknown }).payload);
             return;
         }
 
         // Handle intercepted data
-        if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
+        if (messageType === 'LLM_CAPTURE_DATA_INTERCEPTED' && typeof message?.data === 'string') {
             this.handleInterceptedData(message);
         }
     };
@@ -315,7 +333,7 @@ export class InterceptionManager {
     private processQueuedMessages(): void {
         const globalQueue = (this.globalRef as any).__BLACKIYA_CAPTURE_QUEUE__;
         const windowQueue = (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__;
-        const queue = Array.isArray(globalQueue) ? globalQueue : windowQueue;
+        const queue = (Array.isArray(globalQueue) ? globalQueue : windowQueue) as unknown[];
         if (!Array.isArray(queue) || queue.length === 0) {
             return;
         }
@@ -325,9 +343,14 @@ export class InterceptionManager {
         (this.windowRef as any).__BLACKIYA_CAPTURE_QUEUE__ = [];
 
         for (const message of queue) {
-            if (message?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' && message.data) {
+            const typed = message as Record<string, unknown> | null;
+            if (
+                typed?.type === 'LLM_CAPTURE_DATA_INTERCEPTED' &&
+                typeof typed.data === 'string' &&
+                resolveTokenValidationFailureReason(typed) === null
+            ) {
                 try {
-                    this.handleInterceptedData(message);
+                    this.handleInterceptedData(typed);
                 } catch (error) {
                     logger.warn('Failed to process queued intercepted message', {
                         error: error instanceof Error ? error.message : String(error),
@@ -340,7 +363,7 @@ export class InterceptionManager {
     private processQueuedLogMessages(): void {
         const globalQueue = (this.globalRef as any).__BLACKIYA_LOG_QUEUE__;
         const windowQueue = (this.windowRef as any).__BLACKIYA_LOG_QUEUE__;
-        const queue = Array.isArray(globalQueue) ? globalQueue : windowQueue;
+        const queue = (Array.isArray(globalQueue) ? globalQueue : windowQueue) as unknown[];
         if (!Array.isArray(queue) || queue.length === 0) {
             return;
         }
@@ -350,9 +373,10 @@ export class InterceptionManager {
         (this.windowRef as any).__BLACKIYA_LOG_QUEUE__ = [];
 
         for (const message of queue) {
-            if (message?.type === 'LLM_LOG_ENTRY') {
+            const typed = message as Record<string, unknown> | null;
+            if (typed?.type === 'LLM_LOG_ENTRY' && resolveTokenValidationFailureReason(typed) === null) {
                 try {
-                    this.handleLogEntry(message.payload);
+                    this.handleLogEntry((typed as { payload?: unknown }).payload);
                 } catch (error) {
                     logger.warn('Failed to process queued log message', {
                         error: error instanceof Error ? error.message : String(error),

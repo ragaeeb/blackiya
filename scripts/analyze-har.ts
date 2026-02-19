@@ -68,76 +68,72 @@ const parseArgs = (argv: string[]): CliOptions => {
         return value;
     };
 
+    const consumeFlagValue = (i: number, flag: string): [string, number] => [expectValue(i, flag), i + 1];
+    const valueHandlers: Record<string, (i: number) => number> = {
+        '--input': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--input');
+            input = value;
+            return nextIndex;
+        },
+        '--hint': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--hint');
+            hints.push(value);
+            return nextIndex;
+        },
+        '--host': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--host');
+            hostFilter.push(value.toLowerCase());
+            return nextIndex;
+        },
+        '--output': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--output');
+            outputJson = value;
+            return nextIndex;
+        },
+        '--report': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--report');
+            outputMarkdown = value;
+            return nextIndex;
+        },
+        '--max-body-chars': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--max-body-chars');
+            maxBodyChars = parseNumber(value, '--max-body-chars');
+            return nextIndex;
+        },
+        '--max-matches': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--max-matches');
+            maxMatchesPerHint = parseNumber(value, '--max-matches');
+            return nextIndex;
+        },
+        '--snippet-radius': (i) => {
+            const [value, nextIndex] = consumeFlagValue(i, '--snippet-radius');
+            snippetRadius = parseNumber(value, '--snippet-radius');
+            return nextIndex;
+        },
+    };
+
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
-
         if (arg === '--help' || arg === '-h') {
             printUsage();
             process.exit(0);
         }
-
-        if (arg === '--input') {
-            input = expectValue(i, '--input');
-            i += 1;
-            continue;
-        }
-
-        if (arg === '--hint') {
-            hints.push(expectValue(i, '--hint'));
-            i += 1;
-            continue;
-        }
-
-        if (arg === '--host') {
-            hostFilter.push(expectValue(i, '--host').toLowerCase());
-            i += 1;
-            continue;
-        }
-
-        if (arg === '--output') {
-            outputJson = expectValue(i, '--output');
-            i += 1;
-            continue;
-        }
-
-        if (arg === '--report') {
-            outputMarkdown = expectValue(i, '--report');
-            i += 1;
-            continue;
-        }
-
         if (arg === '--no-report') {
             reportDisabled = true;
             continue;
         }
-
-        if (arg === '--max-body-chars') {
-            maxBodyChars = parseNumber(expectValue(i, '--max-body-chars'), '--max-body-chars');
-            i += 1;
+        const handler = valueHandlers[arg];
+        if (handler) {
+            i = handler(i);
             continue;
         }
-
-        if (arg === '--max-matches') {
-            maxMatchesPerHint = parseNumber(expectValue(i, '--max-matches'), '--max-matches');
-            i += 1;
-            continue;
-        }
-
-        if (arg === '--snippet-radius') {
-            snippetRadius = parseNumber(expectValue(i, '--snippet-radius'), '--snippet-radius');
-            i += 1;
-            continue;
-        }
-
         if (arg.startsWith('--')) {
             throw new Error(`Unknown flag: ${arg}`);
         }
-
         if (!input) {
             input = arg;
             continue;
         }
-
         throw new Error(`Unexpected argument: ${arg}`);
     }
 

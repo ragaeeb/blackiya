@@ -215,20 +215,23 @@ function extractTitleFromGeminiDomHeadings(): string | null {
     return null;
 }
 
-function extractTitleFromGeminiActiveConversationNav(): string | null {
-    if (typeof document === 'undefined') {
-        return null;
-    }
+const GEMINI_ACTIVE_NAV_SELECTORS = [
+    'nav a[aria-current="page"]',
+    'nav button[aria-current="page"]',
+    'aside a[aria-current="page"]',
+    'aside button[aria-current="page"]',
+    '[role="tab"][aria-selected="true"]',
+    'nav [aria-selected="true"]',
+];
 
-    const selectors = [
-        'nav a[aria-current="page"]',
-        'nav button[aria-current="page"]',
-        'aside a[aria-current="page"]',
-        'aside button[aria-current="page"]',
-        '[role="tab"][aria-selected="true"]',
-        'nav [aria-selected="true"]',
-    ];
+const GEMINI_APP_HREF_SELECTORS = [
+    'nav a[href*="/app/"]',
+    'aside a[href*="/app/"]',
+    '[role="navigation"] a[href*="/app/"]',
+    'a[href*="/app/"]',
+];
 
+function extractTitleFromSelectors(selectors: string[]): string | null {
     for (const selector of selectors) {
         const nodes = document.querySelectorAll(selector);
         for (const node of nodes) {
@@ -239,50 +242,78 @@ function extractTitleFromGeminiActiveConversationNav(): string | null {
             return candidate;
         }
     }
+    return null;
+}
 
-    const activeConversationId = (() => {
-        if (typeof window === 'undefined') {
-            return null;
-        }
-        const href = window.location?.href;
+function extractActiveGeminiConversationIdFromLocation(): string | null {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    const href = window.location?.href;
+    if (typeof href !== 'string' || href.length === 0) {
+        return null;
+    }
+    const match = href.match(/\/app\/([a-zA-Z0-9_-]+)/i);
+    return match?.[1] ?? null;
+}
+
+const extractConversationIdFromGeminiHref = (href: string): string | null => {
+    const match = href.match(/\/app\/([a-zA-Z0-9_-]+)/i);
+    return match?.[1] ?? null;
+};
+
+const extractValidGeminiNavTitle = (node: Element): string | null => {
+    const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
+    if (!candidate || isGenericGeminiTitle(candidate)) {
+        return null;
+    }
+    return candidate;
+};
+
+const findGeminiConversationTitleInSelector = (selector: string, conversationId: string): string | null => {
+    const nodes = document.querySelectorAll(selector);
+    for (const node of nodes) {
+        const href = node.getAttribute('href');
         if (typeof href !== 'string' || href.length === 0) {
-            return null;
+            continue;
         }
-        const match = href.match(/\/app\/([a-zA-Z0-9_-]+)/i);
-        return match?.[1] ?? null;
-    })();
+        const hrefConversationId = extractConversationIdFromGeminiHref(href);
+        if (!hrefConversationId || hrefConversationId !== conversationId) {
+            continue;
+        }
+        const title = extractValidGeminiNavTitle(node);
+        if (title) {
+            return title;
+        }
+    }
+    return null;
+};
 
-    if (!activeConversationId) {
+function extractTitleForActiveConversationFromHref(conversationId: string): string | null {
+    for (const selector of GEMINI_APP_HREF_SELECTORS) {
+        const title = findGeminiConversationTitleInSelector(selector, conversationId);
+        if (title) {
+            return title;
+        }
+    }
+    return null;
+}
+
+function extractTitleFromGeminiActiveConversationNav(): string | null {
+    if (typeof document === 'undefined') {
         return null;
     }
 
-    const hrefSelectors = [
-        'nav a[href*="/app/"]',
-        'aside a[href*="/app/"]',
-        '[role="navigation"] a[href*="/app/"]',
-        'a[href*="/app/"]',
-    ];
-
-    for (const selector of hrefSelectors) {
-        const nodes = document.querySelectorAll(selector);
-        for (const node of nodes) {
-            const href = node.getAttribute('href');
-            if (typeof href !== 'string' || href.length === 0) {
-                continue;
-            }
-            const hrefMatch = href.match(/\/app\/([a-zA-Z0-9_-]+)/i);
-            if (!hrefMatch?.[1] || hrefMatch[1] !== activeConversationId) {
-                continue;
-            }
-            const candidate = normalizeGeminiDomTitle((node.textContent ?? '').trim());
-            if (!candidate || isGenericGeminiTitle(candidate)) {
-                continue;
-            }
-            return candidate;
-        }
+    const titleFromActiveSelectors = extractTitleFromSelectors(GEMINI_ACTIVE_NAV_SELECTORS);
+    if (titleFromActiveSelectors) {
+        return titleFromActiveSelectors;
     }
 
-    return null;
+    const activeConversationId = extractActiveGeminiConversationIdFromLocation();
+    if (!activeConversationId) {
+        return null;
+    }
+    return extractTitleForActiveConversationFromHref(activeConversationId);
 }
 
 /**
@@ -380,50 +411,68 @@ function isTitlesEndpoint(url: string): boolean {
  * 2. Heuristic payload match, searching from the END of results so that
  *    StreamGenerate's last (richest) chunk is preferred over early partial chunks.
  */
-function findConversationRpc(
+function parseConversationRpcPayload(payload: string, rpcId: string): unknown | null {
+    try {
+        return JSON.parse(payload);
+    } catch (error) {
+        logger.debug('[Blackiya/Gemini] Failed to parse RPC payload', {
+            rpcId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+    }
+}
+
+function findExactConversationRpc(results: BatchexecuteResult[]): { rpcId: string; payload: unknown } | null {
+    const exactMatch = results.find((res) => res.rpcId === GEMINI_RPC_IDS.CONVERSATION && res.payload);
+    if (!exactMatch?.payload) {
+        return null;
+    }
+    const payload = parseConversationRpcPayload(exactMatch.payload, exactMatch.rpcId);
+    if (!payload) {
+        return null;
+    }
+    logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${exactMatch.rpcId}`);
+    return { rpcId: exactMatch.rpcId, payload };
+}
+
+function findHeuristicConversationRpc(
     results: BatchexecuteResult[],
     isConversationPayload?: (payload: unknown) => boolean,
 ): { rpcId: string; payload: unknown } | null {
-    // Priority 1: Exact RPC ID match
-    const exactMatch = results.find((res) => res.rpcId === GEMINI_RPC_IDS.CONVERSATION && res.payload);
-    if (exactMatch?.payload) {
-        try {
-            const payload = JSON.parse(exactMatch.payload);
-            logger.info(`[Blackiya/Gemini] Found conversation data in RPC ID: ${exactMatch.rpcId}`);
-            return { rpcId: exactMatch.rpcId, payload };
-        } catch (error) {
-            logger.debug('[Blackiya/Gemini] Failed to parse exact-match RPC payload', {
-                rpcId: exactMatch.rpcId,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-    }
-
-    // Priority 2: Heuristic match — search from END for richest StreamGenerate chunk
     for (let i = results.length - 1; i >= 0; i--) {
         const res = results[i];
         if (!res.payload) {
             continue;
         }
-
-        try {
-            const payload = JSON.parse(res.payload);
-            if (isConversationPayload?.(payload)) {
-                logger.info(
-                    `[Blackiya/Gemini] Found conversation data in RPC ID: ${res.rpcId} (heuristic, index ${i}/${results.length})`,
-                );
-                return { rpcId: res.rpcId, payload };
-            }
-        } catch (error) {
+        const payload = parseConversationRpcPayload(res.payload, res.rpcId);
+        if (!payload) {
             logger.debug('[Blackiya/Gemini] Failed to parse heuristic RPC payload', {
                 rpcId: res.rpcId,
                 index: i,
-                error: error instanceof Error ? error.message : String(error),
             });
+            continue;
         }
+        if (!isConversationPayload?.(payload)) {
+            continue;
+        }
+        logger.info(
+            `[Blackiya/Gemini] Found conversation data in RPC ID: ${res.rpcId} (heuristic, index ${i}/${results.length})`,
+        );
+        return { rpcId: res.rpcId, payload };
     }
-
     return null;
+}
+
+function findConversationRpc(
+    results: BatchexecuteResult[],
+    isConversationPayload?: (payload: unknown) => boolean,
+): { rpcId: string; payload: unknown } | null {
+    const exact = findExactConversationRpc(results);
+    if (exact) {
+        return exact;
+    }
+    return findHeuristicConversationRpc(results, isConversationPayload);
 }
 
 type GeminiConversationEnvelope = {

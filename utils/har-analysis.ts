@@ -361,6 +361,163 @@ const collectHintMatches = (
 
 const createEndpointKey = (method: string, host: string, path: string): string => `${method} ${host}${path}`;
 
+type EndpointAccumulator = {
+    method: string;
+    host: string;
+    path: string;
+    statuses: Set<number>;
+    mimeTypes: Set<string>;
+    queryKeys: Set<string>;
+    count: number;
+    streamLikelyCount: number;
+    reasoningSignalCount: number;
+    hintMatchCount: number;
+};
+
+type EntryBodyInfo = {
+    requestBody: string;
+    responseBody: string;
+    requestBodyRawLength: number;
+    responseBodyRawLength: number;
+    bodyTruncationCount: number;
+};
+
+type NormalizedHarAnalysisOptions = {
+    maxBodyChars: number;
+    maxMatchesPerHint: number;
+    snippetRadius: number;
+    hints: HintLookup[];
+    hostFilter: string[];
+};
+
+type HarScanAccumulator = {
+    endpointMap: Map<string, EndpointAccumulator>;
+    timeline: HarTimelineEvent[];
+    hintMatches: HarHintMatch[];
+    hintCounters: Map<string, number>;
+    filteredOut: number;
+    streamLikelyEvents: number;
+    reasoningSignalEvents: number;
+    bodyTruncationCount: number;
+};
+
+const createEndpointAccumulator = (method: string, host: string, path: string): EndpointAccumulator => ({
+    method,
+    host,
+    path,
+    statuses: new Set<number>(),
+    mimeTypes: new Set<string>(),
+    queryKeys: new Set<string>(),
+    count: 0,
+    streamLikelyCount: 0,
+    reasoningSignalCount: 0,
+    hintMatchCount: 0,
+});
+
+const buildEntryBodyInfo = (entry: HarEntry, maxBodyChars: number): EntryBodyInfo => {
+    const requestBodyRaw = String(entry.request?.postData?.text ?? '');
+    const responseBodyRaw = decodeResponseBody(entry.response?.content);
+    return {
+        requestBody: clipBody(requestBodyRaw, maxBodyChars),
+        responseBody: clipBody(responseBodyRaw, maxBodyChars),
+        requestBodyRawLength: requestBodyRaw.length,
+        responseBodyRawLength: responseBodyRaw.length,
+        bodyTruncationCount:
+            (requestBodyRaw.length > maxBodyChars ? 1 : 0) + (responseBodyRaw.length > maxBodyChars ? 1 : 0),
+    };
+};
+
+const buildTimelineEvent = (
+    entry: HarEntry,
+    entryIndex: number,
+    method: string,
+    urlParts: SanitizedUrlParts,
+    mimeType: string,
+    streamLikely: boolean,
+    reasoningSignals: string[],
+    bodyInfo: EntryBodyInfo,
+): HarTimelineEvent => ({
+    entryIndex,
+    startedDateTime: entry.startedDateTime ?? null,
+    method,
+    status: Number.isFinite(entry.response?.status) ? Number(entry.response?.status) : null,
+    host: urlParts.host,
+    path: urlParts.path,
+    queryKeys: urlParts.queryKeys,
+    url: urlParts.url,
+    mimeType: mimeType || null,
+    durationMs: Number.isFinite(entry.time) ? Number(entry.time) : null,
+    requestBodyBytes: bodyInfo.requestBodyRawLength,
+    responseBodyBytes: bodyInfo.responseBodyRawLength,
+    streamLikely,
+    reasoningSignals,
+    hintMatches: [],
+    requestHeaders: sanitizeHeaders(entry.request?.headers),
+    responseHeaders: sanitizeHeaders(entry.response?.headers),
+});
+
+const collectEventHintMatches = (
+    event: HarTimelineEvent,
+    entryIndex: number,
+    hints: HintLookup[],
+    snippetRadius: number,
+    maxMatchesPerHint: number,
+    hintCounters: Map<string, number>,
+    requestBody: string,
+    responseBody: string,
+): HarHintMatch[] => {
+    const requestMatches = collectHintMatches(
+        requestBody,
+        'request',
+        event,
+        entryIndex,
+        hints,
+        snippetRadius,
+        maxMatchesPerHint,
+        hintCounters,
+    );
+    const responseMatches = collectHintMatches(
+        responseBody,
+        'response',
+        event,
+        entryIndex,
+        hints,
+        snippetRadius,
+        maxMatchesPerHint,
+        hintCounters,
+    );
+    const allMatches = requestMatches.concat(responseMatches);
+    event.hintMatches = Array.from(new Set(allMatches.map((item) => item.hint)));
+    return allMatches;
+};
+
+const updateEndpointAccumulatorFromEvent = (
+    endpointMap: Map<string, EndpointAccumulator>,
+    event: HarTimelineEvent,
+): void => {
+    const endpointKey = createEndpointKey(event.method, event.host, event.path);
+    const endpoint = endpointMap.get(endpointKey) ?? createEndpointAccumulator(event.method, event.host, event.path);
+
+    endpoint.count += 1;
+    if (event.status !== null) {
+        endpoint.statuses.add(event.status);
+    }
+    if (event.mimeType) {
+        endpoint.mimeTypes.add(event.mimeType);
+    }
+    for (const key of event.queryKeys) {
+        endpoint.queryKeys.add(key);
+    }
+    if (event.streamLikely) {
+        endpoint.streamLikelyCount += 1;
+    }
+    if (event.reasoningSignals.length > 0) {
+        endpoint.reasoningSignalCount += 1;
+    }
+    endpoint.hintMatchCount += event.hintMatches.length;
+    endpointMap.set(endpointKey, endpoint);
+};
+
 const parseHarEntries = (rawHar: string): HarEntry[] => {
     const parsed = JSON.parse(rawHar) as HarRoot;
     const entries = parsed?.log?.entries;
@@ -370,165 +527,101 @@ const parseHarEntries = (rawHar: string): HarEntry[] => {
     return entries;
 };
 
-export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = {}): HarAnalysisResult => {
-    const entries = parseHarEntries(rawHar);
+const normalizeHostFilter = (hostFilter: string[]): string[] =>
+    Array.from(new Set(hostFilter.map((host) => host.trim().toLowerCase()).filter(Boolean)));
 
-    const maxBodyChars = options.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS;
-    const maxMatchesPerHint = options.maxMatchesPerHint ?? DEFAULT_MAX_MATCHES_PER_HINT;
-    const snippetRadius = options.snippetRadius ?? DEFAULT_SNIPPET_RADIUS;
-    const hints = normalizeHints(options.hints ?? []);
-    const hostFilter = Array.from(
-        new Set((options.hostFilter ?? []).map((host) => host.trim().toLowerCase()).filter(Boolean)),
+const normalizeAnalysisOptions = (options: HarAnalysisOptions): NormalizedHarAnalysisOptions => ({
+    maxBodyChars: options.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS,
+    maxMatchesPerHint: options.maxMatchesPerHint ?? DEFAULT_MAX_MATCHES_PER_HINT,
+    snippetRadius: options.snippetRadius ?? DEFAULT_SNIPPET_RADIUS,
+    hints: normalizeHints(options.hints ?? []),
+    hostFilter: normalizeHostFilter(options.hostFilter ?? []),
+});
+
+const createHarScanAccumulator = (): HarScanAccumulator => ({
+    endpointMap: new Map<string, EndpointAccumulator>(),
+    timeline: [],
+    hintMatches: [],
+    hintCounters: new Map<string, number>(),
+    filteredOut: 0,
+    streamLikelyEvents: 0,
+    reasoningSignalEvents: 0,
+    bodyTruncationCount: 0,
+});
+
+const shouldFilterByHost = (host: string, hostFilter: string[]): boolean =>
+    hostFilter.length > 0 && !hostFilter.includes(host.toLowerCase());
+
+const processHarEntry = (
+    entry: HarEntry,
+    entryIndex: number,
+    options: NormalizedHarAnalysisOptions,
+    accumulator: HarScanAccumulator,
+): void => {
+    const method = String(entry.request?.method ?? 'GET').toUpperCase();
+    const rawUrl = String(entry.request?.url ?? '');
+    if (!rawUrl) {
+        accumulator.filteredOut += 1;
+        return;
+    }
+
+    const urlParts = sanitizeUrl(rawUrl);
+    if (shouldFilterByHost(urlParts.host, options.hostFilter)) {
+        accumulator.filteredOut += 1;
+        return;
+    }
+
+    const bodyInfo = buildEntryBodyInfo(entry, options.maxBodyChars);
+    accumulator.bodyTruncationCount += bodyInfo.bodyTruncationCount;
+    const responseHeaders = sanitizeHeaders(entry.response?.headers);
+    const mimeType = String(
+        entry.response?.content?.mimeType ??
+            entry.response?.headers?.find((h) => h.name?.toLowerCase() === 'content-type')?.value ??
+            '',
+    ).toLowerCase();
+    const reasoningSignals = detectReasoningSignals(bodyInfo.responseBody);
+    const streamLikely = isStreamLikely(urlParts.path, mimeType, bodyInfo.responseBody, responseHeaders);
+
+    const event = buildTimelineEvent(
+        entry,
+        entryIndex,
+        method,
+        urlParts,
+        mimeType,
+        streamLikely,
+        reasoningSignals,
+        bodyInfo,
     );
+    const allMatches = collectEventHintMatches(
+        event,
+        entryIndex,
+        options.hints,
+        options.snippetRadius,
+        options.maxMatchesPerHint,
+        accumulator.hintCounters,
+        bodyInfo.requestBody,
+        bodyInfo.responseBody,
+    );
+    accumulator.hintMatches.push(...allMatches);
+    if (streamLikely) {
+        accumulator.streamLikelyEvents += 1;
+    }
+    if (reasoningSignals.length > 0) {
+        accumulator.reasoningSignalEvents += 1;
+    }
+    accumulator.timeline.push(event);
+    updateEndpointAccumulatorFromEvent(accumulator.endpointMap, event);
+};
 
-    const endpointMap = new Map<
-        string,
-        {
-            method: string;
-            host: string;
-            path: string;
-            statuses: Set<number>;
-            mimeTypes: Set<string>;
-            queryKeys: Set<string>;
-            count: number;
-            streamLikelyCount: number;
-            reasoningSignalCount: number;
-            hintMatchCount: number;
-        }
-    >();
+const scanHarEntries = (entries: HarEntry[], options: NormalizedHarAnalysisOptions): HarScanAccumulator => {
+    const accumulator = createHarScanAccumulator();
+    for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+        processHarEntry(entries[entryIndex], entryIndex, options, accumulator);
+    }
+    return accumulator;
+};
 
-    const timeline: HarTimelineEvent[] = [];
-    const hintMatches: HarHintMatch[] = [];
-    const hintCounters = new Map<string, number>();
-
-    let filteredOut = 0;
-    let streamLikelyEvents = 0;
-    let reasoningSignalEvents = 0;
-    let bodyTruncationCount = 0;
-
-    entries.forEach((entry, entryIndex) => {
-        const method = String(entry.request?.method ?? 'GET').toUpperCase();
-        const rawUrl = String(entry.request?.url ?? '');
-        if (!rawUrl) {
-            filteredOut += 1;
-            return;
-        }
-
-        const urlParts = sanitizeUrl(rawUrl);
-        if (hostFilter.length > 0 && !hostFilter.includes(urlParts.host.toLowerCase())) {
-            filteredOut += 1;
-            return;
-        }
-
-        const requestBodyRaw = String(entry.request?.postData?.text ?? '');
-        const responseBodyRaw = decodeResponseBody(entry.response?.content);
-        const requestBody = clipBody(requestBodyRaw, maxBodyChars);
-        const responseBody = clipBody(responseBodyRaw, maxBodyChars);
-        if (requestBodyRaw.length > maxBodyChars) {
-            bodyTruncationCount += 1;
-        }
-        if (responseBodyRaw.length > maxBodyChars) {
-            bodyTruncationCount += 1;
-        }
-        const responseHeaders = sanitizeHeaders(entry.response?.headers);
-        const requestHeaders = sanitizeHeaders(entry.request?.headers);
-        const mimeType = String(
-            entry.response?.content?.mimeType ??
-                entry.response?.headers?.find((h) => h.name?.toLowerCase() === 'content-type')?.value ??
-                '',
-        ).toLowerCase();
-        const reasoningSignals = detectReasoningSignals(responseBody);
-        const streamLikely = isStreamLikely(urlParts.path, mimeType, responseBody, responseHeaders);
-
-        const event: HarTimelineEvent = {
-            entryIndex,
-            startedDateTime: entry.startedDateTime ?? null,
-            method,
-            status: Number.isFinite(entry.response?.status) ? Number(entry.response?.status) : null,
-            host: urlParts.host,
-            path: urlParts.path,
-            queryKeys: urlParts.queryKeys,
-            url: urlParts.url,
-            mimeType: mimeType || null,
-            durationMs: Number.isFinite(entry.time) ? Number(entry.time) : null,
-            requestBodyBytes: requestBodyRaw.length,
-            responseBodyBytes: responseBodyRaw.length,
-            streamLikely,
-            reasoningSignals,
-            hintMatches: [],
-            requestHeaders,
-            responseHeaders,
-        };
-
-        const requestMatches = collectHintMatches(
-            requestBody,
-            'request',
-            event,
-            entryIndex,
-            hints,
-            snippetRadius,
-            maxMatchesPerHint,
-            hintCounters,
-        );
-        const responseMatches = collectHintMatches(
-            responseBody,
-            'response',
-            event,
-            entryIndex,
-            hints,
-            snippetRadius,
-            maxMatchesPerHint,
-            hintCounters,
-        );
-        const allMatches = requestMatches.concat(responseMatches);
-        event.hintMatches = Array.from(new Set(allMatches.map((item) => item.hint)));
-
-        hintMatches.push(...allMatches);
-
-        if (streamLikely) {
-            streamLikelyEvents += 1;
-        }
-        if (reasoningSignals.length > 0) {
-            reasoningSignalEvents += 1;
-        }
-
-        timeline.push(event);
-
-        const endpointKey = createEndpointKey(method, urlParts.host, urlParts.path);
-        const endpoint = endpointMap.get(endpointKey) ?? {
-            method,
-            host: urlParts.host,
-            path: urlParts.path,
-            statuses: new Set<number>(),
-            mimeTypes: new Set<string>(),
-            queryKeys: new Set<string>(),
-            count: 0,
-            streamLikelyCount: 0,
-            reasoningSignalCount: 0,
-            hintMatchCount: 0,
-        };
-
-        endpoint.count += 1;
-        if (event.status !== null) {
-            endpoint.statuses.add(event.status);
-        }
-        if (event.mimeType) {
-            endpoint.mimeTypes.add(event.mimeType);
-        }
-        for (const key of event.queryKeys) {
-            endpoint.queryKeys.add(key);
-        }
-        if (event.streamLikely) {
-            endpoint.streamLikelyCount += 1;
-        }
-        if (event.reasoningSignals.length > 0) {
-            endpoint.reasoningSignalCount += 1;
-        }
-        endpoint.hintMatchCount += event.hintMatches.length;
-
-        endpointMap.set(endpointKey, endpoint);
-    });
-
+const sortTimeline = (timeline: HarTimelineEvent[]): void => {
     timeline.sort((a, b) => {
         if (!a.startedDateTime && !b.startedDateTime) {
             return a.entryIndex - b.entryIndex;
@@ -541,8 +634,10 @@ export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = 
         }
         return a.startedDateTime.localeCompare(b.startedDateTime);
     });
+};
 
-    const endpointSummary: HarEndpointSummary[] = Array.from(endpointMap.values())
+const buildEndpointSummary = (endpointMap: Map<string, EndpointAccumulator>): HarEndpointSummary[] =>
+    Array.from(endpointMap.values())
         .map((endpoint) => ({
             method: endpoint.method,
             host: endpoint.host,
@@ -568,42 +663,41 @@ export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = 
             return `${a.host}${a.path}`.localeCompare(`${b.host}${b.path}`);
         });
 
+export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = {}): HarAnalysisResult => {
+    const entries = parseHarEntries(rawHar);
+    const normalizedOptions = normalizeAnalysisOptions(options);
+    const scan = scanHarEntries(entries, normalizedOptions);
+    sortTimeline(scan.timeline);
+    const endpointSummary = buildEndpointSummary(scan.endpointMap);
+
     const likelyStreamingEndpoints = endpointSummary.filter((endpoint) => endpoint.streamLikelyCount > 0);
 
     return {
         generatedAt: new Date().toISOString(),
         sourceFile: options.sourceFile ?? null,
-        hints: hints.map((hint) => hint.hint),
-        hostFilter,
+        hints: normalizedOptions.hints.map((hint) => hint.hint),
+        hostFilter: normalizedOptions.hostFilter,
         stats: {
             totalEntries: entries.length,
-            entriesScanned: timeline.length,
-            entriesFilteredOut: filteredOut,
-            timelineEvents: timeline.length,
+            entriesScanned: scan.timeline.length,
+            entriesFilteredOut: scan.filteredOut,
+            timelineEvents: scan.timeline.length,
             endpointCount: endpointSummary.length,
-            streamLikelyEvents,
-            reasoningSignalEvents,
-            hintMatches: hintMatches.length,
-            bodyTruncationCount,
+            streamLikelyEvents: scan.streamLikelyEvents,
+            reasoningSignalEvents: scan.reasoningSignalEvents,
+            hintMatches: scan.hintMatches.length,
+            bodyTruncationCount: scan.bodyTruncationCount,
         },
         likelyStreamingEndpoints,
         endpointSummary,
-        hintMatches,
-        timeline,
+        hintMatches: scan.hintMatches,
+        timeline: scan.timeline,
     };
 };
 
 const renderCount = (value: number): string => String(value).padStart(4, ' ');
 
-export const renderHarAnalysisMarkdown = (analysis: HarAnalysisResult): string => {
-    const lines: string[] = [];
-    lines.push('# HAR Discovery Analysis');
-    lines.push('');
-    lines.push(`Generated: ${analysis.generatedAt}`);
-    lines.push(`Source: ${analysis.sourceFile ?? 'N/A'}`);
-    lines.push(`Host filter: ${analysis.hostFilter.length > 0 ? analysis.hostFilter.join(', ') : 'none'}`);
-    lines.push(`Hints: ${analysis.hints.length > 0 ? analysis.hints.join(' | ') : 'none'}`);
-    lines.push('');
+const appendSummarySection = (lines: string[], analysis: HarAnalysisResult): void => {
     lines.push('## Summary');
     lines.push(`- Entries in HAR: ${analysis.stats.totalEntries}`);
     lines.push(`- Entries scanned: ${analysis.stats.entriesScanned}`);
@@ -613,31 +707,39 @@ export const renderHarAnalysisMarkdown = (analysis: HarAnalysisResult): string =
     lines.push(`- Hint matches: ${analysis.stats.hintMatches}`);
     lines.push(`- Body truncations: ${analysis.stats.bodyTruncationCount}`);
     lines.push('');
+};
 
+const appendLikelyStreamingSection = (lines: string[], analysis: HarAnalysisResult): void => {
     lines.push('## Likely Streaming Endpoints');
     if (analysis.likelyStreamingEndpoints.length === 0) {
         lines.push('- none');
-    } else {
-        for (const endpoint of analysis.likelyStreamingEndpoints) {
-            lines.push(
-                `- ${endpoint.method} ${endpoint.host}${endpoint.path} | hits=${endpoint.count} stream=${endpoint.streamLikelyCount} hints=${endpoint.hintMatchCount} reasoning=${endpoint.reasoningSignalCount}`,
-            );
-        }
+        lines.push('');
+        return;
+    }
+    for (const endpoint of analysis.likelyStreamingEndpoints) {
+        lines.push(
+            `- ${endpoint.method} ${endpoint.host}${endpoint.path} | hits=${endpoint.count} stream=${endpoint.streamLikelyCount} hints=${endpoint.hintMatchCount} reasoning=${endpoint.reasoningSignalCount}`,
+        );
     }
     lines.push('');
+};
 
+const appendHintMatchesSection = (lines: string[], analysis: HarAnalysisResult): void => {
     lines.push('## Hint Matches');
     if (analysis.hintMatches.length === 0) {
         lines.push('- none');
-    } else {
-        for (const match of analysis.hintMatches) {
-            lines.push(
-                `- [${match.hint}] (${match.phase}) ${match.method} ${match.host}${match.path} @ ${match.startedDateTime ?? 'n/a'} :: ${match.snippet}`,
-            );
-        }
+        lines.push('');
+        return;
+    }
+    for (const match of analysis.hintMatches) {
+        lines.push(
+            `- [${match.hint}] (${match.phase}) ${match.method} ${match.host}${match.path} @ ${match.startedDateTime ?? 'n/a'} :: ${match.snippet}`,
+        );
     }
     lines.push('');
+};
 
+const appendTimelineSection = (lines: string[], analysis: HarAnalysisResult): void => {
     lines.push('## Timeline Highlights');
     for (const event of analysis.timeline) {
         const flags: string[] = [];
@@ -656,7 +758,9 @@ export const renderHarAnalysisMarkdown = (analysis: HarAnalysisResult): string =
         );
     }
     lines.push('');
+};
 
+const appendEndpointInventorySection = (lines: string[], analysis: HarAnalysisResult): void => {
     lines.push('## Endpoint Inventory');
     for (const endpoint of analysis.endpointSummary) {
         const statusText = endpoint.statuses.length > 0 ? endpoint.statuses.join(',') : 'n/a';
@@ -666,6 +770,22 @@ export const renderHarAnalysisMarkdown = (analysis: HarAnalysisResult): string =
             `- ${renderCount(endpoint.count)}x ${endpoint.method} ${endpoint.host}${endpoint.path} | status=${statusText} | mime=${mimeText} | query=${queryText}`,
         );
     }
+};
+
+export const renderHarAnalysisMarkdown = (analysis: HarAnalysisResult): string => {
+    const lines: string[] = [];
+    lines.push('# HAR Discovery Analysis');
+    lines.push('');
+    lines.push(`Generated: ${analysis.generatedAt}`);
+    lines.push(`Source: ${analysis.sourceFile ?? 'N/A'}`);
+    lines.push(`Host filter: ${analysis.hostFilter.length > 0 ? analysis.hostFilter.join(', ') : 'none'}`);
+    lines.push(`Hints: ${analysis.hints.length > 0 ? analysis.hints.join(' | ') : 'none'}`);
+    lines.push('');
+    appendSummarySection(lines, analysis);
+    appendLikelyStreamingSection(lines, analysis);
+    appendHintMatchesSection(lines, analysis);
+    appendTimelineSection(lines, analysis);
+    appendEndpointInventorySection(lines, analysis);
 
     return `${lines.join('\n')}\n`;
 };

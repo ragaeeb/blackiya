@@ -2,20 +2,24 @@ export type LifecyclePhaseWire = 'prompt-sent' | 'streaming' | 'completed' | 'te
 
 export type LogLevelWire = 'debug' | 'info' | 'warn' | 'error';
 
+type TokenStampedWireMessage = {
+    __blackiyaToken?: string;
+};
+
 export type ResponseLifecycleMessage = {
     type: 'BLACKIYA_RESPONSE_LIFECYCLE';
     platform: string;
     attemptId: string;
     phase: LifecyclePhaseWire;
     conversationId?: string;
-};
+} & TokenStampedWireMessage;
 
 export type ResponseFinishedMessage = {
     type: 'BLACKIYA_RESPONSE_FINISHED';
     platform: string;
     attemptId: string;
     conversationId?: string;
-};
+} & TokenStampedWireMessage;
 
 export type StreamDeltaMessage = {
     type: 'BLACKIYA_STREAM_DELTA';
@@ -23,25 +27,25 @@ export type StreamDeltaMessage = {
     attemptId: string;
     conversationId?: string;
     text: string;
-};
+} & TokenStampedWireMessage;
 
 export type ConversationIdResolvedMessage = {
     type: 'BLACKIYA_CONVERSATION_ID_RESOLVED';
     platform: string;
     attemptId: string;
     conversationId: string;
-};
+} & TokenStampedWireMessage;
 
 export type AttemptDisposedMessage = {
     type: 'BLACKIYA_ATTEMPT_DISPOSED';
     attemptId: string;
     reason: 'navigation' | 'superseded' | 'timeout' | 'teardown';
-};
+} & TokenStampedWireMessage;
 
 export type StreamDumpConfigMessage = {
     type: 'BLACKIYA_STREAM_DUMP_CONFIG';
     enabled: boolean;
-};
+} & TokenStampedWireMessage;
 
 export type TitleResolvedMessage = {
     type: 'BLACKIYA_TITLE_RESOLVED';
@@ -49,7 +53,7 @@ export type TitleResolvedMessage = {
     attemptId: string;
     conversationId: string;
     title: string;
-};
+} & TokenStampedWireMessage;
 
 export type StreamDumpFrameMessage = {
     type: 'BLACKIYA_STREAM_DUMP_FRAME';
@@ -61,7 +65,7 @@ export type StreamDumpFrameMessage = {
     chunkBytes?: number;
     frameIndex?: number;
     timestampMs?: number;
-};
+} & TokenStampedWireMessage;
 
 export type CaptureInterceptedMessage = {
     type: 'LLM_CAPTURE_DATA_INTERCEPTED';
@@ -69,7 +73,7 @@ export type CaptureInterceptedMessage = {
     url: string;
     data: string;
     attemptId?: string;
-};
+} & TokenStampedWireMessage;
 
 export type LogEntryMessage = {
     type: 'LLM_LOG_ENTRY';
@@ -79,7 +83,7 @@ export type LogEntryMessage = {
         data?: unknown[];
         context?: string;
     };
-};
+} & TokenStampedWireMessage;
 
 export type SessionInitMessage = {
     type: 'BLACKIYA_SESSION_INIT';

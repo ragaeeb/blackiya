@@ -23,6 +23,7 @@ type ShouldEmitXhrRequestLifecycle = (context: {
     attemptId?: string;
     conversationId?: string;
 }) => boolean;
+type ShouldApplySessionInitToken = (existingToken: string | undefined, incomingToken: string) => boolean;
 
 describe('interceptor.content utilities', () => {
     let tryEmitGeminiXhrLoadendCompletion: GeminiLoadendGuard;
@@ -30,6 +31,7 @@ describe('interceptor.content utilities', () => {
     let pruneTimestampCache: PruneTimestampCache;
     let cleanupDisposedAttemptState: CleanupDisposedAttemptState;
     let shouldEmitXhrRequestLifecycle: ShouldEmitXhrRequestLifecycle;
+    let shouldApplySessionInitToken: ShouldApplySessionInitToken;
 
     beforeAll(async () => {
         (globalThis as any).defineContentScript = (config: unknown) => config;
@@ -39,6 +41,7 @@ describe('interceptor.content utilities', () => {
         pruneTimestampCache = mod.pruneTimestampCache as PruneTimestampCache;
         cleanupDisposedAttemptState = mod.cleanupDisposedAttemptState as CleanupDisposedAttemptState;
         shouldEmitXhrRequestLifecycle = mod.shouldEmitXhrRequestLifecycle as ShouldEmitXhrRequestLifecycle;
+        shouldApplySessionInitToken = mod.shouldApplySessionInitToken as ShouldApplySessionInitToken;
     });
 
     it('emits completed once for the same Gemini XHR state', () => {
@@ -151,5 +154,12 @@ describe('interceptor.content utilities', () => {
         expect(map.has('b')).toBeFalse();
         expect(map.get('a')).toBe(99);
         expect(map.has('c')).toBeTrue();
+    });
+
+    it('applies BLACKIYA_SESSION_INIT token only once (first-in-wins)', () => {
+        expect(shouldApplySessionInitToken(undefined, 'bk:first')).toBeTrue();
+        expect(shouldApplySessionInitToken('bk:first', 'bk:second')).toBeFalse();
+        expect(shouldApplySessionInitToken('', 'bk:first')).toBeTrue();
+        expect(shouldApplySessionInitToken(undefined, '')).toBeFalse();
     });
 });

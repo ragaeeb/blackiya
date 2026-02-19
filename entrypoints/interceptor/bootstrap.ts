@@ -50,7 +50,12 @@ import type {
     StreamDumpConfigMessage,
     StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
-import { getSessionToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
+import {
+    getSessionToken,
+    resolveTokenValidationFailureReason,
+    setSessionToken,
+    stampToken,
+} from '@/utils/protocol/session-token';
 import type { ConversationData } from '@/utils/types';
 
 export {
@@ -72,6 +77,7 @@ interface PageSnapshotRequest {
     type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST';
     requestId: string;
     conversationId: string;
+    __blackiyaToken?: string;
 }
 
 interface PageSnapshotResponse {
@@ -80,6 +86,7 @@ interface PageSnapshotResponse {
     success: boolean;
     data?: unknown;
     error?: string;
+    __blackiyaToken?: string;
 }
 
 const completionSignalCache = new Map<string, number>();
@@ -177,12 +184,16 @@ function log(level: 'info' | 'warn' | 'error', message: string, data?: unknown) 
         },
     };
 
-    queueLogMessage(payload);
-    window.postMessage(stampToken(payload), window.location.origin);
+    const stampedPayload = stampToken(payload);
+    queueLogMessage(stampedPayload);
+    window.postMessage(stampedPayload, window.location.origin);
 }
 
-function queueInterceptedMessage(payload: CapturePayload) {
-    const queue = ((window as any).__BLACKIYA_CAPTURE_QUEUE__ as CapturePayload[] | undefined) ?? [];
+function queueInterceptedMessage(payload: CapturePayload & { __blackiyaToken: string }) {
+    const queue =
+        ((window as any).__BLACKIYA_CAPTURE_QUEUE__ as
+            | Array<CapturePayload & { __blackiyaToken: string }>
+            | undefined) ?? [];
     queue.push(payload);
     // Prevent unbounded growth if the content script initializes late
     if (queue.length > 50) {
@@ -234,8 +245,11 @@ function buildRawCaptureSnapshot(conversationId: string): RawCaptureSnapshot | n
     return null;
 }
 
-function queueLogMessage(payload: InterceptorLogPayload) {
-    const queue = ((window as any).__BLACKIYA_LOG_QUEUE__ as InterceptorLogPayload[] | undefined) ?? [];
+function queueLogMessage(payload: InterceptorLogPayload & { __blackiyaToken: string }) {
+    const queue =
+        ((window as any).__BLACKIYA_LOG_QUEUE__ as
+            | Array<InterceptorLogPayload & { __blackiyaToken: string }>
+            | undefined) ?? [];
     queue.push(payload);
     if (queue.length > 100) {
         queue.splice(0, queue.length - 100);
@@ -1131,8 +1145,8 @@ function emitGrokStreamCandidates(
     emittedSignalOrder: string[],
 ): void {
     const emitCandidate = (candidate: string, kind: 'text' | 'thinking') => {
-        const normalized = candidate.trim();
-        if (normalized.length === 0) {
+        const normalized = candidate.replace(/\r\n/g, '\n');
+        if (normalized.trim().length === 0) {
             return;
         }
         const signalKey = `${kind}:${normalized}`;
@@ -2054,6 +2068,13 @@ function isSnapshotRequestEvent(event: MessageEvent) {
     return message;
 }
 
+export function shouldApplySessionInitToken(existingToken: string | undefined, incomingToken: string): boolean {
+    if (typeof incomingToken !== 'string' || incomingToken.length === 0) {
+        return false;
+    }
+    return !(typeof existingToken === 'string' && existingToken.length > 0);
+}
+
 function buildSnapshotResponse(requestId: string, snapshot: unknown | null): PageSnapshotResponse {
     if (snapshot) {
         return {
@@ -2098,8 +2119,9 @@ function emitCapturePayload(url: string, data: string, platform: string, attempt
         platform,
         ...(attemptId ? { attemptId } : {}),
     };
-    queueInterceptedMessage(payload);
-    window.postMessage(stampToken(payload), window.location.origin);
+    const stampedPayload = stampToken(payload);
+    queueInterceptedMessage(stampedPayload);
+    window.postMessage(stampedPayload, window.location.origin);
 }
 
 function handleApiMatchFromFetch(
@@ -2669,55 +2691,68 @@ export default defineContentScript({
             });
         };
 
-        const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
-            if (context.isChatGptPromptRequest && context.lifecycleAttemptId) {
-                setBoundedMapValue(
-                    latestAttemptIdByPlatform,
-                    chatGPTAdapter.name,
-                    context.lifecycleAttemptId,
-                    MAX_INTERCEPTOR_ATTEMPT_BINDINGS,
-                );
-                disposedAttemptIds.delete(context.lifecycleAttemptId);
-                bindAttemptToConversation(context.lifecycleAttemptId, context.lifecycleConversationId);
-                if (context.lifecycleConversationId) {
-                    emitConversationIdResolvedSignal(context.lifecycleAttemptId, context.lifecycleConversationId);
-                }
-                emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
+        const emitChatGptFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+            if (!context.isChatGptPromptRequest || !context.lifecycleAttemptId) {
+                return;
             }
+            setBoundedMapValue(
+                latestAttemptIdByPlatform,
+                chatGPTAdapter.name,
+                context.lifecycleAttemptId,
+                MAX_INTERCEPTOR_ATTEMPT_BINDINGS,
+            );
+            disposedAttemptIds.delete(context.lifecycleAttemptId);
+            bindAttemptToConversation(context.lifecycleAttemptId, context.lifecycleConversationId);
+            if (context.lifecycleConversationId) {
+                emitConversationIdResolvedSignal(context.lifecycleAttemptId, context.lifecycleConversationId);
+            }
+            emitLifecycleSignal(context.lifecycleAttemptId, 'prompt-sent', context.lifecycleConversationId);
+        };
 
+        const resolveNonChatFetchAttemptId = (context: FetchInterceptorContext): string => {
+            const adapter = context.fetchApiAdapter;
+            if (!adapter) {
+                return '';
+            }
+            return (
+                context.nonChatAttemptId ?? resolveAttemptIdForConversation(context.nonChatConversationId, adapter.name)
+            );
+        };
+
+        const emitNonChatFetchPromptLifecycle = (context: FetchInterceptorContext, attemptId: string): void => {
+            const adapter = context.fetchApiAdapter;
+            if (!adapter || !attemptId) {
+                return;
+            }
+            emitLifecycleSignal(attemptId, 'prompt-sent', context.nonChatConversationId, adapter.name);
+            if (adapter.name !== 'Gemini') {
+                emitLifecycleSignal(attemptId, 'streaming', context.nonChatConversationId, adapter.name);
+            }
+        };
+
+        const maybeLogGrokFetchRequestLifecycle = (context: FetchInterceptorContext, attemptId: string): void => {
+            if (!context.fetchApiAdapter || context.fetchApiAdapter.name !== 'Grok') {
+                return;
+            }
+            if (!shouldLogTransient(`grok:fetch:request:${attemptId}`, 3000)) {
+                return;
+            }
+            log('info', 'Grok fetch request intercepted', {
+                attemptId,
+                conversationId: context.nonChatConversationId ?? null,
+                method: context.outgoingMethod,
+                path: context.outgoingPath,
+            });
+        };
+
+        const emitFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
+            emitChatGptFetchPromptLifecycle(context);
             if (!context.shouldEmitNonChatLifecycle || !context.fetchApiAdapter) {
                 return;
             }
-            const nonChatAttemptId =
-                context.nonChatAttemptId ??
-                resolveAttemptIdForConversation(context.nonChatConversationId, context.fetchApiAdapter.name);
-
-            emitLifecycleSignal(
-                nonChatAttemptId,
-                'prompt-sent',
-                context.nonChatConversationId,
-                context.fetchApiAdapter.name,
-            );
-            if (context.fetchApiAdapter.name !== 'Gemini') {
-                emitLifecycleSignal(
-                    nonChatAttemptId,
-                    'streaming',
-                    context.nonChatConversationId,
-                    context.fetchApiAdapter.name,
-                );
-            }
-
-            if (
-                context.fetchApiAdapter.name === 'Grok' &&
-                shouldLogTransient(`grok:fetch:request:${nonChatAttemptId}`, 3000)
-            ) {
-                log('info', 'Grok fetch request intercepted', {
-                    attemptId: nonChatAttemptId,
-                    conversationId: context.nonChatConversationId ?? null,
-                    method: context.outgoingMethod,
-                    path: context.outgoingPath,
-                });
-            }
+            const attemptId = resolveNonChatFetchAttemptId(context);
+            emitNonChatFetchPromptLifecycle(context, attemptId);
+            maybeLogGrokFetchRequestLifecycle(context, attemptId);
         };
 
         const maybeLogGeminiFetchDiscovery = (context: FetchInterceptorContext, response: Response): void => {
@@ -2844,40 +2879,76 @@ export default defineContentScript({
             return originalSetRequestHeader.call(this, header, value);
         };
 
+        const resolveXhrAttemptId = (context: XhrLifecycleContext): string => {
+            if (!context.requestAdapter) {
+                return '';
+            }
+            return (
+                context.attemptId ??
+                resolveAttemptIdForConversation(context.conversationId, context.requestAdapter.name)
+            );
+        };
+
+        const maybeEmitGeminiXhrLifecycle = (
+            xhr: XMLHttpRequest,
+            context: XhrLifecycleContext,
+            attemptId: string,
+        ): boolean => {
+            if (context.requestAdapter?.name !== 'Gemini') {
+                return false;
+            }
+            wireGeminiXhrProgressMonitor(xhr, attemptId, context.conversationId, context.requestUrl);
+            return true;
+        };
+
+        const maybeEmitGrokXhrLifecycle = (
+            xhr: XMLHttpRequest,
+            context: XhrLifecycleContext,
+            attemptId: string,
+        ): boolean => {
+            if (context.requestAdapter?.name !== 'Grok' || !context.conversationId) {
+                return false;
+            }
+            wireGrokXhrProgressMonitor(xhr, attemptId, context.conversationId);
+            if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
+                log('info', 'Grok XHR request intercepted', {
+                    attemptId,
+                    conversationId: context.conversationId,
+                    method: context.methodUpper,
+                    path: safePathname(context.requestUrl),
+                });
+            }
+            return true;
+        };
+
+        const emitDefaultXhrStreamingLifecycle = (context: XhrLifecycleContext, attemptId: string): void => {
+            if (!context.requestAdapter || !context.conversationId) {
+                return;
+            }
+            emitLifecycleSignal(attemptId, 'streaming', context.conversationId, context.requestAdapter.name);
+        };
+
         const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext) => {
             if (!context.shouldEmitNonChatLifecycle || !context.requestAdapter) {
                 return;
             }
-            const attemptId =
-                context.attemptId ??
-                resolveAttemptIdForConversation(context.conversationId, context.requestAdapter.name);
+            const attemptId = resolveXhrAttemptId(context);
+            if (!attemptId) {
+                return;
+            }
             const lifecycleContext = { ...context, attemptId };
             if (!shouldEmitXhrRequestLifecycle(lifecycleContext)) {
                 return;
             }
 
-            emitLifecycleSignal(attemptId, 'prompt-sent', context.conversationId, context.requestAdapter?.name);
-
-            if (context.requestAdapter?.name === 'Gemini') {
-                wireGeminiXhrProgressMonitor(xhr, attemptId, context.conversationId, context.requestUrl);
+            emitLifecycleSignal(attemptId, 'prompt-sent', context.conversationId, context.requestAdapter.name);
+            if (maybeEmitGeminiXhrLifecycle(xhr, context, attemptId)) {
                 return;
             }
-            if (context.requestAdapter?.name === 'Grok' && context.conversationId) {
-                wireGrokXhrProgressMonitor(xhr, attemptId, context.conversationId);
-                if (shouldLogTransient(`grok:xhr:request:${attemptId}`, 3000)) {
-                    log('info', 'Grok XHR request intercepted', {
-                        attemptId,
-                        conversationId: context.conversationId,
-                        method: context.methodUpper,
-                        path: safePathname(context.requestUrl),
-                    });
-                }
+            if (maybeEmitGrokXhrLifecycle(xhr, context, attemptId)) {
                 return;
             }
-            if (!context.conversationId) {
-                return;
-            }
-            emitLifecycleSignal(attemptId, 'streaming', context.conversationId, context.requestAdapter?.name);
+            emitDefaultXhrStreamingLifecycle(context, attemptId);
         };
 
         const maybeLogGrokXhrResponse = (xhr: XMLHttpRequest, methodUpper: string): void => {
@@ -2968,8 +3039,7 @@ export default defineContentScript({
                 if (!message) {
                     return;
                 }
-                const sessionToken = getSessionToken();
-                if (sessionToken && (message as any).__blackiyaToken !== sessionToken) {
+                if (resolveTokenValidationFailureReason(message) !== null) {
                     return;
                 }
                 const conversationId = typeof message.conversationId === 'string' ? message.conversationId : '';
@@ -2987,6 +3057,10 @@ export default defineContentScript({
                 }
                 const message = event.data as SessionInitMessage;
                 if (message?.type !== 'BLACKIYA_SESSION_INIT' || typeof message.token !== 'string') {
+                    return;
+                }
+                const existingToken = getSessionToken();
+                if (!shouldApplySessionInitToken(existingToken, message.token)) {
                     return;
                 }
                 setSessionToken(message.token);

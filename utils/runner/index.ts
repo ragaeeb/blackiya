@@ -1444,9 +1444,35 @@ export function runPlatform(): void {
         applyLifecycleUiState(state, conversationId);
     }
 
+    function resolveStreamProbeDockPosition(): 'bottom-left' | 'top-left' {
+        if ((currentAdapter?.name ?? '').toLowerCase() === 'gemini') {
+            return 'top-left';
+        }
+        const host = window.location?.hostname ?? '';
+        if (/(^|\.)gemini\.google\.com$/i.test(host)) {
+            return 'top-left';
+        }
+        return 'bottom-left';
+    }
+
+    function applyStreamProbeDocking(panel: HTMLDivElement): void {
+        if (resolveStreamProbeDockPosition() === 'top-left') {
+            panel.style.left = '16px';
+            panel.style.right = 'auto';
+            panel.style.top = '16px';
+            panel.style.bottom = 'auto';
+            return;
+        }
+        panel.style.left = '16px';
+        panel.style.right = 'auto';
+        panel.style.top = 'auto';
+        panel.style.bottom = '16px';
+    }
+
     function ensureStreamProbePanel(): HTMLDivElement {
         const existing = document.getElementById('blackiya-stream-probe') as HTMLDivElement | null;
         if (existing) {
+            applyStreamProbeDocking(existing);
             return existing;
         }
 
@@ -1455,6 +1481,8 @@ export function runPlatform(): void {
         panel.style.cssText = `
             position: fixed;
             left: 16px;
+            right: auto;
+            top: auto;
             bottom: 16px;
             width: min(560px, calc(100vw - 32px));
             max-height: 42vh;
@@ -1469,7 +1497,9 @@ export function runPlatform(): void {
             padding: 10px;
             white-space: pre-wrap;
             word-break: break-word;
+            pointer-events: none;
         `;
+        applyStreamProbeDocking(panel);
         document.body.appendChild(panel);
         return panel;
     }
@@ -2269,14 +2299,29 @@ export function runPlatform(): void {
                 resolve(null);
             }, 2500);
 
-            const onMessage = (event: MessageEvent) => {
+            const isMatchingSnapshotResponse = (
+                event: MessageEvent,
+            ): event is MessageEvent<{
+                type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE';
+                requestId: string;
+                success: boolean;
+                data?: unknown;
+            }> => {
                 if (event.source !== window || event.origin !== window.location.origin) {
+                    return false;
+                }
+                const msg = event.data as Record<string, unknown> | null;
+                if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE' || msg.requestId !== requestId) {
+                    return false;
+                }
+                return resolveTokenValidationFailureReason(msg) === null;
+            };
+
+            const onMessage = (event: MessageEvent) => {
+                if (!isMatchingSnapshotResponse(event)) {
                     return;
                 }
                 const msg = event.data;
-                if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE' || msg.requestId !== requestId) {
-                    return;
-                }
                 clearTimeout(timeout);
                 window.removeEventListener('message', onMessage);
                 resolve(msg.success ? msg.data : null);
@@ -2399,65 +2444,91 @@ export function runPlatform(): void {
         }));
     }
 
-    function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
-        const allowedTags = new Set(['MAIN', 'ARTICLE', 'SECTION', 'DIV']);
-        const maxNodesScanned = 220;
-        const snippets: string[] = [];
-        let scanned = 0;
+    function resolveTreeWalkerContext(root: ParentNode): { ownerDocument: Document; walkerRoot: Node } | null {
         const ownerDocument = root instanceof Document ? root : root.ownerDocument;
         const walkerRoot = root instanceof Element || root instanceof Document ? root : ownerDocument?.body;
-        if (ownerDocument && walkerRoot) {
-            const walker = ownerDocument.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
-                acceptNode: (candidate: Node) => {
-                    if (!(candidate instanceof Element)) {
-                        return NodeFilter.FILTER_SKIP;
-                    }
-                    if (!allowedTags.has(candidate.tagName)) {
-                        return NodeFilter.FILTER_SKIP;
-                    }
-                    return NodeFilter.FILTER_ACCEPT;
-                },
-            });
+        if (!ownerDocument || !walkerRoot) {
+            return null;
+        }
+        return { ownerDocument, walkerRoot };
+    }
 
-            let node = walker.nextNode();
-            while (node && snippets.length < 6 && scanned < maxNodesScanned) {
-                scanned += 1;
-                const text = normalizeSnapshotText((node.textContent ?? '').trim());
-                if (text.length >= 40 && text.length <= 1200) {
-                    snippets.push(text);
-                }
-                node = walker.nextNode();
-            }
-        } else {
-            const containers = root.querySelectorAll('main, article, section, div');
-            for (const node of containers) {
-                const text = normalizeSnapshotText((node.textContent ?? '').trim());
-                if (text.length < 40 || text.length > 1200) {
-                    continue;
-                }
+    function createSnapshotContainerFilter(allowedTags: Set<string>): NodeFilter {
+        return {
+            acceptNode: (candidate: Node) =>
+                candidate instanceof Element && allowedTags.has(candidate.tagName)
+                    ? NodeFilter.FILTER_ACCEPT
+                    : NodeFilter.FILTER_SKIP,
+        };
+    }
+
+    function collectTreeWalkerSnippets(walker: TreeWalker, snippets: string[], maxNodesScanned: number): void {
+        let scanned = 0;
+        let node = walker.nextNode();
+        while (node && snippets.length < 6 && scanned < maxNodesScanned) {
+            scanned += 1;
+            const text = normalizeSnapshotText((node.textContent ?? '').trim());
+            if (text.length >= 40 && text.length <= 1200) {
                 snippets.push(text);
-                if (snippets.length >= 6) {
-                    break;
-                }
+            }
+            node = walker.nextNode();
+        }
+    }
+
+    function collectLastResortCandidatesViaTreeWalker(root: ParentNode, snippets: string[]): boolean {
+        const context = resolveTreeWalkerContext(root);
+        if (!context) {
+            return false;
+        }
+        const allowedTags = new Set(['MAIN', 'ARTICLE', 'SECTION', 'DIV']);
+        const walker = context.ownerDocument.createTreeWalker(
+            context.walkerRoot,
+            NodeFilter.SHOW_ELEMENT,
+            createSnapshotContainerFilter(allowedTags),
+        );
+        collectTreeWalkerSnippets(walker, snippets, 220);
+        return true;
+    }
+
+    function collectLastResortCandidatesViaSelectors(root: ParentNode, snippets: string[]): void {
+        const containers = root.querySelectorAll('main, article, section, div');
+        for (const node of containers) {
+            const text = normalizeSnapshotText((node.textContent ?? '').trim());
+            if (text.length < 40 || text.length > 1200) {
+                continue;
+            }
+            snippets.push(text);
+            if (snippets.length >= 6) {
+                return;
             }
         }
+    }
 
-        const unique = Array.from(new Set(snippets));
-        if (unique.length === 0) {
+    function buildFallbackRoleCandidates(uniqueTexts: string[]): SnapshotMessageCandidate[] {
+        if (uniqueTexts.length === 0) {
             return [];
         }
-
-        if (unique.length === 1) {
+        if (uniqueTexts.length === 1) {
             return [
                 { role: 'user', text: 'Captured via calibration fallback' },
-                { role: 'assistant', text: unique[0] },
+                { role: 'assistant', text: uniqueTexts[0] },
             ];
         }
-
-        return unique.slice(0, 6).map((text, index) => ({
+        return uniqueTexts.slice(0, 6).map((text, index) => ({
             role: index % 2 === 0 ? 'user' : 'assistant',
             text,
         }));
+    }
+
+    function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
+        const snippets: string[] = [];
+        const usedTreeWalker = collectLastResortCandidatesViaTreeWalker(root, snippets);
+        if (!usedTreeWalker) {
+            collectLastResortCandidatesViaSelectors(root, snippets);
+        }
+
+        const unique = Array.from(new Set(snippets));
+        return buildFallbackRoleCandidates(unique);
     }
 
     function buildConversationDataFromMessages(
@@ -3204,8 +3275,49 @@ export function runPlatform(): void {
         }
     }
 
+    function shouldPreserveLifecycleOnNullToConversationSwitch(newId: string | null): boolean {
+        return !currentConversationId && isLifecycleActiveGeneration() && !!newId;
+    }
+
+    function maybeSwitchAdapterForConversation(): void {
+        const newAdapter = getPlatformAdapter(window.location.href);
+        if (!newAdapter || !currentAdapter || newAdapter.name === currentAdapter.name) {
+            return;
+        }
+        currentAdapter = newAdapter;
+        runnerState.adapter = newAdapter;
+        updateManagers();
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    }
+
+    function applyConversationSwitchLifecycle(newId: string, isPreserved: boolean): void {
+        if (isPreserved) {
+            logger.info('Conversation switch -> preserving active lifecycle', {
+                newId,
+                preservedState: lifecycleState,
+            });
+            setLifecycleState(lifecycleState, newId);
+            return;
+        }
+        setTimeout(injectSaveButton, 500);
+        logger.info('Conversation switch -> idle', {
+            newId,
+            previousState: lifecycleState,
+        });
+        setLifecycleState('idle', newId);
+    }
+
+    function schedulePostConversationSwitchCapture(newId: string): void {
+        void warmFetchConversationSnapshot(newId, 'conversation-switch');
+        setTimeout(() => {
+            maybeRunAutoCapture(newId, 'navigation');
+        }, 1800);
+    }
+
     function handleConversationSwitch(newId: string | null): void {
-        const isNewConversationNavigation = !currentConversationId && isLifecycleActiveGeneration() && !!newId;
+        const isNewConversationNavigation = shouldPreserveLifecycleOnNullToConversationSwitch(newId);
         // For null→new-conversation SPA nav during active generation,
         // skip disposal so the interceptor stream monitor keeps running.
         if (!isNewConversationNavigation) {
@@ -3225,41 +3337,9 @@ export function runPlatform(): void {
         }
 
         setCurrentConversation(newId);
-
-        // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
-        const newAdapter = getPlatformAdapter(window.location.href);
-        if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
-            currentAdapter = newAdapter;
-            runnerState.adapter = newAdapter;
-            updateManagers();
-            calibrationPreferenceLoaded = false;
-            calibrationPreferenceLoading = null;
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
-
-        if (isNewConversationNavigation) {
-            logger.info('Conversation switch → preserving active lifecycle', {
-                newId,
-                preservedState: lifecycleState,
-            });
-            // Re-associate the preserved lifecycle state with the new conversation ID
-            // so downstream systems (SFE, readiness) bind to the correct conversation.
-            setLifecycleState(lifecycleState, newId);
-        } else {
-            setTimeout(injectSaveButton, 500);
-            logger.info('Conversation switch → idle', {
-                newId,
-                previousState: lifecycleState,
-            });
-            setLifecycleState('idle', newId);
-        }
-
-        void warmFetchConversationSnapshot(newId, 'conversation-switch');
-        setTimeout(() => {
-            if (newId) {
-                maybeRunAutoCapture(newId, 'navigation');
-            }
-        }, 1800);
+        maybeSwitchAdapterForConversation();
+        applyConversationSwitchLifecycle(newId, isNewConversationNavigation);
+        schedulePostConversationSwitchCapture(newId);
     }
 
     function updateManagers(): void {
@@ -3306,40 +3386,50 @@ export function runPlatform(): void {
         }
     }
 
+    function applyActionButtonModeFromDecision(decision: ReadinessDecision, isCanonicalReady: boolean): void {
+        const isDegraded = decision.mode === 'degraded_manual_only';
+        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
+        if (isDegraded) {
+            buttonManager.setButtonEnabled('save', true);
+            buttonManager.setButtonEnabled('copy', false);
+            return;
+        }
+        buttonManager.setActionButtonsEnabled(isCanonicalReady);
+    }
+
+    function maybeLogHasDataTransition(conversationId: string, decision: ReadinessDecision, hasData: boolean): void {
+        const prevKey = lastButtonStateLog;
+        const opacity = hasData ? '1' : '0.6';
+        const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
+        if (prevKey === newKey || !hasData) {
+            return;
+        }
+        const peekedAttempt = peekAttemptId(conversationId);
+        const retries = peekedAttempt ? (canonicalStabilizationRetryCounts.get(peekedAttempt) ?? 0) : 0;
+        const hasPendingTimer = peekedAttempt ? canonicalStabilizationRetryTimers.has(peekedAttempt) : false;
+        logger.info('Button readiness transition to hasData=true', {
+            conversationId,
+            decisionMode: decision.mode,
+            decisionReason: decision.reason,
+            fidelity: getCaptureMeta(conversationId).fidelity,
+            sfeEnabled,
+            lifecycleState,
+            retries,
+            hasPendingTimer,
+        });
+    }
+
     function applyReadyButtonState(conversationId: string, decision: ReadinessDecision): void {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         const isDegraded = decision.mode === 'degraded_manual_only';
         const hasData = isCanonicalReady || isDegraded;
 
         buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
-        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
-        if (isDegraded) {
-            buttonManager.setButtonEnabled('save', true);
-            buttonManager.setButtonEnabled('copy', false);
-        } else {
-            buttonManager.setActionButtonsEnabled(isCanonicalReady);
-        }
+        applyActionButtonModeFromDecision(decision, isCanonicalReady);
 
         const opacity = hasData ? '1' : '0.6';
         buttonManager.setOpacity(opacity);
-
-        const prevKey = lastButtonStateLog;
-        const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
-        if (prevKey !== newKey && hasData) {
-            const peekedAttempt = peekAttemptId(conversationId);
-            const retries = peekedAttempt ? (canonicalStabilizationRetryCounts.get(peekedAttempt) ?? 0) : 0;
-            const hasPendingTimer = peekedAttempt ? canonicalStabilizationRetryTimers.has(peekedAttempt) : false;
-            logger.info('Button readiness transition to hasData=true', {
-                conversationId,
-                decisionMode: decision.mode,
-                decisionReason: decision.reason,
-                fidelity: getCaptureMeta(conversationId).fidelity,
-                sfeEnabled,
-                lifecycleState,
-                retries,
-                hasPendingTimer,
-            });
-        }
+        maybeLogHasDataTransition(conversationId, decision, hasData);
         logButtonStateIfChanged(conversationId, hasData, opacity);
     }
 
@@ -3548,6 +3638,32 @@ export function runPlatform(): void {
         };
     }
 
+    function shouldApplyChatGptGenerationGuard(source: 'network' | 'dom', conversationId: string): boolean {
+        const shouldApplyNetworkGenerationGuard = currentAdapter?.name === 'ChatGPT';
+        if (source !== 'network' || !shouldApplyNetworkGenerationGuard) {
+            return false;
+        }
+        return shouldBlockActionsForGeneration(conversationId);
+    }
+
+    function resolveFinishedSignalDebounce(
+        conversationId: string,
+        source: 'network' | 'dom',
+        attemptId: string | null,
+    ): { minIntervalMs: number; effectiveAttemptId: string } {
+        const isSameConversation = conversationId === lastResponseFinishedConversationId;
+        const effectiveAttemptId = attemptId ?? '';
+        const isNewAttemptInSameConversation =
+            source === 'network' &&
+            isSameConversation &&
+            !!lastResponseFinishedAttemptId &&
+            lastResponseFinishedAttemptId !== effectiveAttemptId;
+        return {
+            minIntervalMs: source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500,
+            effectiveAttemptId,
+        };
+    }
+
     function shouldProcessFinishedSignal(
         conversationId: string | null,
         source: 'network' | 'dom',
@@ -3557,27 +3673,13 @@ export function runPlatform(): void {
             logger.info('Finished signal ignored: missing conversation context', { source });
             return false;
         }
-        // ChatGPT emits many non-terminal network finished hints (stream_status polling).
-        // Gemini/Grok finished hints should not be blocked by DOM-generation heuristics.
-        const shouldApplyNetworkGenerationGuard = currentAdapter?.name === 'ChatGPT';
-        if (
-            source === 'network' &&
-            shouldApplyNetworkGenerationGuard &&
-            conversationId &&
-            shouldBlockActionsForGeneration(conversationId)
-        ) {
+        if (shouldApplyChatGptGenerationGuard(source, conversationId)) {
             logger.info('Finished signal blocked by generation guard', { conversationId, source });
             return false;
         }
         const now = Date.now();
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
-        const effectiveAttemptId = attemptId ?? '';
-        const isNewAttemptInSameConversation =
-            source === 'network' &&
-            isSameConversation &&
-            lastResponseFinishedAttemptId &&
-            lastResponseFinishedAttemptId !== effectiveAttemptId;
-        const minIntervalMs = source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500;
+        const { minIntervalMs, effectiveAttemptId } = resolveFinishedSignalDebounce(conversationId, source, attemptId);
         if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
             logger.info('Finished signal debounced', {
                 conversationId,
@@ -3721,6 +3823,12 @@ export function runPlatform(): void {
         const cachedReady = !!cached && evaluateReadinessForData(cached).ready;
 
         if (shouldPromoteGrokFromCanonicalCapture(source, cachedReady, lifecycleState)) {
+            applyCompletedLifecycleState(conversationId, attemptId);
+        }
+
+        const shouldPromoteGenericCompleted =
+            lifecycleState !== 'completed' && (source === 'dom' || currentAdapter?.name !== 'ChatGPT');
+        if (shouldPromoteGenericCompleted) {
             applyCompletedLifecycleState(conversationId, attemptId);
         }
 
@@ -4131,25 +4239,41 @@ export function runPlatform(): void {
         }
     }
 
+    function parseStreamDeltaPayload(message: unknown): StreamDeltaMessage | null {
+        const candidate = message as StreamDeltaMessage | undefined;
+        if (candidate?.type !== 'BLACKIYA_STREAM_DELTA' || typeof candidate.attemptId !== 'string') {
+            return null;
+        }
+        if (typeof candidate.text !== 'string' || candidate.text.length === 0) {
+            return null;
+        }
+        return candidate;
+    }
+
+    function resolveDeltaConversationId(typed: StreamDeltaMessage): string | null {
+        if (typeof typed.conversationId === 'string' && typed.conversationId.length > 0) {
+            return typed.conversationId;
+        }
+        return currentConversationId;
+    }
+
+    function handlePendingConversationDelta(attemptId: string, text: string): void {
+        if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
+            lifecycleAttemptId = attemptId;
+            setLifecycleState('streaming');
+        }
+        appendPendingStreamProbeText(attemptId, text);
+    }
+
     function handleStreamDeltaMessage(message: unknown): boolean {
-        if (
-            (message as StreamDeltaMessage | undefined)?.type !== 'BLACKIYA_STREAM_DELTA' ||
-            typeof (message as StreamDeltaMessage).attemptId !== 'string'
-        ) {
+        const typed = parseStreamDeltaPayload(message);
+        if (!typed) {
             return false;
         }
 
-        const typed = message as StreamDeltaMessage;
-        const text = typeof typed.text === 'string' ? typed.text : '';
-        if (text.length === 0) {
-            return true;
-        }
-
-        const conversationId =
-            typeof typed.conversationId === 'string' && typed.conversationId.length > 0
-                ? typed.conversationId
-                : currentConversationId;
+        const conversationId = resolveDeltaConversationId(typed);
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
+        const text = typed.text;
         if (isStaleAttemptMessage(attemptId, conversationId ?? undefined, 'delta')) {
             return true;
         }
@@ -4157,13 +4281,7 @@ export function runPlatform(): void {
         setActiveAttempt(attemptId);
 
         if (!conversationId) {
-            // Grok reconnect streams can emit deltas before a conversation ID is known.
-            // Surface live text immediately and promote lifecycle so the UI does not stay idle.
-            if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
-                lifecycleAttemptId = attemptId;
-                setLifecycleState('streaming');
-            }
-            appendPendingStreamProbeText(attemptId, text);
+            handlePendingConversationDelta(attemptId, text);
             return true;
         }
 
