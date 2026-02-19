@@ -246,6 +246,32 @@ const ingestEffectiveSnapshot = (
     }
 };
 
+const maybeApplyIsolatedFallbackAfterRawReplay = (
+    conversationId: string,
+    mode: CalibrationMode,
+    effectiveSnapshot: unknown,
+    isolatedSnapshot: ConversationData | null,
+    deps: CalibrationCaptureDeps,
+) => {
+    if (deps.isCaptureSatisfied(conversationId, mode) || !isRawCaptureSnapshot(effectiveSnapshot)) {
+        return;
+    }
+    logger.info('Calibration snapshot replay did not capture conversation', {
+        conversationId,
+        platform: deps.adapter.name,
+        replayUrl: effectiveSnapshot.url,
+    });
+    const isolated = isolatedSnapshot ?? deps.buildIsolatedSnapshot(conversationId);
+    if (!isolated) {
+        return;
+    }
+    logger.info('Calibration isolated DOM fallback after replay failure', {
+        conversationId,
+        platform: deps.adapter.name,
+    });
+    deps.ingestConversationData(isolated, 'calibration-isolated-dom-fallback');
+};
+
 /**
  * Executes the `page-snapshot` calibration step. Requests a snapshot from the
  * MAIN world and falls back to an isolated DOM snapshot if unavailable. After
@@ -256,8 +282,9 @@ export const captureFromSnapshot = async (
     mode: CalibrationMode,
     deps: CalibrationCaptureDeps,
 ): Promise<boolean> => {
-    // For auto-mode Gemini and ChatGPT, wait for DOM to settle first.
-    if (mode === 'auto' && (deps.adapter.name === 'Gemini' || deps.adapter.name === 'ChatGPT')) {
+    const shouldWaitForDomQuietPeriod =
+        mode === 'auto' && (deps.adapter.name === 'Gemini' || deps.adapter.name === 'ChatGPT');
+    if (shouldWaitForDomQuietPeriod) {
         const settled = await waitForDomQuietPeriod(conversationId, deps.adapter.name, 1400, 20_000);
         if (!settled) {
             logger.info('Calibration snapshot deferred; DOM still active', {
@@ -285,23 +312,7 @@ export const captureFromSnapshot = async (
     }
 
     ingestEffectiveSnapshot(conversationId, mode, effectiveSnapshot, deps);
-
-    // If raw replay didn't capture, try isolated DOM as secondary fallback.
-    if (!deps.isCaptureSatisfied(conversationId, mode) && isRawCaptureSnapshot(effectiveSnapshot)) {
-        logger.info('Calibration snapshot replay did not capture conversation', {
-            conversationId,
-            platform: deps.adapter.name,
-            replayUrl: effectiveSnapshot.url,
-        });
-        const isolated = isolatedSnapshot ?? deps.buildIsolatedSnapshot(conversationId);
-        if (isolated) {
-            logger.info('Calibration isolated DOM fallback after replay failure', {
-                conversationId,
-                platform: deps.adapter.name,
-            });
-            deps.ingestConversationData(isolated, 'calibration-isolated-dom-fallback');
-        }
-    }
+    maybeApplyIsolatedFallbackAfterRawReplay(conversationId, mode, effectiveSnapshot, isolatedSnapshot, deps);
 
     return deps.isCaptureSatisfied(conversationId, mode);
 };

@@ -17,27 +17,31 @@ import { ButtonManager } from './button-manager';
 describe('ButtonManager', () => {
     const windowInstance = new Window();
     const document = windowInstance.document;
+    const isObjectLike = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object';
+    const enqueueChildren = (queue: any[], current: any) => {
+        if (current.shadowRoot) {
+            queue.push(current.shadowRoot);
+        }
+        const children = current.children;
+        if (!children || typeof children.length !== 'number') {
+            return;
+        }
+        for (let i = 0; i < children.length; i += 1) {
+            queue.push(children.item(i));
+        }
+    };
     const listById = (id: string, root: any = document): any[] => {
         const matches: any[] = [];
         const queue: any[] = [root];
         while (queue.length > 0) {
             const current = queue.shift();
-            if (!current || typeof current !== 'object') {
+            if (!isObjectLike(current)) {
                 continue;
             }
             if (current.id === id) {
                 matches.push(current);
             }
-            if (current.shadowRoot) {
-                queue.push(current.shadowRoot);
-            }
-            const children = current.children;
-            if (!children || typeof children.length !== 'number') {
-                continue;
-            }
-            for (let i = 0; i < children.length; i += 1) {
-                queue.push(children.item(i));
-            }
+            enqueueChildren(queue, current);
         }
         return matches;
     };

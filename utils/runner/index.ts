@@ -54,7 +54,6 @@ import {
 } from '@/utils/runner/attempt-registry';
 import {
     type CalibrationCaptureDeps,
-    captureFromRetries,
     isConversationDataLike,
     isRawCaptureSnapshot,
     type RawCaptureSnapshot,
@@ -72,7 +71,7 @@ import {
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
 } from '@/utils/runner/canonical-stabilization';
-import { buildIsolatedDomSnapshot, buildRunnerSnapshotConversationData } from '@/utils/runner/dom-snapshot';
+import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import {
     attachExportMeta,
     buildExportPayloadForFormat as buildExportPayloadForFormatPure,
@@ -1150,6 +1149,77 @@ export const runPlatform = (): void => {
         );
     };
 
+    const logCanonicalRetrySkip = (
+        conversationId: string,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+    ) => {
+        if (resolution.ready) {
+            return;
+        }
+        logger.info('Canonical retry skipped', {
+            conversationId,
+            lifecycleState,
+            reason: resolution.reason,
+            blocking: resolution.blockingConditions,
+        });
+    };
+
+    const maybeScheduleCanonicalRetryFromResolution = (
+        conversationId: string,
+        effectiveAttemptId: string,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+        readiness: PlatformReadiness,
+    ) => {
+        const shouldRetry = shouldScheduleCanonicalRetry(resolution, lifecycleState);
+        if (!shouldRetry) {
+            logCanonicalRetrySkip(conversationId, resolution);
+            return;
+        }
+        scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
+        const awaitingStabilization = resolution.reason === 'awaiting_stabilization';
+        structuredLogger.emit(
+            effectiveAttemptId,
+            'info',
+            awaitingStabilization ? 'awaiting_stabilization' : 'awaiting_canonical_capture',
+            awaitingStabilization
+                ? 'Awaiting canonical stabilization before ready'
+                : 'Completed stream but canonical sample not terminal yet; scheduling retries',
+            { conversationId, phase: resolution.phase },
+            `${awaitingStabilization ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${readiness.contentHash ?? 'none'}`,
+        );
+    };
+
+    const maybeClearCanonicalRetryOnTimeout = (
+        effectiveAttemptId: string,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+    ) => {
+        if (!resolution.blockingConditions.includes('stabilization_timeout')) {
+            return;
+        }
+        clearCanonicalStabilizationRetry(effectiveAttemptId);
+    };
+
+    const maybeHandleCanonicalReadyState = (
+        effectiveAttemptId: string,
+        conversationId: string,
+        data: ConversationData,
+        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
+    ) => {
+        if (!resolution.ready) {
+            return;
+        }
+        clearCanonicalStabilizationRetry(effectiveAttemptId);
+        syncStreamProbePanelFromCanonical(conversationId, data);
+        structuredLogger.emit(
+            effectiveAttemptId,
+            'info',
+            'captured_ready',
+            'Capture reached ready state',
+            { conversationId, phase: resolution.phase },
+            `captured-ready:${conversationId}`,
+        );
+    };
+
     function ingestSfeCanonicalSample(
         data: ConversationData,
         attemptId?: string,
@@ -1170,45 +1240,9 @@ export const runPlatform = (): void => {
             timestampMs: Date.now(),
         });
         emitCanonicalSampleProcessed(effectiveAttemptId, conversationId, resolution, readiness);
-        const shouldRetry = shouldScheduleCanonicalRetry(resolution, lifecycleState);
-        if (!shouldRetry && !resolution.ready) {
-            logger.info('Canonical retry skipped', {
-                conversationId,
-                lifecycleState,
-                reason: resolution.reason,
-                blocking: resolution.blockingConditions,
-            });
-        }
-        if (shouldRetry) {
-            scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
-            structuredLogger.emit(
-                effectiveAttemptId,
-                'info',
-                resolution.reason === 'awaiting_stabilization'
-                    ? 'awaiting_stabilization'
-                    : 'awaiting_canonical_capture',
-                resolution.reason === 'awaiting_stabilization'
-                    ? 'Awaiting canonical stabilization before ready'
-                    : 'Completed stream but canonical sample not terminal yet; scheduling retries',
-                { conversationId, phase: resolution.phase },
-                `${resolution.reason === 'awaiting_stabilization' ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${readiness.contentHash ?? 'none'}`,
-            );
-        }
-        if (resolution.blockingConditions.includes('stabilization_timeout')) {
-            clearCanonicalStabilizationRetry(effectiveAttemptId);
-        }
-        if (resolution.ready) {
-            clearCanonicalStabilizationRetry(effectiveAttemptId);
-            syncStreamProbePanelFromCanonical(conversationId, data);
-            structuredLogger.emit(
-                effectiveAttemptId,
-                'info',
-                'captured_ready',
-                'Capture reached ready state',
-                { conversationId, phase: resolution.phase },
-                `captured-ready:${conversationId}`,
-            );
-        }
+        maybeScheduleCanonicalRetryFromResolution(conversationId, effectiveAttemptId, resolution, readiness);
+        maybeClearCanonicalRetryOnTimeout(effectiveAttemptId, resolution);
+        maybeHandleCanonicalReadyState(effectiveAttemptId, conversationId, data, resolution);
         return resolution;
     }
 
@@ -1367,13 +1401,6 @@ export const runPlatform = (): void => {
             .join('\n\n')
             .trim();
     }
-
-    // Lazy import so buildCommonExport doesn't need to be imported at module level
-    // purely for the probe display path.
-    const buildCommonExportForProbe = (data: ConversationData): unknown => {
-        const { buildCommonExport } = require('@/utils/common-export');
-        return buildCommonExport(data, currentAdapter?.name ?? 'Unknown');
-    };
 
     // -----------------------------------------------------------------------
     // Stream done probe
@@ -1539,29 +1566,41 @@ export const runPlatform = (): void => {
         context: StreamDoneProbeContext,
         apiUrls: string[],
     ): Promise<boolean> => {
+        const shouldStopProbe = () =>
+            context.controller.signal.aborted || isAttemptDisposedOrSuperseded(context.attemptId);
+        const tryFetchCandidate = async (apiUrl: string): Promise<ConversationData | null> => {
+            const response = await fetch(apiUrl, { credentials: 'include', signal: context.controller.signal });
+            if (!response.ok) {
+                return null;
+            }
+            const text = await response.text();
+            const parsed = context.adapter.parseInterceptedData(text, apiUrl);
+            if (!parsed?.conversation_id || parsed.conversation_id !== context.conversationId) {
+                return null;
+            }
+            return parsed;
+        };
+        const applyProbeFetchSuccess = (parsed: ConversationData) => {
+            const body = extractResponseTextForProbe(parsed) || '(empty response text)';
+            if (lastStreamProbeKey === context.probeKey) {
+                setStreamDonePanelWithMirror(context.conversationId, 'stream-done: fetched full text', body);
+            }
+            logger.info('Stream done probe success', {
+                platform: context.adapter.name,
+                conversationId: context.conversationId,
+                textLength: body.length,
+            });
+        };
         for (const apiUrl of apiUrls) {
-            if (context.controller.signal.aborted || isAttemptDisposedOrSuperseded(context.attemptId)) {
+            if (shouldStopProbe()) {
                 return true;
             }
             try {
-                const response = await fetch(apiUrl, { credentials: 'include', signal: context.controller.signal });
-                if (!response.ok) {
+                const parsed = await tryFetchCandidate(apiUrl);
+                if (!parsed) {
                     continue;
                 }
-                const text = await response.text();
-                const parsed = context.adapter.parseInterceptedData(text, apiUrl);
-                if (!parsed?.conversation_id || parsed.conversation_id !== context.conversationId) {
-                    continue;
-                }
-                const body = extractResponseTextForProbe(parsed) || '(empty response text)';
-                if (lastStreamProbeKey === context.probeKey) {
-                    setStreamDonePanelWithMirror(context.conversationId, 'stream-done: fetched full text', body);
-                }
-                logger.info('Stream done probe success', {
-                    platform: context.adapter.name,
-                    conversationId: context.conversationId,
-                    textLength: body.length,
-                });
+                applyProbeFetchSuccess(parsed);
                 return true;
             } catch {
                 // try next candidate
@@ -1571,18 +1610,28 @@ export const runPlatform = (): void => {
     };
 
     const tryShowStreamDoneFallbackPanel = async (context: StreamDoneProbeContext) => {
-        if (lastStreamProbeKey !== context.probeKey) {
-            return;
-        }
-        const cached = interceptionManager.getConversation(context.conversationId);
-        if (cached && evaluateReadinessForData(cached).ready) {
+        const showAwaitingCanonical = () => {
+            setStreamDonePanelWithMirror(
+                context.conversationId,
+                'stream-done: awaiting canonical capture',
+                `Conversation stream completed for ${context.conversationId}. Waiting for canonical capture.`,
+            );
+        };
+        const tryShowCapturedCachePanel = () => {
+            const cached = interceptionManager.getConversation(context.conversationId);
+            if (!cached || !evaluateReadinessForData(cached).ready) {
+                return false;
+            }
             const cachedText = extractResponseTextForProbe(cached);
             const body = cachedText.length > 0 ? cachedText : '(captured cache ready; no assistant text extracted)';
             setStreamDonePanelWithMirror(context.conversationId, 'stream-done: using captured cache', body);
-            return;
-        }
-        const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(context.conversationId, context.attemptId);
-        if (capturedFromSnapshot) {
+            return true;
+        };
+        const tryShowSnapshotFallbackPanel = async () => {
+            const capturedFromSnapshot = await tryStreamDoneSnapshotCapture(context.conversationId, context.attemptId);
+            if (!capturedFromSnapshot) {
+                return false;
+            }
             const snapshotCached = interceptionManager.getConversation(context.conversationId);
             const snapshotText = snapshotCached ? extractResponseTextForProbe(snapshotCached) : '';
             const snapshotBody = snapshotText.length > 0 ? snapshotText : '(captured via snapshot fallback)';
@@ -1591,13 +1640,18 @@ export const runPlatform = (): void => {
                 'stream-done: degraded snapshot captured',
                 `${snapshotBody}\n\nAwaiting canonical capture. Force Save appears only if stabilization times out.`,
             );
+            return true;
+        };
+        if (lastStreamProbeKey !== context.probeKey) {
             return;
         }
-        setStreamDonePanelWithMirror(
-            context.conversationId,
-            'stream-done: awaiting canonical capture',
-            `Conversation stream completed for ${context.conversationId}. Waiting for canonical capture.`,
-        );
+        if (tryShowCapturedCachePanel()) {
+            return;
+        }
+        if (await tryShowSnapshotFallbackPanel()) {
+            return;
+        }
+        showAwaitingCanonical();
     };
 
     // -----------------------------------------------------------------------
@@ -1782,7 +1836,7 @@ export const runPlatform = (): void => {
     // Calibration capture (delegates to calibration-capture module)
     // -----------------------------------------------------------------------
 
-    const buildCalibrationCaptureDeps = (conversationId: string): CalibrationCaptureDeps => ({
+    const buildCalibrationCaptureDeps = (_conversationId: string): CalibrationCaptureDeps => ({
         adapter: currentAdapter!,
         isCaptureSatisfied: (cid, mode) => isCalibrationCaptureSatisfied(cid, mode),
         flushQueuedMessages: () => interceptionManager.flushQueuedMessages(),
@@ -1911,54 +1965,87 @@ export const runPlatform = (): void => {
         return !!interceptionManager.getConversation(conversationId);
     };
 
-    async function runCalibrationCapture(mode: CalibrationMode = 'manual', hintedConversationId?: string) {
-        if (calibrationState === 'capturing' || !currentAdapter) {
-            return;
+    const resolveCalibrationConversationId = (
+        hintedConversationId?: string,
+    ): { adapter: LLMPlatform; conversationId: string } | null => {
+        if (!currentAdapter) {
+            return null;
         }
         const conversationId = hintedConversationId || currentAdapter.extractConversationId(window.location.href);
         if (!conversationId) {
+            return null;
+        }
+        return { adapter: currentAdapter, conversationId };
+    };
+
+    const applyCalibrationFailureState = (mode: CalibrationMode, conversationId: string) => {
+        if (mode === 'manual') {
+            setCalibrationStatus('error');
+            refreshButtonState(conversationId);
+        } else {
+            setCalibrationStatus('idle');
+        }
+        logger.warn('Calibration capture failed after retries', { conversationId });
+    };
+
+    const applyCalibrationSuccessState = async (
+        mode: CalibrationMode,
+        conversationId: string,
+        successfulStep: CalibrationStep,
+        platformName: string,
+    ) => {
+        if (mode === 'manual') {
+            markCalibrationSuccess(conversationId);
+        } else {
+            setCalibrationStatus('success');
+            refreshButtonState(conversationId);
+        }
+        if (shouldPersistCalibrationProfile(mode)) {
+            await rememberCalibrationSuccess(platformName, successfulStep);
+        }
+        logger.info('Calibration capture succeeded', { conversationId, step: successfulStep, mode });
+    };
+
+    const runCalibrationStrategy = async (
+        strategyOrder: CalibrationStep[],
+        conversationId: string,
+        mode: CalibrationMode,
+    ): Promise<CalibrationStep | null> => {
+        for (const step of strategyOrder) {
+            if (await runCalibrationStep(step, conversationId, mode)) {
+                return step;
+            }
+        }
+        return null;
+    };
+
+    async function runCalibrationCapture(mode: CalibrationMode = 'manual', hintedConversationId?: string) {
+        if (calibrationState === 'capturing') {
+            return;
+        }
+        const resolved = resolveCalibrationConversationId(hintedConversationId);
+        if (!resolved) {
             logger.warn('Calibration failed: no conversation ID');
             setCalibrationStatus('error');
             return;
         }
+        const { adapter, conversationId } = resolved;
 
         setCalibrationStatus('capturing');
-        logger.info('Calibration capture started', { conversationId, platform: currentAdapter.name });
-        const strategyOrder = buildCalibrationOrderForMode(rememberedPreferredStep, mode, currentAdapter.name);
+        logger.info('Calibration capture started', { conversationId, platform: adapter.name });
+        const strategyOrder = buildCalibrationOrderForMode(rememberedPreferredStep, mode, adapter.name);
         logger.info('Calibration strategy', {
-            platform: currentAdapter.name,
+            platform: adapter.name,
             steps: strategyOrder,
             mode,
             remembered: rememberedPreferredStep,
         });
-
-        let successfulStep: CalibrationStep | null = null;
-        for (const step of strategyOrder) {
-            if (await runCalibrationStep(step, conversationId, mode)) {
-                successfulStep = step;
-                break;
-            }
-        }
+        const successfulStep = await runCalibrationStrategy(strategyOrder, conversationId, mode);
 
         if (successfulStep) {
-            if (mode === 'manual') {
-                markCalibrationSuccess(conversationId);
-            } else {
-                setCalibrationStatus('success');
-                refreshButtonState(conversationId);
-            }
-            if (shouldPersistCalibrationProfile(mode)) {
-                await rememberCalibrationSuccess(currentAdapter.name, successfulStep);
-            }
-            logger.info('Calibration capture succeeded', { conversationId, step: successfulStep, mode });
+            await applyCalibrationSuccessState(mode, conversationId, successfulStep, adapter.name);
         } else {
-            if (mode === 'manual') {
-                setCalibrationStatus('error');
-                refreshButtonState(conversationId);
-            } else {
-                setCalibrationStatus('idle');
-            }
-            logger.warn('Calibration capture failed after retries', { conversationId });
+            applyCalibrationFailureState(mode, conversationId);
         }
     }
 
@@ -2171,6 +2258,33 @@ export const runPlatform = (): void => {
     const isLifecycleActiveGeneration = (): boolean =>
         lifecycleState === 'prompt-sent' || lifecycleState === 'streaming';
 
+    const updateLifecycleConversationTracking = (state: LifecycleUiState, resolvedConversationId: string | null) => {
+        if (state === 'idle') {
+            lifecycleConversationId = null;
+            lifecycleAttemptId = null;
+            return;
+        }
+        if (resolvedConversationId) {
+            lifecycleConversationId = resolvedConversationId;
+        }
+    };
+
+    const applyLifecycleButtonState = (state: LifecycleUiState, conversationId?: string) => {
+        if (state === 'completed') {
+            const targetId = conversationId || extractConversationIdFromLocation() || undefined;
+            if (targetId) {
+                refreshButtonState(targetId);
+                scheduleButtonRefresh(targetId);
+            }
+            return;
+        }
+        if (state !== 'prompt-sent' && state !== 'streaming') {
+            return;
+        }
+        buttonManager.setActionButtonsEnabled(false);
+        buttonManager.setOpacity('0.6');
+    };
+
     const setLifecycleState = (state: LifecycleUiState, conversationId?: string) => {
         const resolvedConversationId = conversationId ?? currentConversationId ?? null;
         if (lifecycleState !== state) {
@@ -2182,23 +2296,9 @@ export const runPlatform = (): void => {
         }
         lifecycleState = state;
         runnerState.lifecycleState = state;
-        if (state === 'idle') {
-            lifecycleConversationId = null;
-            lifecycleAttemptId = null;
-        } else if (resolvedConversationId) {
-            lifecycleConversationId = resolvedConversationId;
-        }
+        updateLifecycleConversationTracking(state, resolvedConversationId);
         buttonManager.setLifecycleState(state);
-        if (state === 'completed') {
-            const targetId = conversationId || extractConversationIdFromLocation() || undefined;
-            if (targetId) {
-                refreshButtonState(targetId);
-                scheduleButtonRefresh(targetId);
-            }
-        } else if (state === 'prompt-sent' || state === 'streaming') {
-            buttonManager.setActionButtonsEnabled(false);
-            buttonManager.setOpacity('0.6');
-        }
+        applyLifecycleButtonState(state, conversationId);
         emitPublicStatusSnapshot(resolvedConversationId);
     };
 
@@ -2331,6 +2431,46 @@ export const runPlatform = (): void => {
         return options.includeDegraded === true && decision.mode === 'degraded_manual_only';
     }
 
+    const disableButtonsForActiveGeneration = (conversationId: string) => {
+        buttonManager.setSaveButtonMode('default');
+        buttonManager.setActionButtonsEnabled(false);
+        buttonManager.setOpacity('0.6');
+        logButtonStateIfChanged(conversationId, false, '0.6');
+        emitPublicStatusSnapshot(conversationId);
+    };
+
+    const maybeIngestCachedCanonicalSample = (conversationId: string) => {
+        const cached = interceptionManager.getConversation(conversationId);
+        const captureMeta = getCaptureMeta(conversationId);
+        if (!cached || !shouldIngestAsCanonicalSample(captureMeta)) {
+            return;
+        }
+        ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
+    };
+
+    const applyReadinessDecisionToButtons = (conversationId: string, decision: ReadinessDecision) => {
+        const isCanonicalReady = decision.mode === 'canonical_ready';
+        const isDegraded = decision.mode === 'degraded_manual_only';
+        const hasData = isCanonicalReady || isDegraded;
+        buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
+        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
+        if (isDegraded) {
+            buttonManager.setButtonEnabled('save', true);
+        } else {
+            buttonManager.setActionButtonsEnabled(isCanonicalReady);
+        }
+        const opacity = hasData ? '1' : '0.6';
+        buttonManager.setOpacity(opacity);
+        logButtonStateIfChanged(conversationId, hasData, opacity);
+        if (isCanonicalReady && calibrationState !== 'capturing') {
+            setCalibrationStatus('success');
+            syncCalibrationButtonDisplay();
+        } else if (!isCanonicalReady && calibrationState === 'success') {
+            setCalibrationStatus('idle');
+            syncCalibrationButtonDisplay();
+        }
+    };
+
     function refreshButtonState(forConversationId?: string) {
         if (!currentAdapter) {
             emitPublicStatusSnapshot(null);
@@ -2350,47 +2490,13 @@ export const runPlatform = (): void => {
             (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') &&
             (!currentConversationId || conversationId === currentConversationId);
         if (shouldDisable || (lifecycleState !== 'completed' && shouldBlockActionsForGeneration(conversationId))) {
-            buttonManager.setSaveButtonMode('default');
-            buttonManager.setActionButtonsEnabled(false);
-            buttonManager.setOpacity('0.6');
-            logButtonStateIfChanged(conversationId, false, '0.6');
-            emitPublicStatusSnapshot(conversationId);
+            disableButtonsForActiveGeneration(conversationId);
             return;
         }
 
-        // Ensure SFE has a canonical sample for any network-sourced data.
-        const cached = interceptionManager.getConversation(conversationId);
-        const captureMeta = getCaptureMeta(conversationId);
-        if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
-            ingestSfeCanonicalSample(cached, attemptByConversation.get(conversationId));
-        }
-
+        maybeIngestCachedCanonicalSample(conversationId);
         const decision = resolveReadinessDecision(conversationId);
-        const isCanonicalReady = decision.mode === 'canonical_ready';
-        const isDegraded = decision.mode === 'degraded_manual_only';
-        const hasData = isCanonicalReady || isDegraded;
-
-        buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
-        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
-        if (isDegraded) {
-            buttonManager.setButtonEnabled('save', true);
-        } else {
-            buttonManager.setActionButtonsEnabled(isCanonicalReady);
-        }
-
-        const opacity = hasData ? '1' : '0.6';
-        buttonManager.setOpacity(opacity);
-        logButtonStateIfChanged(conversationId, hasData, opacity);
-
-        // Sync calibration display.
-        if (isCanonicalReady && calibrationState !== 'capturing') {
-            setCalibrationStatus('success');
-            syncCalibrationButtonDisplay();
-        } else if (!isCanonicalReady && calibrationState === 'success') {
-            setCalibrationStatus('idle');
-            syncCalibrationButtonDisplay();
-        }
-
+        applyReadinessDecisionToButtons(conversationId, decision);
         emitPublicStatusSnapshot(conversationId);
     }
 
@@ -2626,17 +2732,27 @@ export const runPlatform = (): void => {
         return true;
     };
 
+    const resolveFinishedConversationId = (hintedConversationId?: string): string | null =>
+        hintedConversationId ??
+        (currentAdapter ? currentAdapter.extractConversationId(window.location.href) : null) ??
+        currentConversationId;
+
+    const resolveFinishedAttemptId = (
+        conversationId: string | null,
+        peekedAttemptId: string | null,
+    ): { attemptId: string; wasPeeked: boolean } => {
+        const attemptId = peekedAttemptId ?? resolveAttemptId(conversationId ?? undefined);
+        return { attemptId, wasPeeked: !!peekedAttemptId };
+    };
+
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string) {
-        const conversationId =
-            hintedConversationId ??
-            (currentAdapter ? currentAdapter.extractConversationId(window.location.href) : null) ??
-            currentConversationId;
+        const conversationId = resolveFinishedConversationId(hintedConversationId);
         const peekedAttemptId = conversationId ? peekAttemptId(conversationId) : null;
         if (!shouldProcessFinishedSignal(conversationId, source, peekedAttemptId)) {
             return;
         }
-        const attemptId = peekedAttemptId ?? resolveAttemptId(conversationId ?? undefined);
-        if (!peekedAttemptId) {
+        const { attemptId, wasPeeked } = resolveFinishedAttemptId(conversationId, peekedAttemptId);
+        if (!wasPeeked) {
             lastResponseFinishedAttemptId = attemptId;
         }
         setActiveAttempt(attemptId);
@@ -2708,11 +2824,39 @@ export const runPlatform = (): void => {
         if (typed?.type !== MESSAGE_TYPES.RESPONSE_FINISHED || typeof typed.attemptId !== 'string') {
             return false;
         }
-        const hintedConversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
-        const resolvedConversationId =
-            hintedConversationId ??
-            (currentAdapter ? currentAdapter.extractConversationId(window.location.href) : null) ??
-            currentConversationId;
+        const resolveFinishedMessageConversationId = (payload: ResponseFinishedMessage): string | null => {
+            if (typeof payload.conversationId === 'string') {
+                return payload.conversationId;
+            }
+            return (
+                (currentAdapter ? currentAdapter.extractConversationId(window.location.href) : null) ??
+                currentConversationId
+            );
+        };
+        const maybePromoteCompletedLifecycle = (conversationId: string, attemptId: string) => {
+            if (lifecycleState !== 'prompt-sent' && lifecycleState !== 'streaming') {
+                return;
+            }
+            const shouldReject =
+                currentAdapter?.name === 'ChatGPT' && currentAdapter && isPlatformGenerating(currentAdapter);
+            if (shouldReject) {
+                logger.info('RESPONSE_FINISHED rejected: platform still generating', {
+                    conversationId,
+                    attemptId,
+                    lifecycleState,
+                });
+                return;
+            }
+            logger.info('RESPONSE_FINISHED promoted lifecycle to completed', {
+                conversationId,
+                attemptId,
+                previousLifecycle: lifecycleState,
+            });
+            lifecycleAttemptId = attemptId;
+            lifecycleConversationId = conversationId;
+            setLifecycleState('completed', conversationId);
+        };
+        const resolvedConversationId = resolveFinishedMessageConversationId(typed);
         if (!resolvedConversationId) {
             logger.info('RESPONSE_FINISHED ignored: missing conversation context', {
                 attemptId: typed.attemptId,
@@ -2726,26 +2870,7 @@ export const runPlatform = (): void => {
         }
         setActiveAttempt(attemptId);
         bindAttempt(resolvedConversationId, attemptId);
-        if (lifecycleState === 'prompt-sent' || lifecycleState === 'streaming') {
-            const shouldReject =
-                currentAdapter?.name === 'ChatGPT' && currentAdapter && isPlatformGenerating(currentAdapter);
-            if (shouldReject) {
-                logger.info('RESPONSE_FINISHED rejected: platform still generating', {
-                    conversationId: resolvedConversationId,
-                    attemptId,
-                    lifecycleState,
-                });
-                return true;
-            }
-            logger.info('RESPONSE_FINISHED promoted lifecycle to completed', {
-                conversationId: resolvedConversationId,
-                attemptId,
-                previousLifecycle: lifecycleState,
-            });
-            lifecycleAttemptId = attemptId;
-            lifecycleConversationId = resolvedConversationId;
-            setLifecycleState('completed', resolvedConversationId);
-        }
+        maybePromoteCompletedLifecycle(resolvedConversationId, attemptId);
         handleResponseFinished('network', resolvedConversationId);
         return true;
     };
@@ -2829,30 +2954,43 @@ export const runPlatform = (): void => {
         }
     };
 
+    const isSupportedLifecyclePhase = (phase: unknown): phase is ResponseLifecycleMessage['phase'] =>
+        phase === 'prompt-sent' || phase === 'streaming' || phase === 'completed' || phase === 'terminated';
+
+    const handlePendingLifecycleWithoutConversation = (
+        phase: ResponseLifecycleMessage['phase'],
+        attemptId: string,
+        platform: string,
+        rawAttemptId: string,
+    ) => {
+        cachePendingLifecycleSignal(attemptId, phase, platform);
+        ingestSfeLifecycleFromWirePhase(phase, attemptId, null);
+        logger.info('Lifecycle pending conversation resolution', {
+            phase,
+            platform,
+            attemptId: rawAttemptId,
+        });
+        if (phase !== 'prompt-sent' && phase !== 'streaming') {
+            return;
+        }
+        lifecycleAttemptId = attemptId;
+        setLifecycleState(phase);
+    };
+
     const handleLifecycleMessage = (message: unknown): boolean => {
         const typed = message as ResponseLifecycleMessage | undefined;
         if (typed?.type !== MESSAGE_TYPES.RESPONSE_LIFECYCLE || typeof typed.attemptId !== 'string') {
             return false;
         }
         const phase = typed.phase;
-        if (phase !== 'prompt-sent' && phase !== 'streaming' && phase !== 'completed' && phase !== 'terminated') {
+        if (!isSupportedLifecyclePhase(phase)) {
             return false;
         }
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
         const conversationId = typeof typed.conversationId === 'string' ? typed.conversationId : undefined;
 
         if (!conversationId) {
-            cachePendingLifecycleSignal(attemptId, phase, typed.platform);
-            ingestSfeLifecycleFromWirePhase(phase, attemptId, null);
-            logger.info('Lifecycle pending conversation resolution', {
-                phase,
-                platform: typed.platform,
-                attemptId: typed.attemptId,
-            });
-            if (phase === 'prompt-sent' || phase === 'streaming') {
-                lifecycleAttemptId = attemptId;
-                setLifecycleState(phase);
-            }
+            handlePendingLifecycleWithoutConversation(phase, attemptId, typed.platform, typed.attemptId);
             return true;
         }
 
@@ -2869,6 +3007,21 @@ export const runPlatform = (): void => {
         return true;
     };
 
+    const resolveStreamDeltaConversationId = (typed: StreamDeltaMessage): string | null => {
+        if (typeof typed.conversationId === 'string' && typed.conversationId.length > 0) {
+            return typed.conversationId;
+        }
+        return currentConversationId;
+    };
+
+    const handleStreamDeltaWithoutConversation = (attemptId: string, text: string) => {
+        if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
+            lifecycleAttemptId = attemptId;
+            setLifecycleState('streaming');
+        }
+        appendPendingStreamProbeText(attemptId, text);
+    };
+
     const handleStreamDeltaMessage = (message: unknown): boolean => {
         const typed = message as StreamDeltaMessage | undefined;
         if (typed?.type !== MESSAGE_TYPES.STREAM_DELTA || typeof typed.attemptId !== 'string') {
@@ -2877,21 +3030,14 @@ export const runPlatform = (): void => {
         if (typeof typed.text !== 'string' || typed.text.length === 0) {
             return false;
         }
-        const conversationId =
-            typeof typed.conversationId === 'string' && typed.conversationId.length > 0
-                ? typed.conversationId
-                : currentConversationId;
+        const conversationId = resolveStreamDeltaConversationId(typed);
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
         if (isStaleAttemptMessage(attemptId, conversationId ?? undefined, 'delta')) {
             return true;
         }
         setActiveAttempt(attemptId);
         if (!conversationId) {
-            if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
-                lifecycleAttemptId = attemptId;
-                setLifecycleState('streaming');
-            }
-            appendPendingStreamProbeText(attemptId, typed.text);
+            handleStreamDeltaWithoutConversation(attemptId, typed.text);
             return true;
         }
         bindAttempt(conversationId, attemptId);
@@ -3164,6 +3310,23 @@ export const runPlatform = (): void => {
         }
     };
 
+    const resetAdapterCalibrationPreference = (adapterName: string) => {
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        void ensureCalibrationPreferenceLoaded(adapterName);
+    };
+
+    const maybeSwitchAdapterForConversation = () => {
+        const newAdapter = getPlatformAdapter(window.location.href);
+        if (!newAdapter || !currentAdapter || newAdapter.name === currentAdapter.name) {
+            return;
+        }
+        currentAdapter = newAdapter;
+        runnerState.adapter = newAdapter;
+        interceptionManager.updateAdapter(currentAdapter);
+        resetAdapterCalibrationPreference(currentAdapter.name);
+    };
+
     function handleConversationSwitch(newId: string | null) {
         const isNewConversationNavigation = !currentConversationId && isLifecycleActiveGeneration() && !!newId;
         if (!isNewConversationNavigation) {
@@ -3181,16 +3344,7 @@ export const runPlatform = (): void => {
             buttonManager.remove();
         }
         setCurrentConversation(newId);
-        // Switch adapter if the platform changed.
-        const newAdapter = getPlatformAdapter(window.location.href);
-        if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
-            currentAdapter = newAdapter;
-            runnerState.adapter = newAdapter;
-            interceptionManager.updateAdapter(currentAdapter);
-            calibrationPreferenceLoaded = false;
-            calibrationPreferenceLoading = null;
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
+        maybeSwitchAdapterForConversation();
         if (isNewConversationNavigation) {
             logger.info('Conversation switch -> preserving active lifecycle', {
                 newId,
@@ -3262,37 +3416,56 @@ export const runPlatform = (): void => {
     void loadStreamDumpSetting();
     void loadStreamProbeVisibilitySetting();
 
-    type StorageChangeMap = Parameters<Parameters<typeof browser.storage.onChanged.addListener>[0]>[0];
+    const handleStorageStreamDumpChange = (changes: Record<string, { newValue?: unknown }>) => {
+        if (!changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
+            return;
+        }
+        streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
+        emitStreamDumpConfig();
+    };
+
+    const handleStorageProbeVisibilityChange = (changes: Record<string, { newValue?: unknown }>) => {
+        if (!changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]) {
+            return;
+        }
+        streamProbeVisible = changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]?.newValue === true;
+        if (!streamProbeVisible) {
+            removeStreamProbePanel();
+        }
+    };
+
+    const handleStorageSfeEnabledChange = (changes: Record<string, { newValue?: unknown }>) => {
+        if (!changes[STORAGE_KEYS.SFE_ENABLED]) {
+            return;
+        }
+        sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
+        refreshButtonState(currentConversationId ?? undefined);
+    };
+
+    const handleStorageCalibrationProfilesChange = (changes: Record<string, { newValue?: unknown }>) => {
+        if (!changes[STORAGE_KEYS.CALIBRATION_PROFILES] || !currentAdapter) {
+            return;
+        }
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        autoCaptureAttempts.clear();
+        autoCaptureDeferredLogged.clear();
+        for (const timerId of autoCaptureRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        autoCaptureRetryTimers.clear();
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    };
 
     const storageChangeListener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
         if (areaName !== 'local') {
             return;
         }
-        if (changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
-            streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
-            emitStreamDumpConfig();
-        }
-        if (changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]) {
-            streamProbeVisible = changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]?.newValue === true;
-            if (!streamProbeVisible) {
-                removeStreamProbePanel();
-            }
-        }
-        if (changes[STORAGE_KEYS.SFE_ENABLED]) {
-            sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
-            refreshButtonState(currentConversationId ?? undefined);
-        }
-        if (changes[STORAGE_KEYS.CALIBRATION_PROFILES] && currentAdapter) {
-            calibrationPreferenceLoaded = false;
-            calibrationPreferenceLoading = null;
-            autoCaptureAttempts.clear();
-            autoCaptureDeferredLogged.clear();
-            for (const timerId of autoCaptureRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            autoCaptureRetryTimers.clear();
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
+        const typedChanges = changes as Record<string, { newValue?: unknown }>;
+        handleStorageStreamDumpChange(typedChanges);
+        handleStorageProbeVisibilityChange(typedChanges);
+        handleStorageSfeEnabledChange(typedChanges);
+        handleStorageCalibrationProfilesChange(typedChanges);
     };
     browser.storage.onChanged.addListener(storageChangeListener);
 
@@ -3361,6 +3534,70 @@ export const runPlatform = (): void => {
     let cleanedUp = false;
     let beforeUnloadHandler: (() => void) | null = null;
 
+    const clearTimerMap = (timerMap: Map<string, number>) => {
+        for (const timerId of timerMap.values()) {
+            clearTimeout(timerId);
+        }
+        timerMap.clear();
+    };
+
+    const disposeAttemptsForTeardown = () => {
+        const disposed = sfe.disposeAll();
+        for (const attemptId of disposed) {
+            cancelStreamDoneProbe(attemptId, 'teardown');
+            clearCanonicalStabilizationRetry(attemptId);
+            clearProbeLeaseRetry(attemptId);
+            emitAttemptDisposed(attemptId, 'teardown');
+        }
+    };
+
+    const disposeStreamProbeControllers = () => {
+        for (const controller of streamProbeControllers.values()) {
+            try {
+                controller.abort();
+            } catch {
+                /* ignore */
+            }
+        }
+        streamProbeControllers.clear();
+        probeLease.dispose();
+    };
+
+    const clearRuntimeCollections = () => {
+        clearTimerMap(autoCaptureRetryTimers);
+        clearTimerMap(canonicalStabilizationRetryTimers);
+        clearTimerMap(probeLeaseRetryTimers);
+        canonicalStabilizationRetryCounts.clear();
+        canonicalStabilizationStartedAt.clear();
+        timeoutWarningByAttempt.clear();
+        canonicalStabilizationInProgress.clear();
+        autoCaptureDeferredLogged.clear();
+    };
+
+    const clearBootRetryTimeouts = () => {
+        for (const timeoutId of retryTimeoutIds) {
+            clearTimeout(timeoutId);
+        }
+        retryTimeoutIds.length = 0;
+    };
+
+    const removeBeforeUnloadHandler = () => {
+        if (!beforeUnloadHandler) {
+            return;
+        }
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+        beforeUnloadHandler = null;
+    };
+
+    const cleanupRunnerControlGlobal = () => {
+        const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
+            | RunnerControl
+            | undefined;
+        if (globalControl === runnerControl) {
+            delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
+        }
+    };
+
     const cleanupRuntime = () => {
         if (cleanedUp) {
             return;
@@ -3368,13 +3605,7 @@ export const runPlatform = (): void => {
         cleanedUp = true;
         try {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
-            const disposed = sfe.disposeAll();
-            for (const attemptId of disposed) {
-                cancelStreamDoneProbe(attemptId, 'teardown');
-                clearCanonicalStabilizationRetry(attemptId);
-                clearProbeLeaseRetry(attemptId);
-                emitAttemptDisposed(attemptId, 'teardown');
-            }
+            disposeAttemptsForTeardown();
             interceptionManager.stop();
             navigationManager.stop();
             buttonManager.remove();
@@ -3382,46 +3613,11 @@ export const runPlatform = (): void => {
             cleanupCompletionWatcher?.();
             cleanupButtonHealthCheck?.();
             browser.storage.onChanged.removeListener(storageChangeListener);
-            for (const timerId of autoCaptureRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            autoCaptureRetryTimers.clear();
-            for (const timerId of canonicalStabilizationRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            canonicalStabilizationRetryTimers.clear();
-            canonicalStabilizationRetryCounts.clear();
-            canonicalStabilizationStartedAt.clear();
-            timeoutWarningByAttempt.clear();
-            canonicalStabilizationInProgress.clear();
-            for (const timerId of probeLeaseRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            probeLeaseRetryTimers.clear();
-            for (const controller of streamProbeControllers.values()) {
-                try {
-                    controller.abort();
-                } catch {
-                    /* ignore */
-                }
-            }
-            streamProbeControllers.clear();
-            probeLease.dispose();
-            for (const timeoutId of retryTimeoutIds) {
-                clearTimeout(timeoutId);
-            }
-            retryTimeoutIds.length = 0;
-            autoCaptureDeferredLogged.clear();
-            if (beforeUnloadHandler) {
-                window.removeEventListener('beforeunload', beforeUnloadHandler);
-                beforeUnloadHandler = null;
-            }
-            const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
-                | RunnerControl
-                | undefined;
-            if (globalControl === runnerControl) {
-                delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
-            }
+            clearRuntimeCollections();
+            disposeStreamProbeControllers();
+            clearBootRetryTimeouts();
+            removeBeforeUnloadHandler();
+            cleanupRunnerControlGlobal();
         } catch (error) {
             logger.debug('Error during cleanup:', error);
         }
