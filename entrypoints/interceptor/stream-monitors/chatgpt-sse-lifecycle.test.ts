@@ -12,10 +12,6 @@ mock.module('@/entrypoints/interceptor/text-extraction', () => ({
     extractTitleFromSsePayload: () => null,
 }));
 
-mock.module('@/entrypoints/interceptor/stream-monitors/chatgpt-sse-monitor', () => ({
-    monitorChatgptSseChunk: (chunkText: string, onChunk: (chunk: string) => void) => onChunk(chunkText),
-}));
-
 mock.module('@/entrypoints/interceptor/stream-monitors/stream-emitter', () => ({
     consumeReadableStreamChunks: async (
         _reader: ReadableStreamDefaultReader<Uint8Array>,

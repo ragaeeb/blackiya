@@ -1,11 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
 
-mock.module('@/platforms/chatgpt', () => ({
-    chatGPTAdapter: {
-        parseInterceptedData: () => null,
-    },
-}));
-
 import { extractLikelyTextFromSsePayload } from './text-extraction';
 
 describe('text-extraction', () => {
