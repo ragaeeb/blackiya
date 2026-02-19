@@ -48,7 +48,12 @@ export function createInterceptorAttemptRegistry(
         if (!conversationId) {
             return undefined;
         }
-        return state.attemptByConversationId.get(conversationId);
+        const bound = state.attemptByConversationId.get(conversationId);
+        if (bound && state.disposedAttemptIds.has(bound)) {
+            state.attemptByConversationId.delete(conversationId);
+            return undefined;
+        }
+        return bound;
     };
 
     const resolveReusableLatestAttempt = (platformKey: string, conversationId?: string): string | undefined => {
@@ -106,8 +111,7 @@ export function createInterceptorAttemptRegistry(
         return undefined;
     };
 
-    const isAttemptDisposed = (attemptId: string | undefined): boolean =>
-        !!attemptId && state.disposedAttemptIds.has(attemptId);
+    const isAttemptDisposed = (attemptId: string | undefined) => !!attemptId && state.disposedAttemptIds.has(attemptId);
 
     return {
         bindAttemptToConversation,

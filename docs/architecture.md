@@ -1,6 +1,5 @@
 # Blackiya Architecture
 
-> Last updated: 2026-02-18 (v2.0.6 runner/interceptor decomposition continuation)
 > Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
 
 ## 1) System Overview
@@ -61,6 +60,7 @@ flowchart LR
   - `utils/sfe/signal-fusion-engine.ts`
   - `utils/sfe/probe-lease-protocol.ts`
   - `utils/sfe/probe-lease-coordinator.ts`
+  - `utils/sfe/probe-lease-store.ts`
   - `utils/sfe/cross-tab-probe-lease.ts`
 - Background lease coordinator:
   - `entrypoints/background.ts`
@@ -106,10 +106,12 @@ Readiness decision modes:
 Critical invariant:
 - Completion hint alone never guarantees export readiness.
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
+- Network completion debounce is attempt-aware: same-conversation new attempts use a shorter debounce window than repeated same-attempt hints.
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
 - **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative/snapshot) and always-disabled `['dom_hint', 'snapshot_fallback']`. `CalibrationStep` mapping is now reversible via a distinct `snapshot` strategy for `page-snapshot`. The runner exclusively uses the manual-strict policy path.
+- **Retention hygiene:** pending lifecycle cache is explicitly bounded with near-cap warning telemetry, and SFE resolution cache prunes stale terminal entries plus enforces a max-resolution bound.
 
 ## 5) End-to-End Flow (Generic)
 
@@ -183,6 +185,10 @@ Title strategy:
 Primary code:
 - `platforms/gemini.ts`
 - `utils/gemini-stream-parser.ts`
+
+State management:
+- Mutable Gemini adapter state (title cache + active conversation cache) is encapsulated in `GeminiAdapterState`.
+- `resetGeminiAdapterState()` is exported for deterministic test isolation.
 
 ### 6.3 Grok
 

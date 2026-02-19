@@ -89,6 +89,7 @@ export type HarAnalysisResult = {
         streamLikelyEvents: number;
         reasoningSignalEvents: number;
         hintMatches: number;
+        bodyTruncationCount: number;
     };
     likelyStreamingEndpoints: HarEndpointSummary[];
     endpointSummary: HarEndpointSummary[];
@@ -403,6 +404,7 @@ export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = 
     let filteredOut = 0;
     let streamLikelyEvents = 0;
     let reasoningSignalEvents = 0;
+    let bodyTruncationCount = 0;
 
     entries.forEach((entry, entryIndex) => {
         const method = String(entry.request?.method ?? 'GET').toUpperCase();
@@ -422,6 +424,12 @@ export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = 
         const responseBodyRaw = decodeResponseBody(entry.response?.content);
         const requestBody = clipBody(requestBodyRaw, maxBodyChars);
         const responseBody = clipBody(responseBodyRaw, maxBodyChars);
+        if (requestBodyRaw.length > maxBodyChars) {
+            bodyTruncationCount += 1;
+        }
+        if (responseBodyRaw.length > maxBodyChars) {
+            bodyTruncationCount += 1;
+        }
         const responseHeaders = sanitizeHeaders(entry.response?.headers);
         const requestHeaders = sanitizeHeaders(entry.request?.headers);
         const mimeType = String(
@@ -576,6 +584,7 @@ export const analyzeHarContent = (rawHar: string, options: HarAnalysisOptions = 
             streamLikelyEvents,
             reasoningSignalEvents,
             hintMatches: hintMatches.length,
+            bodyTruncationCount,
         },
         likelyStreamingEndpoints,
         endpointSummary,
@@ -602,6 +611,7 @@ export const renderHarAnalysisMarkdown = (analysis: HarAnalysisResult): string =
     lines.push(`- Stream-likely events: ${analysis.stats.streamLikelyEvents}`);
     lines.push(`- Reasoning signal events: ${analysis.stats.reasoningSignalEvents}`);
     lines.push(`- Hint matches: ${analysis.stats.hintMatches}`);
+    lines.push(`- Body truncations: ${analysis.stats.bodyTruncationCount}`);
     lines.push('');
 
     lines.push('## Likely Streaming Endpoints');

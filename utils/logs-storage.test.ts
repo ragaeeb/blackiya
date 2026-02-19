@@ -168,4 +168,47 @@ describe('BufferedLogsStorage', () => {
         const logs = await storage.getLogs();
         expect(logs.length).toBe(0);
     });
+
+    it('should restore failed flush batch to buffer and retry on next flush', async () => {
+        const originalConsoleError = console.error;
+        console.error = () => {};
+        try {
+            let shouldFailSet = true;
+            setSpy = mock(async (data: any) => {
+                if (shouldFailSet) {
+                    shouldFailSet = false;
+                    throw new Error('storage full');
+                }
+                if (data.logs) {
+                    storedLogs = data.logs;
+                }
+            });
+
+            const mockBackend = {
+                get: getSpy,
+                set: setSpy,
+                remove: removeSpy,
+            };
+            storage = new BufferedLogsStorage(mockBackend);
+
+            for (let i = 0; i < FLUSH_THRESHOLD; i += 1) {
+                await storage.saveLog({
+                    timestamp: `t-${i}`,
+                    level: 'info',
+                    message: `msg-${i}`,
+                    context: 'background',
+                });
+            }
+
+            // First flush failed and restored the batch back to memory.
+            expect(storedLogs.length).toBe(0);
+
+            // Next flush should persist the restored batch.
+            const logs = await storage.getLogs();
+            expect(logs.length).toBe(FLUSH_THRESHOLD);
+            expect(setSpy).toHaveBeenCalledTimes(2);
+        } finally {
+            console.error = originalConsoleError;
+        }
+    });
 });

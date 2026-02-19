@@ -72,10 +72,7 @@ export function appendPendingRunnerStreamPreview(
     return capped;
 }
 
-export function removePendingRunnerStreamPreview(
-    state: RunnerStreamPreviewState,
-    canonicalAttemptId: string,
-): boolean {
+export function removePendingRunnerStreamPreview(state: RunnerStreamPreviewState, canonicalAttemptId: string): boolean {
     return state.liveByAttemptWithoutConversation.delete(canonicalAttemptId);
 }
 

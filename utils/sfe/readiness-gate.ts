@@ -3,6 +3,9 @@ import type { BlockingCondition, PlatformReadiness } from '@/utils/sfe/types';
 interface ReadinessGateOptions {
     minStableMs?: number;
     maxStabilizationWaitMs?: number;
+    sampleTtlMs?: number;
+    maxSamples?: number;
+    pruneMinIntervalMs?: number;
 }
 
 interface SampleState {
@@ -23,10 +26,17 @@ export class ReadinessGate {
     private samples = new Map<string, SampleState>();
     private readonly minStableMs: number;
     private readonly maxStabilizationWaitMs: number;
+    private readonly sampleTtlMs: number;
+    private readonly maxSamples: number;
+    private readonly pruneMinIntervalMs: number;
+    private lastPruneAtMs = 0;
 
     constructor(options: ReadinessGateOptions = {}) {
         this.minStableMs = options.minStableMs ?? 900;
         this.maxStabilizationWaitMs = options.maxStabilizationWaitMs ?? 30_000;
+        this.sampleTtlMs = Math.max(1, options.sampleTtlMs ?? 10 * 60 * 1000);
+        this.maxSamples = Math.max(1, options.maxSamples ?? 500);
+        this.pruneMinIntervalMs = Math.max(0, options.pruneMinIntervalMs ?? 1000);
     }
 
     public reset(attemptId: string): void {
@@ -34,6 +44,7 @@ export class ReadinessGate {
     }
 
     public evaluate(attemptId: string, readiness: PlatformReadiness, timestampMs = Date.now()): ReadinessGateResult {
+        this.pruneSamples(timestampMs);
         const blocking: BlockingCondition[] = [];
 
         if (!readiness.contentHash || readiness.latestAssistantTextLength <= 0) {
@@ -56,6 +67,7 @@ export class ReadinessGate {
                 terminal: readiness.terminal,
                 textLength: readiness.latestAssistantTextLength,
             });
+            this.pruneSamples(timestampMs);
             blocking.push('awaiting_second_sample');
             return { ready: false, blockingConditions: blocking };
         }
@@ -97,5 +109,30 @@ export class ReadinessGate {
             ready: true,
             blockingConditions: [],
         };
+    }
+
+    private pruneSamples(nowMs: number): void {
+        if (nowMs - this.lastPruneAtMs < this.pruneMinIntervalMs) {
+            return;
+        }
+        this.lastPruneAtMs = nowMs;
+
+        for (const [attemptId, sample] of this.samples.entries()) {
+            if (nowMs - sample.lastSeenAtMs > this.sampleTtlMs) {
+                this.samples.delete(attemptId);
+            }
+        }
+
+        if (this.samples.size <= this.maxSamples) {
+            return;
+        }
+
+        const overflow = this.samples.size - this.maxSamples;
+        const oldest = [...this.samples.entries()]
+            .sort((left, right) => left[1].lastSeenAtMs - right[1].lastSeenAtMs)
+            .slice(0, overflow);
+        for (const [attemptId] of oldest) {
+            this.samples.delete(attemptId);
+        }
     }
 }

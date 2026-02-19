@@ -9,76 +9,16 @@
 
 import { logger } from '@/utils/logger';
 import { type LogEntry, logsStorage } from '@/utils/logs-storage';
-import { ProbeLeaseCoordinator, type ProbeLeaseCoordinatorStore } from '@/utils/sfe/probe-lease-coordinator';
+import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 import {
     isProbeLeaseClaimRequest,
     isProbeLeaseReleaseRequest,
     type ProbeLeaseClaimResponse,
     type ProbeLeaseReleaseResponse,
 } from '@/utils/sfe/probe-lease-protocol';
+import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 
 type BackgroundLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>;
-
-class SessionStorageProbeLeaseStore implements ProbeLeaseCoordinatorStore {
-    private readonly storage: typeof browser.storage.session;
-
-    public constructor(storage: typeof browser.storage.session) {
-        this.storage = storage;
-    }
-
-    public async get(key: string) {
-        const result = await this.storage.get(key);
-        const value = result[key];
-        return typeof value === 'string' ? value : null;
-    }
-
-    public async set(key: string, value: string) {
-        await this.storage.set({ [key]: value });
-    }
-
-    public async remove(key: string) {
-        await this.storage.remove(key);
-    }
-
-    public async getAll() {
-        const result = await this.storage.get(null);
-        const output: Record<string, string> = {};
-        for (const [key, value] of Object.entries(result)) {
-            if (typeof value === 'string') {
-                output[key] = value;
-            }
-        }
-        return output;
-    }
-}
-
-class InMemoryProbeLeaseStore implements ProbeLeaseCoordinatorStore {
-    private readonly entries = new Map<string, string>();
-
-    public async get(key: string) {
-        return this.entries.get(key) ?? null;
-    }
-
-    public async set(key: string, value: string) {
-        this.entries.set(key, value);
-    }
-
-    public async remove(key: string) {
-        this.entries.delete(key);
-    }
-
-    public async getAll() {
-        return Object.fromEntries(this.entries.entries());
-    }
-}
-
-function createProbeLeaseStore() {
-    const sessionStorage = browser.storage?.session;
-    if (sessionStorage) {
-        return new SessionStorageProbeLeaseStore(sessionStorage);
-    }
-    return new InMemoryProbeLeaseStore();
-}
 
 function isLogContext(value: unknown): value is LogEntry['context'] {
     return value === 'background' || value === 'content' || value === 'popup' || value === 'unknown';

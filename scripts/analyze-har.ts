@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { analyzeHarContent, renderHarAnalysisMarkdown } from '../utils/har-analysis';
@@ -13,6 +13,8 @@ type CliOptions = {
     maxMatchesPerHint: number | undefined;
     snippetRadius: number | undefined;
 };
+
+const LARGE_HAR_WARN_BYTES = 25 * 1024 * 1024;
 
 const printUsage = (): void => {
     console.log(
@@ -182,6 +184,13 @@ const run = async (): Promise<void> => {
     const markdownPath =
         options.outputMarkdown === null ? null : path.resolve(options.outputMarkdown ?? defaults.markdownPath);
 
+    const inputStat = await stat(options.input);
+    if (inputStat.size >= LARGE_HAR_WARN_BYTES) {
+        console.warn(
+            `Warning: HAR file is ${(inputStat.size / (1024 * 1024)).toFixed(1)}MB; consider --max-body-chars to reduce scan pressure.`,
+        );
+    }
+
     const rawHar = await readFile(options.input, 'utf8');
     const analysis = analyzeHarContent(rawHar, {
         hints: options.hints,
@@ -204,6 +213,7 @@ const run = async (): Promise<void> => {
     console.log(`HAR analysis complete.`);
     console.log(`Input: ${path.resolve(options.input)}`);
     console.log(`Entries scanned: ${analysis.stats.entriesScanned}/${analysis.stats.totalEntries}`);
+    console.log(`Body truncations: ${analysis.stats.bodyTruncationCount}`);
     console.log(`Likely streaming endpoints: ${analysis.likelyStreamingEndpoints.length}`);
     console.log(`Hint matches: ${analysis.stats.hintMatches}`);
     console.log(`JSON report: ${jsonPath}`);

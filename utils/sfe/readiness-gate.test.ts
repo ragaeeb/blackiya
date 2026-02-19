@@ -55,4 +55,40 @@ describe('ReadinessGate', () => {
         expect(timedOut.blockingConditions).toContain('stabilization_timeout');
         expect(timedOut.blockingConditions).not.toContain('stability_window_not_elapsed');
     });
+
+    it('prunes stale samples after TTL expires', () => {
+        const gate = new ReadinessGate({
+            minStableMs: 1,
+            sampleTtlMs: 50,
+            pruneMinIntervalMs: 0,
+        });
+        gate.evaluate('a1', READY_SAMPLE, 1000);
+        expect(gate.evaluate('a1', READY_SAMPLE, 1010).ready).toBeTrue();
+
+        // Trigger prune with a different attempt far beyond TTL.
+        gate.evaluate('b1', READY_SAMPLE, 1200);
+
+        // a1 should have been evicted and behave like a first sample again.
+        const reintroduced = gate.evaluate('a1', READY_SAMPLE, 1201);
+        expect(reintroduced.ready).toBeFalse();
+        expect(reintroduced.blockingConditions).toContain('awaiting_second_sample');
+    });
+
+    it('caps sample cache size and evicts oldest attempts', () => {
+        const gate = new ReadinessGate({
+            minStableMs: 1,
+            maxSamples: 2,
+            sampleTtlMs: 10_000,
+            pruneMinIntervalMs: 0,
+        });
+        gate.evaluate('a1', READY_SAMPLE, 1000);
+        gate.evaluate('a1', READY_SAMPLE, 1002);
+        gate.evaluate('b1', READY_SAMPLE, 1003);
+        gate.evaluate('c1', READY_SAMPLE, 1004);
+
+        // a1 was oldest and should be evicted once c1 is inserted.
+        const a1AfterEviction = gate.evaluate('a1', READY_SAMPLE, 1005);
+        expect(a1AfterEviction.ready).toBeFalse();
+        expect(a1AfterEviction.blockingConditions).toContain('awaiting_second_sample');
+    });
 });

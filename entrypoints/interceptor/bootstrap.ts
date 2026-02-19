@@ -157,7 +157,7 @@ function maybePruneTimestampCaches(nowMs = Date.now()): void {
     pruneTimestampCache(conversationResolvedSignalCache, INTERCEPTOR_CACHE_ENTRY_TTL_MS, nowMs);
 }
 
-function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
+function log(level: 'info' | 'warn' | 'error', message: string, data?: unknown) {
     // Keep page-console output for warnings/errors while avoiding info-level floods.
     const displayData = data ? ` ${JSON.stringify(data)}` : '';
     if (level === 'error') {
@@ -1778,19 +1778,19 @@ function logChatGptStreamFrameSample(
     return sampledFrames + 1;
 }
 
-function isConversationLike(candidate: any, conversationId: string): boolean {
+function isConversationLike(candidate: unknown, conversationId: string): boolean {
     if (!candidate || typeof candidate !== 'object') {
         return false;
     }
-    const hasCoreShape =
-        typeof candidate.title === 'string' && !!candidate.mapping && typeof candidate.mapping === 'object';
+    const typed = candidate as Record<string, unknown>;
+    const hasCoreShape = typeof typed.title === 'string' && !!typed.mapping && typeof typed.mapping === 'object';
     if (!hasCoreShape) {
         return false;
     }
-    if (typeof candidate.conversation_id === 'string' && candidate.conversation_id === conversationId) {
+    if (typeof typed.conversation_id === 'string' && typed.conversation_id === conversationId) {
         return true;
     }
-    if (typeof candidate.id === 'string' && candidate.id === conversationId) {
+    if (typeof typed.id === 'string' && typed.id === conversationId) {
         return true;
     }
     return false;
@@ -2543,11 +2543,21 @@ export default defineContentScript({
             text: string,
             apiUrl: string,
         ): ConversationData | null => {
-            const parsed = adapter.parseInterceptedData(text, apiUrl);
-            if (!isCapturedConversationReady(adapter, parsed)) {
+            try {
+                const parsed = adapter.parseInterceptedData(text, apiUrl);
+                if (!isCapturedConversationReady(adapter, parsed)) {
+                    return null;
+                }
+                return parsed;
+            } catch (error) {
+                if (shouldLogTransient(`fetch:parse:${adapter.name}:${safePathname(apiUrl)}`, 5000)) {
+                    log('warn', `fetch parse err ${adapter.name}`, {
+                        path: safePathname(apiUrl),
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
                 return null;
             }
-            return parsed;
         };
 
         const tryFetchConversation = async (
@@ -2613,7 +2623,12 @@ export default defineContentScript({
                         requestHeaders,
                     );
                     if (success) {
-                        proactiveSuccessAtByKey.set(key, Date.now());
+                        setBoundedMapValue(
+                            proactiveSuccessAtByKey,
+                            key,
+                            Date.now(),
+                            MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES,
+                        );
                         return true;
                     }
                 }

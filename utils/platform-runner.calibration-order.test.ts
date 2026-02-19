@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { buildCalibrationOrderForMode } from '@/utils/platform-runner';
+import { buildCalibrationOrderForMode } from '@/utils/runner/calibration-policy';
 
 describe('Calibration order strategy', () => {
     it('returns default order when no preferred step exists', () => {

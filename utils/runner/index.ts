@@ -38,7 +38,12 @@ import type {
     StreamDumpFrameMessage,
     TitleResolvedMessage,
 } from '@/utils/protocol/messages';
-import { generateSessionToken, isValidToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
+import {
+    generateSessionToken,
+    resolveTokenValidationFailureReason,
+    setSessionToken,
+    stampToken,
+} from '@/utils/protocol/session-token';
 import {
     getConversationAttemptMismatch as getConversationAttemptMismatchForRegistry,
     peekRunnerAttemptId,
@@ -68,8 +73,8 @@ import {
     appendPendingRunnerStreamPreview,
     ensureLiveRunnerStreamPreview,
     migratePendingRunnerStreamPreview,
-    removePendingRunnerStreamPreview,
     type RunnerStreamPreviewState,
+    removePendingRunnerStreamPreview,
     withPreservedRunnerStreamMirrorSnapshot,
 } from '@/utils/runner/stream-preview';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
@@ -101,8 +106,11 @@ const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
 const PROBE_LEASE_TTL_MS = 5000;
 const PROBE_LEASE_RETRY_GRACE_MS = 500;
 const MAX_CONVERSATION_ATTEMPTS = 250;
+const MAX_PENDING_LIFECYCLE_ATTEMPTS = 320;
 const MAX_STREAM_PREVIEWS = 150;
 const MAX_AUTOCAPTURE_KEYS = 400;
+const MAX_STREAM_RESOLVED_TITLES = MAX_CONVERSATION_ATTEMPTS;
+const WARM_FETCH_REQUEST_TIMEOUT_MS = 15_000;
 const CANONICAL_READY_LOG_TTL_MS = 15_000;
 const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
 
@@ -118,7 +126,7 @@ function normalizeContentText(text: string): string {
     return text.trim().normalize('NFC');
 }
 
-export function resolveExportConversationTitle(data: ConversationData): string {
+export function resolveExportConversationTitle(data: ConversationData) {
     return resolveExportTitleDecision(data).title;
 }
 
@@ -126,7 +134,7 @@ export function shouldRemoveDisposedAttemptBinding(
     mappedAttemptId: string,
     disposedAttemptId: string,
     resolveAttemptId: (attemptId: string) => string,
-): boolean {
+) {
     return shouldRemoveDisposedAttemptBindingFromRegistry(mappedAttemptId, disposedAttemptId, resolveAttemptId);
 }
 
@@ -188,6 +196,8 @@ export function runPlatform(): void {
     const canonicalStabilizationInProgress = new Set<string>();
     let lastResponseFinishedAt = 0;
     let lastResponseFinishedConversationId: string | null = null;
+    let lastResponseFinishedAttemptId: string | null = null;
+    let lastPendingLifecycleCapacityWarnAt = 0;
     let rememberedPreferredStep: CalibrationStep | null = null;
     let rememberedCalibrationUpdatedAt: string | null = null;
     let calibrationPreferenceLoaded = false;
@@ -218,6 +228,7 @@ export function runPlatform(): void {
     const streamResolvedTitles = new Map<string, string>();
     const lastCanonicalReadyLogAtByConversation = new Map<string, number>();
     let activeAttemptId: string | null = null;
+    let lastInvalidSessionTokenLogAt = 0;
 
     function setCurrentConversation(conversationId: string | null): void {
         currentConversationId = conversationId;
@@ -246,8 +257,18 @@ export function runPlatform(): void {
                 platform,
                 receivedAtMs: Date.now(),
             },
-            MAX_CONVERSATION_ATTEMPTS * 2,
+            MAX_PENDING_LIFECYCLE_ATTEMPTS,
         );
+        if (pendingLifecycleByAttempt.size >= Math.floor(MAX_PENDING_LIFECYCLE_ATTEMPTS * 0.9)) {
+            const now = Date.now();
+            if (now - lastPendingLifecycleCapacityWarnAt > 15_000) {
+                lastPendingLifecycleCapacityWarnAt = now;
+                logger.warn('Pending lifecycle cache near capacity', {
+                    size: pendingLifecycleByAttempt.size,
+                    maxEntries: MAX_PENDING_LIFECYCLE_ATTEMPTS,
+                });
+            }
+        }
     }
 
     function setCaptureMetaForConversation(conversationId: string, meta: ExportMeta): void {
@@ -665,19 +686,13 @@ export function runPlatform(): void {
         if (hadTimer) {
             logger.info('Stabilization retry cleared', { attemptId });
         }
-        clearCanonicalStabilizationAttemptState(
-            attemptId,
-            {
-                timerIds: canonicalStabilizationRetryTimers,
-                retryCounts: canonicalStabilizationRetryCounts,
-                startedAt: canonicalStabilizationStartedAt,
-                timeoutWarnings: timeoutWarningByAttempt,
-                inProgress: canonicalStabilizationInProgress,
-            },
-            (timerId) => {
-                clearTimeout(timerId);
-            },
-        );
+        clearCanonicalStabilizationAttemptState(attemptId, {
+            timerIds: canonicalStabilizationRetryTimers,
+            retryCounts: canonicalStabilizationRetryCounts,
+            startedAt: canonicalStabilizationStartedAt,
+            timeoutWarnings: timeoutWarningByAttempt,
+            inProgress: canonicalStabilizationInProgress,
+        });
     }
 
     function emitTimeoutWarningOnce(attemptId: string, conversationId: string): void {
@@ -2063,8 +2078,10 @@ export function runPlatform(): void {
         reason: 'initial-load' | 'conversation-switch' | 'stabilization-retry' | 'force-save',
         apiUrl: string,
     ): Promise<boolean> {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), WARM_FETCH_REQUEST_TIMEOUT_MS);
         try {
-            const response = await fetch(apiUrl, { credentials: 'include' });
+            const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
             if (!response.ok) {
                 logger.info('Warm fetch HTTP error', {
                     conversationId,
@@ -2098,6 +2115,8 @@ export function runPlatform(): void {
                 error: err instanceof Error ? err.message : String(err),
             });
             return false;
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 
@@ -2381,17 +2400,45 @@ export function runPlatform(): void {
     }
 
     function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
-        const containers = root.querySelectorAll('main, article, section, div');
+        const allowedTags = new Set(['MAIN', 'ARTICLE', 'SECTION', 'DIV']);
+        const maxNodesScanned = 220;
         const snippets: string[] = [];
+        let scanned = 0;
+        const ownerDocument = root instanceof Document ? root : root.ownerDocument;
+        const walkerRoot = root instanceof Element || root instanceof Document ? root : ownerDocument?.body;
+        if (ownerDocument && walkerRoot) {
+            const walker = ownerDocument.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
+                acceptNode: (candidate: Node) => {
+                    if (!(candidate instanceof Element)) {
+                        return NodeFilter.FILTER_SKIP;
+                    }
+                    if (!allowedTags.has(candidate.tagName)) {
+                        return NodeFilter.FILTER_SKIP;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
+                },
+            });
 
-        for (const node of containers) {
-            const text = normalizeSnapshotText((node.textContent ?? '').trim());
-            if (text.length < 40 || text.length > 1200) {
-                continue;
+            let node = walker.nextNode();
+            while (node && snippets.length < 6 && scanned < maxNodesScanned) {
+                scanned += 1;
+                const text = normalizeSnapshotText((node.textContent ?? '').trim());
+                if (text.length >= 40 && text.length <= 1200) {
+                    snippets.push(text);
+                }
+                node = walker.nextNode();
             }
-            snippets.push(text);
-            if (snippets.length >= 6) {
-                break;
+        } else {
+            const containers = root.querySelectorAll('main, article, section, div');
+            for (const node of containers) {
+                const text = normalizeSnapshotText((node.textContent ?? '').trim());
+                if (text.length < 40 || text.length > 1200) {
+                    continue;
+                }
+                snippets.push(text);
+                if (snippets.length >= 6) {
+                    break;
+                }
             }
         }
 
@@ -2819,11 +2866,7 @@ export function runPlatform(): void {
         logger.warn('Calibration capture failed after retries', { conversationId });
     }
 
-    function enterCalibrationCaptureState(mode: CalibrationMode): void {
-        if (mode === 'manual') {
-            setCalibrationStatus('capturing');
-            return;
-        }
+    function enterCalibrationCaptureState(_mode: CalibrationMode): void {
         setCalibrationStatus('capturing');
     }
 
@@ -3505,7 +3548,11 @@ export function runPlatform(): void {
         };
     }
 
-    function shouldProcessFinishedSignal(conversationId: string | null, source: 'network' | 'dom'): boolean {
+    function shouldProcessFinishedSignal(
+        conversationId: string | null,
+        source: 'network' | 'dom',
+        attemptId: string | null,
+    ): boolean {
         if (!conversationId) {
             logger.info('Finished signal ignored: missing conversation context', { source });
             return false;
@@ -3524,11 +3571,18 @@ export function runPlatform(): void {
         }
         const now = Date.now();
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
-        const minIntervalMs = source === 'network' ? 4500 : 1500;
+        const effectiveAttemptId = attemptId ?? '';
+        const isNewAttemptInSameConversation =
+            source === 'network' &&
+            isSameConversation &&
+            lastResponseFinishedAttemptId &&
+            lastResponseFinishedAttemptId !== effectiveAttemptId;
+        const minIntervalMs = source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500;
         if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
             logger.info('Finished signal debounced', {
                 conversationId,
                 source,
+                attemptId: effectiveAttemptId || null,
                 elapsed: now - lastResponseFinishedAt,
                 minIntervalMs,
             });
@@ -3536,6 +3590,9 @@ export function runPlatform(): void {
         }
         lastResponseFinishedAt = now;
         lastResponseFinishedConversationId = conversationId;
+        if (effectiveAttemptId) {
+            lastResponseFinishedAttemptId = effectiveAttemptId;
+        }
         return true;
     }
 
@@ -3679,10 +3736,14 @@ export function runPlatform(): void {
 
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
         const conversationId = resolveActiveConversationId(hintedConversationId);
-        if (!shouldProcessFinishedSignal(conversationId, source)) {
+        const peekedAttemptId = conversationId ? peekAttemptId(conversationId) : null;
+        if (!shouldProcessFinishedSignal(conversationId, source, peekedAttemptId)) {
             return;
         }
-        const attemptId = resolveAttemptId(conversationId ?? undefined);
+        const attemptId = peekedAttemptId ?? resolveAttemptId(conversationId ?? undefined);
+        if (!peekedAttemptId) {
+            lastResponseFinishedAttemptId = attemptId;
+        }
         setActiveAttempt(attemptId);
         ingestSfeLifecycle('completed_hint', attemptId, conversationId);
 
@@ -3770,7 +3831,7 @@ export function runPlatform(): void {
             fallbackTitle: title,
             platformDefaultTitles,
         });
-        streamResolvedTitles.set(conversationId, streamDecision.title);
+        setBoundedMapValue(streamResolvedTitles, conversationId, streamDecision.title, MAX_STREAM_RESOLVED_TITLES);
 
         if (cached) {
             const cacheDecision = resolveConversationTitleByPrecedence({
@@ -4266,8 +4327,15 @@ export function runPlatform(): void {
             if (!isSameWindowOrigin(event)) {
                 return;
             }
-            if (!isValidToken(event.data)) {
-                logger.debug('Dropped message with invalid session token');
+            const tokenFailureReason = resolveTokenValidationFailureReason(event.data);
+            if (tokenFailureReason !== null) {
+                const now = Date.now();
+                if (now - lastInvalidSessionTokenLogAt > 1500) {
+                    lastInvalidSessionTokenLogAt = now;
+                    logger.debug('Dropped message due to session token validation failure', {
+                        reason: tokenFailureReason,
+                    });
+                }
                 return;
             }
             dispatchWindowBridgeMessage(event.data);
