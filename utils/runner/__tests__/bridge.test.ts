@@ -308,8 +308,9 @@ describe('Platform Runner – window bridge', () => {
             type: 'BLACKIYA_GET_JSON_RESPONSE',
             requestId: 'req-incomplete',
             success: false,
-            data: undefined,
             error: 'NO_CONVERSATION_DATA',
         });
+        expect(response.data).toBeUndefined();
+        expect(typeof response.__blackiyaToken).toBe('string');
     });
 });

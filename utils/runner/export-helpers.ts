@@ -50,3 +50,35 @@ export const attachExportMeta = (payload: unknown, meta: ExportMeta): unknown =>
         },
     };
 };
+
+/**
+ * Extracts human-readable response text from a ConversationData for display
+ * in the stream probe panel. Tries the common export format first (which gives
+ * the cleanest `response` field), then falls back to raw assistant message parts.
+ */
+export const extractResponseTextFromConversation = (data: ConversationData, platformName: string): string => {
+    try {
+        const common = buildCommonExport(data, platformName) as {
+            response?: string | null;
+            prompt?: string | null;
+        };
+        const response = (common.response ?? '').trim();
+        const prompt = (common.prompt ?? '').trim();
+        if (response) {
+            return response;
+        }
+        if (prompt) {
+            return `(No assistant response found yet)\nPrompt: ${prompt}`;
+        }
+    } catch {
+        // fall through to raw extraction
+    }
+    return Object.values(data.mapping)
+        .map((node) => node.message)
+        .filter((msg): msg is NonNullable<(typeof data.mapping)[string]['message']> => !!msg)
+        .filter((msg) => msg.author.role === 'assistant')
+        .flatMap((msg) => msg.content.parts ?? [])
+        .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+        .join('\n\n')
+        .trim();
+};
