@@ -1,3 +1,4 @@
+// Compatibility shim retained for external imports; internal modules should import from /utils/runner/* directly.
 export {
     beginCanonicalStabilizationTick,
     buildCalibrationOrderForMode,

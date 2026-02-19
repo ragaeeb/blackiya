@@ -65,6 +65,8 @@ interface SignalFusionEngineOptions {
     probeScheduler?: ProbeScheduler;
     readinessGate?: ReadinessGate;
     now?: () => number;
+    maxResolutions?: number;
+    terminalResolutionTtlMs?: number;
 }
 
 function isRegressive(current: LifecyclePhase, next: LifecyclePhase): boolean {
@@ -153,6 +155,8 @@ export class SignalFusionEngine {
     private readonly probeScheduler: ProbeScheduler;
     private readonly readinessGate: ReadinessGate;
     private readonly now: () => number;
+    private readonly maxResolutions: number;
+    private readonly terminalResolutionTtlMs: number;
     private readonly resolutions = new Map<string, CaptureResolution>();
 
     constructor(options: SignalFusionEngineOptions = {}) {
@@ -160,6 +164,8 @@ export class SignalFusionEngine {
         this.probeScheduler = options.probeScheduler ?? new InMemoryProbeScheduler();
         this.readinessGate = options.readinessGate ?? new ReadinessGate();
         this.now = options.now ?? (() => Date.now());
+        this.maxResolutions = Math.max(1, options.maxResolutions ?? 800);
+        this.terminalResolutionTtlMs = Math.max(1_000, options.terminalResolutionTtlMs ?? 10 * 60 * 1000);
     }
 
     public ingestSignal(signal: FusionSignal): CaptureResolution {
@@ -327,9 +333,46 @@ export class SignalFusionEngine {
         descriptor: AttemptDescriptor,
         blocking: CaptureResolution['blockingConditions'],
     ): CaptureResolution {
+        this.pruneResolutionCache();
         const existing = this.resolutions.get(descriptor.attemptId) ?? buildDefaultResolution(descriptor);
         const next = resolutionFromPhase(descriptor, existing, blocking);
         this.resolutions.set(descriptor.attemptId, next);
         return next;
+    }
+
+    private pruneResolutionCache(): void {
+        if (this.resolutions.size === 0) {
+            return;
+        }
+        const now = this.now();
+        const activeAttemptIds = new Set(this.tracker.all().map((attempt) => attempt.attemptId));
+        for (const [attemptId, resolution] of this.resolutions.entries()) {
+            if (!activeAttemptIds.has(attemptId)) {
+                this.resolutions.delete(attemptId);
+                continue;
+            }
+            if (
+                (resolution.phase === 'disposed' ||
+                    resolution.phase === 'superseded' ||
+                    resolution.phase === 'captured_ready' ||
+                    resolution.phase === 'terminated_partial' ||
+                    resolution.phase === 'error') &&
+                now - resolution.updatedAtMs > this.terminalResolutionTtlMs
+            ) {
+                this.resolutions.delete(attemptId);
+            }
+        }
+
+        if (this.resolutions.size <= this.maxResolutions) {
+            return;
+        }
+
+        const ordered = [...this.resolutions.values()].sort((left, right) => left.updatedAtMs - right.updatedAtMs);
+        for (const resolution of ordered) {
+            if (this.resolutions.size <= this.maxResolutions) {
+                return;
+            }
+            this.resolutions.delete(resolution.attemptId);
+        }
     }
 }

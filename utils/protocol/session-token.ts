@@ -8,6 +8,11 @@
  */
 
 const SESSION_TOKEN_KEY = '__BLACKIYA_SESSION_TOKEN__';
+export type TokenValidationFailureReason =
+    | 'invalid-payload'
+    | 'missing-message-token'
+    | 'session-token-uninitialized'
+    | 'token-mismatch';
 
 export const generateSessionToken = (): string => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -39,18 +44,21 @@ export const stampToken = <T extends object>(payload: T): T & { __blackiyaToken:
 };
 
 export const isValidToken = (payload: unknown): boolean => {
+    return resolveTokenValidationFailureReason(payload) === null;
+};
+
+export const resolveTokenValidationFailureReason = (payload: unknown): TokenValidationFailureReason | null => {
     if (!payload || typeof payload !== 'object') {
-        return false;
+        return 'invalid-payload';
     }
     const candidate = payload as Record<string, unknown>;
     const messageToken = candidate.__blackiyaToken;
     if (typeof messageToken !== 'string' || messageToken.length === 0) {
-        return false;
+        return 'missing-message-token';
     }
     const sessionToken = getSessionToken();
     if (!sessionToken) {
-        // No session token set yet — cannot validate
-        return false;
+        return 'session-token-uninitialized';
     }
-    return messageToken === sessionToken;
+    return messageToken === sessionToken ? null : 'token-mismatch';
 };

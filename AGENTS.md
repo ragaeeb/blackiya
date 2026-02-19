@@ -44,6 +44,7 @@ Supporting modules:
 - Interceptor attempt registry: `entrypoints/interceptor/attempt-registry.ts`
 - SFE: `utils/sfe/*`
 - Lease arbitration: `utils/sfe/probe-lease-*`, `entrypoints/background.ts`
+- Lease store implementations: `utils/sfe/probe-lease-store.ts`
 - Interception cache: `utils/managers/interception-manager.ts`
 - UI buttons: `utils/ui/button-manager.ts`
 - Runner helpers:
@@ -104,6 +105,7 @@ bun test platforms/grok.test.ts --bail
 bun test platforms/gemini.test.ts --bail
 bun test platforms/chatgpt.test.ts --bail
 bun test utils/platform-runner.test.ts
+bun run test:e2e
 ```
 
 ## 7) Logging and Diagnostics

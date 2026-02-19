@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { shouldPersistCalibrationProfile } from '@/utils/platform-runner';
+import { shouldPersistCalibrationProfile } from '@/utils/runner/calibration-policy';
 
 describe('Calibration profile persistence policy', () => {
     it('persists profile updates for manual calibration runs', () => {

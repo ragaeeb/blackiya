@@ -67,6 +67,18 @@ describe('interceptor attempt registry', () => {
         expect(peeked).toBeUndefined();
     });
 
+    it('should evict disposed bound attempts before resolving a replacement', () => {
+        const attemptByConversationId = new Map<string, string>([['conv-6', 'attempt-disposed']]);
+        const latestAttemptIdByPlatform = new Map<string, string>([['Grok', 'attempt-fresh']]);
+        const disposedAttemptIds = new Set<string>(['attempt-disposed']);
+        const registry = createRegistry({ attemptByConversationId, latestAttemptIdByPlatform, disposedAttemptIds });
+
+        const resolved = registry.resolveAttemptIdForConversation('conv-6', 'Grok');
+
+        expect(resolved).toBe('attempt-fresh');
+        expect(attemptByConversationId.get('conv-6')).toBe('attempt-fresh');
+    });
+
     it('should treat missing attempt or conversation as a no-op bind', () => {
         const attemptByConversationId = new Map<string, string>();
         const registry = createRegistry({ attemptByConversationId });

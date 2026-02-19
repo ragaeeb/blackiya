@@ -179,7 +179,13 @@ bun run zip              # Create distributable ZIP file
 
 # Testing
 bun test                 # Run tests (when added)
+bun run test:e2e         # Run Playwright smoke harness (requires BLACKIYA_EXTENSION_PATH)
 bun test utils/har-analysis.integration.test.ts
+```
+
+Playwright smoke usage:
+```bash
+BLACKIYA_EXTENSION_PATH="$(pwd)/.output/chrome-mv3" bun run test:e2e
 ```
 
 ## 🏗️ Project Structure

@@ -3,6 +3,7 @@ import {
     generateSessionToken,
     getSessionToken,
     isValidToken,
+    resolveTokenValidationFailureReason,
     setSessionToken,
     stampToken,
 } from '@/utils/protocol/session-token';
@@ -55,25 +56,34 @@ describe('protocol/session-token', () => {
     it('should validate matching token', () => {
         setSessionToken('bk:valid-token');
         expect(isValidToken({ __blackiyaToken: 'bk:valid-token', type: 'test' })).toBeTrue();
+        expect(resolveTokenValidationFailureReason({ __blackiyaToken: 'bk:valid-token', type: 'test' })).toBeNull();
     });
 
     it('should reject missing token field', () => {
         setSessionToken('bk:valid-token');
         expect(isValidToken({ type: 'test' })).toBeFalse();
+        expect(resolveTokenValidationFailureReason({ type: 'test' })).toBe('missing-message-token');
     });
 
     it('should reject empty token string', () => {
         setSessionToken('bk:valid-token');
         expect(isValidToken({ __blackiyaToken: '', type: 'test' })).toBeFalse();
+        expect(resolveTokenValidationFailureReason({ __blackiyaToken: '', type: 'test' })).toBe('missing-message-token');
     });
 
     it('should reject mismatched token', () => {
         setSessionToken('bk:valid-token');
         expect(isValidToken({ __blackiyaToken: 'bk:wrong-token', type: 'test' })).toBeFalse();
+        expect(resolveTokenValidationFailureReason({ __blackiyaToken: 'bk:wrong-token', type: 'test' })).toBe(
+            'token-mismatch',
+        );
     });
 
     it('should reject when no session token is set', () => {
         expect(isValidToken({ __blackiyaToken: 'bk:some-token', type: 'test' })).toBeFalse();
+        expect(resolveTokenValidationFailureReason({ __blackiyaToken: 'bk:some-token', type: 'test' })).toBe(
+            'session-token-uninitialized',
+        );
     });
 
     it('should reject non-object payloads', () => {
@@ -82,5 +92,6 @@ describe('protocol/session-token', () => {
         expect(isValidToken(undefined)).toBeFalse();
         expect(isValidToken('string')).toBeFalse();
         expect(isValidToken(42)).toBeFalse();
+        expect(resolveTokenValidationFailureReason(null)).toBe('invalid-payload');
     });
 });

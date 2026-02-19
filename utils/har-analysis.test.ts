@@ -78,6 +78,7 @@ describe('har-analysis', () => {
         expect(analysis.stats.totalEntries).toBe(3);
         expect(analysis.stats.entriesScanned).toBe(2);
         expect(analysis.stats.entriesFilteredOut).toBe(1);
+        expect(analysis.stats.bodyTruncationCount).toBe(0);
 
         const firstEvent = analysis.timeline[0];
         expect(firstEvent.url).toContain('token=%5BREDACTED%5D');
@@ -148,6 +149,34 @@ describe('har-analysis', () => {
         expect(report).toContain('# HAR Discovery Analysis');
         expect(report).toContain('## Likely Streaming Endpoints');
         expect(report).toContain('## Hint Matches');
+    });
+
+    it('should track body truncation count when maxBodyChars clips payloads', () => {
+        const longBodyHar = {
+            log: {
+                entries: [
+                    {
+                        request: {
+                            method: 'POST',
+                            url: 'https://grok.com/long',
+                            postData: { text: 'a'.repeat(200) },
+                        },
+                        response: {
+                            status: 200,
+                            content: { mimeType: 'application/json', text: JSON.stringify({ text: 'b'.repeat(200) }) },
+                        },
+                    },
+                ],
+            },
+        };
+        const analysis = analyzeHarContent(JSON.stringify(longBodyHar), {
+            hostFilter: ['grok.com'],
+            maxBodyChars: 80,
+            hints: ['zzzz'],
+        });
+
+        expect(analysis.stats.bodyTruncationCount).toBe(2);
+        expect(analysis.hintMatches.length).toBe(0);
     });
 
     it('should throw for malformed HAR payloads', () => {
