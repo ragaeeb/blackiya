@@ -14,6 +14,8 @@ type CliOptions = {
     snippetRadius: number | undefined;
 };
 
+const LARGE_HAR_WARN_BYTES = 25 * 1024 * 1024;
+
 const printUsage = (): void => {
     console.log(
         [
@@ -183,8 +185,7 @@ const run = async (): Promise<void> => {
         options.outputMarkdown === null ? null : path.resolve(options.outputMarkdown ?? defaults.markdownPath);
 
     const inputStat = await stat(options.input);
-    const largeHarWarnBytes = 25 * 1024 * 1024;
-    if (inputStat.size >= largeHarWarnBytes) {
+    if (inputStat.size >= LARGE_HAR_WARN_BYTES) {
         console.warn(
             `Warning: HAR file is ${(inputStat.size / (1024 * 1024)).toFixed(1)}MB; consider --max-body-chars to reduce scan pressure.`,
         );

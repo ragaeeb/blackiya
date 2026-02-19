@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 import { AttemptTracker } from '@/utils/sfe/attempt-tracker';
+import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 
 describe('SignalFusionEngine dispose', () => {
     it('prevents post-dispose signals from mutating readiness', () => {
@@ -40,6 +40,7 @@ describe('SignalFusionEngine dispose', () => {
             now: () => now,
             terminalResolutionTtlMs: 50,
             maxResolutions: 8,
+            pruneMinIntervalMs: 0,
         });
         sfe.ingestSignal({
             attemptId: 'old',

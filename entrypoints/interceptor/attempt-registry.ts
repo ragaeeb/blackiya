@@ -111,8 +111,7 @@ export function createInterceptorAttemptRegistry(
         return undefined;
     };
 
-    const isAttemptDisposed = (attemptId: string | undefined): boolean =>
-        !!attemptId && state.disposedAttemptIds.has(attemptId);
+    const isAttemptDisposed = (attemptId: string | undefined) => !!attemptId && state.disposedAttemptIds.has(attemptId);
 
     return {
         bindAttemptToConversation,

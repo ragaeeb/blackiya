@@ -68,7 +68,9 @@ describe('protocol/session-token', () => {
     it('should reject empty token string', () => {
         setSessionToken('bk:valid-token');
         expect(isValidToken({ __blackiyaToken: '', type: 'test' })).toBeFalse();
-        expect(resolveTokenValidationFailureReason({ __blackiyaToken: '', type: 'test' })).toBe('missing-message-token');
+        expect(resolveTokenValidationFailureReason({ __blackiyaToken: '', type: 'test' })).toBe(
+            'missing-message-token',
+        );
     });
 
     it('should reject mismatched token', () => {

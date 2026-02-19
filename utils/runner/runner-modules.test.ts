@@ -13,8 +13,8 @@ import {
     ensureLiveRunnerStreamPreview,
     mergeRunnerStreamProbeText,
     migratePendingRunnerStreamPreview,
-    removePendingRunnerStreamPreview,
     type RunnerStreamPreviewState,
+    removePendingRunnerStreamPreview,
     withPreservedRunnerStreamMirrorSnapshot,
 } from '@/utils/runner/stream-preview';
 import { appendStreamProbePreview } from '@/utils/runner/stream-probe';

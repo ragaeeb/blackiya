@@ -1783,8 +1783,7 @@ function isConversationLike(candidate: unknown, conversationId: string): boolean
         return false;
     }
     const typed = candidate as Record<string, unknown>;
-    const hasCoreShape =
-        typeof typed.title === 'string' && !!typed.mapping && typeof typed.mapping === 'object';
+    const hasCoreShape = typeof typed.title === 'string' && !!typed.mapping && typeof typed.mapping === 'object';
     if (!hasCoreShape) {
         return false;
     }

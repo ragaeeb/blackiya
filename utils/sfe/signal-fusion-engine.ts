@@ -67,6 +67,7 @@ interface SignalFusionEngineOptions {
     now?: () => number;
     maxResolutions?: number;
     terminalResolutionTtlMs?: number;
+    pruneMinIntervalMs?: number;
 }
 
 function isRegressive(current: LifecyclePhase, next: LifecyclePhase): boolean {
@@ -157,7 +158,9 @@ export class SignalFusionEngine {
     private readonly now: () => number;
     private readonly maxResolutions: number;
     private readonly terminalResolutionTtlMs: number;
+    private readonly pruneMinIntervalMs: number;
     private readonly resolutions = new Map<string, CaptureResolution>();
+    private lastPruneAtMs = 0;
 
     constructor(options: SignalFusionEngineOptions = {}) {
         this.tracker = options.tracker ?? new AttemptTracker();
@@ -166,6 +169,7 @@ export class SignalFusionEngine {
         this.now = options.now ?? (() => Date.now());
         this.maxResolutions = Math.max(1, options.maxResolutions ?? 800);
         this.terminalResolutionTtlMs = Math.max(1_000, options.terminalResolutionTtlMs ?? 10 * 60 * 1000);
+        this.pruneMinIntervalMs = Math.max(0, options.pruneMinIntervalMs ?? 1000);
     }
 
     public ingestSignal(signal: FusionSignal): CaptureResolution {
@@ -341,10 +345,14 @@ export class SignalFusionEngine {
     }
 
     private pruneResolutionCache(): void {
+        const now = this.now();
+        if (now - this.lastPruneAtMs < this.pruneMinIntervalMs) {
+            return;
+        }
+        this.lastPruneAtMs = now;
         if (this.resolutions.size === 0) {
             return;
         }
-        const now = this.now();
         const activeAttemptIds = new Set(this.tracker.all().map((attempt) => attempt.attemptId));
         for (const [attemptId, resolution] of this.resolutions.entries()) {
             if (!activeAttemptIds.has(attemptId)) {

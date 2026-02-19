@@ -4,7 +4,7 @@ export function shouldRemoveDisposedAttemptBinding(
     mappedAttemptId: string,
     disposedAttemptId: string,
     resolveAttemptId: (attemptId: string) => string,
-): boolean {
+) {
     return resolveAttemptId(mappedAttemptId) === resolveAttemptId(disposedAttemptId);
 }
 

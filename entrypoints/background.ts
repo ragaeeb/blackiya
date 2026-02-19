@@ -10,13 +10,13 @@
 import { logger } from '@/utils/logger';
 import { type LogEntry, logsStorage } from '@/utils/logs-storage';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
-import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 import {
     isProbeLeaseClaimRequest,
     isProbeLeaseReleaseRequest,
     type ProbeLeaseClaimResponse,
     type ProbeLeaseReleaseResponse,
 } from '@/utils/sfe/probe-lease-protocol';
+import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 
 type BackgroundLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>;
 

@@ -73,8 +73,8 @@ import {
     appendPendingRunnerStreamPreview,
     ensureLiveRunnerStreamPreview,
     migratePendingRunnerStreamPreview,
-    removePendingRunnerStreamPreview,
     type RunnerStreamPreviewState,
+    removePendingRunnerStreamPreview,
     withPreservedRunnerStreamMirrorSnapshot,
 } from '@/utils/runner/stream-preview';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
@@ -124,7 +124,7 @@ function normalizeContentText(text: string): string {
     return text.trim().normalize('NFC');
 }
 
-export function resolveExportConversationTitle(data: ConversationData): string {
+export function resolveExportConversationTitle(data: ConversationData) {
     return resolveExportTitleDecision(data).title;
 }
 
@@ -132,7 +132,7 @@ export function shouldRemoveDisposedAttemptBinding(
     mappedAttemptId: string,
     disposedAttemptId: string,
     resolveAttemptId: (attemptId: string) => string,
-): boolean {
+) {
     return shouldRemoveDisposedAttemptBindingFromRegistry(mappedAttemptId, disposedAttemptId, resolveAttemptId);
 }
 
@@ -684,16 +684,13 @@ export function runPlatform(): void {
         if (hadTimer) {
             logger.info('Stabilization retry cleared', { attemptId });
         }
-        clearCanonicalStabilizationAttemptState(
-            attemptId,
-            {
-                timerIds: canonicalStabilizationRetryTimers,
-                retryCounts: canonicalStabilizationRetryCounts,
-                startedAt: canonicalStabilizationStartedAt,
-                timeoutWarnings: timeoutWarningByAttempt,
-                inProgress: canonicalStabilizationInProgress,
-            },
-        );
+        clearCanonicalStabilizationAttemptState(attemptId, {
+            timerIds: canonicalStabilizationRetryTimers,
+            retryCounts: canonicalStabilizationRetryCounts,
+            startedAt: canonicalStabilizationStartedAt,
+            timeoutWarnings: timeoutWarningByAttempt,
+            inProgress: canonicalStabilizationInProgress,
+        });
     }
 
     function emitTimeoutWarningOnce(attemptId: string, conversationId: string): void {
@@ -2404,21 +2401,17 @@ export function runPlatform(): void {
         const ownerDocument = root instanceof Document ? root : root.ownerDocument;
         const walkerRoot = root instanceof Element || root instanceof Document ? root : ownerDocument?.body;
         if (ownerDocument && walkerRoot) {
-            const walker = ownerDocument.createTreeWalker(
-                walkerRoot,
-                NodeFilter.SHOW_ELEMENT,
-                {
-                    acceptNode: (candidate: Node) => {
-                        if (!(candidate instanceof Element)) {
-                            return NodeFilter.FILTER_SKIP;
-                        }
-                        if (!allowedTags.has(candidate.tagName)) {
-                            return NodeFilter.FILTER_SKIP;
-                        }
-                        return NodeFilter.FILTER_ACCEPT;
-                    },
+            const walker = ownerDocument.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
+                acceptNode: (candidate: Node) => {
+                    if (!(candidate instanceof Element)) {
+                        return NodeFilter.FILTER_SKIP;
+                    }
+                    if (!allowedTags.has(candidate.tagName)) {
+                        return NodeFilter.FILTER_SKIP;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
                 },
-            );
+            });
 
             let node = walker.nextNode();
             while (node && snippets.length < 6 && scanned < maxNodesScanned) {
@@ -3556,7 +3549,7 @@ export function runPlatform(): void {
     function shouldProcessFinishedSignal(
         conversationId: string | null,
         source: 'network' | 'dom',
-        attemptId: string,
+        attemptId: string | null,
     ): boolean {
         if (!conversationId) {
             logger.info('Finished signal ignored: missing conversation context', { source });
@@ -3576,17 +3569,18 @@ export function runPlatform(): void {
         }
         const now = Date.now();
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
+        const effectiveAttemptId = attemptId ?? '';
         const isNewAttemptInSameConversation =
             source === 'network' &&
             isSameConversation &&
             lastResponseFinishedAttemptId &&
-            lastResponseFinishedAttemptId !== attemptId;
+            lastResponseFinishedAttemptId !== effectiveAttemptId;
         const minIntervalMs = source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500;
         if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
             logger.info('Finished signal debounced', {
                 conversationId,
                 source,
-                attemptId,
+                attemptId: effectiveAttemptId || null,
                 elapsed: now - lastResponseFinishedAt,
                 minIntervalMs,
             });
@@ -3594,7 +3588,9 @@ export function runPlatform(): void {
         }
         lastResponseFinishedAt = now;
         lastResponseFinishedConversationId = conversationId;
-        lastResponseFinishedAttemptId = attemptId;
+        if (effectiveAttemptId) {
+            lastResponseFinishedAttemptId = effectiveAttemptId;
+        }
         return true;
     }
 
@@ -3738,9 +3734,13 @@ export function runPlatform(): void {
 
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string): void {
         const conversationId = resolveActiveConversationId(hintedConversationId);
-        const attemptId = resolveAttemptId(conversationId ?? undefined);
-        if (!shouldProcessFinishedSignal(conversationId, source, attemptId)) {
+        const peekedAttemptId = conversationId ? peekAttemptId(conversationId) : null;
+        if (!shouldProcessFinishedSignal(conversationId, source, peekedAttemptId)) {
             return;
+        }
+        const attemptId = peekedAttemptId ?? resolveAttemptId(conversationId ?? undefined);
+        if (!peekedAttemptId) {
+            lastResponseFinishedAttemptId = attemptId;
         }
         setActiveAttempt(attemptId);
         ingestSfeLifecycle('completed_hint', attemptId, conversationId);

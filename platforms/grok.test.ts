@@ -34,14 +34,41 @@ mock.module('@/utils/logger', () => ({
 
 import sampleConversation from '@/data/grok/sample_grok_conversation.json';
 import sampleHistory from '@/data/grok/sample_grok_history.json';
-import type { MessageNode } from '@/utils/types';
+import type { ConversationData, MessageNode } from '@/utils/types';
+
+const buildConversationData = (overrides: Partial<ConversationData> = {}): ConversationData => ({
+    title: 'Test Grok Conversation',
+    create_time: 1768841980.715,
+    update_time: 1768841980.715,
+    mapping: {},
+    conversation_id: '2013295304527827227',
+    current_node: 'node-1',
+    moderation_results: [],
+    plugin_ids: null,
+    gizmo_id: null,
+    gizmo_type: null,
+    is_archived: false,
+    default_model_slug: 'grok-2',
+    safe_urls: [],
+    blocked_urls: [],
+    ...overrides,
+});
+
+const hasMessageNode = (node: MessageNode): node is MessageNode & { message: NonNullable<MessageNode['message']> } =>
+    node.message !== null;
 
 describe('Grok Platform Adapter', () => {
     let grokAdapter: any;
+    let resetGrokAdapterState: (() => void) | null = null;
 
     beforeAll(async () => {
         const mod = await import('@/platforms/grok');
         grokAdapter = mod.grokAdapter;
+        resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
+    });
+
+    beforeEach(() => {
+        resetGrokAdapterState?.();
     });
 
     describe('extractConversationId', () => {
@@ -510,7 +537,7 @@ describe('Grok Platform Adapter', () => {
             expect(result).not.toBeNull();
             expect(result?.conversation_id).toBe(conversationId);
 
-            const messagesWithContent = Object.values(result!.mapping).filter((n: any) => n.message !== null);
+            const messagesWithContent = (Object.values(result!.mapping) as MessageNode[]).filter(hasMessageNode);
             expect(messagesWithContent.length).toBe(2);
             expect(result?.title).toBe('Capital of France');
         });
@@ -621,93 +648,26 @@ describe('Grok Platform Adapter', () => {
 
     describe('formatFilename', () => {
         it('should format filename with title and timestamp', () => {
-            const data = {
-                title: 'Test Grok Conversation',
-                create_time: 1768841980.715,
-                update_time: 1768841980.715,
-                mapping: {},
-                conversation_id: '2013295304527827227',
-                current_node: 'node-1',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'grok-2',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = grokAdapter.formatFilename(data);
+            const filename = grokAdapter.formatFilename(buildConversationData({ title: 'Test Grok Conversation' }));
 
             expect(filename).toContain('Test_Grok_Conversation');
             expect(filename).toMatch(/\d{4}-\d{2}-\d{2}/);
         });
 
         it('should sanitize special characters in title', () => {
-            const data = {
-                title: 'Test: Special/Characters\\Here?',
-                create_time: 1768841980.715,
-                update_time: 1768841980.715,
-                mapping: {},
-                conversation_id: '2013295304527827227',
-                current_node: 'node-1',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'grok-2',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = grokAdapter.formatFilename(data);
+            const filename = grokAdapter.formatFilename(
+                buildConversationData({ title: 'Test: Special/Characters\\Here?' }),
+            );
             expect(filename).not.toMatch(/[:/\\?<>"|*]/);
         });
 
         it('should handle empty title', () => {
-            const data = {
-                title: '',
-                create_time: 1768841980.715,
-                update_time: 1768841980.715,
-                mapping: {},
-                conversation_id: '2013295304527827227',
-                current_node: 'node-1',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'grok-2',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = grokAdapter.formatFilename(data);
+            const filename = grokAdapter.formatFilename(buildConversationData({ title: '' }));
             expect(filename).toContain('grok_conversation');
         });
 
         it('should truncate very long titles', () => {
-            const longTitle = 'A'.repeat(200);
-            const data = {
-                title: longTitle,
-                create_time: 1768841980.715,
-                update_time: 1768841980.715,
-                mapping: {},
-                conversation_id: '2013295304527827227',
-                current_node: 'node-1',
-                moderation_results: [],
-                plugin_ids: null,
-                gizmo_id: null,
-                gizmo_type: null,
-                is_archived: false,
-                default_model_slug: 'grok-2',
-                safe_urls: [],
-                blocked_urls: [],
-            };
-
-            const filename = grokAdapter.formatFilename(data);
+            const filename = grokAdapter.formatFilename(buildConversationData({ title: 'A'.repeat(200) }));
             expect(filename.length).toBeLessThan(150);
         });
     });
@@ -748,9 +708,7 @@ describe('Grok Platform Adapter', () => {
                 'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
             );
             expect(result).not.toBeNull();
-            const messagesWithContent = (Object.values(result!.mapping) as MessageNode[]).filter(
-                (n): n is any => n.message !== null,
-            );
+            const messagesWithContent = (Object.values(result!.mapping) as MessageNode[]).filter(hasMessageNode);
 
             expect(messagesWithContent.length).toBeGreaterThan(0);
 
@@ -793,10 +751,16 @@ describe('Grok Platform Adapter', () => {
 
 describe('Grok Platform Adapter - ID Synchronization', () => {
     let grokAdapter: any;
+    let resetGrokAdapterState: (() => void) | null = null;
 
     beforeAll(async () => {
         const mod = await import('@/platforms/grok');
         grokAdapter = mod.grokAdapter;
+        resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
+    });
+
+    beforeEach(() => {
+        resetGrokAdapterState?.();
     });
 
     it('should override conversation ID from URL params when present', () => {
@@ -927,10 +891,16 @@ describe('Grok Platform Adapter - evaluateReadiness', () => {
 
 describe('Grok dual-match and metadata endpoints', () => {
     let grokAdapter: any;
+    let resetGrokAdapterState: (() => void) | null = null;
 
     beforeAll(async () => {
         const mod = await import('@/platforms/grok');
         grokAdapter = mod.grokAdapter;
+        resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
+    });
+
+    beforeEach(() => {
+        resetGrokAdapterState?.();
     });
 
     describe('Dual-match: URLs matching both apiEndpointPattern AND completionTriggerPattern', () => {
@@ -1112,18 +1082,38 @@ describe('Grok dual-match and metadata endpoints', () => {
         });
 
         it('conversations_v2 still caches title even when returning null', () => {
+            const conversationId = 'af642f01-1a30-4ad2-a588-c15293a4fafe';
             const metadataPayload = JSON.stringify({
                 conversation: {
-                    conversationId: 'test-title-cache-id',
+                    conversationId,
                     title: 'My cached title',
                     starred: false,
                     createTime: '2026-02-16T17:32:35Z',
                     modifyTime: '2026-02-16T17:32:35Z',
                 },
             });
-            const url = 'https://grok.com/rest/app-chat/conversations_v2/test-title-cache-id';
+            const url = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}`;
             const result = grokAdapter.parseInterceptedData(metadataPayload, url);
             expect(result).toBeNull();
+
+            const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+            const loadResponsesPayload = JSON.stringify({
+                responses: [
+                    {
+                        responseId: 'cached-title-test-resp',
+                        message: 'Assistant response',
+                        sender: 'assistant',
+                        createTime: '2026-02-16T17:32:36Z',
+                        partial: false,
+                        model: 'grok-4',
+                    },
+                ],
+            });
+
+            const followup = grokAdapter.parseInterceptedData(loadResponsesPayload, loadResponsesUrl);
+            expect(followup).not.toBeNull();
+            expect(followup?.conversation_id).toBe(conversationId);
+            expect(followup?.title).toBe('My cached title');
         });
     });
 
