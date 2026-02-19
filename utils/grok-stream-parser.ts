@@ -4,6 +4,8 @@ const GROK_CONVERSATION_ID_REGEX = /^[a-zA-Z0-9-]{8,128}$/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 const TOOL_USAGE_CARD_ARGS_REGEX = /<xai:tool_args><!\[CDATA\[([\s\S]*?)\]\]><\/xai:tool_args>/i;
 const GROK_METADATA_KEYS_TO_SKIP = new Set(['responseId', 'messageTag', 'messageStepId', 'toolUsageCardId']);
+const GROK_PREFERRED_TEXT_KEYS = ['message', 'text', 'delta', 'content', 'output_text', 'summary', 'final_message'];
+const GROK_PREFERRED_TEXT_KEYS_SET = new Set(GROK_PREFERRED_TEXT_KEYS);
 
 function extractToolUsageCardMessage(value: string): string | null {
     if (!value.includes('<xai:tool_usage_card')) {
@@ -55,37 +57,36 @@ function isLikelyGrokText(value: string): boolean {
     return true;
 }
 
-function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void {
-    if (depth > 9 || out.length > 160) {
+function appendLikelyTextCandidate(value: string, out: string[]): void {
+    const normalized = normalizeCandidateText(value).replace(/\r\n/g, '\n');
+    if (!isLikelyGrokText(normalized)) {
         return;
     }
-    if (typeof node === 'string') {
-        const normalized = normalizeCandidateText(node).trim();
-        if (isLikelyGrokText(normalized)) {
-            out.push(normalized);
-        }
-        return;
-    }
-    if (!node || typeof node !== 'object') {
-        return;
-    }
-    if (Array.isArray(node)) {
-        for (const child of node) {
-            collectLikelyTextValues(child, out, depth + 1);
-        }
-        return;
-    }
+    out.push(normalized);
+}
 
-    const obj = node as Record<string, unknown>;
-    const preferredKeys = ['message', 'text', 'delta', 'content', 'output_text', 'summary', 'final_message'];
-    for (const key of preferredKeys) {
-        if (key in obj) {
-            collectLikelyTextValues(obj[key], out, depth + 1);
-        }
+function collectLikelyTextValuesFromArray(values: unknown[], out: string[], depth: number): void {
+    for (const child of values) {
+        collectLikelyTextValues(child, out, depth + 1);
     }
+}
+
+function collectPreferredTextSlots(obj: Record<string, unknown>, out: string[], depth: number): void {
+    for (const key of GROK_PREFERRED_TEXT_KEYS) {
+        if (!(key in obj)) {
+            continue;
+        }
+        collectLikelyTextValues(obj[key], out, depth + 1);
+    }
+}
+
+function collectObjectTextValues(obj: Record<string, unknown>, out: string[], depth: number): void {
     const shouldSkipThinkingToken = obj.isThinking === true && typeof obj.token === 'string';
     for (const [key, value] of Object.entries(obj)) {
         if (GROK_METADATA_KEYS_TO_SKIP.has(key)) {
+            continue;
+        }
+        if (GROK_PREFERRED_TEXT_KEYS_SET.has(key)) {
             continue;
         }
         if (shouldSkipThinkingToken && key === 'token') {
@@ -93,6 +94,26 @@ function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void 
         }
         collectLikelyTextValues(value, out, depth + 1);
     }
+}
+
+function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void {
+    if (depth > 9 || out.length > 160) {
+        return;
+    }
+    if (typeof node === 'string') {
+        appendLikelyTextCandidate(node, out);
+        return;
+    }
+    if (!node || typeof node !== 'object') {
+        return;
+    }
+    if (Array.isArray(node)) {
+        collectLikelyTextValuesFromArray(node, out, depth);
+        return;
+    }
+    const obj = node as Record<string, unknown>;
+    collectPreferredTextSlots(obj, out, depth);
+    collectObjectTextValues(obj, out, depth);
 }
 
 function pushReasoningIfText(value: unknown, out: string[]): void {

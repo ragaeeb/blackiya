@@ -1,44 +1,83 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
 import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-bridge';
+import { setSessionToken } from '@/utils/protocol/session-token';
 
-describe('snapshot bridge requester', () => {
-    it('resolves when response message returns success', async () => {
-        const testWindow = new Window();
-        const requester = createWindowJsonRequester(testWindow as unknown as globalThis.Window, {
+describe('snapshot-bridge', () => {
+    const windowInstance = new Window();
+
+    beforeEach(() => {
+        (globalThis as any).window = windowInstance;
+        setSessionToken('bk:test-bridge-token');
+    });
+
+    it('should stamp token on getJSON bridge requests', async () => {
+        const requester = createWindowJsonRequester(windowInstance as any, {
             requestType: 'BLACKIYA_GET_JSON_REQUEST',
             responseType: 'BLACKIYA_GET_JSON_RESPONSE',
-            timeoutMs: 200,
-            makeRequestId: () => 'req-1',
+            timeoutMs: 100,
+            makeRequestId: () => 'request-1',
         });
 
-        testWindow.addEventListener('message', (event: any) => {
-            const message = event.data as { type?: string; requestId?: string };
-            if (message?.type !== 'BLACKIYA_GET_JSON_REQUEST' || message.requestId !== 'req-1') {
+        let seenRequest: Record<string, unknown> | null = null;
+        const handler = (event: any) => {
+            const message = event.data as Record<string, unknown> | null;
+            if (message?.type !== 'BLACKIYA_GET_JSON_REQUEST') {
                 return;
             }
-            testWindow.postMessage(
+            seenRequest = message;
+            windowInstance.postMessage(
                 {
                     type: 'BLACKIYA_GET_JSON_RESPONSE',
-                    requestId: 'req-1',
+                    requestId: 'request-1',
+                    success: true,
+                    data: { ok: true },
+                    __blackiyaToken: 'bk:test-bridge-token',
+                },
+                windowInstance.location.origin,
+            );
+        };
+        windowInstance.addEventListener('message', handler);
+
+        try {
+            const response = await requester('original');
+            expect(response).toEqual({ ok: true });
+            expect((seenRequest as any)?.__blackiyaToken).toBe('bk:test-bridge-token');
+        } finally {
+            windowInstance.removeEventListener('message', handler);
+        }
+    });
+
+    it('should ignore unstamped bridge responses and time out', async () => {
+        const requester = createWindowJsonRequester(windowInstance as any, {
+            requestType: 'BLACKIYA_GET_JSON_REQUEST',
+            responseType: 'BLACKIYA_GET_JSON_RESPONSE',
+            timeoutMs: 25,
+            makeRequestId: () => 'request-2',
+        });
+
+        const handler = (event: any) => {
+            const message = event.data as Record<string, unknown> | null;
+            if (message?.type !== 'BLACKIYA_GET_JSON_REQUEST') {
+                return;
+            }
+            // Missing __blackiyaToken should fail validation in requester.
+            windowInstance.postMessage(
+                {
+                    type: 'BLACKIYA_GET_JSON_RESPONSE',
+                    requestId: 'request-2',
                     success: true,
                     data: { ok: true },
                 },
-                testWindow.location.origin,
+                windowInstance.location.origin,
             );
-        });
+        };
+        windowInstance.addEventListener('message', handler);
 
-        await expect(requester('original')).resolves.toEqual({ ok: true });
-    });
-
-    it('rejects when no response arrives before timeout', async () => {
-        const testWindow = new Window();
-        const requester = createWindowJsonRequester(testWindow as unknown as globalThis.Window, {
-            requestType: 'BLACKIYA_GET_JSON_REQUEST',
-            responseType: 'BLACKIYA_GET_JSON_RESPONSE',
-            timeoutMs: 20,
-            makeRequestId: () => 'req-timeout',
-        });
-        await expect(requester('common')).rejects.toThrow('TIMEOUT');
+        try {
+            await expect(requester('common')).rejects.toThrow('TIMEOUT');
+        } finally {
+            windowInstance.removeEventListener('message', handler);
+        }
     });
 });

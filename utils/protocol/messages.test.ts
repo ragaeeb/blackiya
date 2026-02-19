@@ -24,8 +24,28 @@ describe('protocol/messages', () => {
                 attemptId: 'a-1',
                 kind: 'snapshot',
                 text: 'hello',
+                __blackiyaToken: 'bk:test',
             }),
         ).toBeTrue();
+    });
+
+    it('keeps tokenized wire messages type-compatible', () => {
+        const lifecycle: protocol.ResponseLifecycleMessage = {
+            type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+            platform: 'ChatGPT',
+            attemptId: 'attempt-1',
+            phase: 'streaming',
+            __blackiyaToken: 'bk:test',
+        };
+        const capture: protocol.CaptureInterceptedMessage = {
+            type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+            platform: 'ChatGPT',
+            url: 'https://chatgpt.com/backend-api/conversation/1',
+            data: '{}',
+            __blackiyaToken: 'bk:test',
+        };
+        expect(lifecycle.__blackiyaToken).toBe('bk:test');
+        expect(capture.__blackiyaToken).toBe('bk:test');
     });
 
     it('rejects lifecycle and completion messages without attempt IDs', () => {

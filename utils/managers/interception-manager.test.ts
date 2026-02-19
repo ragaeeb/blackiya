@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
+import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 
 mock.module('wxt/browser', () => ({
     browser: {
@@ -47,6 +48,7 @@ describe('InterceptionManager', () => {
         (global as any).alert = () => {};
 
         windowInstance.location.href = 'https://chatgpt.com/c/123';
+        setSessionToken('bk:test-interception-token');
         (global as any).window.__BLACKIYA_CAPTURE_QUEUE__ = [];
         (global as any).window.__BLACKIYA_LOG_QUEUE__ = [];
     });
@@ -85,6 +87,7 @@ describe('InterceptionManager', () => {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 url: 'https://chatgpt.com/backend-api/conversation/123',
                 data: '{}',
+                __blackiyaToken: getSessionToken(),
             },
         ];
 
@@ -110,6 +113,7 @@ describe('InterceptionManager', () => {
                     data: [],
                     context: 'interceptor',
                 },
+                __blackiyaToken: getSessionToken(),
             },
         ];
 
@@ -154,11 +158,13 @@ describe('InterceptionManager', () => {
                     safe_urls: [],
                     blocked_urls: [],
                 }),
+                __blackiyaToken: getSessionToken(),
             },
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
                 url: 'https://chatgpt.com/backend-api/conversation/two',
                 data: JSON.stringify({ conversation_id: 'two', mapping: {} }),
+                __blackiyaToken: getSessionToken(),
             },
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
@@ -179,6 +185,7 @@ describe('InterceptionManager', () => {
                     safe_urls: [],
                     blocked_urls: [],
                 }),
+                __blackiyaToken: getSessionToken(),
             },
         ];
 
@@ -212,14 +219,17 @@ describe('InterceptionManager', () => {
             {
                 type: 'LLM_LOG_ENTRY',
                 payload: { level: 'info', message: 'first', data: [], context: 'interceptor' },
+                __blackiyaToken: getSessionToken(),
             },
             {
                 type: 'LLM_LOG_ENTRY',
                 payload: { level: 'info', message: 'second', data: [], context: 'interceptor' },
+                __blackiyaToken: getSessionToken(),
             },
             {
                 type: 'LLM_LOG_ENTRY',
                 payload: { level: 'info', message: 'third', data: [], context: 'interceptor' },
+                __blackiyaToken: getSessionToken(),
             },
         ];
 
@@ -238,6 +248,170 @@ describe('InterceptionManager', () => {
 
         managerAny.processQueuedLogMessages();
         expect(handled).toEqual(['first', 'second', 'third']);
+    });
+
+    it('should revalidate queued messages with missing token once session token is available', () => {
+        const captured: string[] = [];
+        const globalRef = {} as any;
+        const manager = new InterceptionManager((id) => captured.push(id), {
+            window: windowInstance as any,
+            global: globalRef,
+        });
+
+        manager.updateAdapter({
+            parseInterceptedData: () => ({
+                title: 'Queued',
+                create_time: 1,
+                update_time: 1,
+                mapping: {},
+                conversation_id: 'queued-missing-token',
+                current_node: 'node-1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'model',
+                safe_urls: [],
+                blocked_urls: [],
+            }),
+        } as any);
+
+        (windowInstance as any).__BLACKIYA_SESSION_TOKEN__ = undefined;
+        globalRef.__BLACKIYA_CAPTURE_QUEUE__ = [
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/conversation/queued-missing-token',
+                data: '{}',
+            },
+        ];
+        globalRef.__BLACKIYA_LOG_QUEUE__ = [
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'missing-token', context: 'interceptor', data: [] },
+            },
+        ];
+
+        manager.flushQueuedMessages();
+        (manager as any).processQueuedLogMessages();
+        expect(captured).toEqual([]);
+        expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] missing-token');
+
+        setSessionToken('bk:test-interception-token');
+        manager.flushQueuedMessages();
+        expect(captured).toEqual(['queued-missing-token']);
+
+        (manager as any).processPendingTokenRevalidationMessages();
+        expect(loggerSpies.info).toHaveBeenCalledWith('[i] missing-token');
+    });
+
+    it('should drop queued capture/log messages when token is mismatched', () => {
+        const captured: string[] = [];
+        const globalRef = {} as any;
+        const manager = new InterceptionManager((id) => captured.push(id), {
+            window: windowInstance as any,
+            global: globalRef,
+        });
+
+        manager.updateAdapter({
+            parseInterceptedData: () => ({
+                title: 'Queued',
+                create_time: 1,
+                update_time: 1,
+                mapping: {},
+                conversation_id: 'queued-1',
+                current_node: 'node-1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'model',
+                safe_urls: [],
+                blocked_urls: [],
+            }),
+        } as any);
+
+        globalRef.__BLACKIYA_CAPTURE_QUEUE__ = [
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/conversation/queued-2',
+                data: '{}',
+                __blackiyaToken: 'bk:wrong-token',
+            },
+        ];
+
+        globalRef.__BLACKIYA_LOG_QUEUE__ = [
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'wrong-token', context: 'interceptor', data: [] },
+                __blackiyaToken: 'bk:wrong-token',
+            },
+        ];
+
+        manager.flushQueuedMessages();
+        (manager as any).processQueuedLogMessages();
+
+        expect(captured).toEqual([]);
+        expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] wrong-token');
+    });
+
+    it('should drop live window messages when token validation fails', () => {
+        const captured: string[] = [];
+        const manager = new InterceptionManager((id) => captured.push(id), {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.updateAdapter({
+            parseInterceptedData: () => ({
+                title: 'Live',
+                create_time: 1,
+                update_time: 1,
+                mapping: {},
+                conversation_id: 'live-1',
+                current_node: 'node-1',
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'model',
+                safe_urls: [],
+                blocked_urls: [],
+            }),
+        } as any);
+
+        manager.start();
+        try {
+            windowInstance.dispatchEvent(
+                new (windowInstance as any).MessageEvent('message', {
+                    data: {
+                        type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                        url: 'https://chatgpt.com/backend-api/conversation/live-1',
+                        data: '{}',
+                    },
+                    origin: windowInstance.location.origin,
+                    source: windowInstance,
+                }),
+            );
+
+            windowInstance.dispatchEvent(
+                new (windowInstance as any).MessageEvent('message', {
+                    data: {
+                        type: 'LLM_LOG_ENTRY',
+                        payload: { level: 'info', message: 'live-missing-token', context: 'interceptor', data: [] },
+                    },
+                    origin: windowInstance.location.origin,
+                    source: windowInstance,
+                }),
+            );
+
+            expect(captured).toEqual([]);
+            expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] live-missing-token');
+        } finally {
+            manager.stop();
+        }
     });
 
     it('should cache direct conversation payloads from snapshot fallback', () => {

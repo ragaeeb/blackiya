@@ -187,6 +187,7 @@ export function runPlatform(): void {
         maxEntries: MAX_STREAM_PREVIEWS,
     };
     let streamDumpEnabled = false;
+    let streamProbeVisible = false;
     const streamProbeControllers = new Map<string, AbortController>();
     const probeLeaseRetryTimers = new Map<string, number>();
     const canonicalStabilizationRetryTimers = new Map<string, number>();
@@ -323,7 +324,7 @@ export function runPlatform(): void {
     // -- Manager Initialization --
 
     // 1. UI Manager
-    const buttonManager = new ButtonManager(handleSaveClick, handleCopyClick, handleCalibrationClick);
+    const buttonManager = new ButtonManager(handleSaveClick, handleCalibrationClick);
 
     function applyStreamResolvedTitleIfNeeded(conversationId: string, data: ConversationData): void {
         const streamTitle = streamResolvedTitles.get(conversationId);
@@ -1272,6 +1273,27 @@ export function runPlatform(): void {
         emitStreamDumpConfig();
     }
 
+    function removeStreamProbePanel(): void {
+        const panel = document.getElementById('blackiya-stream-probe');
+        if (!panel || !panel.parentNode) {
+            return;
+        }
+        panel.parentNode.removeChild(panel);
+    }
+
+    async function loadStreamProbeVisibilitySetting(): Promise<void> {
+        try {
+            const result = await browser.storage.local.get(STORAGE_KEYS.STREAM_PROBE_VISIBLE);
+            streamProbeVisible = result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true;
+        } catch (error) {
+            logger.warn('Failed to load stream probe visibility setting', error);
+            streamProbeVisible = false;
+        }
+        if (!streamProbeVisible) {
+            removeStreamProbePanel();
+        }
+    }
+
     async function loadSfeSettings(): Promise<void> {
         try {
             const result = await browser.storage.local.get([STORAGE_KEYS.SFE_ENABLED]);
@@ -1444,9 +1466,47 @@ export function runPlatform(): void {
         applyLifecycleUiState(state, conversationId);
     }
 
-    function ensureStreamProbePanel(): HTMLDivElement {
+    function resolveStreamProbeDockPosition(): 'bottom-left' | 'top-left' {
+        if ((currentAdapter?.name ?? '').toLowerCase() === 'gemini') {
+            return 'top-left';
+        }
+        const host = window.location?.hostname ?? '';
+        if (/(^|\.)gemini\.google\.com$/i.test(host)) {
+            return 'top-left';
+        }
+        return 'bottom-left';
+    }
+
+    function applyStreamProbeDocking(panel: HTMLDivElement): void {
+        if (resolveStreamProbeDockPosition() === 'top-left') {
+            panel.style.left = '16px';
+            panel.style.right = 'auto';
+            panel.style.top = '16px';
+            panel.style.bottom = 'auto';
+            return;
+        }
+        panel.style.left = '16px';
+        panel.style.right = 'auto';
+        panel.style.top = 'auto';
+        panel.style.bottom = '16px';
+    }
+
+    function normalizeStreamProbePanelInteraction(panel: HTMLDivElement): void {
+        panel.style.maxHeight = '42vh';
+        panel.style.overflow = 'auto';
+        panel.style.pointerEvents = 'auto';
+        panel.style.touchAction = 'pan-y';
+        panel.style.overscrollBehavior = 'contain';
+    }
+
+    function ensureStreamProbePanel(): HTMLDivElement | null {
+        if (!streamProbeVisible) {
+            return null;
+        }
         const existing = document.getElementById('blackiya-stream-probe') as HTMLDivElement | null;
         if (existing) {
+            normalizeStreamProbePanelInteraction(existing);
+            applyStreamProbeDocking(existing);
             return existing;
         }
 
@@ -1455,6 +1515,8 @@ export function runPlatform(): void {
         panel.style.cssText = `
             position: fixed;
             left: 16px;
+            right: auto;
+            top: auto;
             bottom: 16px;
             width: min(560px, calc(100vw - 32px));
             max-height: 42vh;
@@ -1469,7 +1531,10 @@ export function runPlatform(): void {
             padding: 10px;
             white-space: pre-wrap;
             word-break: break-word;
+            pointer-events: auto;
         `;
+        normalizeStreamProbePanelInteraction(panel);
+        applyStreamProbeDocking(panel);
         document.body.appendChild(panel);
         return panel;
     }
@@ -1478,7 +1543,13 @@ export function runPlatform(): void {
         if (cleanedUp) {
             return;
         }
+        if (!streamProbeVisible) {
+            return;
+        }
         const panel = ensureStreamProbePanel();
+        if (!panel) {
+            return;
+        }
         const now = new Date().toLocaleTimeString();
         panel.textContent = `[Blackiya Stream Probe] ${status} @ ${now}\n\n${body}`;
     }
@@ -1983,26 +2054,6 @@ export function runPlatform(): void {
         await saveConversation(data, { allowDegraded });
     }
 
-    async function handleCopyClick(): Promise<void> {
-        if (!currentAdapter) {
-            return;
-        }
-        const data = await getConversationData();
-        if (!data) {
-            return;
-        }
-
-        try {
-            const exportPayload = await buildExportPayload(data, getCaptureMeta(data.conversation_id));
-            await navigator.clipboard.writeText(JSON.stringify(exportPayload, null, 2));
-            logger.info('Copied conversation to clipboard');
-            buttonManager.setSuccess('copy');
-        } catch (error) {
-            handleError('copy', error);
-            buttonManager.setLoading(false, 'copy');
-        }
-    }
-
     async function handleCalibrationClick(): Promise<void> {
         if (calibrationState === 'capturing') {
             return;
@@ -2269,14 +2320,29 @@ export function runPlatform(): void {
                 resolve(null);
             }, 2500);
 
-            const onMessage = (event: MessageEvent) => {
+            const isMatchingSnapshotResponse = (
+                event: MessageEvent,
+            ): event is MessageEvent<{
+                type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE';
+                requestId: string;
+                success: boolean;
+                data?: unknown;
+            }> => {
                 if (event.source !== window || event.origin !== window.location.origin) {
+                    return false;
+                }
+                const msg = event.data as Record<string, unknown> | null;
+                if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE' || msg.requestId !== requestId) {
+                    return false;
+                }
+                return resolveTokenValidationFailureReason(msg) === null;
+            };
+
+            const onMessage = (event: MessageEvent) => {
+                if (!isMatchingSnapshotResponse(event)) {
                     return;
                 }
                 const msg = event.data;
-                if (msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE' || msg.requestId !== requestId) {
-                    return;
-                }
                 clearTimeout(timeout);
                 window.removeEventListener('message', onMessage);
                 resolve(msg.success ? msg.data : null);
@@ -2399,65 +2465,91 @@ export function runPlatform(): void {
         }));
     }
 
-    function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
-        const allowedTags = new Set(['MAIN', 'ARTICLE', 'SECTION', 'DIV']);
-        const maxNodesScanned = 220;
-        const snippets: string[] = [];
-        let scanned = 0;
+    function resolveTreeWalkerContext(root: ParentNode): { ownerDocument: Document; walkerRoot: Node } | null {
         const ownerDocument = root instanceof Document ? root : root.ownerDocument;
         const walkerRoot = root instanceof Element || root instanceof Document ? root : ownerDocument?.body;
-        if (ownerDocument && walkerRoot) {
-            const walker = ownerDocument.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
-                acceptNode: (candidate: Node) => {
-                    if (!(candidate instanceof Element)) {
-                        return NodeFilter.FILTER_SKIP;
-                    }
-                    if (!allowedTags.has(candidate.tagName)) {
-                        return NodeFilter.FILTER_SKIP;
-                    }
-                    return NodeFilter.FILTER_ACCEPT;
-                },
-            });
+        if (!ownerDocument || !walkerRoot) {
+            return null;
+        }
+        return { ownerDocument, walkerRoot };
+    }
 
-            let node = walker.nextNode();
-            while (node && snippets.length < 6 && scanned < maxNodesScanned) {
-                scanned += 1;
-                const text = normalizeSnapshotText((node.textContent ?? '').trim());
-                if (text.length >= 40 && text.length <= 1200) {
-                    snippets.push(text);
-                }
-                node = walker.nextNode();
-            }
-        } else {
-            const containers = root.querySelectorAll('main, article, section, div');
-            for (const node of containers) {
-                const text = normalizeSnapshotText((node.textContent ?? '').trim());
-                if (text.length < 40 || text.length > 1200) {
-                    continue;
-                }
+    function createSnapshotContainerFilter(allowedTags: Set<string>): NodeFilter {
+        return {
+            acceptNode: (candidate: Node) =>
+                candidate instanceof Element && allowedTags.has(candidate.tagName)
+                    ? NodeFilter.FILTER_ACCEPT
+                    : NodeFilter.FILTER_SKIP,
+        };
+    }
+
+    function collectTreeWalkerSnippets(walker: TreeWalker, snippets: string[], maxNodesScanned: number): void {
+        let scanned = 0;
+        let node = walker.nextNode();
+        while (node && snippets.length < 6 && scanned < maxNodesScanned) {
+            scanned += 1;
+            const text = normalizeSnapshotText((node.textContent ?? '').trim());
+            if (text.length >= 40 && text.length <= 1200) {
                 snippets.push(text);
-                if (snippets.length >= 6) {
-                    break;
-                }
+            }
+            node = walker.nextNode();
+        }
+    }
+
+    function collectLastResortCandidatesViaTreeWalker(root: ParentNode, snippets: string[]): boolean {
+        const context = resolveTreeWalkerContext(root);
+        if (!context) {
+            return false;
+        }
+        const allowedTags = new Set(['MAIN', 'ARTICLE', 'SECTION', 'DIV']);
+        const walker = context.ownerDocument.createTreeWalker(
+            context.walkerRoot,
+            NodeFilter.SHOW_ELEMENT,
+            createSnapshotContainerFilter(allowedTags),
+        );
+        collectTreeWalkerSnippets(walker, snippets, 220);
+        return true;
+    }
+
+    function collectLastResortCandidatesViaSelectors(root: ParentNode, snippets: string[]): void {
+        const containers = root.querySelectorAll('main, article, section, div');
+        for (const node of containers) {
+            const text = normalizeSnapshotText((node.textContent ?? '').trim());
+            if (text.length < 40 || text.length > 1200) {
+                continue;
+            }
+            snippets.push(text);
+            if (snippets.length >= 6) {
+                return;
             }
         }
+    }
 
-        const unique = Array.from(new Set(snippets));
-        if (unique.length === 0) {
+    function buildFallbackRoleCandidates(uniqueTexts: string[]): SnapshotMessageCandidate[] {
+        if (uniqueTexts.length === 0) {
             return [];
         }
-
-        if (unique.length === 1) {
+        if (uniqueTexts.length === 1) {
             return [
                 { role: 'user', text: 'Captured via calibration fallback' },
-                { role: 'assistant', text: unique[0] },
+                { role: 'assistant', text: uniqueTexts[0] },
             ];
         }
-
-        return unique.slice(0, 6).map((text, index) => ({
+        return uniqueTexts.slice(0, 6).map((text, index) => ({
             role: index % 2 === 0 ? 'user' : 'assistant',
             text,
         }));
+    }
+
+    function collectLastResortTextCandidates(root: ParentNode): SnapshotMessageCandidate[] {
+        const snippets: string[] = [];
+        const usedTreeWalker = collectLastResortCandidatesViaTreeWalker(root, snippets);
+        if (!usedTreeWalker || snippets.length === 0) {
+            collectLastResortCandidatesViaSelectors(root, snippets);
+        }
+
+        const unique = Array.from(new Set(snippets));
+        return buildFallbackRoleCandidates(unique);
     }
 
     function buildConversationDataFromMessages(
@@ -3204,8 +3296,49 @@ export function runPlatform(): void {
         }
     }
 
+    function shouldPreserveLifecycleOnNullToConversationSwitch(newId: string | null): boolean {
+        return !currentConversationId && isLifecycleActiveGeneration() && !!newId;
+    }
+
+    function maybeSwitchAdapterForConversation(): void {
+        const newAdapter = getPlatformAdapter(window.location.href);
+        if (!newAdapter || !currentAdapter || newAdapter.name === currentAdapter.name) {
+            return;
+        }
+        currentAdapter = newAdapter;
+        runnerState.adapter = newAdapter;
+        updateManagers();
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    }
+
+    function applyConversationSwitchLifecycle(newId: string, isPreserved: boolean): void {
+        if (isPreserved) {
+            logger.info('Conversation switch -> preserving active lifecycle', {
+                newId,
+                preservedState: lifecycleState,
+            });
+            setLifecycleState(lifecycleState, newId);
+            return;
+        }
+        setTimeout(injectSaveButton, 500);
+        logger.info('Conversation switch -> idle', {
+            newId,
+            previousState: lifecycleState,
+        });
+        setLifecycleState('idle', newId);
+    }
+
+    function schedulePostConversationSwitchCapture(newId: string): void {
+        void warmFetchConversationSnapshot(newId, 'conversation-switch');
+        setTimeout(() => {
+            maybeRunAutoCapture(newId, 'navigation');
+        }, 1800);
+    }
+
     function handleConversationSwitch(newId: string | null): void {
-        const isNewConversationNavigation = !currentConversationId && isLifecycleActiveGeneration() && !!newId;
+        const isNewConversationNavigation = shouldPreserveLifecycleOnNullToConversationSwitch(newId);
         // For null→new-conversation SPA nav during active generation,
         // skip disposal so the interceptor stream monitor keeps running.
         if (!isNewConversationNavigation) {
@@ -3225,41 +3358,9 @@ export function runPlatform(): void {
         }
 
         setCurrentConversation(newId);
-
-        // Determine if we need to update adapter (e.g. cross-platform nav? likely not in same tab but good practice)
-        const newAdapter = getPlatformAdapter(window.location.href);
-        if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
-            currentAdapter = newAdapter;
-            runnerState.adapter = newAdapter;
-            updateManagers();
-            calibrationPreferenceLoaded = false;
-            calibrationPreferenceLoading = null;
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
-
-        if (isNewConversationNavigation) {
-            logger.info('Conversation switch → preserving active lifecycle', {
-                newId,
-                preservedState: lifecycleState,
-            });
-            // Re-associate the preserved lifecycle state with the new conversation ID
-            // so downstream systems (SFE, readiness) bind to the correct conversation.
-            setLifecycleState(lifecycleState, newId);
-        } else {
-            setTimeout(injectSaveButton, 500);
-            logger.info('Conversation switch → idle', {
-                newId,
-                previousState: lifecycleState,
-            });
-            setLifecycleState('idle', newId);
-        }
-
-        void warmFetchConversationSnapshot(newId, 'conversation-switch');
-        setTimeout(() => {
-            if (newId) {
-                maybeRunAutoCapture(newId, 'navigation');
-            }
-        }, 1800);
+        maybeSwitchAdapterForConversation();
+        applyConversationSwitchLifecycle(newId, isNewConversationNavigation);
+        schedulePostConversationSwitchCapture(newId);
     }
 
     function updateManagers(): void {
@@ -3306,40 +3407,49 @@ export function runPlatform(): void {
         }
     }
 
+    function applyActionButtonModeFromDecision(decision: ReadinessDecision, isCanonicalReady: boolean): void {
+        const isDegraded = decision.mode === 'degraded_manual_only';
+        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
+        if (isDegraded) {
+            buttonManager.setButtonEnabled('save', true);
+            return;
+        }
+        buttonManager.setActionButtonsEnabled(isCanonicalReady);
+    }
+
+    function maybeLogHasDataTransition(conversationId: string, decision: ReadinessDecision, hasData: boolean): void {
+        const prevKey = lastButtonStateLog;
+        const opacity = hasData ? '1' : '0.6';
+        const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
+        if (prevKey === newKey || !hasData) {
+            return;
+        }
+        const peekedAttempt = peekAttemptId(conversationId);
+        const retries = peekedAttempt ? (canonicalStabilizationRetryCounts.get(peekedAttempt) ?? 0) : 0;
+        const hasPendingTimer = peekedAttempt ? canonicalStabilizationRetryTimers.has(peekedAttempt) : false;
+        logger.info('Button readiness transition to hasData=true', {
+            conversationId,
+            decisionMode: decision.mode,
+            decisionReason: decision.reason,
+            fidelity: getCaptureMeta(conversationId).fidelity,
+            sfeEnabled,
+            lifecycleState,
+            retries,
+            hasPendingTimer,
+        });
+    }
+
     function applyReadyButtonState(conversationId: string, decision: ReadinessDecision): void {
         const isCanonicalReady = decision.mode === 'canonical_ready';
         const isDegraded = decision.mode === 'degraded_manual_only';
         const hasData = isCanonicalReady || isDegraded;
 
         buttonManager.setReadinessSource(sfeEnabled ? 'sfe' : 'legacy');
-        buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
-        if (isDegraded) {
-            buttonManager.setButtonEnabled('save', true);
-            buttonManager.setButtonEnabled('copy', false);
-        } else {
-            buttonManager.setActionButtonsEnabled(isCanonicalReady);
-        }
+        applyActionButtonModeFromDecision(decision, isCanonicalReady);
 
         const opacity = hasData ? '1' : '0.6';
         buttonManager.setOpacity(opacity);
-
-        const prevKey = lastButtonStateLog;
-        const newKey = `${conversationId}:${hasData ? 'ready' : 'waiting'}:${opacity}`;
-        if (prevKey !== newKey && hasData) {
-            const peekedAttempt = peekAttemptId(conversationId);
-            const retries = peekedAttempt ? (canonicalStabilizationRetryCounts.get(peekedAttempt) ?? 0) : 0;
-            const hasPendingTimer = peekedAttempt ? canonicalStabilizationRetryTimers.has(peekedAttempt) : false;
-            logger.info('Button readiness transition to hasData=true', {
-                conversationId,
-                decisionMode: decision.mode,
-                decisionReason: decision.reason,
-                fidelity: getCaptureMeta(conversationId).fidelity,
-                sfeEnabled,
-                lifecycleState,
-                retries,
-                hasPendingTimer,
-            });
-        }
+        maybeLogHasDataTransition(conversationId, decision, hasData);
         logButtonStateIfChanged(conversationId, hasData, opacity);
     }
 
@@ -3548,6 +3658,32 @@ export function runPlatform(): void {
         };
     }
 
+    function shouldApplyChatGptGenerationGuard(source: 'network' | 'dom', conversationId: string): boolean {
+        const shouldApplyNetworkGenerationGuard = currentAdapter?.name === 'ChatGPT';
+        if (source !== 'network' || !shouldApplyNetworkGenerationGuard) {
+            return false;
+        }
+        return shouldBlockActionsForGeneration(conversationId);
+    }
+
+    function resolveFinishedSignalDebounce(
+        conversationId: string,
+        source: 'network' | 'dom',
+        attemptId: string | null,
+    ): { minIntervalMs: number; effectiveAttemptId: string } {
+        const isSameConversation = conversationId === lastResponseFinishedConversationId;
+        const effectiveAttemptId = attemptId ?? '';
+        const isNewAttemptInSameConversation =
+            source === 'network' &&
+            isSameConversation &&
+            !!lastResponseFinishedAttemptId &&
+            lastResponseFinishedAttemptId !== effectiveAttemptId;
+        return {
+            minIntervalMs: source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500,
+            effectiveAttemptId,
+        };
+    }
+
     function shouldProcessFinishedSignal(
         conversationId: string | null,
         source: 'network' | 'dom',
@@ -3557,27 +3693,13 @@ export function runPlatform(): void {
             logger.info('Finished signal ignored: missing conversation context', { source });
             return false;
         }
-        // ChatGPT emits many non-terminal network finished hints (stream_status polling).
-        // Gemini/Grok finished hints should not be blocked by DOM-generation heuristics.
-        const shouldApplyNetworkGenerationGuard = currentAdapter?.name === 'ChatGPT';
-        if (
-            source === 'network' &&
-            shouldApplyNetworkGenerationGuard &&
-            conversationId &&
-            shouldBlockActionsForGeneration(conversationId)
-        ) {
+        if (shouldApplyChatGptGenerationGuard(source, conversationId)) {
             logger.info('Finished signal blocked by generation guard', { conversationId, source });
             return false;
         }
         const now = Date.now();
         const isSameConversation = conversationId === lastResponseFinishedConversationId;
-        const effectiveAttemptId = attemptId ?? '';
-        const isNewAttemptInSameConversation =
-            source === 'network' &&
-            isSameConversation &&
-            lastResponseFinishedAttemptId &&
-            lastResponseFinishedAttemptId !== effectiveAttemptId;
-        const minIntervalMs = source === 'network' ? (isNewAttemptInSameConversation ? 900 : 4500) : 1500;
+        const { minIntervalMs, effectiveAttemptId } = resolveFinishedSignalDebounce(conversationId, source, attemptId);
         if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
             logger.info('Finished signal debounced', {
                 conversationId,
@@ -3724,8 +3846,16 @@ export function runPlatform(): void {
             applyCompletedLifecycleState(conversationId, attemptId);
         }
 
-        if (!cached || !cachedReady) {
+        const shouldPromoteGenericCompleted =
+            lifecycleState !== 'completed' && source === 'dom' && currentAdapter?.name === 'ChatGPT';
+        if (shouldPromoteGenericCompleted) {
             applyCompletedLifecycleState(conversationId, attemptId);
+        }
+
+        if (!cached || !cachedReady) {
+            if (!shouldPromoteGenericCompleted) {
+                applyCompletedLifecycleState(conversationId, attemptId);
+            }
             void runStreamDoneProbe(conversationId, attemptId);
         }
 
@@ -4131,25 +4261,41 @@ export function runPlatform(): void {
         }
     }
 
+    function parseStreamDeltaPayload(message: unknown): StreamDeltaMessage | null {
+        const candidate = message as StreamDeltaMessage | undefined;
+        if (candidate?.type !== 'BLACKIYA_STREAM_DELTA' || typeof candidate.attemptId !== 'string') {
+            return null;
+        }
+        if (typeof candidate.text !== 'string' || candidate.text.length === 0) {
+            return null;
+        }
+        return candidate;
+    }
+
+    function resolveDeltaConversationId(typed: StreamDeltaMessage): string | null {
+        if (typeof typed.conversationId === 'string' && typed.conversationId.length > 0) {
+            return typed.conversationId;
+        }
+        return currentConversationId;
+    }
+
+    function handlePendingConversationDelta(attemptId: string, text: string): void {
+        if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
+            lifecycleAttemptId = attemptId;
+            setLifecycleState('streaming');
+        }
+        appendPendingStreamProbeText(attemptId, text);
+    }
+
     function handleStreamDeltaMessage(message: unknown): boolean {
-        if (
-            (message as StreamDeltaMessage | undefined)?.type !== 'BLACKIYA_STREAM_DELTA' ||
-            typeof (message as StreamDeltaMessage).attemptId !== 'string'
-        ) {
+        const typed = parseStreamDeltaPayload(message);
+        if (!typed) {
             return false;
         }
 
-        const typed = message as StreamDeltaMessage;
-        const text = typeof typed.text === 'string' ? typed.text : '';
-        if (text.length === 0) {
-            return true;
-        }
-
-        const conversationId =
-            typeof typed.conversationId === 'string' && typed.conversationId.length > 0
-                ? typed.conversationId
-                : currentConversationId;
+        const conversationId = resolveDeltaConversationId(typed);
         const attemptId = resolveAliasedAttemptId(typed.attemptId);
+        const text = typed.text;
         if (isStaleAttemptMessage(attemptId, conversationId ?? undefined, 'delta')) {
             return true;
         }
@@ -4157,13 +4303,7 @@ export function runPlatform(): void {
         setActiveAttempt(attemptId);
 
         if (!conversationId) {
-            // Grok reconnect streams can emit deltas before a conversation ID is known.
-            // Surface live text immediately and promote lifecycle so the UI does not stay idle.
-            if (lifecycleState !== 'completed' && lifecycleState !== 'streaming') {
-                lifecycleAttemptId = attemptId;
-                setLifecycleState('streaming');
-            }
-            appendPendingStreamProbeText(attemptId, text);
+            handlePendingConversationDelta(attemptId, text);
             return true;
         }
 
@@ -4346,6 +4486,12 @@ export function runPlatform(): void {
     }
 
     function registerButtonHealthCheck(): () => void {
+        const healthCheckIntervalMs =
+            typeof (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS === 'number' &&
+            Number.isFinite((window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS) &&
+            (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS > 0
+                ? (window as any).__BLACKIYA_TEST_HEALTH_CHECK_INTERVAL_MS
+                : 1800;
         const intervalId = window.setInterval(() => {
             if (!currentAdapter) {
                 return;
@@ -4363,7 +4509,7 @@ export function runPlatform(): void {
             }
 
             refreshButtonState(activeConversationId);
-        }, 1800);
+        }, healthCheckIntervalMs);
 
         return () => clearInterval(intervalId);
     }
@@ -4405,30 +4551,59 @@ export function runPlatform(): void {
     void ensureCalibrationPreferenceLoaded(currentAdapter.name);
     void loadSfeSettings();
     void loadStreamDumpSetting();
+    void loadStreamProbeVisibilitySetting();
+
+    type StorageChangeMap = Parameters<Parameters<typeof browser.storage.onChanged.addListener>[0]>[0];
+
+    const handleDiagnosticsStreamDumpSettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
+            return;
+        }
+        streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
+        emitStreamDumpConfig();
+    };
+
+    const handleStreamProbeVisibilitySettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]) {
+            return;
+        }
+        streamProbeVisible = changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]?.newValue === true;
+        if (!streamProbeVisible) {
+            removeStreamProbePanel();
+        }
+    };
+
+    const handleSfeSettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.SFE_ENABLED]) {
+            return;
+        }
+        sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
+        refreshButtonState(currentConversationId ?? undefined);
+    };
+
+    const handleCalibrationProfilesSettingChange = (changes: StorageChangeMap): void => {
+        if (!changes[STORAGE_KEYS.CALIBRATION_PROFILES] || !currentAdapter) {
+            return;
+        }
+        calibrationPreferenceLoaded = false;
+        calibrationPreferenceLoading = null;
+        autoCaptureAttempts.clear();
+        autoCaptureDeferredLogged.clear();
+        for (const timerId of autoCaptureRetryTimers.values()) {
+            clearTimeout(timerId);
+        }
+        autoCaptureRetryTimers.clear();
+        void ensureCalibrationPreferenceLoaded(currentAdapter.name);
+    };
 
     const storageChangeListener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
         if (areaName !== 'local') {
             return;
         }
-        if (changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
-            streamDumpEnabled = changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true;
-            emitStreamDumpConfig();
-        }
-        if (changes[STORAGE_KEYS.SFE_ENABLED]) {
-            sfeEnabled = changes[STORAGE_KEYS.SFE_ENABLED]?.newValue !== false;
-            refreshButtonState(currentConversationId ?? undefined);
-        }
-        if (changes[STORAGE_KEYS.CALIBRATION_PROFILES] && currentAdapter) {
-            calibrationPreferenceLoaded = false;
-            calibrationPreferenceLoading = null;
-            autoCaptureAttempts.clear();
-            autoCaptureDeferredLogged.clear();
-            for (const timerId of autoCaptureRetryTimers.values()) {
-                clearTimeout(timerId);
-            }
-            autoCaptureRetryTimers.clear();
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
+        handleDiagnosticsStreamDumpSettingChange(changes);
+        handleStreamProbeVisibilitySettingChange(changes);
+        handleSfeSettingChange(changes);
+        handleCalibrationProfilesSettingChange(changes);
     };
     browser.storage.onChanged.addListener(storageChangeListener);
 

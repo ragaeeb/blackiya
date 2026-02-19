@@ -14,11 +14,17 @@ function App() {
     const [logCount, setLogCount] = useState<number>(0);
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
     const [streamDumpEnabled, setStreamDumpEnabled] = useState<boolean>(false);
+    const [streamProbeVisible, setStreamProbeVisible] = useState<boolean>(false);
 
     useEffect(() => {
         // Load settings
         browser.storage.local
-            .get([STORAGE_KEYS.LOG_LEVEL, STORAGE_KEYS.EXPORT_FORMAT, STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED])
+            .get([
+                STORAGE_KEYS.LOG_LEVEL,
+                STORAGE_KEYS.EXPORT_FORMAT,
+                STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED,
+                STORAGE_KEYS.STREAM_PROBE_VISIBLE,
+            ])
             .then((result) => {
                 const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
                 if (level) {
@@ -31,6 +37,7 @@ function App() {
                     setExportFormat(savedFormat);
                 }
                 setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
+                setStreamProbeVisible(result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true);
             });
 
         // Load log stats
@@ -63,6 +70,14 @@ function App() {
         setStreamDumpEnabled(enabled);
         browser.storage.local.set({ [STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]: enabled });
         logger.info(`Stream dump diagnostics ${enabled ? 'enabled' : 'disabled'}`);
+    };
+
+    const handleStreamProbeVisibilityChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
+        const target = e.currentTarget as HTMLInputElement | null;
+        const enabled = target?.checked === true;
+        setStreamProbeVisible(enabled);
+        browser.storage.local.set({ [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: enabled });
+        logger.info(`In-page stream toast ${enabled ? 'enabled' : 'disabled'}`);
     };
 
     const handleExport = async () => {
@@ -157,8 +172,22 @@ function App() {
                     <option value="common">Common (Normalized)</option>
                 </select>
                 <div style={{ fontSize: '12px', color: '#666' }}>
-                    Applies to Save JSON and Copy actions in supported chat platforms.
+                    Applies to Save actions in supported chat platforms.
                 </div>
+            </div>
+
+            <div className="section">
+                <div className="section-heading">Stream Toast</div>
+                <div className="section-description">Shows a small overlay during active streaming sessions.</div>
+                <label htmlFor="streamProbeVisible" className="checkbox-row">
+                    <input
+                        id="streamProbeVisible"
+                        type="checkbox"
+                        checked={streamProbeVisible}
+                        onChange={handleStreamProbeVisibilityChange}
+                    />
+                    Enable stream toast overlay
+                </label>
             </div>
 
             <button type="button" className="primary" onClick={handleExport}>
@@ -170,11 +199,11 @@ function App() {
             </button>
 
             <div className="section diagnostics-section">
-                <strong>Diagnostics Stream Dump</strong>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                <div className="section-heading">Diagnostics Stream Dump</div>
+                <div className="section-description">
                     Opt-in bounded capture of streaming frame text for forensic debugging.
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <label htmlFor="streamDumpEnabled" className="checkbox-row">
                     <input
                         id="streamDumpEnabled"
                         type="checkbox"

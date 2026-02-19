@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
+import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 
 mock.module('@/utils/logger', () => ({
     logger: {
@@ -19,6 +20,8 @@ describe('integration: cross-world attemptId propagation', () => {
         windowRef = new Window();
         (globalThis as any).window = windowRef as any;
         (globalThis as any).document = windowRef.document;
+        setSessionToken('bk:test-cross-world');
+        (windowRef as any).__BLACKIYA_SESSION_TOKEN__ = 'bk:test-cross-world';
     });
 
     it('propagates attemptId from queued capture payload to callback meta', () => {
@@ -70,6 +73,7 @@ describe('integration: cross-world attemptId propagation', () => {
                 data: '{}',
                 platform: 'ChatGPT',
                 attemptId: 'attempt:1',
+                __blackiyaToken: getSessionToken() ?? 'bk:test-cross-world',
             },
         ];
 

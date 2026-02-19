@@ -15,7 +15,7 @@ Blackiya is designed with a single, clear purpose: to allow users to capture and
 - We do not use any analytics or telemetry services.
 
 ## 3. Local Processing
-All data extraction, processing, and formatting occur locally within your browser's environment. When you click "Save JSON" or "Copy", the extension accesses the conversation data currently visible in your active tab to create the export. This data never leaves your machine unless you manually choose to share the resulting JSON file. If you call `window.__blackiya.getJSON()` from a supported LLM page, the conversation JSON is returned to the page context, and the extension does not transmit it elsewhere.
+All data extraction, processing, and formatting occur locally within your browser's environment. When you click Save, the extension accesses the conversation data currently visible in your active tab to create the export. This data never leaves your machine unless you manually choose to share the resulting JSON file. If you call `window.__blackiya.getJSON()` from a supported LLM page, the conversation JSON is returned to the page context, and the extension does not transmit it elsewhere.
 
 ## 4. No Remote Code
 Blackiya does not use or execute any remote code. All JavaScript and technical assets required for the extension to function are bundled within the extension package itself, in compliance with Chrome Web Store security policies.

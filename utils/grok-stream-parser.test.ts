@@ -97,6 +97,16 @@ describe('grok-stream-parser', () => {
         expect(signals.textCandidates).toEqual(['Data prefix line']);
     });
 
+    it('should preserve boundary whitespace in text candidates for stream joins', () => {
+        const seenPayloads = new Set<string>();
+        const buffer = [JSON.stringify({ message: 'Word ' }), JSON.stringify({ message: 'continuation' }), ''].join(
+            '\n',
+        );
+
+        const signals = extractGrokStreamSignalsFromBuffer(buffer, seenPayloads);
+        expect(signals.textCandidates).toEqual(['Word ', 'continuation']);
+    });
+
     it('should extract tool usage card thinking notes as reasoning candidates', () => {
         const seenPayloads = new Set<string>();
         const toolUsagePayload = [

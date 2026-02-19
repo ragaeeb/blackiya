@@ -1,9 +1,12 @@
+import { resolveTokenValidationFailureReason, stampToken } from '@/utils/protocol/session-token';
+
 export type JsonBridgeFormat = 'original' | 'common';
 
 interface JsonBridgeRequestMessage {
     type: string;
     requestId: string;
     format: JsonBridgeFormat;
+    __blackiyaToken?: string;
 }
 
 interface JsonBridgeResponseMessage {
@@ -12,6 +15,7 @@ interface JsonBridgeResponseMessage {
     success: boolean;
     data?: unknown;
     error?: string;
+    __blackiyaToken?: string;
 }
 
 export interface CreateWindowJsonRequesterOptions {
@@ -46,7 +50,12 @@ export function createWindowJsonRequester(
                     return false;
                 }
                 const message = event.data as JsonBridgeResponseMessage | null;
-                return !!message && message.type === options.responseType && message.requestId === id;
+                return (
+                    !!message &&
+                    message.type === options.responseType &&
+                    message.requestId === id &&
+                    resolveTokenValidationFailureReason(message) === null
+                );
             };
 
             const cleanup = () => {
@@ -75,7 +84,7 @@ export function createWindowJsonRequester(
                 requestId,
                 format,
             };
-            targetWindow.postMessage(request, targetWindow.location.origin);
+            targetWindow.postMessage(stampToken(request), targetWindow.location.origin);
             timeoutId = targetWindow.setTimeout(() => {
                 cleanup();
                 reject(new Error('TIMEOUT'));
