@@ -1,9 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
-
-mock.module('@/entrypoints/interceptor/dom-snapshot', () => ({
-    buildDomConversationSnapshot: () => null,
-}));
 
 import { getPageConversationSnapshot } from './page-snapshot';
 

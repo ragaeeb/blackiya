@@ -108,6 +108,12 @@ bun test utils/platform-runner*.test.ts
 bun run test:e2e
 ```
 
+Test isolation rules (avoid cross-module pollution):
+- Do not use broad top-level `mock.module(...)` for shared modules unless the file is fully isolated; prefer scoped mocking or dependency injection patterns.
+- Always restore per-test monkey patches to globals/prototypes/DOM methods in `afterEach`.
+- Prefer creating a fresh `Window`/`document` per test and resetting `globalThis.window`/`globalThis.document` in teardown.
+- If a test needs selector-engine failure simulation, patch only the local instance method and keep a deterministic manual fallback assertion.
+
 ## 7) Logging and Diagnostics
 
 Debug artifacts:

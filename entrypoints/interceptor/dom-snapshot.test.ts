@@ -87,4 +87,33 @@ describe('dom-snapshot', () => {
         const snapshot = buildDomConversationSnapshot('conv-1') as any;
         expect(snapshot).not.toBeNull();
     });
+
+    it('should fall back to manual role discovery when attribute selector lookup fails', () => {
+        const { document } = windowInstance;
+        document.title = 'Mixed Turn - ChatGPT';
+
+        const turn = document.createElement('div');
+        turn.setAttribute('data-testid', 'conversation-turn-1');
+
+        const role = document.createElement('div');
+        role.setAttribute('data-message-author-role', 'assistant');
+
+        const textNode = document.createElement('div');
+        textNode.setAttribute('data-message-content', '');
+        textNode.textContent = 'Final answer text';
+        role.appendChild(textNode);
+        turn.appendChild(role);
+        document.body.appendChild(turn);
+
+        const originalQuerySelector = turn.querySelector.bind(turn);
+        (turn as any).querySelector = (selector: string) => {
+            if (selector === '[data-message-author-role]') {
+                throw new SyntaxError('Unsupported selector');
+            }
+            return originalQuerySelector(selector);
+        };
+
+        const snapshot = buildDomConversationSnapshot('conv-1') as any;
+        expect(snapshot).not.toBeNull();
+    });
 });

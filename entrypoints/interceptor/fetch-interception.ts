@@ -27,6 +27,8 @@ export type FetchInterceptionDeps = {
     resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string;
 };
 
+const getUtf8ByteLength = (text: string) => new TextEncoder().encode(text).byteLength;
+
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -47,8 +49,9 @@ export const emitNonChatGptStreamSnapshot = (
     if (!text) {
         return;
     }
+    const chunkBytes = getUtf8ByteLength(text);
     emitter.emitStreamDelta(attemptId, conversationId, text, adapter.name);
-    emitter.emitStreamDumpFrame(attemptId, conversationId, 'snapshot', text, text.length, adapter.name);
+    emitter.emitStreamDumpFrame(attemptId, conversationId, 'snapshot', text, chunkBytes, adapter.name);
 };
 
 /**

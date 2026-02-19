@@ -1,5 +1,22 @@
+const findElementByAttribute = (root: Element, attributeName: string): Element | null => {
+    try {
+        const direct = root.querySelector(`[${attributeName}]`);
+        if (direct) {
+            return direct;
+        }
+    } catch {
+        // Fall through to a manual scan when selector engines reject the selector.
+    }
+    for (const element of Array.from(root.getElementsByTagName('*'))) {
+        if (element.hasAttribute(attributeName)) {
+            return element;
+        }
+    }
+    return null;
+};
+
 const extractTurnRole = (turn: Element): 'system' | 'user' | 'assistant' | 'tool' | null => {
-    const role = turn.querySelector('[data-message-author-role]')?.getAttribute('data-message-author-role');
+    const role = findElementByAttribute(turn, 'data-message-author-role')?.getAttribute('data-message-author-role');
     if (role === 'system' || role === 'user' || role === 'assistant' || role === 'tool') {
         return role;
     }

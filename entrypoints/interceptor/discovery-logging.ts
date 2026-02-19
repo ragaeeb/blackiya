@@ -16,7 +16,8 @@ type EmitStreamDumpFn = (
     platformOverride?: string,
 ) => void;
 
-const isStaticAssetPath = (path: string) => !!path.match(/\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico)$/i);
+const STATIC_ASSET_PATH_REGEX = /\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico)$/i;
+const isStaticAssetPath = (path: string) => STATIC_ASSET_PATH_REGEX.test(path);
 
 const parseDiscoveryUrl = (url: string) => {
     try {
@@ -113,17 +114,18 @@ export const logGeminiAdapterMiss = (
     log: LogFn,
     shouldLogTransient: ShouldLogTransientFn,
 ) => {
+    const path = safePathname(url);
     if (!window.location.hostname.includes('gemini.google.com')) {
         return;
     }
-    if (!safePathname(url).includes('/_/BardChatUi/data/')) {
+    if (!path.includes('/_/BardChatUi/data/')) {
         return;
     }
-    if (!shouldLogTransient(`gemini:adapter-miss:${channel}:${safePathname(url)}`, 8000)) {
+    if (!shouldLogTransient(`gemini:adapter-miss:${channel}:${path}`, 8000)) {
         return;
     }
     log('warn', 'Gemini endpoint unmatched by adapter', {
-        path: safePathname(url),
+        path,
         ...(xhrMeta ?? {}),
     });
 };
