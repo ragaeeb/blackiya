@@ -19,6 +19,10 @@ import { createFetchInterceptorContext, type FetchInterceptorContext } from '@/e
 import { createFetchInterceptor } from '@/entrypoints/interceptor/fetch-wrapper';
 import { getPageConversationSnapshot } from '@/entrypoints/interceptor/page-snapshot';
 import { ProactiveFetcher } from '@/entrypoints/interceptor/proactive-fetcher';
+import {
+    type BlackiyaPublicSubscriptionOptions,
+    createBlackiyaPublicStatusApi,
+} from '@/entrypoints/interceptor/public-status-api';
 import { shouldEmitXhrRequestLifecycle } from '@/entrypoints/interceptor/signal-emitter';
 import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-bridge';
 import { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
@@ -51,11 +55,15 @@ import {
     mergeHeaderRecords,
     toForwardableHeaderRecord,
 } from '@/utils/proactive-fetch-headers';
+import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import type {
     AttemptDisposedMessage,
+    BlackiyaPublicEventName,
+    BlackiyaPublicStatus,
     CaptureInterceptedMessage as CapturePayload,
     ConversationIdResolvedMessage,
     LogEntryMessage as InterceptorLogPayload,
+    PublicStatusMessage,
     ResponseFinishedMessage as ResponseFinishedSignal,
     ResponseLifecycleMessage as ResponseLifecycleSignal,
     StreamDeltaMessage as ResponseStreamDeltaSignal,
@@ -63,6 +71,7 @@ import type {
     StreamDumpConfigMessage,
     StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
+import { isBlackiyaPublicStatus } from '@/utils/protocol/messages';
 import {
     getSessionToken,
     resolveTokenValidationFailureReason,
@@ -79,14 +88,14 @@ export {
 export { cleanupDisposedAttemptState, pruneTimestampCache } from '@/entrypoints/interceptor/state';
 
 type PageSnapshotRequest = {
-    type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST';
+    type: typeof MESSAGE_TYPES.PAGE_SNAPSHOT_REQUEST;
     requestId: string;
     conversationId: string;
     __blackiyaToken?: string;
 };
 
 type PageSnapshotResponse = {
-    type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE';
+    type: typeof MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE;
     requestId: string;
     success: boolean;
     data?: unknown;
@@ -108,8 +117,6 @@ const latestAttemptIdByPlatform = new Map<string, string>();
 const MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES = 300;
 const MAX_INTERCEPTOR_ATTEMPT_BINDINGS = 400;
 const MAX_INTERCEPTOR_STREAM_DUMP_ATTEMPTS = 250;
-const BLACKIYA_GET_JSON_REQUEST = 'BLACKIYA_GET_JSON_REQUEST';
-const BLACKIYA_GET_JSON_RESPONSE = 'BLACKIYA_GET_JSON_RESPONSE';
 const JSON_FORMAT_ORIGINAL = 'original';
 const JSON_FORMAT_COMMON = 'common';
 const INTERCEPTOR_CACHE_ENTRY_TTL_MS = 60_000;
@@ -152,7 +159,7 @@ const log = (level: 'info' | 'warn' | 'error', message: string, data?: unknown) 
     }
 
     const payload: InterceptorLogPayload = {
-        type: 'LLM_LOG_ENTRY',
+        type: MESSAGE_TYPES.LOG_ENTRY,
         payload: { level, message, data: data ? [data] : [], context: 'interceptor' },
     };
     const stamped = stampToken(payload);
@@ -227,7 +234,7 @@ const emitCapturePayload = (url: string, data: string, platform: string, attempt
         return;
     }
     const payload: CapturePayload = {
-        type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+        type: MESSAGE_TYPES.CAPTURE_DATA_INTERCEPTED,
         url,
         data,
         platform,
@@ -249,7 +256,7 @@ const emitConversationIdResolvedSignal = (attemptId: string, conversationId: str
     bindAttemptToConversation(attemptId, conversationId);
 
     const payload: ConversationIdResolvedMessage = {
-        type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+        type: MESSAGE_TYPES.CONVERSATION_ID_RESOLVED,
         platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
@@ -282,7 +289,7 @@ const emitLifecycleSignal = (
 
     const platform = platformOverride ?? chatGPTAdapter.name;
     const payload: ResponseLifecycleSignal = {
-        type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+        type: MESSAGE_TYPES.RESPONSE_LIFECYCLE,
         platform,
         attemptId,
         phase,
@@ -302,7 +309,7 @@ const emitTitleResolvedSignal = (
         return;
     }
     const payload = {
-        type: 'BLACKIYA_TITLE_RESOLVED' as const,
+        type: MESSAGE_TYPES.TITLE_RESOLVED,
         platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
@@ -325,7 +332,7 @@ const emitStreamDeltaSignal = (
     }
     bindAttemptToConversation(attemptId, conversationId);
     const payload: ResponseStreamDeltaSignal = {
-        type: 'BLACKIYA_STREAM_DELTA',
+        type: MESSAGE_TYPES.STREAM_DELTA,
         platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
@@ -361,7 +368,7 @@ const emitStreamDumpFrame = (
     setBoundedMapValue(streamDumpFrameCountByAttempt, attemptId, frameIndex, MAX_INTERCEPTOR_STREAM_DUMP_ATTEMPTS);
 
     const payload: StreamDumpFrameMessage = {
-        type: 'BLACKIYA_STREAM_DUMP_FRAME',
+        type: MESSAGE_TYPES.STREAM_DUMP_FRAME,
         platform: platformOverride ?? chatGPTAdapter.name,
         attemptId,
         conversationId,
@@ -405,7 +412,7 @@ const emitResponseFinishedSignal = (adapter: LLMPlatform, url: string) => {
     setBoundedMapValue(completionSignalCache, dedupeKey, now, MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES);
 
     const payload: ResponseFinishedSignal = {
-        type: 'BLACKIYA_RESPONSE_FINISHED',
+        type: MESSAGE_TYPES.RESPONSE_FINISHED,
         platform: adapter.name,
         attemptId,
         conversationId,
@@ -813,15 +820,15 @@ export const shouldApplySessionInitToken = (existingToken: string | undefined, i
 
 const buildSnapshotResponse = (requestId: string, snapshot: unknown | null): PageSnapshotResponse =>
     snapshot
-        ? { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: snapshot }
-        : { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: false, error: 'NOT_FOUND' };
+        ? { type: MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE, requestId, success: true, data: snapshot }
+        : { type: MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE, requestId, success: false, error: 'NOT_FOUND' };
 
 const isSnapshotRequestEvent = (event: MessageEvent) => {
     if (event.source !== window || event.origin !== window.location.origin) {
         return null;
     }
     const message = event.data as PageSnapshotRequest;
-    if (message?.type !== 'BLACKIYA_PAGE_SNAPSHOT_REQUEST' || typeof message.requestId !== 'string') {
+    if (message?.type !== MESSAGE_TYPES.PAGE_SNAPSHOT_REQUEST || typeof message.requestId !== 'string') {
         return null;
     }
     return message;
@@ -835,7 +842,7 @@ const parseAttemptDisposedMessage = (event: MessageEvent): AttemptDisposedMessag
         return null;
     }
     const message = event.data as AttemptDisposedMessage & { __blackiyaToken?: string };
-    if (message?.type !== 'BLACKIYA_ATTEMPT_DISPOSED' || typeof message.attemptId !== 'string') {
+    if (message?.type !== MESSAGE_TYPES.ATTEMPT_DISPOSED || typeof message.attemptId !== 'string') {
         return null;
     }
     const sessionToken = getSessionToken();
@@ -1337,10 +1344,11 @@ export default defineContentScript({
 
         if (!(window as any).__blackiya) {
             const requestJson = createWindowJsonRequester(window, {
-                requestType: BLACKIYA_GET_JSON_REQUEST,
-                responseType: BLACKIYA_GET_JSON_RESPONSE,
+                requestType: MESSAGE_TYPES.GET_JSON_REQUEST,
+                responseType: MESSAGE_TYPES.GET_JSON_RESPONSE,
                 timeoutMs: 5000,
             });
+            const publicStatusApi = createBlackiyaPublicStatusApi();
 
             window.addEventListener('message', (event: MessageEvent) => {
                 const message = isSnapshotRequestEvent(event);
@@ -1376,7 +1384,7 @@ export default defineContentScript({
                     return;
                 }
                 const message = event.data as StreamDumpConfigMessage & { __blackiyaToken?: string };
-                if (message?.type !== 'BLACKIYA_STREAM_DUMP_CONFIG' || typeof message.enabled !== 'boolean') {
+                if (message?.type !== MESSAGE_TYPES.STREAM_DUMP_CONFIG || typeof message.enabled !== 'boolean') {
                     return;
                 }
                 const sessionToken = getSessionToken();
@@ -1395,7 +1403,7 @@ export default defineContentScript({
                     return;
                 }
                 const message = event.data as SessionInitMessage;
-                if (message?.type !== 'BLACKIYA_SESSION_INIT' || typeof message.token !== 'string') {
+                if (message?.type !== MESSAGE_TYPES.SESSION_INIT || typeof message.token !== 'string') {
                     return;
                 }
                 if (shouldApplySessionInitToken(getSessionToken(), message.token)) {
@@ -1403,9 +1411,40 @@ export default defineContentScript({
                 }
             });
 
+            window.addEventListener('message', (event: MessageEvent) => {
+                if (!isSameWindowOriginEvent(event)) {
+                    return;
+                }
+                const message = event.data as PublicStatusMessage;
+                if (
+                    message?.type !== MESSAGE_TYPES.PUBLIC_STATUS ||
+                    resolveTokenValidationFailureReason(message) !== null ||
+                    !isBlackiyaPublicStatus(message.status)
+                ) {
+                    return;
+                }
+                publicStatusApi.applyStatus(message.status);
+            });
+
+            const subscribePublicEvent = (
+                event: BlackiyaPublicEventName,
+                callback: (status: BlackiyaPublicStatus) => void,
+                options?: BlackiyaPublicSubscriptionOptions,
+            ) => publicStatusApi.subscribe(event, callback, options);
+
             (window as any).__blackiya = {
                 getJSON: () => requestJson(JSON_FORMAT_ORIGINAL),
                 getCommonJSON: () => requestJson(JSON_FORMAT_COMMON),
+                getStatus: () => publicStatusApi.getStatus(),
+                subscribe: subscribePublicEvent,
+                onStatusChange: (
+                    callback: (status: BlackiyaPublicStatus) => void,
+                    options?: BlackiyaPublicSubscriptionOptions,
+                ) => subscribePublicEvent('status', callback, options),
+                onReady: (
+                    callback: (status: BlackiyaPublicStatus) => void,
+                    options?: BlackiyaPublicSubscriptionOptions,
+                ) => subscribePublicEvent('ready', callback, options),
             };
         }
     },

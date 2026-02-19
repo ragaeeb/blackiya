@@ -28,9 +28,11 @@ import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
+import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import type {
     AttemptDisposedMessage,
     ConversationIdResolvedMessage,
+    PublicStatusMessage,
     ResponseFinishedMessage,
     ResponseLifecycleMessage,
     StreamDeltaMessage,
@@ -160,7 +162,7 @@ export const runPlatform = (): void => {
     setSessionToken(sessionToken);
 
     // Share session token with MAIN world (interceptor) via handshake
-    window.postMessage({ type: 'BLACKIYA_SESSION_INIT', token: sessionToken }, window.location.origin);
+    window.postMessage({ type: MESSAGE_TYPES.SESSION_INIT, token: sessionToken }, window.location.origin);
 
     const runnerState = new RunnerState();
 
@@ -230,15 +232,82 @@ export const runPlatform = (): void => {
     const lastCanonicalReadyLogAtByConversation = new Map<string, number>();
     let activeAttemptId: string | null = null;
     let lastInvalidSessionTokenLogAt = 0;
+    let publicStatusSequence = 0;
+    let lastPublicStatusSignature = '';
+
+    const resolveLocationConversationId = () => {
+        if (!currentAdapter) {
+            return null;
+        }
+        try {
+            return currentAdapter.extractConversationId(window.location.href);
+        } catch {
+            return null;
+        }
+    };
+
+    const emitPublicStatusSnapshot = (conversationIdOverride?: string | null) => {
+        const conversationId =
+            conversationIdOverride === undefined
+                ? (currentConversationId ?? resolveLocationConversationId())
+                : conversationIdOverride;
+        const attemptId = conversationId ? peekAttemptId(conversationId) : activeAttemptId;
+        const platform = currentAdapter?.name ?? null;
+        const lifecycle = lifecycleState;
+        let readiness: PublicStatusMessage['status']['readiness'] = 'unknown';
+        let readinessReason: string | null = null;
+        let canGet = false;
+
+        if (conversationId && currentAdapter) {
+            const decision = resolveReadinessDecision(conversationId);
+            readiness = decision.mode;
+            readinessReason = decision.reason ?? null;
+            canGet = decision.mode === 'canonical_ready' && !shouldBlockActionsForGeneration(conversationId);
+        }
+
+        const signature = JSON.stringify({
+            platform,
+            conversationId,
+            attemptId,
+            lifecycle,
+            readiness,
+            readinessReason,
+            canGet,
+        });
+        if (signature === lastPublicStatusSignature) {
+            return;
+        }
+        lastPublicStatusSignature = signature;
+        publicStatusSequence += 1;
+
+        const payload: PublicStatusMessage = {
+            type: MESSAGE_TYPES.PUBLIC_STATUS,
+            status: {
+                platform,
+                conversationId,
+                attemptId: attemptId ?? null,
+                lifecycle,
+                readiness,
+                readinessReason,
+                canGetJSON: canGet,
+                canGetCommonJSON: canGet,
+                sequence: publicStatusSequence,
+                timestampMs: Date.now(),
+            },
+        };
+        window.postMessage(stampToken(payload), window.location.origin);
+    };
 
     const setCurrentConversation = (conversationId: string | null) => {
         currentConversationId = conversationId;
         runnerState.conversationId = conversationId;
+        emitPublicStatusSnapshot(conversationId);
     };
 
     const setActiveAttempt = (attemptId: string | null) => {
         activeAttemptId = attemptId;
         runnerState.activeAttemptId = attemptId;
+        emitPublicStatusSnapshot();
     };
 
     const cachePendingLifecycleSignal = (
@@ -1240,7 +1309,7 @@ export const runPlatform = (): void => {
             `attempt-disposed:${reason}`,
         );
         const payload: AttemptDisposedMessage = {
-            type: 'BLACKIYA_ATTEMPT_DISPOSED',
+            type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
             attemptId,
             reason,
         };
@@ -1249,7 +1318,7 @@ export const runPlatform = (): void => {
 
     const emitStreamDumpConfig = () => {
         const payload: StreamDumpConfigMessage = {
-            type: 'BLACKIYA_STREAM_DUMP_CONFIG',
+            type: MESSAGE_TYPES.STREAM_DUMP_CONFIG,
             enabled: streamDumpEnabled,
         };
         window.postMessage(stampToken(payload), window.location.origin);
@@ -1457,6 +1526,7 @@ export const runPlatform = (): void => {
         syncLifecycleContext(state, resolvedConversationId);
         buttonManager.setLifecycleState(state);
         applyLifecycleUiState(state, conversationId);
+        emitPublicStatusSnapshot(resolvedConversationId);
     };
 
     const resolveStreamProbeDockPosition = (): 'bottom-left' | 'top-left' => {
@@ -3487,16 +3557,23 @@ export const runPlatform = (): void => {
     };
 
     function refreshButtonState(forConversationId?: string) {
-        if (!buttonManager.exists() || !currentAdapter) {
+        if (!currentAdapter) {
+            emitPublicStatusSnapshot(null);
             return;
         }
         const conversationId = forConversationId || currentAdapter.extractConversationId(window.location.href);
+        if (!buttonManager.exists()) {
+            emitPublicStatusSnapshot(conversationId);
+            return;
+        }
         if (!conversationId) {
             resetButtonStateForNoConversation();
+            emitPublicStatusSnapshot(null);
             return;
         }
         if (shouldDisableActionsForActiveGeneration(conversationId)) {
             applyDisabledButtonState(conversationId);
+            emitPublicStatusSnapshot(conversationId);
             return;
         }
 
@@ -3504,6 +3581,7 @@ export const runPlatform = (): void => {
         const decision = resolveReadinessDecision(conversationId);
         applyReadyButtonState(conversationId, decision);
         syncCalibrationDisplayFromDecision(decision);
+        emitPublicStatusSnapshot(conversationId);
     }
 
     function scheduleButtonRefresh(conversationId: string) {
@@ -3959,7 +4037,7 @@ export const runPlatform = (): void => {
 
     const handleTitleResolvedMessage = (message: unknown): boolean => {
         if (
-            (message as TitleResolvedMessage | undefined)?.type !== 'BLACKIYA_TITLE_RESOLVED' ||
+            (message as TitleResolvedMessage | undefined)?.type !== MESSAGE_TYPES.TITLE_RESOLVED ||
             typeof (message as TitleResolvedMessage).conversationId !== 'string' ||
             typeof (message as TitleResolvedMessage).title !== 'string'
         ) {
@@ -4004,7 +4082,7 @@ export const runPlatform = (): void => {
 
     const handleResponseFinishedMessage = (message: unknown): boolean => {
         if (
-            (message as ResponseFinishedMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_FINISHED' ||
+            (message as ResponseFinishedMessage | undefined)?.type !== MESSAGE_TYPES.RESPONSE_FINISHED ||
             typeof (message as ResponseFinishedMessage).attemptId !== 'string'
         ) {
             return false;
@@ -4192,7 +4270,7 @@ export const runPlatform = (): void => {
         originalAttemptId: string;
     } | null => {
         if (
-            (message as ResponseLifecycleMessage | undefined)?.type !== 'BLACKIYA_RESPONSE_LIFECYCLE' ||
+            (message as ResponseLifecycleMessage | undefined)?.type !== MESSAGE_TYPES.RESPONSE_LIFECYCLE ||
             typeof (message as ResponseLifecycleMessage).attemptId !== 'string'
         ) {
             return null;
@@ -4285,7 +4363,7 @@ export const runPlatform = (): void => {
 
     const parseStreamDeltaPayload = (message: unknown): StreamDeltaMessage | null => {
         const candidate = message as StreamDeltaMessage | undefined;
-        if (candidate?.type !== 'BLACKIYA_STREAM_DELTA' || typeof candidate.attemptId !== 'string') {
+        if (candidate?.type !== MESSAGE_TYPES.STREAM_DELTA || typeof candidate.attemptId !== 'string') {
             return null;
         }
         if (typeof candidate.text !== 'string' || candidate.text.length === 0) {
@@ -4335,7 +4413,7 @@ export const runPlatform = (): void => {
     };
 
     const handleStreamDumpFrameMessage = (message: unknown): boolean => {
-        if ((message as StreamDumpFrameMessage | undefined)?.type !== 'BLACKIYA_STREAM_DUMP_FRAME') {
+        if ((message as StreamDumpFrameMessage | undefined)?.type !== MESSAGE_TYPES.STREAM_DUMP_FRAME) {
             return false;
         }
 
@@ -4372,7 +4450,7 @@ export const runPlatform = (): void => {
     };
 
     const handleConversationIdResolvedMessage = (message: unknown): boolean => {
-        if ((message as ConversationIdResolvedMessage | undefined)?.type !== 'BLACKIYA_CONVERSATION_ID_RESOLVED') {
+        if ((message as ConversationIdResolvedMessage | undefined)?.type !== MESSAGE_TYPES.CONVERSATION_ID_RESOLVED) {
             return false;
         }
 
@@ -4398,7 +4476,7 @@ export const runPlatform = (): void => {
     };
 
     const handleAttemptDisposedMessage = (message: unknown): boolean => {
-        if ((message as AttemptDisposedMessage | undefined)?.type !== 'BLACKIYA_ATTEMPT_DISPOSED') {
+        if ((message as AttemptDisposedMessage | undefined)?.type !== MESSAGE_TYPES.ATTEMPT_DISPOSED) {
             return false;
         }
         const typed = message as AttemptDisposedMessage;
@@ -4432,7 +4510,7 @@ export const runPlatform = (): void => {
     ) => {
         window.postMessage(
             stampToken({
-                type: 'BLACKIYA_GET_JSON_RESPONSE',
+                type: MESSAGE_TYPES.GET_JSON_RESPONSE,
                 requestId,
                 success,
                 data: options?.data,
@@ -4444,7 +4522,7 @@ export const runPlatform = (): void => {
 
     const handleJsonBridgeRequest = (message: unknown) => {
         const typedMessage = (message as { type?: unknown; requestId?: unknown; format?: unknown } | null) ?? null;
-        if (typedMessage?.type !== 'BLACKIYA_GET_JSON_REQUEST') {
+        if (typedMessage?.type !== MESSAGE_TYPES.GET_JSON_REQUEST) {
             return;
         }
 

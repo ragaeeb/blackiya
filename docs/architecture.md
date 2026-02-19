@@ -82,6 +82,23 @@ Primary events:
 See:
 - `utils/protocol/messages.ts`
 
+### 3.1 Public Window Status Bridge (ISOLATED -> MAIN -> Page)
+
+To support external clients on the same tab, runner emits:
+- `BLACKIYA_PUBLIC_STATUS` (token-stamped)
+
+Flow:
+1. ISOLATED runner computes lifecycle + readiness snapshot.
+2. Runner posts `BLACKIYA_PUBLIC_STATUS`.
+3. MAIN interceptor validates token and updates `window.__blackiya` subscription hub.
+4. Page clients subscribe via:
+   - `window.__blackiya.subscribe('status', cb)`
+   - `window.__blackiya.subscribe('ready', cb)` (or `onReady`)
+
+`ready` semantics:
+- `ready` is emitted only when canonical readiness is reached and export gating allows retrieval.
+- When `ready` is emitted, both `window.__blackiya.getJSON()` and `window.__blackiya.getCommonJSON()` are expected to resolve for the active tab conversation.
+
 ## 4) Lifecycle and Readiness Model
 
 UI lifecycle (`platform-runner`): `idle -> prompt-sent -> streaming -> completed`
@@ -111,6 +128,7 @@ Critical invariant:
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - Cross-world message ingress is token-validated for both live `postMessage` traffic and late-start queue drains (`__BLACKIYA_CAPTURE_QUEUE__`, `__BLACKIYA_LOG_QUEUE__`).
 - Snapshot/getJSON bridge requests and responses are token-stamped and token-validated symmetrically.
+- Public status snapshots (`BLACKIYA_PUBLIC_STATUS`) are token-stamped in runner and token-validated before exposure via `window.__blackiya.subscribe(...)`.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
 - **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
 - **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative/snapshot) and always-disabled `['dom_hint', 'snapshot_fallback']`. `CalibrationStep` mapping is now reversible via a distinct `snapshot` strategy for `page-snapshot`. The runner exclusively uses the manual-strict policy path.

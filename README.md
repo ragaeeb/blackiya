@@ -315,17 +315,31 @@ The extension requires the following permissions:
 Blackiya exposes a lightweight bridge on supported LLM pages:
 
 ```js
-window.__blackiya.getJSON().then((data) => {
-    console.log(data);
+const unsubscribeStatus = window.__blackiya.subscribe('status', (status) => {
+    console.log('blackiya status:', status.lifecycle, status.readiness, status.conversationId);
 });
 
-window.__blackiya.getCommonJSON().then((data) => {
-    console.log(data);
+const unsubscribeReady = window.__blackiya.onReady(async (status) => {
+    console.log('blackiya ready:', status.conversationId);
+
+    // Both are safe when ready is emitted:
+    const original = await window.__blackiya.getJSON();
+    const common = await window.__blackiya.getCommonJSON();
+    console.log({ original, common });
 });
+
+// Optional immediate snapshot:
+console.log(window.__blackiya.getStatus());
+
+// Later:
+unsubscribeStatus();
+unsubscribeReady();
 ```
 
 Notes:
-- `getJSON()` returns a Promise and rejects if no conversation data is captured yet.
+- `subscribe('status', cb)` and `onStatusChange(cb)` are tab-local lifecycle/readiness streams.
+- `subscribe('ready', cb)` and `onReady(cb)` emit when canonical capture is ready.
+- On `ready`, both `getJSON()` and `getCommonJSON()` should resolve for that active tab conversation.
 - This runs in the page context, so only use it on pages you trust.
 
 ## 🔒 Privacy & Compliance

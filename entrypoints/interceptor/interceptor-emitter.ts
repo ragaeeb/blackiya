@@ -3,6 +3,7 @@ import { safePathname } from '@/entrypoints/interceptor/discovery';
 import { pruneTimestampCache } from '@/entrypoints/interceptor/state';
 import type { LLMPlatform } from '@/platforms/types';
 import { setBoundedMapValue } from '@/utils/bounded-collections';
+import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import type {
     CaptureInterceptedMessage as CapturePayload,
     ConversationIdResolvedMessage,
@@ -84,7 +85,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
             console.warn(message + displayData);
         }
         const payload: LogEntryMessage = {
-            type: 'LLM_LOG_ENTRY',
+            type: MESSAGE_TYPES.LOG_ENTRY,
             payload: { level, message, data: data ? [data] : [], context: 'interceptor' },
         };
         const stamped = stampToken(payload);
@@ -139,7 +140,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
             return;
         }
         const payload: CapturePayload = {
-            type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+            type: MESSAGE_TYPES.CAPTURE_DATA_INTERCEPTED,
             url,
             data,
             platform,
@@ -160,7 +161,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         setBoundedMapValue(state.conversationResolvedSignalCache, key, now, maxDedupeEntries);
         bindAttemptToConversation(attemptId, conversationId);
         const payload: ConversationIdResolvedMessage = {
-            type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+            type: MESSAGE_TYPES.CONVERSATION_ID_RESOLVED,
             platform: platformOverride ?? defaultPlatformName,
             attemptId,
             conversationId,
@@ -180,7 +181,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         bindAttemptToConversation(attemptId, conversationId);
         const platform = platformOverride ?? defaultPlatformName;
         const payload: ResponseLifecycleMessage = {
-            type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+            type: MESSAGE_TYPES.RESPONSE_LIFECYCLE,
             platform,
             attemptId,
             phase,
@@ -195,7 +196,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
             return;
         }
         const payload = {
-            type: 'BLACKIYA_TITLE_RESOLVED' as const,
+            type: MESSAGE_TYPES.TITLE_RESOLVED,
             platform: platformOverride ?? defaultPlatformName,
             attemptId,
             conversationId,
@@ -218,7 +219,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         }
         bindAttemptToConversation(attemptId, conversationId);
         const payload: StreamDeltaMessage = {
-            type: 'BLACKIYA_STREAM_DELTA',
+            type: MESSAGE_TYPES.STREAM_DELTA,
             platform: platformOverride ?? defaultPlatformName,
             attemptId,
             conversationId,
@@ -250,7 +251,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         const frameIndex = (state.streamDumpFrameCountByAttempt.get(attemptId) ?? 0) + 1;
         setBoundedMapValue(state.streamDumpFrameCountByAttempt, attemptId, frameIndex, maxStreamDumpAttempts);
         const payload: StreamDumpFrameMessage = {
-            type: 'BLACKIYA_STREAM_DUMP_FRAME',
+            type: MESSAGE_TYPES.STREAM_DUMP_FRAME,
             platform: platformOverride ?? defaultPlatformName,
             attemptId,
             conversationId,
@@ -301,7 +302,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         }
         setBoundedMapValue(state.completionSignalCache, dedupeKey, now, maxDedupeEntries);
         const payload: ResponseFinishedMessage = {
-            type: 'BLACKIYA_RESPONSE_FINISHED',
+            type: MESSAGE_TYPES.RESPONSE_FINISHED,
             platform: adapter.name,
             attemptId,
             conversationId,

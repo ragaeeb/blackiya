@@ -45,6 +45,27 @@ import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
+const waitForReadyStatus = async () =>
+    await new Promise<any>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            window.removeEventListener('message', handler as any);
+            reject(new Error('Timed out waiting for ready status'));
+        }, 2000);
+        const handler = (event: any) => {
+            if (event?.data?.type !== 'BLACKIYA_PUBLIC_STATUS') {
+                return;
+            }
+            const status = event.data?.status;
+            if (!status?.canGetJSON || !status?.canGetCommonJSON) {
+                return;
+            }
+            clearTimeout(timeout);
+            window.removeEventListener('message', handler as any);
+            resolve(status);
+        };
+        window.addEventListener('message', handler as any);
+    });
+
 // Shared fixture
 
 const twoTurnConversation = {
@@ -191,6 +212,63 @@ describe('Platform Runner – window bridge', () => {
         const response = await responsePromise;
         expect(response.type).toBe('BLACKIYA_GET_JSON_RESPONSE');
         expect(response.requestId).toBe('req-2');
+        expect(response.success).toBeTrue();
+        expect(response.data.format).toBe('common');
+        expect(response.data.llm).toBe('TestPlatform');
+    });
+
+    it('should allow getJSON when ready event is emitted', async () => {
+        currentAdapterMock.parseInterceptedData = () => twoTurnConversation;
+        runPlatform();
+        const readyPromise = waitForReadyStatus();
+        await ingestAndStabilise();
+        await readyPromise;
+
+        const responsePromise = new Promise<any>((resolve) => {
+            const handler = (event: any) => {
+                if (event?.data?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
+                    return;
+                }
+                window.removeEventListener('message', handler as any);
+                resolve(event.data);
+            };
+            window.addEventListener('message', handler as any);
+        });
+
+        postStampedMessage(
+            { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'req-ready-original' },
+            window.location.origin,
+        );
+
+        const response = await responsePromise;
+        expect(response.success).toBeTrue();
+        expect(response.data).toEqual(twoTurnConversation);
+    });
+
+    it('should allow getCommonJSON when ready event is emitted', async () => {
+        currentAdapterMock.parseInterceptedData = () => twoTurnConversation;
+        runPlatform();
+        const readyPromise = waitForReadyStatus();
+        await ingestAndStabilise();
+        await readyPromise;
+
+        const responsePromise = new Promise<any>((resolve) => {
+            const handler = (event: any) => {
+                if (event?.data?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
+                    return;
+                }
+                window.removeEventListener('message', handler as any);
+                resolve(event.data);
+            };
+            window.addEventListener('message', handler as any);
+        });
+
+        postStampedMessage(
+            { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'req-ready-common', format: 'common' },
+            window.location.origin,
+        );
+
+        const response = await responsePromise;
         expect(response.success).toBeTrue();
         expect(response.data.format).toBe('common');
         expect(response.data.llm).toBe('TestPlatform');

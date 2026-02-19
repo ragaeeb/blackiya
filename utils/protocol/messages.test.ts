@@ -27,6 +27,23 @@ describe('protocol/messages', () => {
                 __blackiyaToken: 'bk:test',
             }),
         ).toBeTrue();
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_PUBLIC_STATUS',
+                status: {
+                    platform: 'ChatGPT',
+                    conversationId: 'conv-1',
+                    attemptId: 'attempt-1',
+                    lifecycle: 'streaming',
+                    readiness: 'awaiting_stabilization',
+                    readinessReason: 'captured_not_ready',
+                    canGetJSON: false,
+                    canGetCommonJSON: false,
+                    sequence: 2,
+                    timestampMs: 1_700_000_000_000,
+                },
+            }),
+        ).toBeTrue();
     });
 
     it('keeps tokenized wire messages type-compatible', () => {
