@@ -86,6 +86,11 @@ describe('dom-snapshot', () => {
 
         const snapshot = buildDomConversationSnapshot('conv-1') as any;
         expect(snapshot).not.toBeNull();
+        const assistantMessage = Object.values(snapshot.mapping)
+            .map((node: any) => node.message)
+            .find((message: any) => message?.author?.role === 'assistant');
+        expect(assistantMessage).toBeDefined();
+        expect(assistantMessage.content?.parts).toEqual(['Final answer text']);
     });
 
     it('should fall back to manual role discovery when attribute selector lookup fails', () => {
@@ -106,6 +111,9 @@ describe('dom-snapshot', () => {
         document.body.appendChild(turn);
 
         const originalQuerySelector = turn.querySelector.bind(turn);
+        // This test relies on object identity: buildDomConversationSnapshot() gets the same
+        // `turn` instance from findConversationTurns(), so patching turn.querySelector here
+        // forces findElementByAttribute() down its manual-scan fallback.
         (turn as any).querySelector = (selector: string) => {
             if (selector === '[data-message-author-role]') {
                 throw new SyntaxError('Unsupported selector');

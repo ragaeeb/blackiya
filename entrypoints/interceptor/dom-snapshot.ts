@@ -65,7 +65,7 @@ const buildDomMessageContent = (text: string, thoughtFragments: string[]): Recor
         return { content_type: 'text', parts: text ? [text] : [] };
     }
     const thoughts = buildThoughtEntries(thoughtFragments);
-    if (thoughtFragments.length > 0 && text.length === 0) {
+    if (text.length === 0) {
         return {
             content_type: 'thoughts',
             thoughts,

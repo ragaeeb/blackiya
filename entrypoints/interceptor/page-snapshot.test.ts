@@ -12,7 +12,12 @@ describe('page-snapshot global scanning', () => {
         (globalThis as any).document = windowInstance.document;
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+        if (typeof (windowInstance as any)?.close === 'function') {
+            (windowInstance as any).close();
+        } else if (typeof (windowInstance as any)?.happyDOM?.close === 'function') {
+            await (windowInstance as any).happyDOM.close();
+        }
         delete (globalThis as any).window;
         delete (globalThis as any).document;
     });

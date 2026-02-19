@@ -27,7 +27,8 @@ export type FetchInterceptionDeps = {
     resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string;
 };
 
-const getUtf8ByteLength = (text: string) => new TextEncoder().encode(text).byteLength;
+const utf8Encoder = new TextEncoder();
+const getUtf8ByteLength = (text: string) => utf8Encoder.encode(text).byteLength;
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -98,48 +99,44 @@ export const handleApiMatchFromFetch = (
     if (emitter.shouldLogTransient(`api:match:${adapter.name}:${safePathname(url)}`, 2500)) {
         emitter.log('info', `API match ${adapter.name}`);
     }
-    response
-        .clone()
-        .text()
-        .then((text) => {
-            const shouldCapture = emitter.shouldEmitCapturedPayload(adapter.name, url, text);
-            if (shouldCapture) {
-                emitter.log('info', `API ${text.length}b ${adapter.name}`);
-            }
-
-            const parsed = parseConversationData(adapter, text, url);
-            const conversationId = resolveParsedConversationId(adapter, parsed, url);
-            const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
-
-            if (shouldCapture) {
-                emitter.emitApiResponseDumpFrame(adapter.name, url, text, attemptId, conversationId);
-                emitter.emitCapturePayload(url, text, adapter.name, attemptId);
-                emitNonChatGptStreamSnapshot(adapter, attemptId, conversationId, parsed, emitter);
-            }
-
-            if (
-                deferredCompletionAdapter &&
-                shouldEmitCompletionForParsedData(deferredCompletionAdapter, url, parsed)
-            ) {
-                emitter.emitResponseFinished(deferredCompletionAdapter, url);
-                return;
-            }
-            if (
-                adapter.name !== chatGPTAdapter.name &&
-                parsed?.conversation_id &&
-                shouldEmitCompletionForParsedData(adapter, url, parsed)
-            ) {
-                emitter.emitResponseFinished(adapter, url);
-            }
-        })
-        .catch(() => {
+    const path = safePathname(url);
+    const textPromise = response.clone().text();
+    textPromise.catch(() => {
             if (deferredCompletionAdapter && !shouldSuppressCompletion(deferredCompletionAdapter, url)) {
                 emitter.emitResponseFinished(deferredCompletionAdapter, url);
             }
-            if (adapter.name !== chatGPTAdapter.name || !safePathname(url).startsWith('/backend-api/f/conversation')) {
-                emitter.log('warn', `API read err ${adapter.name}`, { path: safePathname(url) });
+            if (adapter.name !== chatGPTAdapter.name || !path.startsWith('/backend-api/f/conversation')) {
+                emitter.log('warn', `API read err ${adapter.name}`, { path });
             }
         });
+    void textPromise.then((text) => {
+        const shouldCapture = emitter.shouldEmitCapturedPayload(adapter.name, url, text);
+        if (shouldCapture) {
+            emitter.log('info', `API ${text.length}b ${adapter.name}`);
+        }
+
+        const parsed = parseConversationData(adapter, text, url);
+        const conversationId = resolveParsedConversationId(adapter, parsed, url);
+        const attemptId = resolveAttemptIdForConversation(conversationId, adapter.name);
+
+        if (shouldCapture) {
+            emitter.emitApiResponseDumpFrame(adapter.name, url, text, attemptId, conversationId);
+            emitter.emitCapturePayload(url, text, adapter.name, attemptId);
+            emitNonChatGptStreamSnapshot(adapter, attemptId, conversationId, parsed, emitter);
+        }
+
+        if (deferredCompletionAdapter && shouldEmitCompletionForParsedData(deferredCompletionAdapter, url, parsed)) {
+            emitter.emitResponseFinished(deferredCompletionAdapter, url);
+            return;
+        }
+        if (
+            adapter.name !== chatGPTAdapter.name &&
+            parsed?.conversation_id &&
+            shouldEmitCompletionForParsedData(adapter, url, parsed)
+        ) {
+            emitter.emitResponseFinished(adapter, url);
+        }
+    });
 };
 
 export const inspectAuxConversationFetch = (
