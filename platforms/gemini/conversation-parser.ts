@@ -7,7 +7,7 @@ import type { ConversationData, MessageNode } from '@/utils/types';
 const isConversationIdCandidate = (value: unknown): value is string =>
     typeof value === 'string' && (value.startsWith('c_') || /^[a-f0-9]+$/i.test(value));
 
-export const hasGeminiBatchexecuteConversationShape = (payload: any): boolean => {
+export const hasGeminiBatchexecuteConversationShape = (payload: unknown): boolean => {
     if (!Array.isArray(payload) || payload.length === 0) {
         return false;
     }
@@ -28,7 +28,7 @@ export const hasGeminiBatchexecuteConversationShape = (payload: any): boolean =>
 
 type StreamShapeIndices = { idIndex: number; assistantSlotIndex: number };
 
-const resolveGeminiStreamShape = (payload: any): StreamShapeIndices | null => {
+const resolveGeminiStreamShape = (payload: unknown): StreamShapeIndices | null => {
     if (!Array.isArray(payload) || payload.length < 5) {
         return null;
     }
@@ -49,24 +49,27 @@ const resolveGeminiStreamShape = (payload: any): StreamShapeIndices | null => {
     return null;
 };
 
-export const hasGeminiStreamGenerateConversationShape = (payload: any): boolean => !!resolveGeminiStreamShape(payload);
+export const hasGeminiStreamGenerateConversationShape = (payload: unknown): boolean =>
+    !!resolveGeminiStreamShape(payload);
 
-type ConversationEnvelope = { conversationRoot: any[]; isStreamFormat: boolean };
+type ConversationEnvelope = { conversationRoot: unknown[]; isStreamFormat: boolean };
 
-export const resolveGeminiConversationEnvelope = (payload: any): ConversationEnvelope | null => {
-    const batchexecuteRoot = payload?.[0]?.[0];
+export const resolveGeminiConversationEnvelope = (payload: unknown): ConversationEnvelope | null => {
+    const payloadArray = Array.isArray(payload) ? payload : null;
+    const level1 = Array.isArray(payloadArray?.[0]) ? payloadArray[0] : null;
+    const batchexecuteRoot = Array.isArray(level1) ? level1[0] : null;
     if (Array.isArray(batchexecuteRoot)) {
         return { conversationRoot: batchexecuteRoot, isStreamFormat: false };
     }
 
     const streamShape = resolveGeminiStreamShape(payload);
-    if (streamShape) {
+    if (streamShape && payloadArray) {
         const conversationRoot = [
             null,
-            payload[streamShape.idIndex],
+            payloadArray[streamShape.idIndex],
             null,
             null,
-            payload[streamShape.assistantSlotIndex],
+            payloadArray[streamShape.assistantSlotIndex],
         ];
         return { conversationRoot, isStreamFormat: true };
     }
@@ -82,7 +85,10 @@ const normalizeConversationId = (rawConversationId: unknown): string | null => {
     return rawConversationId.startsWith('c_') ? rawConversationId.slice(2) : rawConversationId;
 };
 
-export const extractGeminiConversationId = (conversationRoot: any[], isStreamFormat: boolean): string | null => {
+export const extractGeminiConversationId = (conversationRoot: unknown, isStreamFormat: boolean): string | null => {
+    if (!Array.isArray(conversationRoot)) {
+        return null;
+    }
     const idArray = isStreamFormat ? conversationRoot[1] : conversationRoot[0];
     return normalizeConversationId(Array.isArray(idArray) ? idArray[0] : null);
 };
@@ -95,7 +101,7 @@ export const resolveGeminiConversationTitle = (
 
 // ── Message parsing ────────────────────────────────────────────────────────────
 
-const extractGeminiTextNode = (node: any, depth = 0, maxDepth = 50): string => {
+const extractGeminiTextNode = (node: unknown, depth = 0, maxDepth = 50): string => {
     if (typeof node === 'string') {
         return node;
     }
@@ -108,14 +114,49 @@ const extractGeminiTextNode = (node: any, depth = 0, maxDepth = 50): string => {
     return extractGeminiTextNode(node[0], depth + 1, maxDepth);
 };
 
-const parseGeminiThoughts = (assistantCandidate: any[]): any[] => {
-    const thinkingText = assistantCandidate[37]?.[0]?.[0];
+type GeminiThought = { summary: string; content: string; chunks: string[]; finished: boolean };
+type ParsedGeminiMessage = { role: 'user' | 'assistant'; content: string; thoughts?: GeminiThought[] };
+
+const THINKING_SECTION_REGEX = /\n\*\*([^*]+)\*\*\n/;
+
+const findGeminiThoughtText = (candidate: unknown, depth = 0, maxDepth = 8): string | null => {
+    if (typeof candidate === 'string') {
+        return THINKING_SECTION_REGEX.test(candidate) ? candidate : null;
+    }
+    if (!Array.isArray(candidate) || depth >= maxDepth) {
+        return null;
+    }
+    for (const entry of candidate) {
+        const found = findGeminiThoughtText(entry, depth + 1, maxDepth);
+        if (found) {
+            return found;
+        }
+    }
+    return null;
+};
+
+const summarizeThoughtCandidate = (assistantCandidate: unknown[]) =>
+    assistantCandidate.slice(0, 12).map((entry, index) => {
+        if (Array.isArray(entry)) {
+            return { index, type: 'array', length: entry.length };
+        }
+        return { index, type: typeof entry };
+    });
+
+const parseGeminiThoughts = (assistantCandidate: unknown[]): GeminiThought[] => {
+    const thinkingText = findGeminiThoughtText(assistantCandidate);
     if (typeof thinkingText !== 'string' || thinkingText.length === 0) {
+        if (assistantCandidate.length >= 30) {
+            logger.debug('[Blackiya/Gemini] Expected thoughts-like payload but no thought text candidate was found', {
+                candidateLength: assistantCandidate.length,
+                candidateSnapshot: summarizeThoughtCandidate(assistantCandidate),
+            });
+        }
         return [];
     }
 
-    const thoughts: any[] = [];
-    const sections = thinkingText.split(/\n\*\*([^*]+)\*\*\n/);
+    const thoughts: GeminiThought[] = [];
+    const sections = thinkingText.split(THINKING_SECTION_REGEX);
     for (let i = 1; i < sections.length; i += 2) {
         const title = sections[i]?.trim();
         const content = sections[i + 1]?.trim();
@@ -126,41 +167,83 @@ const parseGeminiThoughts = (assistantCandidate: any[]): any[] => {
     return thoughts;
 };
 
-export const parseGeminiMessages = (conversationRoot: any[], isStreamFormat: boolean): any[] => {
-    const parsedMessages: any[] = [];
+const parseGeminiUserMessage = (conversationRoot: unknown[]): ParsedGeminiMessage | null => {
+    const userSlot = conversationRoot[2];
+    if (!Array.isArray(userSlot)) {
+        return null;
+    }
+    const rawUserContent = extractGeminiTextNode(userSlot);
+    if (!rawUserContent) {
+        return null;
+    }
+    return { role: 'user', content: rawUserContent };
+};
+
+const resolveGeminiAssistantCandidate = (conversationRoot: unknown[], isStreamFormat: boolean): unknown[] | null => {
+    const assistantSlot = isStreamFormat ? conversationRoot[4] : conversationRoot[3];
+    if (isStreamFormat) {
+        if (Array.isArray(assistantSlot) && Array.isArray(assistantSlot[0])) {
+            return assistantSlot[0];
+        }
+        return null;
+    }
+    if (!Array.isArray(assistantSlot)) {
+        return null;
+    }
+    const nested = assistantSlot[0];
+    if (!Array.isArray(nested) || !Array.isArray(nested[0])) {
+        return null;
+    }
+    return nested[0];
+};
+
+const parseGeminiAssistantMessage = (
+    conversationRoot: unknown[],
+    isStreamFormat: boolean,
+): ParsedGeminiMessage | null => {
+    const assistantCandidate = resolveGeminiAssistantCandidate(conversationRoot, isStreamFormat);
+    if (!assistantCandidate) {
+        return null;
+    }
+    const textParts = assistantCandidate[1];
+    const assistantContent = Array.isArray(textParts) && typeof textParts[0] === 'string' ? textParts[0] : '';
+    const thoughts = parseGeminiThoughts(assistantCandidate);
+    if (!assistantContent && thoughts.length === 0) {
+        return null;
+    }
+    return {
+        role: 'assistant',
+        content: assistantContent,
+        thoughts: thoughts.length > 0 ? thoughts : undefined,
+    };
+};
+
+export const parseGeminiMessages = (conversationRoot: unknown, isStreamFormat: boolean): ParsedGeminiMessage[] => {
+    if (!Array.isArray(conversationRoot)) {
+        return [];
+    }
+    const parsedMessages: ParsedGeminiMessage[] = [];
 
     if (!isStreamFormat) {
-        const userSlot = conversationRoot[2];
-        if (Array.isArray(userSlot)) {
-            const rawUserContent = extractGeminiTextNode(userSlot);
-            if (rawUserContent) {
-                parsedMessages.push({ role: 'user', content: rawUserContent });
-            }
+        const userMessage = parseGeminiUserMessage(conversationRoot);
+        if (userMessage) {
+            parsedMessages.push(userMessage);
         }
     }
 
-    const assistantSlot = isStreamFormat ? conversationRoot[4] : conversationRoot[3];
-    const assistantCandidate = isStreamFormat ? assistantSlot?.[0] : assistantSlot?.[0]?.[0];
-    if (!Array.isArray(assistantCandidate)) {
-        return parsedMessages;
-    }
-
-    const textParts = assistantCandidate[1];
-    const assistantContent = Array.isArray(textParts) ? (textParts[0] as string) || '' : '';
-    const thoughts = parseGeminiThoughts(assistantCandidate);
-    if (assistantContent || thoughts.length > 0) {
-        parsedMessages.push({
-            role: 'assistant',
-            content: assistantContent,
-            thoughts: thoughts.length > 0 ? thoughts : undefined,
-        });
+    const assistantMessage = parseGeminiAssistantMessage(conversationRoot, isStreamFormat);
+    if (assistantMessage) {
+        parsedMessages.push(assistantMessage);
     }
 
     return parsedMessages;
 };
 
-export const extractGeminiModelName = (conversationRoot: any[], isStreamFormat: boolean): string => {
+export const extractGeminiModelName = (conversationRoot: unknown, isStreamFormat: boolean): string => {
     const defaultModelName = 'gemini-2.0';
+    if (!Array.isArray(conversationRoot)) {
+        return defaultModelName;
+    }
     const modelSlotSource = isStreamFormat ? conversationRoot[4] : conversationRoot[3];
     if (!Array.isArray(modelSlotSource) || modelSlotSource.length <= 21) {
         return defaultModelName;
@@ -176,7 +259,10 @@ export const extractGeminiModelName = (conversationRoot: any[], isStreamFormat: 
 
 // ── Conversation data builder ──────────────────────────────────────────────────
 
-const buildGeminiConversationMapping = (parsedMessages: any[], now: number): Record<string, MessageNode> => {
+const buildGeminiConversationMapping = (
+    parsedMessages: ParsedGeminiMessage[],
+    now: number,
+): Record<string, MessageNode> => {
     const mapping: Record<string, MessageNode> = {};
     parsedMessages.forEach((msg, index) => {
         const id = `segment-${index}`;
@@ -232,7 +318,7 @@ const buildGeminiConversationData = (
 };
 
 export const parseConversationPayload = (
-    payload: any,
+    payload: unknown,
     titlesCache: LRUCache<string, string>,
     activeConvos: LRUCache<string, ConversationData>,
 ): ConversationData | null => {

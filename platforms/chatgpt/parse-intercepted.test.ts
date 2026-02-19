@@ -25,9 +25,7 @@ describe('ChatGPT parseInterceptedData', () => {
         adapter = module.createChatGPTAdapter();
     });
 
-    // -----------------------------------------------------------------------
     // JSON object parsing
-    // -----------------------------------------------------------------------
 
     describe('direct JSON payloads', () => {
         it('should parse a flat conversation payload', () => {
@@ -104,9 +102,7 @@ describe('ChatGPT parseInterceptedData', () => {
         });
     });
 
-    // -----------------------------------------------------------------------
     // current_node and model slug derivation
-    // -----------------------------------------------------------------------
 
     describe('current_node and model slug derivation', () => {
         it('should derive current_node from latest message timestamp when current_node is missing/invalid', () => {
@@ -162,9 +158,7 @@ describe('ChatGPT parseInterceptedData', () => {
         });
     });
 
-    // -----------------------------------------------------------------------
     // Title normalization
-    // -----------------------------------------------------------------------
 
     describe('title normalization', () => {
         it('should derive title from first user message when payload title is a placeholder', () => {
@@ -250,9 +244,7 @@ describe('ChatGPT parseInterceptedData', () => {
         });
     });
 
-    // -----------------------------------------------------------------------
     // SSE stream parsing
-    // -----------------------------------------------------------------------
 
     describe('SSE stream payloads', () => {
         it('should build synthetic conversation from f/conversation SSE stream', () => {

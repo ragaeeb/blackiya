@@ -2,9 +2,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import type { ConversationData } from '@/utils/types';
 
-// ---------------------------------------------------------------------------
 // Conversation ID extraction
-// ---------------------------------------------------------------------------
 
 export const extractConversationIdFromChatGptUrl = (url: string) => url.match(/\/c\/([a-f0-9-]{36})/i)?.[1];
 
@@ -41,9 +39,7 @@ export const resolveRequestConversationId = (adapter: LLMPlatform, requestUrl: s
     adapter.extractConversationId(window.location.href) ??
     undefined;
 
-// ---------------------------------------------------------------------------
 // Conversation data parsing
-// ---------------------------------------------------------------------------
 
 export const parseConversationData = (adapter: LLMPlatform, payload: string, url: string) => {
     try {
@@ -80,9 +76,7 @@ export const extractLatestAssistantText = (parsed: ConversationData): string | n
     return normalized.length === 0 || /^v\d+$/i.test(normalized) ? null : normalized;
 };
 
-// ---------------------------------------------------------------------------
 // Readiness checks
-// ---------------------------------------------------------------------------
 
 export const isCapturedConversationReady = (adapter: LLMPlatform, parsed: unknown): boolean => {
     if (!parsed || typeof parsed !== 'object' || !('conversation_id' in parsed)) {
@@ -94,9 +88,7 @@ export const isCapturedConversationReady = (adapter: LLMPlatform, parsed: unknow
         : isConversationReady(conversation);
 };
 
-// ---------------------------------------------------------------------------
 // Proactive-fetch URL resolution
-// ---------------------------------------------------------------------------
 
 export const isFetchReady = (adapter: LLMPlatform): boolean =>
     !!adapter.extractConversationIdFromUrl && (!!adapter.buildApiUrl || !!adapter.buildApiUrls);

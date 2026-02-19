@@ -3,9 +3,7 @@ import { normalizeGrokStreamChunk } from '@/entrypoints/interceptor/stream-monit
 import { extractGrokStreamSignalsFromBuffer } from '@/utils/grok-stream-parser';
 import { consumeReadableStreamChunks, type StreamMonitorEmitter } from './stream-emitter';
 
-// ---------------------------------------------------------------------------
 // Shared XHR state type
-// ---------------------------------------------------------------------------
 
 type GrokXhrStreamState = {
     attemptId: string;
@@ -20,9 +18,7 @@ type GrokXhrStreamState = {
     emittedStreaming: boolean;
 };
 
-// ---------------------------------------------------------------------------
 // History-trimming helpers
-// ---------------------------------------------------------------------------
 
 const trimPayloadHistory = (order: string[], set: Set<string>, max = 260): void => {
     while (order.length > max) {
@@ -42,9 +38,7 @@ const trimSignalHistory = (order: string[], set: Set<string>, max = 360): void =
     }
 };
 
-// ---------------------------------------------------------------------------
 // Buffer helpers
-// ---------------------------------------------------------------------------
 
 const appendGrokBuffer = (buffer: string, chunk: string): string => {
     const next = buffer + chunk;
@@ -58,9 +52,7 @@ const appendSeenPayloads = (seenPayloadOrder: string[], seenPayloads: Set<string
     trimPayloadHistory(seenPayloadOrder, seenPayloads);
 };
 
-// ---------------------------------------------------------------------------
 // Candidate emission
-// ---------------------------------------------------------------------------
 
 const emitStreamCandidates = (
     attemptId: string,
@@ -97,9 +89,7 @@ const emitStreamCandidates = (
     }
 };
 
-// ---------------------------------------------------------------------------
 // Fetch stream monitor
-// ---------------------------------------------------------------------------
 
 const processFetchChunk = (
     attemptId: string,
@@ -242,9 +232,7 @@ export const monitorGrokResponseStream = async (
     }
 };
 
-// ---------------------------------------------------------------------------
 // XHR progress monitor
-// ---------------------------------------------------------------------------
 
 const createXhrStreamState = (
     attemptId: string,
@@ -323,12 +311,13 @@ export const wireGrokXhrProgressMonitor = (
     attemptId: string,
     emit: StreamMonitorEmitter,
     seedConversationId: string | undefined,
+    requestUrl: string,
 ): void => {
     if (emit.shouldLogTransient(`grok:xhr-stream:start:${attemptId}`, 7000)) {
         emit.log('info', 'Grok XHR stream monitor start', { attemptId, conversationId: seedConversationId ?? null });
     }
 
-    const state = createXhrStreamState(attemptId, ((xhr as any)._url as string | undefined) ?? '', seedConversationId);
+    const state = createXhrStreamState(attemptId, requestUrl, seedConversationId);
 
     const flushProgress = () => {
         if (typeof xhr.responseText !== 'string' || xhr.responseText.length <= state.lastLength) {

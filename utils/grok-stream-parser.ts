@@ -67,6 +67,9 @@ function appendLikelyTextCandidate(value: string, out: string[]): void {
 
 function collectLikelyTextValuesFromArray(values: unknown[], out: string[], depth: number): void {
     for (const child of values) {
+        if (out.length > 160) {
+            break;
+        }
         collectLikelyTextValues(child, out, depth + 1);
     }
 }

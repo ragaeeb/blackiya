@@ -35,24 +35,33 @@ const extractThoughtFragments = (turn: Element): string[] => {
 
 const normalizeDomTitle = (rawTitle: string) => rawTitle.replace(/\s*[-|]\s*ChatGPT.*$/i, '').trim();
 
+const buildThoughtEntries = (thoughtFragments: string[]) =>
+    thoughtFragments.map((summary) => ({
+        summary,
+        content: summary,
+        chunks: [],
+        finished: true,
+    }));
+
 const buildDomMessageContent = (text: string, thoughtFragments: string[]): Record<string, unknown> => {
+    if (thoughtFragments.length === 0) {
+        return { content_type: 'text', parts: text ? [text] : [] };
+    }
+    const thoughts = buildThoughtEntries(thoughtFragments);
     if (thoughtFragments.length > 0 && text.length === 0) {
         return {
             content_type: 'thoughts',
-            thoughts: thoughtFragments.map((summary) => ({
-                summary,
-                content: summary,
-                chunks: [],
-                finished: true,
-            })),
+            thoughts,
         };
     }
-    return { content_type: 'text', parts: text ? [text] : [] };
+    return {
+        content_type: 'text',
+        parts: [text],
+        thoughts,
+    };
 };
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Walks the ChatGPT DOM and constructs a synthetic conversation payload in the

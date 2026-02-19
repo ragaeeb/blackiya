@@ -127,9 +127,7 @@ const attemptRegistry = createInterceptorAttemptRegistry({
 const { bindAttemptToConversation, resolveAttemptIdForConversation, peekAttemptIdForConversation, isAttemptDisposed } =
     attemptRegistry;
 
-// ---------------------------------------------------------------------------
 // Cache pruning
-// ---------------------------------------------------------------------------
 
 const maybePruneTimestampCaches = (nowMs = Date.now()): void => {
     if (nowMs - lastCachePruneAtMs < INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS) {
@@ -143,9 +141,7 @@ const maybePruneTimestampCaches = (nowMs = Date.now()): void => {
     pruneTimestampCache(conversationResolvedSignalCache, INTERCEPTOR_CACHE_ENTRY_TTL_MS, nowMs);
 };
 
-// ---------------------------------------------------------------------------
 // Logging
-// ---------------------------------------------------------------------------
 
 const log = (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => {
     const displayData = data ? ` ${JSON.stringify(data)}` : '';
@@ -175,9 +171,7 @@ const shouldLogTransient = (key: string, intervalMs = 2000): boolean => {
     return true;
 };
 
-// ---------------------------------------------------------------------------
 // Capture queue
-// ---------------------------------------------------------------------------
 
 const queueLogMessage = (payload: InterceptorLogPayload & { __blackiyaToken: string }) => {
     const queue = ((window as any).__BLACKIYA_LOG_QUEUE__ as (typeof payload)[] | undefined) ?? [];
@@ -212,9 +206,7 @@ const queueInterceptedMessage = (payload: CapturePayload & { __blackiyaToken: st
     cacheRawCapture(payload);
 };
 
-// ---------------------------------------------------------------------------
 // Signal emission
-// ---------------------------------------------------------------------------
 
 const shouldEmitCapturedPayload = (adapterName: string, url: string, payload: string, intervalMs = 5000): boolean => {
     const path = safePathname(url);
@@ -430,9 +422,7 @@ const emitResponseFinishedSignal = (adapter: LLMPlatform, url: string): void => 
     });
 };
 
-// ---------------------------------------------------------------------------
 // StreamMonitorEmitter factory — closes over module-level state/functions
-// ---------------------------------------------------------------------------
 
 /** Creates the signal-emitter bundle used by all platform stream monitors. */
 const createStreamMonitorEmitter = (): StreamMonitorEmitter => ({
@@ -446,9 +436,7 @@ const createStreamMonitorEmitter = (): StreamMonitorEmitter => ({
     log,
 });
 
-// ---------------------------------------------------------------------------
 // Completion-signal suppression helpers
-// ---------------------------------------------------------------------------
 
 const isGeminiTitlesEndpoint = (url: string): boolean =>
     /\/_\/BardChatUi\/data\/batchexecute/i.test(url) && /[?&]rpcids=MaZiqc(?:&|$)/i.test(url);
@@ -498,9 +486,7 @@ const shouldEmitNonChatLifecycleForRequest = (adapter: LLMPlatform, url: string)
     return true;
 };
 
-// ---------------------------------------------------------------------------
 // Non-ChatGPT stream snapshot helper
-// ---------------------------------------------------------------------------
 
 const emitNonChatGptStreamSnapshot = (
     adapter: LLMPlatform,
@@ -519,9 +505,7 @@ const emitNonChatGptStreamSnapshot = (
     emitStreamDumpFrame(attemptId, conversationId, 'snapshot', text, text.length, adapter.name);
 };
 
-// ---------------------------------------------------------------------------
 // Discovery logging helpers
-// ---------------------------------------------------------------------------
 
 const isDiscoveryModeHost = (hostname: string): boolean =>
     hostname.includes('gemini.google.com') || hostname.includes('x.com') || hostname.includes('grok.com');
@@ -602,9 +586,7 @@ const logDiscoveryXhr = (url: string, responseText: string): void => {
     emitDiscoveryDumpFrame('XHR DISCOVERY', urlObj.pathname, responseText);
 };
 
-// ---------------------------------------------------------------------------
 // Fetch/XHR capture helpers
-// ---------------------------------------------------------------------------
 
 const tryParseAndEmitConversation = (adapter: LLMPlatform, url: string, text: string, source: string): boolean => {
     const parsed = parseConversationData(adapter, text, url);
@@ -824,9 +806,7 @@ const handleXhrLoad = (xhr: XMLHttpRequest, method: string): void => {
     }
 };
 
-// ---------------------------------------------------------------------------
 // Session init / page snapshot / message handlers
-// ---------------------------------------------------------------------------
 
 export const shouldApplySessionInitToken = (existingToken: string | undefined, incomingToken: string): boolean => {
     if (typeof incomingToken !== 'string' || incomingToken.length === 0) {
@@ -869,9 +849,7 @@ const parseAttemptDisposedMessage = (event: MessageEvent): AttemptDisposedMessag
     return message;
 };
 
-// ---------------------------------------------------------------------------
 // Main entry point
-// ---------------------------------------------------------------------------
 
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
@@ -953,9 +931,7 @@ export default defineContentScript({
             return true;
         };
 
-        // ------------------------------------------------------------------
         // Proactive fetch
-        // ------------------------------------------------------------------
 
         const tryFetchConversation = async (
             adapter: LLMPlatform,
@@ -1059,9 +1035,7 @@ export default defineContentScript({
             });
         };
 
-        // ------------------------------------------------------------------
         // Fetch interceptor
-        // ------------------------------------------------------------------
 
         const emitChatGptFetchPromptLifecycle = (context: FetchInterceptorContext): void => {
             if (!context.isChatGptPromptRequest || !context.lifecycleAttemptId) {
@@ -1215,9 +1189,7 @@ export default defineContentScript({
             interceptFetchRequest([input, init] as Parameters<typeof fetch>),
         );
 
-        // ------------------------------------------------------------------
         // XHR interceptor
-        // ------------------------------------------------------------------
 
         const XHR = window.XMLHttpRequest;
         const originalOpen = XHR.prototype.open;
@@ -1265,7 +1237,7 @@ export default defineContentScript({
                 return true;
             }
             if (context.requestAdapter.name === 'Grok' && context.conversationId) {
-                wireGrokXhrProgressMonitor(xhr, attemptId, emit, context.conversationId);
+                wireGrokXhrProgressMonitor(xhr, attemptId, emit, context.conversationId, context.requestUrl);
                 logGrokXhrRequest(attemptId, context);
                 return true;
             }
@@ -1370,9 +1342,7 @@ export default defineContentScript({
 
         log('info', 'init', { host: window.location.hostname, runtimeTag: INTERCEPTOR_RUNTIME_TAG });
 
-        // ------------------------------------------------------------------
         // Window message handlers (page snapshot, session, disposal, dump config)
-        // ------------------------------------------------------------------
 
         if (!(window as any).__blackiya) {
             const requestJson = createWindowJsonRequester(window, {

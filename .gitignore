@@ -38,4 +38,4 @@ build
 *.tsbuildinfo
 *.pem
 coverage
-.nyc_output
+.nyc_outputlogs/*.har

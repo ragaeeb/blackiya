@@ -18,7 +18,11 @@ describe('Gemini — StreamGenerate parsing (V2.1-031)', () => {
     beforeAll(async () => {
         const module = await import('@/platforms/gemini');
         geminiAdapter = module.geminiAdapter;
-        resetGeminiAdapterState = module.resetGeminiAdapterState ?? (() => {});
+        resetGeminiAdapterState = module.resetGeminiAdapterState;
+        expect(resetGeminiAdapterState).toBeDefined();
+        if (!resetGeminiAdapterState) {
+            throw new Error('Expected gemini adapter module to export resetGeminiAdapterState');
+        }
     });
 
     beforeEach(() => resetGeminiAdapterState());
@@ -39,8 +43,6 @@ describe('Gemini — StreamGenerate parsing (V2.1-031)', () => {
                     'rc_cand1',
                     [assistantText],
                     ...Array(33).fill(null),
-                    null,
-                    null,
                     null,
                     null,
                     ['Thinking step 1\n**Analysis**\nContent here'],
@@ -161,6 +163,28 @@ describe('Gemini — StreamGenerate parsing (V2.1-031)', () => {
         expect(assistantMsg?.content.thoughts).toBeDefined();
         expect(assistantMsg?.content.thoughts?.length).toBe(2);
         expect(assistantMsg?.content.thoughts?.[0].summary).toBe('Analyzing the Problem');
+    });
+
+    it('should extract thinking sections when the thought payload index drifts', () => {
+        const convId = 'stream_test_conv_dynamic_thoughts_005';
+        const thinkingText = '\n**Reasoning**\nStep-by-step plan.';
+        const payload = [
+            null,
+            [`c_${convId}`, 'r_resp_dynamic'],
+            null,
+            null,
+            [['rc_cand_dynamic', ['Final answer text'], null, null, [[thinkingText]], null, null, null]],
+        ];
+
+        const result = geminiAdapter.parseInterceptedData(buildStreamResponse(buildChunk(payload)), STREAM_URL);
+        expect(result).not.toBeNull();
+
+        const assistantMsg = Object.values(result!.mapping)
+            .map((n: any) => n.message)
+            .filter((m: any) => m !== null)
+            .find((m: any) => m.author.role === 'assistant');
+        expect(assistantMsg?.content.thoughts?.length).toBe(1);
+        expect(assistantMsg?.content.thoughts?.[0]?.summary).toBe('Reasoning');
     });
 
     it('should parse StreamGenerate payload when envelope indices are shifted', () => {

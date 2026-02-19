@@ -16,6 +16,8 @@ import type { ConversationData } from '@/utils/types';
 
 export class InterceptionManager {
     private static readonly BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+    private static readonly MAX_PENDING_TOKEN_MESSAGES = 300;
+    private static readonly MAX_TOKEN_REVALIDATION_RETRIES = 40;
     private readonly conversationCache: LRUCache<string, ConversationData>;
     private readonly specificTitleCache: LRUCache<string, string>;
     private currentAdapter: LLMPlatform | null = null;
@@ -24,6 +26,8 @@ export class InterceptionManager {
     private lastInvalidTokenLogAtMs = 0;
     private pendingTokenRevalidationMessages: Array<Record<string, unknown>> = [];
     private pendingTokenRevalidationTimer: ReturnType<typeof setTimeout> | null = null;
+    private pendingTokenRevalidationRetryCount = 0;
+    private pendingTokenRevalidationRetryLimitReached = false;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
     private onDataCaptured: (
@@ -80,6 +84,8 @@ export class InterceptionManager {
             clearTimeout(this.pendingTokenRevalidationTimer);
             this.pendingTokenRevalidationTimer = null;
         }
+        this.pendingTokenRevalidationRetryCount = 0;
+        this.pendingTokenRevalidationRetryLimitReached = false;
     }
 
     public getConversation(id: string): ConversationData | undefined {
@@ -241,6 +247,10 @@ export class InterceptionManager {
         if (!message || reason !== 'missing-message-token') {
             return false;
         }
+        if (this.pendingTokenRevalidationMessages.length >= InterceptionManager.MAX_PENDING_TOKEN_MESSAGES) {
+            this.logTokenValidationDrop(messageType, 'missing-message-token-queue-full');
+            return true;
+        }
         this.pendingTokenRevalidationMessages.push(message);
         this.logTokenValidationDrop(messageType, 'missing-message-token-queued-for-revalidation');
         this.schedulePendingTokenRevalidation();
@@ -263,13 +273,19 @@ export class InterceptionManager {
         }
         const sessionToken = this.resolvePendingRevalidationSessionToken();
         if (!sessionToken) {
+            if (this.pendingTokenRevalidationRetryLimitReached) {
+                this.pendingTokenRevalidationMessages = [];
+                this.pendingTokenRevalidationRetryLimitReached = false;
+            }
             return;
         }
 
         const pending = this.pendingTokenRevalidationMessages;
         this.pendingTokenRevalidationMessages = [];
         for (const typed of pending) {
-            this.applyMissingTokenIfNeeded(typed, sessionToken);
+            if (!this.applyMissingTokenIfNeeded(typed, sessionToken)) {
+                continue;
+            }
             this.processPendingTokenRevalidationMessage(typed);
         }
     }
@@ -277,17 +293,36 @@ export class InterceptionManager {
     private resolvePendingRevalidationSessionToken(): string | null {
         const sessionToken = getSessionToken();
         if (sessionToken) {
+            this.pendingTokenRevalidationRetryCount = 0;
+            this.pendingTokenRevalidationRetryLimitReached = false;
             return sessionToken;
+        }
+        this.pendingTokenRevalidationRetryCount += 1;
+        if (this.pendingTokenRevalidationRetryCount >= InterceptionManager.MAX_TOKEN_REVALIDATION_RETRIES) {
+            this.pendingTokenRevalidationRetryCount = 0;
+            this.pendingTokenRevalidationRetryLimitReached = true;
+            if (this.pendingTokenRevalidationTimer !== null) {
+                clearTimeout(this.pendingTokenRevalidationTimer);
+                this.pendingTokenRevalidationTimer = null;
+            }
+            logger.warn('Pending token revalidation retry limit reached; dropping pending messages', {
+                pendingCount: this.pendingTokenRevalidationMessages.length,
+            });
+            return null;
         }
         this.schedulePendingTokenRevalidation();
         return null;
     }
 
-    private applyMissingTokenIfNeeded(message: Record<string, unknown>, sessionToken: string): void {
+    private applyMissingTokenIfNeeded(message: Record<string, unknown>, sessionToken: string | null): boolean {
         if (typeof message.__blackiyaToken === 'string' && message.__blackiyaToken.length > 0) {
-            return;
+            return true;
+        }
+        if (!sessionToken) {
+            return false;
         }
         message.__blackiyaToken = sessionToken;
+        return true;
     }
 
     private processPendingTokenRevalidationMessage(message: Record<string, unknown>): void {

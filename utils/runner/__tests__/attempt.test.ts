@@ -11,6 +11,7 @@ import { Window } from 'happy-dom';
 import { STORAGE_KEYS } from '@/utils/settings';
 
 const window = new Window();
+(window as any).SyntaxError = SyntaxError;
 const document = window.document;
 (global as any).window = window;
 (global as any).document = document;
@@ -26,6 +27,8 @@ import {
     createLoggerCalls,
     createMockAdapter,
     makePostStampedMessage,
+    parseInterceptedDataMock,
+    waitFor,
 } from './helpers';
 
 let currentAdapterMock: any = createMockAdapter(document);
@@ -48,31 +51,14 @@ import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
-const waitUntil = async (predicate: () => boolean, timeout = 2000, interval = 10): Promise<void> => {
-    const start = Date.now();
-    while (!predicate()) {
-        if (Date.now() - start > timeout) {
-            throw new Error('waitUntil timed out');
-        }
-        await new Promise((resolve) => setTimeout(resolve, interval));
-    }
-};
-
-const waitForRunnerReady = () => waitUntil(() => !!document.getElementById('blackiya-save-btn'));
+const waitForRunnerReady = () => waitFor(() => !!document.getElementById('blackiya-save-btn'));
 
 const waitForLifecyclePromptSent = () =>
-    waitUntil(() => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Prompt Sent') === true);
+    waitFor(() => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Prompt Sent') === true);
 
 const jsonParsingAdapter = () => ({
     ...createMockAdapter(document),
-    parseInterceptedData: (raw: string) => {
-        try {
-            const p = JSON.parse(raw);
-            return p?.conversation_id ? p : null;
-        } catch {
-            return null;
-        }
-    },
+    parseInterceptedData: parseInterceptedDataMock,
 });
 
 describe('Platform Runner – attempt registry', () => {
@@ -117,7 +103,7 @@ describe('Platform Runner – attempt registry', () => {
                 window.location.origin,
             );
             await waitForLifecyclePromptSent();
-            await waitUntil(() => logCalls.info.length > logsBefore);
+            await waitFor(() => logCalls.info.length > logsBefore);
         };
 
         // Build alias chain A → B, bind conv-2 to raw A
@@ -136,7 +122,7 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await waitUntil(() =>
+        await waitFor(() =>
             logCalls.info.some((entry) =>
                 String(entry.message).includes('Successfully captured/cached data for conversation: conv-2'),
             ),
@@ -154,7 +140,7 @@ describe('Platform Runner – attempt registry', () => {
 
         try {
             await postLifecycle('attempt:chain-d', 'conv-2');
-            await waitUntil(() =>
+            await waitFor(() =>
                 postedMessages.some((p) => p?.type === 'BLACKIYA_ATTEMPT_DISPOSED' && p?.reason === 'superseded'),
             );
         } finally {
@@ -185,7 +171,7 @@ describe('Platform Runner – attempt registry', () => {
                 window.location.origin,
             );
             await waitForLifecyclePromptSent();
-            await waitUntil(() => logCalls.info.length > logsBefore);
+            await waitFor(() => logCalls.info.length > logsBefore);
         };
 
         // Establish alias: alias-a → canon-a
@@ -203,7 +189,7 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await waitUntil(() =>
+        await waitFor(() =>
             logCalls.info.some((entry) =>
                 String(entry.message).includes('Successfully captured/cached data for conversation: conv-2'),
             ),
@@ -244,7 +230,7 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await waitUntil(
+        await waitFor(
             () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') === true,
         );
 
@@ -270,7 +256,7 @@ describe('Platform Runner – attempt registry', () => {
             },
             window.location.origin,
         );
-        await waitUntil(
+        await waitFor(
             () => document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Completed') === true,
         );
 

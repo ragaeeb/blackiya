@@ -85,7 +85,7 @@ export const hydrateGeminiTitleCandidatesFromRpcResults = (
 
 // ── Conversation-list titles (MaZiqc) ─────────────────────────────────────────
 
-const parseGeminiTitlesPayload = (data: string): unknown | null => {
+const parseGeminiTitlesPayload = (data: string): unknown => {
     const rpcResults = parseBatchexecuteResponse(data);
     const titleRpc = rpcResults.find((res) => res.rpcId === GEMINI_RPC_IDS.TITLES);
     if (!titleRpc?.payload) {
@@ -154,7 +154,7 @@ export const parseTitlesResponse = (
 
 // ── Conversation RPC finding ───────────────────────────────────────────────────
 
-const parseRpcPayload = (payload: string, rpcId: string): unknown | null => {
+const parseRpcPayload = (payload: string, rpcId: string): unknown => {
     try {
         return JSON.parse(payload);
     } catch (error) {
@@ -181,7 +181,7 @@ const findExactConversationRpc = (results: BatchexecuteResult[]): { rpcId: strin
 
 const findHeuristicConversationRpc = (
     results: BatchexecuteResult[],
-    isConversationPayload?: (payload: unknown) => boolean,
+    isConversationPayload: (payload: unknown) => boolean = () => true,
 ): { rpcId: string; payload: unknown } | null => {
     for (let i = results.length - 1; i >= 0; i--) {
         const res = results[i];

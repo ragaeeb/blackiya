@@ -23,9 +23,7 @@ import {
     tryParseJson,
 } from './utils';
 
-// ---------------------------------------------------------------------------
 // SSE block extraction
-// ---------------------------------------------------------------------------
 
 /**
  * Splits raw SSE text into parsed JSON payloads.
@@ -60,9 +58,7 @@ export const extractSsePayloads = (text: string): unknown[] => {
     return payloads;
 };
 
-// ---------------------------------------------------------------------------
 // Per-event helpers used while building a synthetic conversation
-// ---------------------------------------------------------------------------
 
 const extractConversationIdFromEvent = (event: Record<string, unknown>): string | null => {
     const candidates = [
@@ -110,9 +106,7 @@ const appendMessageToMapping = (
     return messageId;
 };
 
-// ---------------------------------------------------------------------------
 // Multi-payload SSE collection
-// ---------------------------------------------------------------------------
 
 type SseCollectionResult =
     | { directConversation: ConversationData }
@@ -165,9 +159,7 @@ const collectSseMessages = (payloads: unknown[]): SseCollectionResult => {
     return { directConversation: null, conversationId, title, messageOrder, messagesById };
 };
 
-// ---------------------------------------------------------------------------
 // Public: build ConversationData from SSE payload list
-// ---------------------------------------------------------------------------
 
 /**
  * Builds a synthetic `ConversationData` from a list of parsed SSE event payloads.

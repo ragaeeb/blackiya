@@ -36,9 +36,8 @@ mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
 import { runPlatform } from '@/utils/platform-runner';
 
-// ---------------------------------------------------------------------------
 // Shared calibration profile fixture
-// ---------------------------------------------------------------------------
+
 const makeCalibrationProfile = (platform: string, updatedAt?: string) => ({
     'userSettings.calibrationProfiles': {
         [platform]: {

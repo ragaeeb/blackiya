@@ -45,9 +45,8 @@ import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
-// ---------------------------------------------------------------------------
 // Shared fixture
-// ---------------------------------------------------------------------------
+
 const twoTurnConversation = {
     title: 'Test',
     create_time: 1_700_000_000,

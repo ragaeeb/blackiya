@@ -14,16 +14,12 @@ export const HOST_CANDIDATES = ['https://chatgpt.com', 'https://chat.openai.com'
 
 export const PLACEHOLDER_TITLE_PATTERNS = [/^new chat$/i, /^new conversation$/i, /^untitled$/i];
 
-// ---------------------------------------------------------------------------
 // Type guards
-// ---------------------------------------------------------------------------
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === 'object' && !Array.isArray(value);
 
-// ---------------------------------------------------------------------------
 // Primitive normalizers
-// ---------------------------------------------------------------------------
 
 /** Trims and returns a non-empty string, or null. */
 export const normalizeText = (value: unknown): string | null => {

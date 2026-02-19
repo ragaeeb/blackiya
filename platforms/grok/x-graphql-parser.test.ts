@@ -101,6 +101,11 @@ describe('Grok Adapter — conversation data structure', () => {
         expect(typeof result?.current_node).toBe('string');
     });
 
+    it('should use the shared Grok default model slug when no model field is present', () => {
+        const result = grokAdapter.parseInterceptedData(JSON.stringify(sampleConversation), X_GRAPHQL_URL);
+        expect(result?.default_model_slug).toBe('grok-4');
+    });
+
     it('should have valid message node shapes', () => {
         const result = grokAdapter.parseInterceptedData(JSON.stringify(sampleConversation), X_GRAPHQL_URL);
         const nodes = Object.values(result!.mapping) as MessageNode[];
@@ -137,6 +142,36 @@ describe('Grok Adapter — conversation data structure', () => {
     it('should have current_node pointing to a valid mapping entry', () => {
         const result = grokAdapter.parseInterceptedData(JSON.stringify(sampleConversation), X_GRAPHQL_URL);
         expect(result!.mapping[result!.current_node]).toBeDefined();
+    });
+
+    it('should keep current_node on the last successfully parsed item when trailing items are malformed', () => {
+        const payload = {
+            data: {
+                grok_conversation_items_by_rest_id: {
+                    items: [
+                        {
+                            chat_item_id: 'node-good',
+                            created_at_ms: 1_700_000_010_000,
+                            sender_type: 'Agent',
+                            message: 'Good node',
+                            is_partial: false,
+                        },
+                        {
+                            // malformed trailing item: missing chat_item_id
+                            created_at_ms: 1_700_000_020_000,
+                            sender_type: 'Agent',
+                            message: 'Malformed trailing node',
+                            is_partial: false,
+                        },
+                    ],
+                },
+            },
+        };
+
+        const result = grokAdapter.parseInterceptedData(JSON.stringify(payload), X_GRAPHQL_URL);
+        expect(result).not.toBeNull();
+        expect(result?.current_node).toBe('node-good');
+        expect(result?.mapping[result!.current_node]).toBeDefined();
     });
 });
 

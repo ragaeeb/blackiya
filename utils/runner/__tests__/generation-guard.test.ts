@@ -14,6 +14,7 @@ import { Window } from 'happy-dom';
 import { STORAGE_KEYS } from '@/utils/settings';
 
 const window = new Window();
+(window as any).SyntaxError = SyntaxError;
 const document = window.document;
 (global as any).window = window;
 (global as any).document = document;
@@ -30,6 +31,7 @@ import {
     createMockAdapter,
     evaluateReadinessMock,
     makePostStampedMessage,
+    parseInterceptedDataMock,
 } from './helpers';
 
 let currentAdapterMock: any = createMockAdapter(document);
@@ -79,14 +81,7 @@ describe('Platform Runner – generation guard', () => {
         currentAdapterMock = {
             ...createMockAdapter(document),
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         runPlatform();
@@ -262,14 +257,7 @@ describe('Platform Runner – generation guard', () => {
             ...createMockAdapter(document),
             name: 'ChatGPT',
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         runPlatform();
@@ -360,14 +348,7 @@ describe('Platform Runner – generation guard', () => {
             ...createMockAdapter(document),
             name: 'ChatGPT',
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         runPlatform();
@@ -453,14 +434,7 @@ describe('Platform Runner – generation guard', () => {
             ...createMockAdapter(document),
             name: 'ChatGPT',
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         runPlatform();
@@ -519,14 +493,7 @@ describe('Platform Runner – generation guard', () => {
             ...createMockAdapter(document),
             name: 'ChatGPT',
             evaluateReadiness: evaluateReadinessMock,
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
 
         runPlatform();

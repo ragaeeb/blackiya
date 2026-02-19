@@ -3,9 +3,7 @@ import { shouldProcessGeminiChunk } from '@/entrypoints/interceptor/stream-monit
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
 import { consumeReadableStreamChunks, type StreamMonitorEmitter } from './stream-emitter';
 
-// ---------------------------------------------------------------------------
 // Shared types
-// ---------------------------------------------------------------------------
 
 export type GeminiXhrStreamState = {
     attemptId: string;
@@ -21,9 +19,7 @@ export type GeminiXhrStreamState = {
     emittedCompleted: boolean;
 };
 
-// ---------------------------------------------------------------------------
 // Shared history-trimming helpers
-// ---------------------------------------------------------------------------
 
 const trimPayloadHistory = (order: string[], set: Set<string>, max = 220): void => {
     while (order.length > max) {
@@ -43,9 +39,7 @@ const trimDeltaHistory = (order: string[], set: Set<string>, max = 260): void =>
     }
 };
 
-// ---------------------------------------------------------------------------
 // Buffer helpers
-// ---------------------------------------------------------------------------
 
 const appendGeminiBuffer = (buffer: string, chunk: string): string => {
     const next = buffer + chunk;
@@ -61,9 +55,7 @@ const syncSeenPayloadOrder = (seenPayloads: Set<string>, seenPayloadOrder: strin
     trimPayloadHistory(seenPayloadOrder, seenPayloads);
 };
 
-// ---------------------------------------------------------------------------
 // Candidate emission helpers
-// ---------------------------------------------------------------------------
 
 const emitTextCandidates = (
     attemptId: string,
@@ -117,9 +109,7 @@ const emitTitleCandidates = (
     }
 };
 
-// ---------------------------------------------------------------------------
 // Fetch stream monitor
-// ---------------------------------------------------------------------------
 
 const processFetchChunk = (
     attemptId: string,
@@ -239,9 +229,7 @@ export const monitorGeminiResponseStream = async (
     }
 };
 
-// ---------------------------------------------------------------------------
 // XHR progress monitor
-// ---------------------------------------------------------------------------
 
 const createXhrStreamState = (attemptId: string, seedConversationId?: string): GeminiXhrStreamState => ({
     attemptId,

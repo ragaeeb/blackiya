@@ -14,6 +14,7 @@ import { Window } from 'happy-dom';
 import { STORAGE_KEYS } from '@/utils/settings';
 
 const window = new Window();
+(window as any).SyntaxError = SyntaxError;
 const document = window.document;
 (global as any).window = window;
 (global as any).document = document;
@@ -30,6 +31,8 @@ import {
     createMockAdapter,
     evaluateReadinessMock,
     makePostStampedMessage,
+    parseInterceptedDataMock,
+    waitFor,
 } from './helpers';
 
 let currentAdapterMock: any = createMockAdapter(document);
@@ -51,6 +54,7 @@ import { runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
+const waitForRunnerReady = () => waitFor(() => !!document.getElementById('blackiya-save-btn'));
 
 const geminiAdapter = () => ({
     ...createMockAdapter(document),
@@ -132,17 +136,10 @@ describe('Platform Runner – Gemini lifecycle', () => {
     it('should keep Gemini Save disabled while streaming even after canonical samples arrive pre-completion', async () => {
         currentAdapterMock = {
             ...geminiAdapter(),
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
         runPlatform();
-        await new Promise((r) => setTimeout(r, 120));
+        await waitForRunnerReady();
 
         postStampedMessage(
             {
@@ -173,7 +170,11 @@ describe('Platform Runner – Gemini lifecycle', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 60));
+        await waitFor(
+            () =>
+                document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') === true &&
+                ((document.getElementById('blackiya-save-btn') as HTMLButtonElement | null)?.disabled ?? true),
+        );
 
         const canonical = buildConversation('gem-late-2', 'Assistant final answer', {
             status: 'finished_successfully',
@@ -189,7 +190,13 @@ describe('Platform Runner – Gemini lifecycle', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 950));
+        const stabilizationWaitStartedAt = Date.now();
+        await waitFor(
+            () =>
+                logCalls.info.some((entry) => entry.message === 'Stabilization retry tick') ||
+                Date.now() - stabilizationWaitStartedAt >= 950,
+            { timeout: 2500, interval: 20 },
+        );
         postStampedMessage(
             {
                 type: 'LLM_CAPTURE_DATA_INTERCEPTED',
@@ -200,7 +207,11 @@ describe('Platform Runner – Gemini lifecycle', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 120));
+        await waitFor(
+            () =>
+                document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Streaming') === true &&
+                ((document.getElementById('blackiya-save-btn') as HTMLButtonElement | null)?.disabled ?? true),
+        );
 
         // Still streaming — Save must stay disabled
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
@@ -215,7 +226,11 @@ describe('Platform Runner – Gemini lifecycle', () => {
             },
             window.location.origin,
         );
-        await new Promise((r) => setTimeout(r, 120));
+        await waitFor(
+            () =>
+                document.getElementById('blackiya-lifecycle-badge')?.textContent?.includes('Completed') === true &&
+                (document.getElementById('blackiya-save-btn') as HTMLButtonElement | null)?.disabled === false,
+        );
 
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
         expect((document.getElementById('blackiya-save-btn') as HTMLButtonElement | null)?.disabled).toBeFalse();
@@ -334,14 +349,7 @@ describe('Platform Runner – Gemini lifecycle', () => {
         currentAdapterMock = {
             ...geminiAdapter(),
             extractConversationId: () => 'gem-ready-log',
-            parseInterceptedData: (raw: string) => {
-                try {
-                    const p = JSON.parse(raw);
-                    return p?.conversation_id ? p : null;
-                } catch {
-                    return null;
-                }
-            },
+            parseInterceptedData: parseInterceptedDataMock,
         };
         delete (window as any).location;
         (window as any).location = {
