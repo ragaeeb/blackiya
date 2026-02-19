@@ -160,7 +160,9 @@ export const inspectAuxConversationFetch = (
 
             const conversationId = extractConversationIdFromAnyUrl(url);
             const attemptId = deps.resolveAttemptIdForConversation(conversationId, adapter.name);
-            deps.emitter.emitApiResponseDumpFrame(adapter.name, url, text, attemptId, conversationId);
+            if (text.length > 100) {
+                deps.emitter.emitApiResponseDumpFrame(adapter.name, url, text, attemptId, conversationId);
+            }
 
             if (!tryParseAndEmitConversation(adapter, url, text, 'aux', deps)) {
                 if (deps.emitter.shouldLogTransient(`aux:miss:${safePathname(url)}`, 2500)) {

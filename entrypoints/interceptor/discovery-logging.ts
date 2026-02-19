@@ -18,6 +18,15 @@ type EmitStreamDumpFn = (
 
 const isStaticAssetPath = (path: string) => !!path.match(/\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico)$/i);
 
+const parseDiscoveryUrl = (url: string) => {
+    try {
+        const parsed = new URL(url);
+        return { pathname: parsed.pathname, search: parsed.search };
+    } catch {
+        return { pathname: safePathname(url), search: '' };
+    }
+};
+
 export const isDiscoveryModeHost = (hostname: string) =>
     hostname.includes('gemini.google.com') || hostname.includes('x.com') || hostname.includes('grok.com');
 
@@ -54,13 +63,13 @@ export const logDiscoveryFetch = (url: string, response: Response, log: LogFn, s
     if (!isDiscoveryDiagnosticsEnabled()) {
         return;
     }
-    const urlObj = new URL(url);
-    if (isStaticAssetPath(urlObj.pathname)) {
+    const { pathname, search } = parseDiscoveryUrl(url);
+    if (isStaticAssetPath(pathname)) {
         return;
     }
     log('info', '[DISCOVERY] POST', {
-        path: urlObj.pathname,
-        search: urlObj.search.slice(0, 150),
+        path: pathname,
+        search: search.slice(0, 150),
         status: response.status,
         contentType: response.headers.get('content-type'),
     });
@@ -70,12 +79,12 @@ export const logDiscoveryFetch = (url: string, response: Response, log: LogFn, s
         .then((text) => {
             if (text.length > 500) {
                 log('info', '[DISCOVERY] Response', {
-                    path: urlObj.pathname,
+                    path: pathname,
                     size: text.length,
                     preview: text.slice(0, 300),
                 });
             }
-            emitDiscoveryDumpFrame('DISCOVERY', urlObj.pathname, text, streamDump);
+            emitDiscoveryDumpFrame('DISCOVERY', pathname, text, streamDump);
         })
         .catch(() => {});
 };
@@ -84,17 +93,17 @@ export const logDiscoveryXhr = (url: string, responseText: string, log: LogFn, s
     if (!isDiscoveryDiagnosticsEnabled()) {
         return;
     }
-    const urlObj = new URL(url);
-    if (isStaticAssetPath(urlObj.pathname) || responseText.length <= 500) {
+    const { pathname, search } = parseDiscoveryUrl(url);
+    if (isStaticAssetPath(pathname) || responseText.length <= 500) {
         return;
     }
     log('info', '[DISCOVERY] XHR', {
-        path: urlObj.pathname,
-        search: urlObj.search.slice(0, 150),
+        path: pathname,
+        search: search.slice(0, 150),
         size: responseText.length,
         preview: responseText.slice(0, 300),
     });
-    emitDiscoveryDumpFrame('XHR DISCOVERY', urlObj.pathname, responseText, streamDump);
+    emitDiscoveryDumpFrame('XHR DISCOVERY', pathname, responseText, streamDump);
 };
 
 export const logGeminiAdapterMiss = (
