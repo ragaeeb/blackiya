@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/ragaeeb/blackiya/compare/v2.2.0...v2.3.0) (2026-02-20)
+
+
+### Features
+
+* **drifts:** Harden drifts, expose new TS definitions ([#35](https://github.com/ragaeeb/blackiya/issues/35)) ([040f5bd](https://github.com/ragaeeb/blackiya/commit/040f5bd851cbf8f6fb529dff95d0386638151740))
+
 # [2.2.0](https://github.com/ragaeeb/blackiya/compare/v2.1.0...v2.2.0) (2026-02-20)
 
 
