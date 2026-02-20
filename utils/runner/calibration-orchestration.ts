@@ -6,13 +6,13 @@
  */
 
 import type { LLMPlatform } from '@/platforms/types';
-import { logger } from '@/utils/logger';
 import {
     buildCalibrationProfileFromStep,
     loadCalibrationProfileV2IfPresent,
     saveCalibrationProfileV2,
     stepFromStrategy,
 } from '@/utils/calibration-profile';
+import { logger } from '@/utils/logger';
 import {
     buildCalibrationOrderForMode,
     type CalibrationMode,
@@ -40,10 +40,7 @@ export type CalibrationOrchestrationDeps = {
     hasConversationData: (conversationId: string) => boolean;
     refreshButtonState: (conversationId: string) => void;
     buttonManagerExists: () => boolean;
-    buttonManagerSetCalibrationState: (
-        state: CalibrationUiState,
-        options: { timestampLabel: string | null },
-    ) => void;
+    buttonManagerSetCalibrationState: (state: CalibrationUiState, options: { timestampLabel: string | null }) => void;
     syncRunnerStateCalibration: (state: CalibrationUiState) => void;
 };
 
@@ -61,10 +58,7 @@ const markCalibrationSuccess = (conversationId: string, deps: CalibrationOrchest
     deps.refreshButtonState(conversationId);
 };
 
-export const loadCalibrationPreference = async (
-    platformName: string,
-    deps: CalibrationOrchestrationDeps,
-) => {
+export const loadCalibrationPreference = async (platformName: string, deps: CalibrationOrchestrationDeps) => {
     try {
         const profileV2 = await loadCalibrationProfileV2IfPresent(platformName);
         if (profileV2) {
@@ -162,11 +156,7 @@ export const runCalibrationCapture = async (
 
     setCalibrationStatus('capturing', deps);
     logger.info('Calibration capture started', { conversationId, platform: adapter.name });
-    const strategyOrder = buildCalibrationOrderForMode(
-        deps.getRememberedPreferredStep(),
-        effectiveMode,
-        adapter.name,
-    );
+    const strategyOrder = buildCalibrationOrderForMode(deps.getRememberedPreferredStep(), effectiveMode, adapter.name);
     logger.info('Calibration strategy', {
         platform: adapter.name,
         steps: strategyOrder,

@@ -50,8 +50,8 @@ mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
+import { runPlatform } from '@/utils/runner/platform-runtime';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 const waitForRunnerReady = () => waitFor(() => !!document.getElementById('blackiya-save-btn'));

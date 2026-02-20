@@ -324,6 +324,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         shouldLogTransient,
         shouldEmitCapturedPayload,
         shouldEmitLifecycleSignal,
+        isAttemptDisposed,
         emitCapturePayload,
         emitConversationIdResolved,
         emitLifecycle,

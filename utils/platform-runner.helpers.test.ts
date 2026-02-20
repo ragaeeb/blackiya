@@ -44,7 +44,7 @@ import {
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
     shouldRemoveDisposedAttemptBinding,
-} from './platform-runner';
+} from '@/utils/runner/platform-runtime';
 
 describe('shouldRemoveDisposedAttemptBinding', () => {
     const resolveFromMap = (aliases: Record<string, string>) => (attemptId: string) => {
@@ -99,7 +99,7 @@ describe('canonical stabilization retry helpers', () => {
                 timeoutWarnings,
                 inProgress,
             },
-            (timerId) => {
+            (timerId: any) => {
                 clearedTimers.push(timerId);
             },
         );
@@ -117,7 +117,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-1',
             true,
             undefined,
-            (attemptId) => attemptId,
+            (attemptId: any) => attemptId,
         );
         expect(disposed).toBeTrue();
 
@@ -125,7 +125,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-1',
             false,
             'attempt-2',
-            (attemptId) => attemptId,
+            (attemptId: any) => attemptId,
         );
         expect(mismatched).toBeTrue();
 
@@ -133,7 +133,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-1',
             false,
             'alias-attempt-1',
-            (attemptId) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),
+            (attemptId: any) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),
         );
         expect(canonicalAliasMatch).toBeFalse();
     });

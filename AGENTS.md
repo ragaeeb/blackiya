@@ -61,6 +61,11 @@ Supporting modules:
   - `utils/runner/save-pipeline.ts`
   - `utils/runner/calibration-orchestration.ts`
   - `utils/runner/interception-capture.ts`
+  - `utils/runner/stale-attempt-filter.ts`
+  - `utils/runner/lifecycle-phase-handler.ts`
+  - `utils/runner/public-status.ts`
+  - `utils/runner/button-state-manager.ts`
+  - `utils/runner/wire-message-handlers.ts`
 - Protocol types: `utils/protocol/messages.ts`
 - Protocol contract: lifecycle/finished/delta messages require `attemptId` (legacy attempt-less messages removed)
 

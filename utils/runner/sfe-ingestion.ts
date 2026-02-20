@@ -164,9 +164,7 @@ export const ingestSfeCanonicalSample = (
         deps.structuredLogger.emit(
             effectiveAttemptId,
             'info',
-            resolution.reason === 'awaiting_stabilization'
-                ? 'awaiting_stabilization'
-                : 'awaiting_canonical_capture',
+            resolution.reason === 'awaiting_stabilization' ? 'awaiting_stabilization' : 'awaiting_canonical_capture',
             resolution.reason === 'awaiting_stabilization'
                 ? 'Awaiting canonical stabilization before ready'
                 : 'Completed stream but canonical sample not terminal yet; scheduling retries',
@@ -195,10 +193,7 @@ export const ingestSfeCanonicalSample = (
 /**
  * Returns `true` when the SFE reports the conversation as ready.
  */
-export const resolveSfeReady = (
-    conversationId: string,
-    sfe: SignalFusionEngine,
-): boolean => {
+export const resolveSfeReady = (conversationId: string, sfe: SignalFusionEngine): boolean => {
     const resolution = sfe.resolveByConversation(conversationId);
     return !!resolution?.ready;
 };

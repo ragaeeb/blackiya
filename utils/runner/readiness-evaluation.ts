@@ -26,10 +26,7 @@ const INVALID_SHAPE_READINESS: PlatformReadiness = {
  * adapter's `evaluateReadiness` when available, otherwise uses generic
  * assistant message analysis.
  */
-export const evaluateReadinessForData = (
-    data: ConversationData,
-    adapter: LLMPlatform | null,
-): PlatformReadiness => {
+export const evaluateReadinessForData = (data: ConversationData, adapter: LLMPlatform | null): PlatformReadiness => {
     if (!data || !data.mapping || typeof data.mapping !== 'object') {
         return INVALID_SHAPE_READINESS;
     }

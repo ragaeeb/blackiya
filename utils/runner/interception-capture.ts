@@ -57,11 +57,7 @@ const updateActiveAttemptFromMeta = (
     deps.bindAttempt(conversationId, meta.attemptId);
 };
 
-const handleSnapshotSourceCapture = (
-    conversationId: string,
-    source: string,
-    deps: InterceptionCaptureDeps,
-) => {
+const handleSnapshotSourceCapture = (conversationId: string, source: string, deps: InterceptionCaptureDeps) => {
     const existingDecision = deps.resolveReadinessDecision(conversationId);
     if (existingDecision.mode === 'canonical_ready') {
         deps.markCanonicalCaptureMeta(conversationId);
@@ -92,9 +88,7 @@ const handleNetworkSourceCapture = (
         return;
     }
     const source = meta?.source ?? 'network';
-    const effectiveAttemptId = deps.resolveAliasedAttemptId(
-        meta?.attemptId ?? deps.resolveAttemptId(conversationId),
-    );
+    const effectiveAttemptId = deps.resolveAliasedAttemptId(meta?.attemptId ?? deps.resolveAttemptId(conversationId));
     deps.maybeRestartCanonicalRecoveryAfterTimeout(conversationId, effectiveAttemptId);
     logger.info('Network source: marking canonical fidelity', {
         conversationId,

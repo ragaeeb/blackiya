@@ -37,8 +37,7 @@ export type NavigationDeps = {
  */
 export const switchConversation = (newId: string | null, deps: NavigationDeps) => {
     const currentConversationId = deps.getCurrentConversationId();
-    const isNewConversationNavigation =
-        !currentConversationId && deps.isLifecycleActiveGeneration() && !!newId;
+    const isNewConversationNavigation = !currentConversationId && deps.isLifecycleActiveGeneration() && !!newId;
     if (!isNewConversationNavigation) {
         deps.disposeInFlightAttempts(newId);
     }

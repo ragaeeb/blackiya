@@ -21,13 +21,11 @@ const document = window.document;
 
 import { buildBrowserMock, buildLoggerMock, createLoggerCalls, createMockAdapter } from './helpers';
 
-
 let currentAdapterMock: any = createMockAdapter(document);
 const browserMockState = {
     storageData: {} as Record<string, unknown>,
     sendMessage: async (_: unknown) => undefined as unknown,
 };
-
 
 mock.module('@/platforms/factory', () => ({
     getPlatformAdapter: () => currentAdapterMock,
@@ -37,7 +35,7 @@ mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { runPlatform } from '@/utils/platform-runner';
+import { runPlatform } from '@/utils/runner/platform-runtime';
 
 describe('Platform Runner – initialisation', () => {
     const countById = (id: string): number =>

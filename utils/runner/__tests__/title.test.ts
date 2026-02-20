@@ -47,8 +47,8 @@ mock.module('@/utils/download', () => ({
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { resolveExportConversationTitle, runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
+import { resolveExportConversationTitle, runPlatform } from '@/utils/runner/platform-runtime';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 

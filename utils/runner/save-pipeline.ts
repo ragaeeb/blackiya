@@ -10,15 +10,15 @@ import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
-import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { attachExportMeta, buildExportPayloadForFormat } from '@/utils/runner/export-helpers';
+import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { buildExportMetaForSave, confirmDegradedForceSave } from '@/utils/runner/save-export';
+import type { ExportFormat } from '@/utils/settings';
+import type { ExportMeta, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
 import {
     deriveConversationTitleFromFirstUserMessage,
     resolveConversationTitleByPrecedence,
 } from '@/utils/title-resolver';
-import type { ExportFormat } from '@/utils/settings';
-import type { ExportMeta, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 
 export type SavePipelineDeps = {
@@ -46,10 +46,7 @@ export type SavePipelineDeps = {
     structuredLogger: StructuredAttemptLogger;
 };
 
-const resolveConversationIdOrNotify = (
-    silent: boolean | undefined,
-    deps: SavePipelineDeps,
-): string | null => {
+const resolveConversationIdOrNotify = (silent: boolean | undefined, deps: SavePipelineDeps): string | null => {
     const conversationId = deps.resolveConversationIdForUserAction();
     if (conversationId) {
         return conversationId;

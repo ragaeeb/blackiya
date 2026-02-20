@@ -6,11 +6,10 @@
  * runner closure.
  */
 
-import { logger } from '@/utils/logger';
 import type { PlatformReadiness } from '@/platforms/types';
-import { resolveFinishedSignalDebounce } from '@/utils/runner/finished-signal';
-import { shouldPromoteGrokFromCanonicalCapture } from '@/utils/runner/finished-signal';
+import { logger } from '@/utils/logger';
 import type { AutoCaptureReason } from '@/utils/runner/auto-capture';
+import { resolveFinishedSignalDebounce, shouldPromoteGrokFromCanonicalCapture } from '@/utils/runner/finished-signal';
 import type { RunnerCalibrationUiState, RunnerLifecycleUiState } from '@/utils/runner/state';
 import type { LifecyclePhase } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';

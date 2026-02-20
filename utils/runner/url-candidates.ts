@@ -36,7 +36,8 @@ export const getFetchUrlCandidates = (adapter: LLMPlatform, conversationId: stri
 const GROK_REPLAY_URL_TEMPLATES = [
     (cid: string) => `https://grok.com/rest/app-chat/conversations/${cid}/load-responses`,
     (cid: string) => `https://grok.com/rest/app-chat/conversations/${cid}/response-node?includeThreads=true`,
-    (cid: string) => `https://grok.com/rest/app-chat/conversations_v2/${cid}?includeWorkspaces=true&includeTaskResult=true`,
+    (cid: string) =>
+        `https://grok.com/rest/app-chat/conversations_v2/${cid}?includeWorkspaces=true&includeTaskResult=true`,
 ] as const;
 
 /**
