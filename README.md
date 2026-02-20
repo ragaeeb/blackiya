@@ -111,7 +111,7 @@ touch entrypoints/background.ts
 touch entrypoints/main.content.ts entrypoints/interceptor.content.ts
 mkdir -p entrypoints/interceptor
 touch platforms/chatgpt.ts platforms/gemini.ts platforms/grok.ts
-touch utils/platform-runner.ts utils/protocol/messages.ts
+touch utils/protocol/messages.ts
 mkdir -p utils/runner
 ```
 
@@ -223,9 +223,12 @@ blackiya/
 │   ├── grok.ts               # Grok platform adapter
 │   └── types.ts              # Platform interface definitions
 ├── utils/
-│   ├── platform-runner.ts    # Compatibility re-export for runner
 │   ├── runner/
-│   │   ├── index.ts          # Main orchestration + readiness gating
+│   │   ├── platform-runtime.ts         # Runner entrypoint
+│   │   ├── platform-runner-engine.ts   # Main orchestration + readiness gating
+│   │   ├── platform-runtime-wiring.ts  # Wire handlers + observer/navigation wiring
+│   │   ├── platform-runtime-calibration.ts # Calibration runtime orchestration
+│   │   ├── platform-runtime-stream-probe.ts # Stream-probe runtime wiring
 │   │   ├── state.ts
 │   │   ├── lifecycle-manager.ts
 │   │   ├── message-bridge.ts

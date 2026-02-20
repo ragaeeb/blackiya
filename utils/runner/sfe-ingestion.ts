@@ -151,6 +151,28 @@ export const ingestSfeCanonicalSample = (
     );
 
     const shouldRetry = shouldScheduleCanonicalRetry(resolution, deps.getLifecycleState());
+    processCanonicalSampleOutcome({
+        deps,
+        data,
+        resolution,
+        shouldRetry,
+        conversationId,
+        attemptId: effectiveAttemptId,
+        contentHash: readiness.contentHash ?? 'none',
+    });
+    return resolution;
+};
+
+const processCanonicalSampleOutcome = (args: {
+    deps: SfeIngestionDeps;
+    data: ConversationData;
+    resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>;
+    shouldRetry: boolean;
+    conversationId: string;
+    attemptId: string;
+    contentHash: string;
+}) => {
+    const { deps, data, resolution, shouldRetry, conversationId, attemptId, contentHash } = args;
     if (!shouldRetry && !resolution.ready) {
         logger.info('Canonical retry skipped', {
             conversationId,
@@ -160,34 +182,34 @@ export const ingestSfeCanonicalSample = (
         });
     }
     if (shouldRetry) {
-        deps.scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
+        deps.scheduleCanonicalStabilizationRetry(conversationId, attemptId);
+        const awaitingStabilization = resolution.reason === 'awaiting_stabilization';
         deps.structuredLogger.emit(
-            effectiveAttemptId,
+            attemptId,
             'info',
-            resolution.reason === 'awaiting_stabilization' ? 'awaiting_stabilization' : 'awaiting_canonical_capture',
-            resolution.reason === 'awaiting_stabilization'
+            awaitingStabilization ? 'awaiting_stabilization' : 'awaiting_canonical_capture',
+            awaitingStabilization
                 ? 'Awaiting canonical stabilization before ready'
                 : 'Completed stream but canonical sample not terminal yet; scheduling retries',
             { conversationId, phase: resolution.phase },
-            `${resolution.reason === 'awaiting_stabilization' ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${readiness.contentHash ?? 'none'}`,
+            `${awaitingStabilization ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${contentHash}`,
         );
     }
-    if (resolution.blockingConditions.includes('stabilization_timeout')) {
-        deps.clearCanonicalStabilizationRetry(effectiveAttemptId);
+    if (resolution.blockingConditions.includes('stabilization_timeout') || resolution.ready) {
+        deps.clearCanonicalStabilizationRetry(attemptId);
     }
-    if (resolution.ready) {
-        deps.clearCanonicalStabilizationRetry(effectiveAttemptId);
-        deps.syncStreamProbePanelFromCanonical(conversationId, data);
-        deps.structuredLogger.emit(
-            effectiveAttemptId,
-            'info',
-            'captured_ready',
-            'Capture reached ready state',
-            { conversationId, phase: resolution.phase },
-            `captured-ready:${conversationId}`,
-        );
+    if (!resolution.ready) {
+        return;
     }
-    return resolution;
+    deps.syncStreamProbePanelFromCanonical(conversationId, data);
+    deps.structuredLogger.emit(
+        attemptId,
+        'info',
+        'captured_ready',
+        'Capture reached ready state',
+        { conversationId, phase: resolution.phase },
+        `captured-ready:${conversationId}`,
+    );
 };
 
 /**

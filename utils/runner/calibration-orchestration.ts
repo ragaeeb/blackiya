@@ -172,26 +172,35 @@ export const runCalibrationCapture = async (
         }
     }
 
-    if (successfulStep) {
-        if (effectiveMode === 'manual') {
-            markCalibrationSuccess(conversationId, deps);
-        } else {
-            setCalibrationStatus('success', deps);
-            deps.refreshButtonState(conversationId);
-        }
-        if (shouldPersistCalibrationProfile(effectiveMode)) {
-            await rememberCalibrationSuccess(adapter.name, successfulStep, deps);
-        }
-        logger.info('Calibration capture succeeded', { conversationId, step: successfulStep, mode: effectiveMode });
-    } else {
-        if (effectiveMode === 'manual') {
-            setCalibrationStatus('error', deps);
-            deps.refreshButtonState(conversationId);
-        } else {
-            setCalibrationStatus('idle', deps);
-        }
+    if (!successfulStep) {
+        applyCalibrationFailure(effectiveMode, conversationId, deps);
         logger.warn('Calibration capture failed after retries', { conversationId });
+        return;
     }
+
+    applyCalibrationSuccess(effectiveMode, conversationId, deps);
+    if (shouldPersistCalibrationProfile(effectiveMode)) {
+        await rememberCalibrationSuccess(adapter.name, successfulStep, deps);
+    }
+    logger.info('Calibration capture succeeded', { conversationId, step: successfulStep, mode: effectiveMode });
+};
+
+const applyCalibrationSuccess = (mode: CalibrationMode, conversationId: string, deps: CalibrationOrchestrationDeps) => {
+    if (mode === 'manual') {
+        markCalibrationSuccess(conversationId, deps);
+        return;
+    }
+    setCalibrationStatus('success', deps);
+    deps.refreshButtonState(conversationId);
+};
+
+const applyCalibrationFailure = (mode: CalibrationMode, conversationId: string, deps: CalibrationOrchestrationDeps) => {
+    if (mode === 'manual') {
+        setCalibrationStatus('error', deps);
+        deps.refreshButtonState(conversationId);
+        return;
+    }
+    setCalibrationStatus('idle', deps);
 };
 
 export const handleCalibrationClick = async (deps: CalibrationOrchestrationDeps) => {

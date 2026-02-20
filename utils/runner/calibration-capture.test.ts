@@ -91,7 +91,7 @@ describe('calibration-capture', () => {
 
             globalThis.setTimeout = mock((fn) => {
                 currentTime += 300; // Increment past 250ms interval
-                (fn as Function)();
+                (fn as () => void)();
                 return 1 as any; // Mock timer ID
             }) as any;
 
@@ -141,9 +141,9 @@ describe('calibration-capture', () => {
             const originalDateNow = Date.now;
             globalThis.Date.now = () => currentTime;
 
-            let intervalCallback: Function;
+            let intervalCallback: () => void;
             globalThis.setInterval = mock((fn) => {
-                intervalCallback = fn as Function;
+                intervalCallback = fn as () => void;
                 return 123 as any; // timer id
             }) as any;
 
@@ -194,15 +194,15 @@ describe('calibration-capture', () => {
             const originalDateNow = Date.now;
             globalThis.Date.now = () => currentTime;
 
-            let intervalCallback: Function;
+            let intervalCallback: () => void;
             globalThis.setInterval = mock((fn) => {
-                intervalCallback = fn as Function;
+                intervalCallback = fn as () => void;
                 return 123 as any;
             }) as any;
 
-            let observerCallback: Function;
+            let observerCallback: () => void;
             (globalThis.MutationObserver as any) = class {
-                constructor(cb: Function) {
+                constructor(cb: () => void) {
                     observerCallback = cb;
                 }
                 observe() {}
@@ -347,7 +347,7 @@ describe('calibration-capture', () => {
 
             // Use instant backoff mapping by mocking setTimeout
             globalThis.setTimeout = mock((fn) => {
-                (fn as Function)();
+                (fn as () => void)();
                 return 1 as any;
             }) as any;
 
@@ -366,7 +366,7 @@ describe('calibration-capture', () => {
 
             globalThis.fetch = mock(() => Promise.reject(abortError)) as any;
             globalThis.setTimeout = mock((fn) => {
-                (fn as Function)();
+                (fn as () => void)();
                 return 1 as any;
             }) as any;
 

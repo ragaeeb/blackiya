@@ -28,8 +28,12 @@ describe('warm-fetch', () => {
         };
 
         // Mock window.setTimeout and clearTimeout
-        if (!(globalThis as any).window) (globalThis as any).window = {};
-        if (!(globalThis as any).window.location) (globalThis as any).window.location = {};
+        if (!(globalThis as any).window) {
+            (globalThis as any).window = {};
+        }
+        if (!(globalThis as any).window.location) {
+            (globalThis as any).window.location = {};
+        }
         (globalThis as any).window.setTimeout = mock(() => 123) as any;
         (globalThis as any).window.location.origin = 'http://localhost';
         globalThis.clearTimeout = mock(() => {}) as any;

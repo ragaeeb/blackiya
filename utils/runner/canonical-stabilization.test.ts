@@ -32,7 +32,7 @@ describe('canonical-stabilization', () => {
                 inProgress: new Set(['attempt-1']),
             };
 
-            const clearTimerMock = mock((id) => {});
+            const clearTimerMock = mock((_id) => {});
             clearCanonicalStabilizationAttemptState('attempt-1', state, clearTimerMock);
 
             expect(clearTimerMock).toHaveBeenCalledWith(123);
@@ -52,7 +52,7 @@ describe('canonical-stabilization', () => {
                 inProgress: new Set(),
             };
 
-            const clearTimerMock = mock((id) => {});
+            const clearTimerMock = mock((_id) => {});
             clearCanonicalStabilizationAttemptState('attempt-1', state, clearTimerMock);
 
             expect(clearTimerMock).not.toHaveBeenCalled();

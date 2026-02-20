@@ -4,7 +4,6 @@ import {
     createVisibilityChangeHandler,
     getExportFormat,
     loadStreamDumpSetting,
-    loadStreamProbeVisibilitySetting,
 } from '@/utils/runner/runtime-settings';
 import { STORAGE_KEYS } from '@/utils/settings';
 

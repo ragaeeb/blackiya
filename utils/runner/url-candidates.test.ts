@@ -1,15 +1,19 @@
-import { describe, expect, it, mock, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { LLMPlatform } from '@/platforms/types';
 import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from '@/utils/runner/url-candidates';
 
 describe('url-candidates', () => {
     describe('getFetchUrlCandidates', () => {
         let originalWindow: any;
-        
+
         beforeEach(() => {
             originalWindow = (globalThis as any).window;
-            if (!(globalThis as any).window) (globalThis as any).window = {};
-            if (!(globalThis as any).window.location) (globalThis as any).window.location = {};
+            if (!(globalThis as any).window) {
+                (globalThis as any).window = {};
+            }
+            if (!(globalThis as any).window.location) {
+                (globalThis as any).window.location = {};
+            }
         });
 
         afterEach(() => {

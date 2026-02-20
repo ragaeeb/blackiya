@@ -146,9 +146,9 @@ describe('canonical-stabilization-tick', () => {
         });
 
         it('should set timer and trigger tick', async () => {
-            let tickCallback: Function | undefined;
+            let tickCallback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                tickCallback = fn as Function;
+                tickCallback = fn as () => void;
                 return 123 as any;
             }) as any;
 
@@ -176,9 +176,9 @@ describe('canonical-stabilization-tick', () => {
         });
 
         it('should ingest canonical sample if capture meta is canonical', async () => {
-            let tickCallback: Function | undefined;
+            let tickCallback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                tickCallback = fn as Function;
+                tickCallback = fn as () => void;
                 return 123 as any;
             }) as any;
 
@@ -196,9 +196,9 @@ describe('canonical-stabilization-tick', () => {
         });
 
         it('should attempt promotion if API is unreachable and readily degraded data is in cache', async () => {
-            let tickCallback: Function | undefined;
+            let _tickCallback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                originalSetTimeout(() => (fn as Function)(), 0);
+                originalSetTimeout(() => (fn as () => void)(), 0);
                 return 123 as any;
             }) as any;
 
@@ -225,9 +225,9 @@ describe('canonical-stabilization-tick', () => {
 
         it('should abort if already in progress to avoid overlapping ticks', async () => {
             deps.inProgress.add('attempt-1');
-            let tickCallback: Function | undefined;
+            let tickCallback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                tickCallback = fn as Function;
+                tickCallback = fn as () => void;
                 return 123 as any;
             }) as any;
 
@@ -242,9 +242,9 @@ describe('canonical-stabilization-tick', () => {
         });
 
         it('should promote refresh snapshot if ready and fetch succeeds but capture meta is degraded', async () => {
-            let tickCallback: Function | undefined;
+            let _tickCallback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                originalSetTimeout(() => (fn as Function)(), 0);
+                originalSetTimeout(() => (fn as () => void)(), 0);
                 return 123 as any;
             }) as any;
 
@@ -263,7 +263,7 @@ describe('canonical-stabilization-tick', () => {
             deps.requestSnapshot = mock(() => Promise.resolve({} as ConversationData));
 
             deps.getConversation = mock(() => ({}) as ConversationData);
-            deps.evaluateReadiness = mock((data) => ({ ready: false }) as any)
+            deps.evaluateReadiness = mock((_data) => ({ ready: false }) as any)
                 .mockImplementationOnce(() => ({ ready: false }) as any) // Initial degraded readiness -> goes to tryRefresh
                 .mockImplementationOnce(() => ({ ready: true }) as any); // Second pass when validating fresh snapshot
 

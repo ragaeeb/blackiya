@@ -18,7 +18,7 @@ The architecture is split across two runtime worlds:
 flowchart LR
     A["User prompt"] --> B["MAIN world interceptor\n/entrypoints/interceptor.content.ts -> /entrypoints/interceptor/bootstrap.ts"]
     B --> C["postMessage protocol\nBLACKIYA_* events"]
-    C --> D["ISOLATED runner\n/utils/platform-runner.ts -> /utils/runner/index.ts"]
+    C --> D["ISOLATED runner\n/utils/runner/platform-runtime.ts -> /utils/runner/platform-runner-engine.ts"]
     D --> E["InterceptionManager cache\n/utils/managers/interception-manager.ts"]
     D --> F["Signal Fusion Engine (SFE)\n/utils/sfe/*"]
     D --> G["ButtonManager UI\n/utils/ui/button-manager.ts"]
@@ -40,8 +40,11 @@ flowchart LR
   - `entrypoints/interceptor/signal-emitter.ts`
   - `entrypoints/interceptor/discovery.ts`
 - Platform orchestrator:
-  - `utils/platform-runner.ts`
-  - `utils/runner/index.ts`
+  - `utils/runner/platform-runtime.ts`
+  - `utils/runner/platform-runner-engine.ts`
+  - `utils/runner/platform-runtime-wiring.ts`
+  - `utils/runner/platform-runtime-calibration.ts`
+  - `utils/runner/platform-runtime-stream-probe.ts`
   - `utils/runner/*` (state/lifecycle/export/probe/calibration/bridge + attempt/readiness modules)
   - `utils/runner/attempt-registry.ts` (attempt-id resolution: `resolveRunnerAttemptId` for writes, `peekRunnerAttemptId` for reads)
   - `utils/runner/calibration-policy.ts` (calibration ordering + persistence policy helpers)
@@ -279,7 +282,7 @@ On route changes, in-flight attempts bound to the destination conversation are p
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 
 Key methods:
-- `utils/runner/index.ts`:
+- `utils/runner/platform-runner-engine.ts`:
   - `handleLifecycleMessage`
   - `handleResponseFinishedMessage`
   - `resolveReadinessDecision`
@@ -302,7 +305,7 @@ Save pipeline:
 6. Downloads JSON via `downloadAsJSON`.
 
 Primary code:
-- `utils/runner/index.ts`
+- `utils/runner/platform-runner-engine.ts`
 - `utils/common-export.ts`
 - `utils/download.ts`
 

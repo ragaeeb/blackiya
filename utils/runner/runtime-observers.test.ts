@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import {
-    registerButtonHealthCheck,
-    registerCompletionWatcher,
-    registerWindowBridge,
-} from '@/utils/runner/runtime-observers';
+import { registerButtonHealthCheck, registerWindowBridge } from '@/utils/runner/runtime-observers';
 
 describe('runtime-observers', () => {
     describe('registerWindowBridge', () => {

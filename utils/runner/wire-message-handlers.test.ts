@@ -2,13 +2,10 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
-    handleAttemptDisposedMessage,
     handleConversationIdResolvedMessage,
     handleJsonBridgeRequest,
     handleLifecycleMessage,
     handleResponseFinishedMessage,
-    handleStreamDeltaMessage,
-    handleStreamDumpFrameMessage,
     handleTitleResolvedMessage,
     type WireMessageHandlerDeps,
 } from '@/utils/runner/wire-message-handlers';
@@ -26,7 +23,9 @@ describe('wire-message-handlers', () => {
         logCalls.error.length = 0;
 
         deps = {
-            getAdapter: mock(() => ({ name: 'ChatGPT', defaultTitles: ['New chat'], extractConversationId: () => 'c-1' }) as any),
+            getAdapter: mock(
+                () => ({ name: 'ChatGPT', defaultTitles: ['New chat'], extractConversationId: () => 'c-1' }) as any,
+            ),
             getCurrentConversationId: mock(() => 'c-1'),
             getActiveAttemptId: mock(() => 'a-1'),
             resolveAliasedAttemptId: mock((id) => id),
@@ -65,8 +64,12 @@ describe('wire-message-handlers', () => {
             stampToken: mock((t) => t),
         };
 
-        if (!(globalThis as any).window) (globalThis as any).window = {};
-        if (!(globalThis as any).window.location) (globalThis as any).window.location = {};
+        if (!(globalThis as any).window) {
+            (globalThis as any).window = {};
+        }
+        if (!(globalThis as any).window.location) {
+            (globalThis as any).window.location = {};
+        }
         (globalThis as any).window.location.origin = 'http://localhost';
     });
 
@@ -159,7 +162,9 @@ describe('wire-message-handlers', () => {
 
     describe('handleJsonBridgeRequest', () => {
         it('should send response data with postMessage', async () => {
-            if (!(globalThis as any).window) (globalThis as any).window = {};
+            if (!(globalThis as any).window) {
+                (globalThis as any).window = {};
+            }
             const postMessageMock = mock(() => {});
             const oldPostMessage = globalThis.window.postMessage;
             globalThis.window.postMessage = postMessageMock;

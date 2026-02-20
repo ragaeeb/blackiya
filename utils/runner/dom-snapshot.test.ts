@@ -4,7 +4,6 @@ import {
     buildConversationSnapshotFromMessages,
     buildIsolatedDomSnapshot,
     buildRunnerSnapshotConversationData,
-    collectLastResortTextCandidates,
     collectLooseGrokCandidates,
     collectSnapshotMessageCandidates,
     normalizeSnapshotText,
@@ -28,7 +27,7 @@ describe('dom-snapshot', () => {
             expect(result!.title).toBe('My Title');
             expect(result!.conversation_id).toBe('123');
             expect(Object.keys(result!.mapping).length).toBe(3); // root + 2 msgs
-            expect(result!.mapping['root']).toBeDefined();
+            expect(result!.mapping.root).toBeDefined();
             expect(result!.mapping['snapshot-0']).toBeDefined();
             expect(result!.mapping['snapshot-1']).toBeDefined();
             expect(result!.mapping['snapshot-0'].message!.content!.parts![0]).toBe('hello');
@@ -97,7 +96,7 @@ describe('dom-snapshot', () => {
 
         it('should return elements if querySelectorAll succeeds', () => {
             const root = {
-                querySelectorAll: mock((sel) => [{ id: 1 }, { id: 2 }]),
+                querySelectorAll: mock((_sel) => [{ id: 1 }, { id: 2 }]),
             };
             expect(queryAllFromRoot(root as any, '.cls')).toEqual([{ id: 1 }, { id: 2 }] as any);
         });
@@ -128,7 +127,7 @@ describe('dom-snapshot', () => {
     describe('collectLooseGrokCandidates', () => {
         it('should collect alternating candidates for grok from main articles', () => {
             const root = {
-                querySelectorAll: mock((sel) => [
+                querySelectorAll: mock((_sel) => [
                     { textContent: 'a long question for grok' },
                     { textContent: 'an equally long response from grok' },
                 ]),

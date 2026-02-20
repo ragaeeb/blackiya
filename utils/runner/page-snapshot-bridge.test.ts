@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import * as sessionToken from '@/utils/protocol/session-token';
 import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
 
 mock.module('@/utils/protocol/session-token', () => ({
@@ -27,7 +26,7 @@ describe('page-snapshot-bridge', () => {
             removeEventListener: mockRemoveEventListener,
             postMessage: mockPostMessage,
             location: { origin: 'http://test' },
-            setTimeout: mock((fn: any) => {
+            setTimeout: mock((_fn: any) => {
                 return 123;
             }),
         };
@@ -69,7 +68,7 @@ describe('page-snapshot-bridge', () => {
     });
 
     it('should resolve null if timeout triggers', async () => {
-        let timeoutCb: Function;
+        let timeoutCb: (() => void) | undefined;
         (globalThis.window as any).setTimeout = mock((fn: any) => {
             timeoutCb = fn;
             return 123;

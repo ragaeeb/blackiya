@@ -192,39 +192,12 @@ export const refreshButtonState = (
     deps: ButtonStateManagerDeps,
     lastButtonStateLog: { value: string },
 ) => {
-    const adapter = deps.getAdapter();
-    if (!adapter) {
-        deps.emitPublicStatusSnapshot(null);
-        return;
-    }
-    const conversationId = forConversationId || adapter.extractConversationId(window.location.href);
-    if (!deps.buttonManager.exists()) {
-        deps.emitPublicStatusSnapshot(conversationId);
-        return;
-    }
+    const conversationId = resolveRefreshConversationId(forConversationId, deps);
     if (!conversationId) {
-        resetButtonStateForNoConversation(deps);
-        deps.emitPublicStatusSnapshot(null);
         return;
     }
-    const shouldDisable =
-        (deps.getLifecycleState() === 'prompt-sent' || deps.getLifecycleState() === 'streaming') &&
-        (!deps.getCurrentConversationId() || conversationId === deps.getCurrentConversationId());
-    if (
-        shouldDisable ||
-        (deps.getLifecycleState() !== 'completed' && deps.shouldBlockActionsForGeneration(conversationId))
-    ) {
-        deps.buttonManager.setSaveButtonMode('default');
-        deps.buttonManager.setActionButtonsEnabled(false);
-        deps.buttonManager.setOpacity('0.6');
-        logButtonStateIfChanged(
-            conversationId,
-            false,
-            '0.6',
-            lastButtonStateLog,
-            deps.getLifecycleState(),
-            deps.getConversation,
-        );
+    if (shouldDisableButtonActions(conversationId, deps)) {
+        applyDisabledButtonState(conversationId, deps, lastButtonStateLog);
         deps.emitPublicStatusSnapshot(conversationId);
         return;
     }
@@ -275,6 +248,56 @@ export const refreshButtonState = (
     }
 
     deps.emitPublicStatusSnapshot(conversationId);
+};
+
+const resolveRefreshConversationId = (
+    forConversationId: string | undefined,
+    deps: ButtonStateManagerDeps,
+): string | null => {
+    const adapter = deps.getAdapter();
+    if (!adapter) {
+        deps.emitPublicStatusSnapshot(null);
+        return null;
+    }
+    const conversationId = forConversationId || adapter.extractConversationId(window.location.href);
+    if (!deps.buttonManager.exists()) {
+        deps.emitPublicStatusSnapshot(conversationId);
+        return null;
+    }
+    if (!conversationId) {
+        resetButtonStateForNoConversation(deps);
+        deps.emitPublicStatusSnapshot(null);
+        return null;
+    }
+    return conversationId;
+};
+
+const shouldDisableButtonActions = (conversationId: string, deps: ButtonStateManagerDeps) => {
+    const lifecycleState = deps.getLifecycleState();
+    const activeGeneration = lifecycleState === 'prompt-sent' || lifecycleState === 'streaming';
+    const sameConversation = !deps.getCurrentConversationId() || conversationId === deps.getCurrentConversationId();
+    if (activeGeneration && sameConversation) {
+        return true;
+    }
+    return lifecycleState !== 'completed' && deps.shouldBlockActionsForGeneration(conversationId);
+};
+
+const applyDisabledButtonState = (
+    conversationId: string,
+    deps: ButtonStateManagerDeps,
+    lastButtonStateLog: { value: string },
+) => {
+    deps.buttonManager.setSaveButtonMode('default');
+    deps.buttonManager.setActionButtonsEnabled(false);
+    deps.buttonManager.setOpacity('0.6');
+    logButtonStateIfChanged(
+        conversationId,
+        false,
+        '0.6',
+        lastButtonStateLog,
+        deps.getLifecycleState(),
+        deps.getConversation,
+    );
 };
 
 export const scheduleButtonRefresh = (

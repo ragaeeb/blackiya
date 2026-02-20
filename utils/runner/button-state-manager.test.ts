@@ -16,7 +16,7 @@ const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
 mock.module('@/utils/runner/readiness', () => ({
-    resolveRunnerReadinessDecision: mock((args) => {
+    resolveRunnerReadinessDecision: mock((_args) => {
         // Mock default behavior
         return { mode: 'canonical_ready', ready: true, terminal: true, reason: 'terminal' };
     }),
@@ -41,7 +41,7 @@ describe('button-state-manager', () => {
         };
 
         originalSetTimeout = globalThis.setTimeout;
-        globalThis.setTimeout = mock((fn) => {
+        globalThis.setTimeout = mock((_fn) => {
             // Do NOT automatically call fn for scheduleButtonRefresh else it infinite loops
             return 123 as any;
         }) as any;
@@ -272,9 +272,9 @@ describe('button-state-manager', () => {
         });
 
         it('should execute tick successfully if canonical ready and call refreshButtonState', () => {
-            let callback: Function | undefined;
+            let callback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                callback = fn as Function;
+                callback = fn as () => void;
                 return 123 as any;
             }) as any;
 
@@ -287,9 +287,9 @@ describe('button-state-manager', () => {
         });
 
         it('should retry if button does not exist yet', () => {
-            let callback: Function | undefined;
+            let callback: (() => void) | undefined;
             globalThis.setTimeout = mock((fn) => {
-                callback = fn as Function;
+                callback = fn as () => void;
                 return 123 as any;
             }) as any;
 
@@ -321,9 +321,9 @@ describe('button-state-manager', () => {
         });
 
         it('should handle injection successfully if conversation present', () => {
-            let timeoutCallback: Function | undefined;
-            globalThis.setTimeout = ((fn: Function) => {
-                timeoutCallback = fn;
+            let _timeoutCallback: (() => void) | undefined;
+            globalThis.setTimeout = ((fn: () => void) => {
+                _timeoutCallback = fn;
             }) as any;
 
             injectSaveButton(deps, lastButtonStateLog);

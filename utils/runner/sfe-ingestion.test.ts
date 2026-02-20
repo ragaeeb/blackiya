@@ -5,8 +5,6 @@ import {
     ingestSfeCanonicalSample,
     ingestSfeLifecycleFromWirePhase,
     logSfeMismatchIfNeeded,
-    maybeReingestCachedCanonical,
-    resolveSfeReady,
 } from '@/utils/runner/sfe-ingestion';
 
 const logCalls = createLoggerCalls();

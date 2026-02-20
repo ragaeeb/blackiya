@@ -13,7 +13,7 @@ const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
 mock.module('@/utils/common-export', () => ({
-    buildCommonExport: mock((data, platform) => {
+    buildCommonExport: mock((data, _platform) => {
         if (data.title === 'throw') {
             throw new Error('Test error');
         }

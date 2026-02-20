@@ -20,7 +20,7 @@ describe('stream-probe-runtime', () => {
             originalDocument = globalThis.document;
             (globalThis as any).document = {
                 getElementById: (id: string) => documentMockElements[id] || null,
-                createElement: (tag: string) => ({
+                createElement: (_tag: string) => ({
                     style: {},
                     id: '',
                     parentNode: null,
@@ -104,7 +104,7 @@ describe('stream-probe-runtime', () => {
                 lastStreamProbeConversationId: 'c-1',
                 getAdapterName: () => 'ChatGPT',
                 setStreamProbePanel: setPanel,
-                withPreservedLiveMirrorSnapshot: (cid, status, body) => `${status} | ${body}`,
+                withPreservedLiveMirrorSnapshot: (_cid, status, body) => `${status} | ${body}`,
             };
 
             syncStreamProbePanelFromCanonical('c-1', { mapping: {} } as any, deps);
@@ -120,7 +120,7 @@ describe('stream-probe-runtime', () => {
                 lastStreamProbeConversationId: 'c-2',
                 getAdapterName: () => 'ChatGPT',
                 setStreamProbePanel: setPanel,
-                withPreservedLiveMirrorSnapshot: (cid, status, body) => '',
+                withPreservedLiveMirrorSnapshot: (_cid, _status, _body) => '',
             };
 
             syncStreamProbePanelFromCanonical('c-1', { mapping: {} } as any, deps);

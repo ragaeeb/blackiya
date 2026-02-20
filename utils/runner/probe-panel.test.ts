@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
     ensureStreamProbePanel,
-    removeStreamProbePanel,
     resolveStreamProbeDockPosition,
     setStreamProbePanelContent,
 } from '@/utils/runner/probe-panel';
@@ -25,7 +24,7 @@ describe('probe-panel', () => {
             originalDocument = globalThis.document;
             (globalThis as any).document = {
                 getElementById: (id: string) => documentMockElements[id] || null,
-                createElement: (tag: string) => {
+                createElement: (_tag: string) => {
                     const el = {
                         style: {},
                         id: '',

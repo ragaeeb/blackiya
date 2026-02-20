@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
-import type { SavePipelineDeps } from '@/utils/runner/save-pipeline';
 import {
     applyTitleDomFallbackIfNeeded,
     getConversationData,
-    maybeIngestFreshSnapshotForForceSave,
     recoverCanonicalBeforeForceSave,
     resolveSaveReadiness,
 } from '@/utils/runner/save-pipeline';

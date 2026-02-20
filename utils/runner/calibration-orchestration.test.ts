@@ -183,7 +183,7 @@ describe('calibration-orchestration', () => {
         });
 
         it('should execute steps and mark success if one succeeds (manual)', async () => {
-            let resolveRun: (res: boolean) => void;
+            let _resolveRun: (res: boolean) => void;
             deps.runCalibrationStep = mock(() => Promise.resolve(true)); // immediate success
 
             await runCalibrationCapture('manual', '123', deps);

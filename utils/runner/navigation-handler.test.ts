@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { getPlatformAdapter } from '@/platforms/factory';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import { handleNavigationChange, type NavigationDeps, switchConversation } from '@/utils/runner/navigation-handler';
 

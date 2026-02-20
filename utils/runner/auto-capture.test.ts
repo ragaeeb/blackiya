@@ -176,8 +176,8 @@ describe('auto-capture', () => {
         it('should fire the deferred timer callback and execute maybeRunAutoCapture again', () => {
             deps.isPlatformGenerating = () => true;
 
-            let timerCallback: Function | null = null;
-            globalThis.setTimeout = mock((fn: Function) => {
+            let timerCallback: (() => void) | null = null;
+            globalThis.setTimeout = mock((fn: () => void) => {
                 timerCallback = fn;
                 return 123 as any;
             }) as any;

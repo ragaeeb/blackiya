@@ -34,8 +34,8 @@ Two-world design:
 
 2. ISOLATED world runner:
 - `entrypoints/main.content.ts`
-- `utils/platform-runner.ts` (compat re-export)
-- Core implementation: `utils/runner/index.ts`
+- Core implementation entry: `utils/runner/platform-runtime.ts`
+- Main orchestration engine: `utils/runner/platform-runner-engine.ts`
 - Handles lifecycle state, SFE readiness, UI gating, export
 
 Supporting modules:
@@ -106,7 +106,7 @@ For any bug fix:
 2. Implement minimal fix.
 3. Re-run targeted tests.
 4. Re-run typecheck.
-5. Update `docs/handoff.md` status and `docs/architecture.md` when behavior/invariants change.
+5. Update `docs/architecture.md` (and `docs/PR.md` when present) when behavior/invariants change.
 
 Minimum commands:
 ```bash
@@ -166,7 +166,7 @@ When changing title handling:
 ## 9) Files Most Likely to Need Careful Review
 
 - `entrypoints/interceptor/bootstrap.ts`
-- `utils/runner/index.ts`
+- `utils/runner/platform-runner-engine.ts`
 - `platforms/gemini.ts`
 - `platforms/grok.ts`
 
