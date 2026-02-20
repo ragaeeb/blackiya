@@ -45,6 +45,26 @@ const collectArrayNode = (
     }
 };
 
+const shouldSkipObjectEntry = (
+    node: Record<string, unknown>,
+    key: string,
+    value: unknown,
+    preferredSet: Set<string> | null,
+    options: Required<Pick<TextCandidateCollectorOptions, 'maxDepth' | 'maxCandidates'>> &
+        Omit<TextCandidateCollectorOptions, 'maxDepth' | 'maxCandidates'>,
+) => {
+    if (options.skipKeys?.has(key)) {
+        return true;
+    }
+    if (preferredSet?.has(key)) {
+        return true;
+    }
+    if (options.shouldSkipEntry?.({ key, value, parent: node })) {
+        return true;
+    }
+    return false;
+};
+
 const collectObjectNode = (
     node: Record<string, unknown>,
     out: string[],
@@ -63,13 +83,7 @@ const collectObjectNode = (
     }
 
     for (const [key, value] of Object.entries(node)) {
-        if (options.skipKeys?.has(key)) {
-            continue;
-        }
-        if (preferredSet?.has(key)) {
-            continue;
-        }
-        if (options.shouldSkipEntry?.({ key, value, parent: node })) {
+        if (shouldSkipObjectEntry(node, key, value, preferredSet, options)) {
             continue;
         }
         collectNode(value, out, depth + 1, options);
