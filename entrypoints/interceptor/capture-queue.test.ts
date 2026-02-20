@@ -1,12 +1,22 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { appendToCaptureQueue, appendToLogQueue, getRawCaptureHistory } from '@/entrypoints/interceptor/capture-queue';
 
 describe('capture-queue', () => {
+    let originalWindow: unknown;
+
     beforeEach(() => {
+        originalWindow = (globalThis as any).window;
+        if (!(globalThis as any).window) {
+            (globalThis as any).window = {};
+        }
         const win = globalThis.window as any;
         delete win.__BLACKIYA_LOG_QUEUE__;
         delete win.__BLACKIYA_CAPTURE_QUEUE__;
         delete win.__BLACKIYA_RAW_CAPTURE_HISTORY__;
+    });
+
+    afterEach(() => {
+        (globalThis as any).window = originalWindow;
     });
 
     describe('appendToLogQueue', () => {

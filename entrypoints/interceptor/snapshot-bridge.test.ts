@@ -1,14 +1,20 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
 import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-bridge';
 import { setSessionToken } from '@/utils/protocol/session-token';
 
 describe('snapshot-bridge', () => {
     const windowInstance = new Window();
+    let originalWindow: unknown;
 
     beforeEach(() => {
+        originalWindow = (globalThis as any).window;
         (globalThis as any).window = windowInstance;
         setSessionToken('bk:test-bridge-token');
+    });
+
+    afterEach(() => {
+        (globalThis as any).window = originalWindow;
     });
 
     it('should stamp token on getJSON bridge requests', async () => {
