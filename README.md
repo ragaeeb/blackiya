@@ -334,6 +334,12 @@ const unsubscribeReady = window.__blackiya.onReady(async (status) => {
 // Optional immediate snapshot:
 console.log(window.__blackiya.getStatus());
 
+// Optional promise-based readiness gate:
+await window.__blackiya.waitForReady({ timeoutMs: 10000 });
+
+// Public API version for compatibility checks:
+console.log(window.__blackiya.version);
+
 // Later:
 unsubscribeStatus();
 unsubscribeReady();
@@ -342,7 +348,9 @@ unsubscribeReady();
 Notes:
 - `subscribe('status', cb)` and `onStatusChange(cb)` are tab-local lifecycle/readiness streams.
 - `subscribe('ready', cb)` and `onReady(cb)` emit when canonical capture is ready.
+- `waitForReady()` resolves once canonical readiness is reached (or rejects on timeout).
 - On `ready`, both `getJSON()` and `getCommonJSON()` should resolve for that active tab conversation.
+- Bridge request errors are structured (`name: "BlackiyaBridgeError"`, `code: "TIMEOUT" | "REQUEST_FAILED" | "NOT_FOUND"`).
 - This runs in the page context, so only use it on pages you trust.
 
 ## 🔒 Privacy & Compliance

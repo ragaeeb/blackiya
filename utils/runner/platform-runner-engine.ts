@@ -40,10 +40,42 @@ import { processInterceptionCapture as processInterceptionCaptureCore } from './
 import { createCalibrationRuntime } from './platform-runtime-calibration';
 import { createStreamProbeRuntime } from './platform-runtime-stream-probe';
 import { createRuntimeWiring } from './platform-runtime-wiring';
-import {
-    emitPublicStatusSnapshot as emitPublicStatusSnapshotCore,
-} from './public-status';
+import { emitPublicStatusSnapshot as emitPublicStatusSnapshotCore } from './public-status';
 import { processResponseFinished as processResponseFinishedCore } from './response-finished-handler';
+import type { EngineCtx } from './runner-engine-context';
+import {
+    buildAttemptCoordinatorDeps,
+    buildButtonStateManagerDeps,
+    buildCalibrationCaptureDeps,
+    buildCalibrationRuntimeDeps,
+    buildCanonicalStabilizationTickDeps,
+    buildCleanupRuntimeDeps,
+    buildExportPayloadForFormat,
+    buildInterceptionCaptureDeps,
+    buildPublicStatusDeps,
+    buildResponseFinishedDeps,
+    buildRuntimeWiringDeps,
+    buildSavePipelineDeps,
+    buildStorageChangeListenerDeps,
+    buildStreamDoneCoordinatorDeps,
+    buildStreamDumpSettingDeps,
+    buildStreamProbeVisibilitySettingDeps,
+    buildVisibilityRecoveryDeps,
+    buildWarmFetchDeps,
+    emitAttemptDisposed,
+    evaluateReadinessForData,
+    extractConversationIdFromLocation,
+    getCaptureMeta,
+    getExportFormat,
+    ingestSfeCanonicalSample,
+    ingestSfeLifecycle,
+    ingestSfeLifecycleFromWirePhase,
+    isStaleAttemptMessage,
+    MAX_STREAM_PREVIEWS,
+    resolveConversationIdForUserAction,
+    resolveIsolatedSnapshotData,
+    shouldBlockActionsForGeneration,
+} from './runner-engine-context';
 import { createCleanupRuntime } from './runtime-cleanup';
 import {
     createStorageChangeListener as createStorageChangeListenerCore,
@@ -58,51 +90,21 @@ import {
 } from './save-pipeline';
 import { RunnerState } from './state';
 import { createStreamDoneCoordinator } from './stream-done-coordinator';
-import type { EngineCtx } from './runner-engine-context';
-import {
-    MAX_STREAM_PREVIEWS,
-    buildAttemptCoordinatorDeps,
-    buildButtonStateManagerDeps,
-    buildCalibrationRuntimeDeps,
-    buildCanonicalStabilizationTickDeps,
-    buildCleanupRuntimeDeps,
-    buildInterceptionCaptureDeps,
-    buildPublicStatusDeps,
-    buildResponseFinishedDeps,
-    buildRuntimeWiringDeps,
-    buildSavePipelineDeps,
-    buildStorageChangeListenerDeps,
-    buildStreamDoneCoordinatorDeps,
-    buildStreamDumpSettingDeps,
-    buildStreamProbeVisibilitySettingDeps,
-    buildVisibilityRecoveryDeps,
-    emitAttemptDisposed,
-    emitStreamDumpConfig,
-    evaluateReadinessForData,
-    extractConversationIdFromLocation,
-    getCaptureMeta,
-    getExportFormat,
-    ingestSfeCanonicalSample,
-    ingestSfeLifecycle,
-    ingestSfeLifecycleFromWirePhase,
-    isStaleAttemptMessage,
-    buildExportPayloadForFormat,
-    buildWarmFetchDeps,
-    buildCalibrationCaptureDeps,
-    shouldBlockActionsForGeneration,
-    isPlatformGenerating,
-    resolveIsolatedSnapshotData,
-    resolveConversationIdForUserAction,
-} from './runner-engine-context';
 
 const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
 const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
 type RunnerControl = { cleanup?: () => void };
 
 export const runPlatform = (): void => {
-    const globalRunnerControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as RunnerControl | undefined;
+    const globalRunnerControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
+        | RunnerControl
+        | undefined;
     if (globalRunnerControl?.cleanup) {
-        try { globalRunnerControl.cleanup(); } catch (error) { logger.debug('Error while cleaning previous runner instance:', error); }
+        try {
+            globalRunnerControl.cleanup();
+        } catch (error) {
+            logger.debug('Error while cleaning previous runner instance:', error);
+        }
     }
     const runnerControl: RunnerControl = {};
     (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] = runnerControl;
@@ -112,7 +114,9 @@ export const runPlatform = (): void => {
     window.postMessage({ type: MESSAGE_TYPES.SESSION_INIT, token: sessionToken }, window.location.origin);
 
     const runnerState = new RunnerState();
-    const sfe = new SignalFusionEngine({ readinessGate: new ReadinessGate({ maxStabilizationWaitMs: SFE_STABILIZATION_MAX_WAIT_MS }) });
+    const sfe = new SignalFusionEngine({
+        readinessGate: new ReadinessGate({ maxStabilizationWaitMs: SFE_STABILIZATION_MAX_WAIT_MS }),
+    });
     const structuredLogger = new StructuredAttemptLogger();
     const probeLease = new CrossTabProbeLease();
 
@@ -164,7 +168,10 @@ export const runPlatform = (): void => {
         autoCaptureDeferredLogged: new Set(),
         retryTimeoutIds: [],
         liveStreamPreviewByConversation: runnerState.streamPreviewByConversation,
-        sfe, probeLease, structuredLogger, runnerState,
+        sfe,
+        probeLease,
+        structuredLogger,
+        runnerState,
         interceptionManager: null!,
         navigationManager: null!,
         buttonManager: null!,
@@ -177,35 +184,68 @@ export const runPlatform = (): void => {
         publicStatusState: { sequence: 0, lastSignature: '' },
         streamProbeRuntime: null,
         // Function stubs — populated below during coordinator wiring
-        setCurrentConversation: null!, setActiveAttempt: null!, bindAttempt: null!,
-        resolveAliasedAttemptId: null!, peekAttemptId: null!, resolveAttemptId: null!,
-        isAttemptDisposedOrSuperseded: null!, forwardAttemptAlias: null!,
-        markSnapshotCaptureMeta: null!, markCanonicalCaptureMeta: null!,
+        setCurrentConversation: null!,
+        setActiveAttempt: null!,
+        bindAttempt: null!,
+        resolveAliasedAttemptId: null!,
+        peekAttemptId: null!,
+        resolveAttemptId: null!,
+        isAttemptDisposedOrSuperseded: null!,
+        forwardAttemptAlias: null!,
+        markSnapshotCaptureMeta: null!,
+        markCanonicalCaptureMeta: null!,
         cachePendingLifecycleSignal: null!,
-        cancelStreamDoneProbe: null!, clearProbeLeaseRetry: null!, runStreamDoneProbe: null!,
-        clearCanonicalStabilizationRetry: null!, hasCanonicalStabilizationTimedOut: null!,
-        scheduleCanonicalStabilizationRetry: null!, maybeRestartCanonicalRecoveryAfterTimeout: null!,
-        ingestSfeLifecycle: null!, ingestSfeCanonicalSample: null!, logSfeMismatchIfNeeded: null!,
-        emitAttemptDisposed: null!, evaluateReadinessForData: null!,
-        refreshButtonState: null!, scheduleButtonRefresh: null!, injectSaveButton: null!,
-        resolveReadinessDecision: null!, isConversationReadyForActions: null!,
-        shouldBlockActionsForGeneration: null!, isLifecycleActiveGeneration: null!,
-        setLifecycleState: null!, handleResponseFinished: null!,
-        handleSaveClick: null!, handleCalibrationClick: null!,
-        getConversationData: null!, warmFetchConversationSnapshot: null!,
-        maybeRunAutoCapture: null!, syncCalibrationButtonDisplay: null!,
-        ensureCalibrationPreferenceLoaded: null!, isCalibrationCaptureSatisfied: null!,
-        resetCalibrationPreference: null!, handleCalibrationProfilesChanged: null!,
-        loadSfeSettings: null!, emitPublicStatusSnapshot: null!,
-        extractConversationIdFromLocation: null!, resolveConversationIdForUserAction: null!,
-        getCaptureMeta: null!, resolveIsolatedSnapshotData: null!,
-        setStreamProbePanel: null!, withPreservedLiveMirrorSnapshot: null!,
-        syncStreamProbePanelFromCanonical: null!, appendPendingStreamProbeText: null!,
-        migratePendingStreamProbeText: null!, appendLiveStreamProbeText: null!,
-        isStaleAttemptMessage: null!, buildExportPayloadForFormat: null!,
-        getExportFormat: null!, ingestSfeLifecycleFromWirePhase: null!,
-        buildCalibrationOrchestrationDeps: null!, buildCalibrationCaptureDeps: null!,
-        runCalibrationStep: null!, buildWarmFetchDeps: null!,
+        cancelStreamDoneProbe: null!,
+        clearProbeLeaseRetry: null!,
+        runStreamDoneProbe: null!,
+        clearCanonicalStabilizationRetry: null!,
+        hasCanonicalStabilizationTimedOut: null!,
+        scheduleCanonicalStabilizationRetry: null!,
+        maybeRestartCanonicalRecoveryAfterTimeout: null!,
+        ingestSfeLifecycle: null!,
+        ingestSfeCanonicalSample: null!,
+        logSfeMismatchIfNeeded: null!,
+        emitAttemptDisposed: null!,
+        evaluateReadinessForData: null!,
+        refreshButtonState: null!,
+        scheduleButtonRefresh: null!,
+        injectSaveButton: null!,
+        resolveReadinessDecision: null!,
+        isConversationReadyForActions: null!,
+        shouldBlockActionsForGeneration: null!,
+        isLifecycleActiveGeneration: null!,
+        setLifecycleState: null!,
+        handleResponseFinished: null!,
+        handleSaveClick: null!,
+        handleCalibrationClick: null!,
+        getConversationData: null!,
+        warmFetchConversationSnapshot: null!,
+        maybeRunAutoCapture: null!,
+        syncCalibrationButtonDisplay: null!,
+        ensureCalibrationPreferenceLoaded: null!,
+        isCalibrationCaptureSatisfied: null!,
+        resetCalibrationPreference: null!,
+        handleCalibrationProfilesChanged: null!,
+        loadSfeSettings: null!,
+        emitPublicStatusSnapshot: null!,
+        extractConversationIdFromLocation: null!,
+        resolveConversationIdForUserAction: null!,
+        getCaptureMeta: null!,
+        resolveIsolatedSnapshotData: null!,
+        setStreamProbePanel: null!,
+        withPreservedLiveMirrorSnapshot: null!,
+        syncStreamProbePanelFromCanonical: null!,
+        appendPendingStreamProbeText: null!,
+        migratePendingStreamProbeText: null!,
+        appendLiveStreamProbeText: null!,
+        isStaleAttemptMessage: null!,
+        buildExportPayloadForFormat: null!,
+        getExportFormat: null!,
+        ingestSfeLifecycleFromWirePhase: null!,
+        buildCalibrationOrchestrationDeps: null!,
+        buildCalibrationCaptureDeps: null!,
+        runCalibrationStep: null!,
+        buildWarmFetchDeps: null!,
     };
 
     // ── Wire context-free utility functions ──
@@ -217,7 +257,8 @@ export const runPlatform = (): void => {
     ctx.evaluateReadinessForData = (data) => evaluateReadinessForData(ctx, data);
     ctx.shouldBlockActionsForGeneration = (cid) => shouldBlockActionsForGeneration(ctx, cid);
     ctx.isLifecycleActiveGeneration = () => ctx.lifecycleState === 'prompt-sent' || ctx.lifecycleState === 'streaming';
-    ctx.emitPublicStatusSnapshot = (cidOverride) => emitPublicStatusSnapshotCore(cidOverride, ctx.publicStatusState, buildPublicStatusDeps(ctx));
+    ctx.emitPublicStatusSnapshot = (cidOverride) =>
+        emitPublicStatusSnapshotCore(cidOverride, ctx.publicStatusState, buildPublicStatusDeps(ctx));
     ctx.emitAttemptDisposed = (aid, reason) => emitAttemptDisposed(ctx, aid, reason);
     ctx.ingestSfeLifecycle = (phase, aid, cid) => ingestSfeLifecycle(ctx, phase, aid, cid);
     ctx.ingestSfeCanonicalSample = (data, aid) => ingestSfeCanonicalSample(ctx, data, aid);
@@ -237,8 +278,10 @@ export const runPlatform = (): void => {
         getLastStreamProbeConversationId: () => ctx.lastStreamProbeConversationId,
     });
     ctx.setStreamProbePanel = (s, b) => ctx.streamProbeRuntime?.setStreamProbePanel(s, b);
-    ctx.withPreservedLiveMirrorSnapshot = (cid, s, b) => ctx.streamProbeRuntime?.withPreservedLiveMirrorSnapshot(cid, s, b) ?? b;
-    ctx.syncStreamProbePanelFromCanonical = (cid, data) => ctx.streamProbeRuntime?.syncStreamProbePanelFromCanonical(cid, data);
+    ctx.withPreservedLiveMirrorSnapshot = (cid, s, b) =>
+        ctx.streamProbeRuntime?.withPreservedLiveMirrorSnapshot(cid, s, b) ?? b;
+    ctx.syncStreamProbePanelFromCanonical = (cid, data) =>
+        ctx.streamProbeRuntime?.syncStreamProbePanelFromCanonical(cid, data);
     ctx.appendPendingStreamProbeText = (aid, text) => ctx.streamProbeRuntime?.appendPendingStreamProbeText(aid, text);
     ctx.migratePendingStreamProbeText = (cid, aid) => ctx.streamProbeRuntime?.migratePendingStreamProbeText(cid, aid);
     ctx.appendLiveStreamProbeText = (cid, text) => ctx.streamProbeRuntime?.appendLiveStreamProbeText(cid, text);
@@ -260,12 +303,17 @@ export const runPlatform = (): void => {
 
     // ── Managers ──
 
-    ctx.buttonManager = new ButtonManager(() => ctx.handleSaveClick(), () => ctx.handleCalibrationClick());
+    ctx.buttonManager = new ButtonManager(
+        () => ctx.handleSaveClick(),
+        () => ctx.handleCalibrationClick(),
+    );
     ctx.interceptionManager = new InterceptionManager((capturedId, data, meta) => {
         processInterceptionCaptureCore(capturedId, data, meta, buildInterceptionCaptureDeps(ctx));
     });
     let handleNavigationChange: () => void;
-    ctx.navigationManager = new NavigationManager(() => { handleNavigationChange(); });
+    ctx.navigationManager = new NavigationManager(() => {
+        handleNavigationChange();
+    });
 
     // ── Stream done coordinator ──
 
@@ -276,10 +324,14 @@ export const runPlatform = (): void => {
 
     // ── Canonical stabilization ──
 
-    ctx.clearCanonicalStabilizationRetry = (aid) => clearCanonicalStabilizationRetryCore(aid, buildCanonicalStabilizationTickDeps(ctx));
-    ctx.hasCanonicalStabilizationTimedOut = (aid) => hasCanonicalStabilizationTimedOutCore(aid, buildCanonicalStabilizationTickDeps(ctx));
-    ctx.scheduleCanonicalStabilizationRetry = (cid, aid) => scheduleCanonicalStabilizationRetryCore(cid, aid, buildCanonicalStabilizationTickDeps(ctx));
-    ctx.maybeRestartCanonicalRecoveryAfterTimeout = (cid, aid) => maybeRestartCanonicalRecoveryAfterTimeoutCore(cid, aid, buildCanonicalStabilizationTickDeps(ctx));
+    ctx.clearCanonicalStabilizationRetry = (aid) =>
+        clearCanonicalStabilizationRetryCore(aid, buildCanonicalStabilizationTickDeps(ctx));
+    ctx.hasCanonicalStabilizationTimedOut = (aid) =>
+        hasCanonicalStabilizationTimedOutCore(aid, buildCanonicalStabilizationTickDeps(ctx));
+    ctx.scheduleCanonicalStabilizationRetry = (cid, aid) =>
+        scheduleCanonicalStabilizationRetryCore(cid, aid, buildCanonicalStabilizationTickDeps(ctx));
+    ctx.maybeRestartCanonicalRecoveryAfterTimeout = (cid, aid) =>
+        maybeRestartCanonicalRecoveryAfterTimeoutCore(cid, aid, buildCanonicalStabilizationTickDeps(ctx));
 
     // ── Save pipeline ──
 
@@ -308,9 +360,38 @@ export const runPlatform = (): void => {
 
     ctx.injectSaveButton = () => injectSaveButtonCore(buildButtonStateManagerDeps(ctx), ctx.lastButtonStateLogRef);
     ctx.resolveReadinessDecision = (cid) => resolveReadinessDecisionCore(cid, buildButtonStateManagerDeps(ctx));
-    ctx.isConversationReadyForActions = (cid, opts = {}) => isConversationReadyForActionsCore(cid, opts, buildButtonStateManagerDeps(ctx));
-    ctx.refreshButtonState = (cid) => refreshButtonStateCore(cid, buildButtonStateManagerDeps(ctx), ctx.lastButtonStateLogRef);
-    ctx.scheduleButtonRefresh = (cid) => scheduleButtonRefreshCore(cid, buildButtonStateManagerDeps(ctx), ctx.lastButtonStateLogRef);
+    ctx.isConversationReadyForActions = (cid, opts = {}) =>
+        isConversationReadyForActionsCore(cid, opts, buildButtonStateManagerDeps(ctx));
+    ctx.refreshButtonState = (cid) =>
+        refreshButtonStateCore(cid, buildButtonStateManagerDeps(ctx), ctx.lastButtonStateLogRef);
+    ctx.scheduleButtonRefresh = (cid) =>
+        scheduleButtonRefreshCore(cid, buildButtonStateManagerDeps(ctx), ctx.lastButtonStateLogRef);
+
+    const syncLifecycleConversationBinding = (state: string, resolvedCid: string | null) => {
+        if (state === 'idle') {
+            ctx.lifecycleConversationId = null;
+            ctx.lifecycleAttemptId = null;
+            return;
+        }
+        if (resolvedCid) {
+            ctx.lifecycleConversationId = resolvedCid;
+        }
+    };
+
+    const applyLifecycleUiState = (state: string, conversationId?: string) => {
+        if (state === 'completed') {
+            const targetId = conversationId || ctx.extractConversationIdFromLocation() || undefined;
+            if (targetId) {
+                ctx.refreshButtonState(targetId);
+                ctx.scheduleButtonRefresh(targetId);
+            }
+            return;
+        }
+        if (state === 'prompt-sent' || state === 'streaming') {
+            ctx.buttonManager.setActionButtonsEnabled(false);
+            ctx.buttonManager.setOpacity('0.6');
+        }
+    };
 
     // ── Lifecycle state ──
 
@@ -321,26 +402,16 @@ export const runPlatform = (): void => {
         }
         ctx.lifecycleState = state;
         ctx.runnerState.lifecycleState = state;
-        if (state === 'idle') {
-            ctx.lifecycleConversationId = null;
-            ctx.lifecycleAttemptId = null;
-        } else if (resolvedCid) {
-            ctx.lifecycleConversationId = resolvedCid;
-        }
+        syncLifecycleConversationBinding(state, resolvedCid);
         ctx.buttonManager.setLifecycleState(state);
-        if (state === 'completed') {
-            const targetId = conversationId || ctx.extractConversationIdFromLocation() || undefined;
-            if (targetId) { ctx.refreshButtonState(targetId); ctx.scheduleButtonRefresh(targetId); }
-        } else if (state === 'prompt-sent' || state === 'streaming') {
-            ctx.buttonManager.setActionButtonsEnabled(false);
-            ctx.buttonManager.setOpacity('0.6');
-        }
+        applyLifecycleUiState(state, conversationId);
         ctx.emitPublicStatusSnapshot(resolvedCid);
     };
 
     // ── Response finished ──
 
-    ctx.handleResponseFinished = (source, hintedCid) => processResponseFinishedCore(source, hintedCid, buildResponseFinishedDeps(ctx));
+    ctx.handleResponseFinished = (source, hintedCid) =>
+        processResponseFinishedCore(source, hintedCid, buildResponseFinishedDeps(ctx));
 
     // ── Runtime wiring ──
 
@@ -384,12 +455,15 @@ export const runPlatform = (): void => {
     if (ctx.currentConversationId) {
         void ctx.warmFetchConversationSnapshot(ctx.currentConversationId, 'initial-load');
     }
-    ctx.retryTimeoutIds.push(...scheduleButtonInjectionRetriesCore(ctx.injectSaveButton, () => ctx.buttonManager.exists()));
+    ctx.retryTimeoutIds.push(
+        ...scheduleButtonInjectionRetriesCore(ctx.injectSaveButton, () => ctx.buttonManager.exists()),
+    );
 
     // ── Cleanup ──
 
     const cleanupDeps = buildCleanupRuntimeDeps(ctx, runnerControl, storageChangeListener);
-    cleanupDeps.removeVisibilityChangeListener = () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    cleanupDeps.removeVisibilityChangeListener = () =>
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
     cleanupDeps.removeStorageChangeListener = () => browser.storage.onChanged.removeListener(storageChangeListener);
     cleanupDeps.cleanupWindowBridge = ctx.cleanupWindowBridge;
     cleanupDeps.cleanupCompletionWatcher = ctx.cleanupCompletionWatcher;

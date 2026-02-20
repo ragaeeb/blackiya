@@ -1,7 +1,7 @@
 import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { collectLikelyTextCandidates } from '@/utils/text-candidate-collector';
 
 const PREFERRED_TEXT_KEYS = ['text', 'delta', 'content', 'message', 'output_text', 'token', 'part'] as const;
-const PREFERRED_TEXT_KEY_SET = new Set<string>(PREFERRED_TEXT_KEYS);
 
 const isLikelyReadableToken = (value: string): boolean => {
     const trimmed = value.trim();
@@ -23,68 +23,16 @@ const isLikelyReadableToken = (value: string): boolean => {
     return true;
 };
 
-const isCollectionLimitReached = (depth: number, out: string[]): boolean => depth > 8 || out.length > 80;
-
-const collectStringValue = (value: string, out: string[]) => {
-    if (!isLikelyReadableToken(value)) {
-        return;
-    }
-    out.push(value.trim());
-};
-
-const collectArrayValues = (items: unknown[], out: string[], depth: number) => {
-    for (const child of items) {
-        collectLikelyTextValues(child, out, depth + 1);
-    }
-};
-
-const collectPreferredObjectValues = (obj: Record<string, unknown>, out: string[], depth: number) => {
-    for (const key of PREFERRED_TEXT_KEYS) {
-        if (key in obj) {
-            collectLikelyTextValues(obj[key], out, depth + 1);
-        }
-    }
-};
-
-const collectFallbackObjectValues = (obj: Record<string, unknown>, out: string[], depth: number) => {
-    for (const [key, value] of Object.entries(obj)) {
-        if (PREFERRED_TEXT_KEY_SET.has(key)) {
-            continue;
-        }
-        collectLikelyTextValues(value, out, depth + 1);
-    }
-};
-
-const collectLikelyTextValues = (node: unknown, out: string[], depth = 0) => {
-    if (isCollectionLimitReached(depth, out)) {
-        return;
-    }
-
-    if (typeof node === 'string') {
-        collectStringValue(node, out);
-        return;
-    }
-    if (!node || typeof node !== 'object') {
-        return;
-    }
-
-    if (Array.isArray(node)) {
-        collectArrayValues(node, out, depth);
-        return;
-    }
-
-    const obj = node as Record<string, unknown>;
-    // Preferred keys are checked first so the most structured path wins.
-    collectPreferredObjectValues(obj, out, depth);
-    collectFallbackObjectValues(obj, out, depth);
-};
-
 /** Extracts the most likely human-readable text tokens from an arbitrary SSE JSON payload. */
 export const extractLikelyTextFromSsePayload = (payload: string): string[] => {
     try {
         const parsed = JSON.parse(payload);
-        const values: string[] = [];
-        collectLikelyTextValues(parsed, values);
+        const values = collectLikelyTextCandidates(parsed, {
+            preferredKeys: PREFERRED_TEXT_KEYS,
+            maxDepth: 8,
+            maxCandidates: 80,
+            isLikelyText: isLikelyReadableToken,
+        });
         const seen = new Set<string>();
         return values.filter((v) => {
             if (seen.has(v)) {

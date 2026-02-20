@@ -39,6 +39,7 @@ flowchart LR
   - `entrypoints/interceptor/state.ts`
   - `entrypoints/interceptor/signal-emitter.ts`
   - `entrypoints/interceptor/discovery.ts`
+  - `entrypoints/interceptor/public-api-contract.ts`
 - Platform orchestrator:
   - `utils/runner/platform-runtime.ts`
   - `utils/runner/platform-runner-engine.ts`
@@ -56,6 +57,10 @@ flowchart LR
   - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
 - Adapter interface + readiness contract:
   - `platforms/types.ts`
+- Adapter drift registries (endpoint + selector constants):
+  - `platforms/chatgpt/registry.ts`
+  - `platforms/gemini/registry.ts`
+  - `platforms/grok/registry.ts`
 - Adapter factory:
   - `platforms/factory.ts`
 - SFE types + transitions:
@@ -69,6 +74,8 @@ flowchart LR
   - `entrypoints/background.ts`
 - Protocol message definitions:
   - `utils/protocol/messages.ts`
+- Shared text candidate collector:
+  - `utils/text-candidate-collector.ts`
 
 ## 3) Wire Protocol (MAIN -> ISOLATED)
 
@@ -101,6 +108,10 @@ Flow:
 `ready` semantics:
 - `ready` is emitted only when canonical readiness is reached and export gating allows retrieval.
 - When `ready` is emitted, both `window.__blackiya.getJSON()` and `window.__blackiya.getCommonJSON()` are expected to resolve for the active tab conversation.
+- Public API also exposes:
+  - `version` (contract/runtime compatibility marker)
+  - `waitForReady({ timeoutMs? })` promise helper
+- JSON bridge failures are surfaced with structured `BlackiyaBridgeError` codes (`TIMEOUT`, `REQUEST_FAILED`, `NOT_FOUND`).
 
 ## 4) Lifecycle and Readiness Model
 
@@ -133,6 +144,8 @@ Critical invariant:
 - Snapshot/getJSON bridge requests and responses are token-stamped and token-validated symmetrically.
 - Public status snapshots (`BLACKIYA_PUBLIC_STATUS`) are token-stamped in runner and token-validated before exposure via `window.__blackiya.subscribe(...)`.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
+- Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
+- Interceptor queue trimming increments bounded drop counters and emits throttled warnings (log/capture/history queues) to surface silent drop pressure.
 - **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
 - **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative/snapshot) and always-disabled `['dom_hint', 'snapshot_fallback']`. `CalibrationStep` mapping is now reversible via a distinct `snapshot` strategy for `page-snapshot`. The runner exclusively uses the manual-strict policy path.
 - **Retention hygiene:** pending lifecycle cache is explicitly bounded with near-cap warning telemetry, and SFE resolution cache prunes stale terminal entries plus enforces a max-resolution bound.

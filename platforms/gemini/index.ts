@@ -16,6 +16,7 @@ import {
     hasGeminiStreamGenerateConversationShape,
     parseConversationPayload,
 } from './conversation-parser';
+import { GEMINI_ENDPOINT_REGISTRY, resolveGeminiButtonInjectionTarget } from './registry';
 import {
     findConversationRpc,
     hydrateGeminiTitleCandidatesFromRpcResults,
@@ -43,10 +44,8 @@ export const geminiAdapter: LLMPlatform = {
     name: 'Gemini',
     urlMatchPattern: 'https://gemini.google.com/*',
 
-    apiEndpointPattern:
-        /\/_\/BardChatUi\/data\/(?:batchexecute(?:\?.*)?|assistant\.lamda\.BardFrontendService\/StreamGenerate)/,
-    completionTriggerPattern:
-        /\/_\/BardChatUi\/data\/(?:batchexecute(?:\?.*)?|assistant\.lamda\.BardFrontendService\/StreamGenerate)/,
+    apiEndpointPattern: GEMINI_ENDPOINT_REGISTRY.apiEndpointPattern,
+    completionTriggerPattern: GEMINI_ENDPOINT_REGISTRY.completionTriggerPattern,
 
     isPlatformUrl: (url: string) => url.includes('gemini.google.com'),
 
@@ -128,24 +127,7 @@ export const geminiAdapter: LLMPlatform = {
         return `${sanitizedTitle}_${timestamp}`;
     },
 
-    getButtonInjectionTarget(): HTMLElement | null {
-        const selectors = [
-            'header [aria-haspopup="menu"]',
-            'header .flex-1.overflow-hidden',
-            'header nav',
-            '.chat-app-header',
-            'header',
-            '[role="banner"]',
-            'body',
-        ];
-        for (const selector of selectors) {
-            const target = document.querySelector(selector);
-            if (target) {
-                return (target.parentElement || target) as HTMLElement;
-            }
-        }
-        return null;
-    },
+    getButtonInjectionTarget: () => resolveGeminiButtonInjectionTarget(),
 
     evaluateReadiness(data: ConversationData) {
         return evaluateGeminiReadiness(data);

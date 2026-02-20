@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
 import { setSessionToken } from '@/utils/protocol/session-token';
+import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
 
 describe('page-snapshot-bridge', () => {
     let mockAddEventListener: ReturnType<typeof mock>;
@@ -91,14 +91,26 @@ describe('page-snapshot-bridge', () => {
         listener({
             source: {},
             origin: 'http://test',
-            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'snap', __blackiyaToken: '123' },
+            data: {
+                type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                requestId,
+                success: true,
+                data: 'snap',
+                __blackiyaToken: '123',
+            },
         } as unknown as MessageEvent);
 
         // Wrong origin
         listener({
             source: globalThis.window,
             origin: 'http://bad',
-            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'snap', __blackiyaToken: '123' },
+            data: {
+                type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                requestId,
+                success: true,
+                data: 'snap',
+                __blackiyaToken: '123',
+            },
         } as unknown as MessageEvent);
 
         // Wrong type
@@ -114,7 +126,13 @@ describe('page-snapshot-bridge', () => {
         listener({
             source: globalThis.window,
             origin: 'http://test',
-            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'valid-snap', __blackiyaToken: '123' },
+            data: {
+                type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
+                requestId,
+                success: true,
+                data: 'valid-snap',
+                __blackiyaToken: '123',
+            },
         } as unknown as MessageEvent);
 
         const result = await promise;

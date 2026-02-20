@@ -10,9 +10,9 @@ import {
 import { isDiscoveryDiagnosticsEnabled, safePathname } from '@/entrypoints/interceptor/discovery';
 import {
     isDiscoveryModeHost,
+    logAdapterEndpointMiss,
     logConversationSkip,
     logDiscoveryXhr,
-    logGeminiAdapterMiss,
 } from '@/entrypoints/interceptor/discovery-logging';
 import {
     emitNonChatGptStreamSnapshot,
@@ -107,7 +107,7 @@ export const handleXhrLoad = (xhr: XMLHttpRequest, methodUpper: string, deps: Xh
             logDiscoveryXhr(url, xhr.responseText, deps.emitter.log, deps.emitter.emitStreamDumpFrame);
         } catch {}
     }
-    logGeminiAdapterMiss(
+    logAdapterEndpointMiss(
         'xhr',
         url,
         { method: methodUpper, status: xhr.status },

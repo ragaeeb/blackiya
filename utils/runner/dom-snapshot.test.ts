@@ -151,11 +151,15 @@ describe('dom-snapshot', () => {
         let originalDescTitle: PropertyDescriptor | undefined;
 
         const getDesc = (obj: any, prop: string) => {
-            if (!obj) return undefined;
+            if (!obj) {
+                return undefined;
+            }
             let current = obj;
             while (current) {
                 const desc = Object.getOwnPropertyDescriptor(current, prop);
-                if (desc) return desc;
+                if (desc) {
+                    return desc;
+                }
                 // Get proto manually, Object.getPrototypeOf might fail on pure objects but works on DOM
                 current = Object.getPrototypeOf(current);
             }
@@ -163,7 +167,9 @@ describe('dom-snapshot', () => {
         };
 
         const restoreDesc = (obj: any, prop: string, desc: PropertyDescriptor | undefined) => {
-            if (!obj) return;
+            if (!obj) {
+                return;
+            }
             if (desc) {
                 Object.defineProperty(obj, prop, desc);
             } else {
@@ -213,7 +219,7 @@ describe('dom-snapshot', () => {
                         return [];
                     },
                 },
-                configurable: true
+                configurable: true,
             });
 
             const adapter = { name: 'ChatGPT' } as LLMPlatform;
@@ -230,12 +236,15 @@ describe('dom-snapshot', () => {
                         // primary fails by returning empty for user/assistant roles
                         // but loose fallback returns on main article
                         if (sel.includes('main article')) {
-                            return [{ textContent: 'long enough user msg' }, { textContent: 'long enough assistant msg' }];
+                            return [
+                                { textContent: 'long enough user msg' },
+                                { textContent: 'long enough assistant msg' },
+                            ];
                         }
                         return [];
                     },
                 },
-                configurable: true
+                configurable: true,
             });
 
             const adapter = { name: 'Grok' } as LLMPlatform;

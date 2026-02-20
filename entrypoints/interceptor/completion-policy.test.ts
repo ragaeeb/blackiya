@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import * as geminiClassifier from '@/utils/gemini-request-classifier';
-import * as grokClassifier from '@/utils/grok-request-classifier';
 import {
     shouldEmitCompletionForParsedData,
     shouldEmitCompletionForUrl,
     shouldEmitLifecycleForRequest,
     shouldSuppressCompletion,
 } from '@/entrypoints/interceptor/completion-policy';
+import * as geminiClassifier from '@/utils/gemini-request-classifier';
+import * as grokClassifier from '@/utils/grok-request-classifier';
 
 describe('completion-policy', () => {
     let geminiCompletionSpy: ReturnType<typeof spyOn>;
@@ -15,17 +15,17 @@ describe('completion-policy', () => {
     let grokLifecycleSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
-        geminiCompletionSpy = spyOn(geminiClassifier, 'shouldEmitGeminiCompletion').mockImplementation(
-            (url: string) => url.includes('gemini-complete'),
+        geminiCompletionSpy = spyOn(geminiClassifier, 'shouldEmitGeminiCompletion').mockImplementation((url: string) =>
+            url.includes('gemini-complete'),
         );
-        geminiLifecycleSpy = spyOn(geminiClassifier, 'shouldEmitGeminiLifecycle').mockImplementation(
-            (url: string) => url.includes('gemini-lifecycle'),
+        geminiLifecycleSpy = spyOn(geminiClassifier, 'shouldEmitGeminiLifecycle').mockImplementation((url: string) =>
+            url.includes('gemini-lifecycle'),
         );
-        grokCompletionSpy = spyOn(grokClassifier, 'shouldEmitGrokCompletion').mockImplementation(
-            (url: string) => url.includes('grok-complete'),
+        grokCompletionSpy = spyOn(grokClassifier, 'shouldEmitGrokCompletion').mockImplementation((url: string) =>
+            url.includes('grok-complete'),
         );
-        grokLifecycleSpy = spyOn(grokClassifier, 'shouldEmitGrokLifecycle').mockImplementation(
-            (url: string) => url.includes('grok-lifecycle'),
+        grokLifecycleSpy = spyOn(grokClassifier, 'shouldEmitGrokLifecycle').mockImplementation((url: string) =>
+            url.includes('grok-lifecycle'),
         );
     });
 

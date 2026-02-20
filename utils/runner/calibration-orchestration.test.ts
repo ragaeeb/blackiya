@@ -30,10 +30,16 @@ describe('calibration-orchestration', () => {
         logCalls.warn.length = 0;
         logCalls.error.length = 0;
 
-        loadProfileSpy = spyOn(calibrationProfile, 'loadCalibrationProfileV2IfPresent').mockImplementation(() => Promise.resolve(null));
-        saveProfileSpy = spyOn(calibrationProfile, 'saveCalibrationProfileV2').mockImplementation(() => Promise.resolve());
+        loadProfileSpy = spyOn(calibrationProfile, 'loadCalibrationProfileV2IfPresent').mockImplementation(() =>
+            Promise.resolve(null),
+        );
+        saveProfileSpy = spyOn(calibrationProfile, 'saveCalibrationProfileV2').mockImplementation(() =>
+            Promise.resolve(),
+        );
         stepFromStrategySpy = spyOn(calibrationProfile, 'stepFromStrategy').mockImplementation((s: any) => s as any);
-        buildProfileSpy = spyOn(calibrationProfile, 'buildCalibrationProfileFromStep').mockImplementation((p: any, s: any) => ({ platform: p, strategy: s }) as any);
+        buildProfileSpy = spyOn(calibrationProfile, 'buildCalibrationProfileFromStep').mockImplementation(
+            (p: any, s: any) => ({ platform: p, strategy: s }) as any,
+        );
 
         (globalThis as any).window = {
             location: { href: 'https://chat.openai.com/c/123' },

@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import * as finishedSignal from '@/utils/runner/finished-signal';
 import {

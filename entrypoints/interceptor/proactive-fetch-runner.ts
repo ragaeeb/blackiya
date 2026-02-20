@@ -6,7 +6,7 @@ import {
 import { safePathname } from '@/entrypoints/interceptor/discovery';
 import { ProactiveFetcher } from '@/entrypoints/interceptor/proactive-fetcher';
 import type { LLMPlatform } from '@/platforms/types';
-import { setBoundedMapValue } from '@/utils/bounded-collections';
+import { setBoundedMapValue, touchBoundedMapKey } from '@/utils/bounded-collections';
 import { type HeaderRecord, mergeHeaderRecords } from '@/utils/proactive-fetch-headers';
 import type { ConversationData } from '@/utils/types';
 
@@ -51,9 +51,6 @@ export class ProactiveFetchRunner {
         }
 
         const key = `${adapter.name}:${conversationId}`;
-        if (Date.now() - (this.successAtByKey.get(key) ?? 0) < SUCCESS_COOLDOWN_MS) {
-            return;
-        }
 
         const merged = mergeHeaderRecords(this.headersByKey.get(key), requestHeaders);
         if (merged) {
@@ -61,13 +58,20 @@ export class ProactiveFetchRunner {
         }
 
         await this.fetcher.withInFlight(key, async () => {
-            this.emitter.log('info', `trigger ${adapter.name} ${conversationId}`);
-            const attemptId = this.resolveAttemptIdForConversation(conversationId, adapter.name);
-            const succeeded = await this.runWithBackoff(adapter, conversationId, key, attemptId);
-            if (!succeeded) {
-                this.emitter.log('info', `fetch gave up ${conversationId}`);
+            try {
+                if (Date.now() - (this.successAtByKey.get(key) ?? 0) < SUCCESS_COOLDOWN_MS) {
+                    touchBoundedMapKey(this.successAtByKey, key);
+                    return;
+                }
+                this.emitter.log('info', `trigger ${adapter.name} ${conversationId}`);
+                const attemptId = this.resolveAttemptIdForConversation(conversationId, adapter.name);
+                const succeeded = await this.runWithBackoff(adapter, conversationId, key, attemptId);
+                if (!succeeded) {
+                    this.emitter.log('info', `fetch gave up ${conversationId}`);
+                }
+            } finally {
+                this.headersByKey.delete(key);
             }
-            this.headersByKey.delete(key);
         });
     };
 

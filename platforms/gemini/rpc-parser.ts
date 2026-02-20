@@ -3,9 +3,10 @@ import type { BatchexecuteResult } from '@/utils/google-rpc';
 import { parseBatchexecuteResponse } from '@/utils/google-rpc';
 import { logger } from '@/utils/logger';
 import type { LRUCache } from '@/utils/lru-cache';
+import { isGeminiTitlesEndpointUrl } from './registry';
 import { extractTitleCandidatesFromPayload } from './title-utils';
 
-export const isTitlesEndpoint = (url: string) => url.includes(`rpcids=${GEMINI_RPC_IDS.TITLES}`);
+export const isTitlesEndpoint = (url: string) => isGeminiTitlesEndpointUrl(url);
 
 const CONVERSATION_ID_IN_PAYLOAD_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 
