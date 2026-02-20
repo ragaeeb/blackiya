@@ -1,5 +1,9 @@
 import { getPageConversationSnapshot } from '@/entrypoints/interceptor/page-snapshot';
 import {
+    BLACKIYA_PUBLIC_API_VERSION,
+    BLACKIYA_WAIT_FOR_READY_TIMEOUT_MS,
+} from '@/entrypoints/interceptor/public-api-contract';
+import {
     type BlackiyaPublicSubscriptionOptions,
     createBlackiyaPublicStatusApi,
 } from '@/entrypoints/interceptor/public-status-api';
@@ -163,10 +167,58 @@ export const setupPublicWindowApi = (deps: BootstrapPublicApiDeps) => {
         options?: BlackiyaPublicSubscriptionOptions,
     ) => publicStatusApi.subscribe(event, callback, options);
 
+    const waitForReady = (options?: { timeoutMs?: number; emitCurrent?: boolean }) =>
+        new Promise<BlackiyaPublicStatus>((resolve, reject) => {
+            const timeoutMs = options?.timeoutMs ?? BLACKIYA_WAIT_FOR_READY_TIMEOUT_MS;
+            const current = publicStatusApi.getStatus();
+            if (current.canGetJSON && current.canGetCommonJSON) {
+                resolve(current);
+                return;
+            }
+
+            let settled = false;
+            let timeoutId: number | undefined;
+            const cleanup = (unsubscribe?: (() => void) | null, timeoutId?: number) => {
+                if (unsubscribe) {
+                    unsubscribe();
+                }
+                if (timeoutId !== undefined) {
+                    clearTimeout(timeoutId);
+                }
+            };
+
+            const unsubscribe = subscribePublicEvent(
+                'ready',
+                (status) => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    cleanup(unsubscribe, timeoutId);
+                    resolve(status);
+                },
+                { emitCurrent: options?.emitCurrent ?? true },
+            );
+
+            timeoutId = window.setTimeout(
+                () => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    cleanup(unsubscribe, timeoutId);
+                    reject(new Error('waitForReady timed out'));
+                },
+                Math.max(0, timeoutMs),
+            );
+        });
+
     (window as any).__blackiya = {
+        version: BLACKIYA_PUBLIC_API_VERSION,
         getJSON: () => requestJson(JSON_FORMAT_ORIGINAL),
         getCommonJSON: () => requestJson(JSON_FORMAT_COMMON),
         getStatus: () => publicStatusApi.getStatus(),
+        waitForReady,
         subscribe: subscribePublicEvent,
         onStatusChange: (
             callback: (status: BlackiyaPublicStatus) => void,

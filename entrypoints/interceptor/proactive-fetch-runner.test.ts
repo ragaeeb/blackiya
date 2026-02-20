@@ -37,23 +37,60 @@ const createEmitterDeps = () => ({
     emitCapturePayload: mock(() => {}),
 });
 
+type GlobalWithOptionalWindow = {
+    window?: unknown;
+};
+
+type WindowWithSetTimeout = {
+    setTimeout?: typeof globalThis.setTimeout;
+};
+
+type TestWindow = {
+    setTimeout: typeof globalThis.setTimeout;
+    location: {
+        origin: string;
+    };
+};
+
 describe('ProactiveFetchRunner', () => {
-    let originalSetTimeout: typeof window.setTimeout;
+    let globalWithWindow: GlobalWithOptionalWindow;
+    let hadWindow = false;
+    let originalWindow: unknown;
 
     beforeEach(() => {
-        originalSetTimeout = window.setTimeout;
-        (window as unknown as { setTimeout: typeof window.setTimeout }).setTimeout = ((
-            callback: TimerHandler,
-        ): number => {
+        globalWithWindow = globalThis as unknown as GlobalWithOptionalWindow;
+        hadWindow = typeof globalWithWindow.window !== 'undefined';
+        originalWindow = globalWithWindow.window;
+
+        const immediateSetTimeout = ((
+            callback: Parameters<typeof globalThis.setTimeout>[0],
+            _timeout?: number,
+            ...args: unknown[]
+        ): ReturnType<typeof globalThis.setTimeout> => {
             if (typeof callback === 'function') {
-                callback();
+                (callback as (...callbackArgs: unknown[]) => void)(...args);
             }
-            return 1;
-        }) as typeof window.setTimeout;
+            return 1 as unknown as ReturnType<typeof globalThis.setTimeout>;
+        }) as typeof globalThis.setTimeout;
+
+        if (globalWithWindow.window && typeof globalWithWindow.window === 'object') {
+            (globalWithWindow.window as WindowWithSetTimeout).setTimeout = immediateSetTimeout;
+            return;
+        }
+
+        const testWindow: TestWindow = {
+            setTimeout: immediateSetTimeout,
+            location: { origin: 'https://example.com' },
+        };
+        globalWithWindow.window = testWindow;
     });
 
     afterEach(() => {
-        (window as unknown as { setTimeout: typeof window.setTimeout }).setTimeout = originalSetTimeout;
+        if (hadWindow) {
+            globalWithWindow.window = originalWindow;
+            return;
+        }
+        delete globalWithWindow.window;
     });
 
     it('should fetch and emit capture payload when proactive fetch returns ready conversation data', async () => {

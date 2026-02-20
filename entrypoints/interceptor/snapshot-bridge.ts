@@ -1,3 +1,4 @@
+import { BRIDGE_ERROR_CODES, type BridgeErrorCode } from '@/entrypoints/interceptor/public-api-contract';
 import { resolveTokenValidationFailureReason, stampToken } from '@/utils/protocol/session-token';
 
 export type JsonBridgeFormat = 'original' | 'common';
@@ -23,6 +24,28 @@ export type CreateWindowJsonRequesterOptions = {
     responseType: string;
     timeoutMs?: number;
     makeRequestId?: () => string;
+};
+
+export class BlackiyaBridgeError extends Error {
+    constructor(
+        public readonly code: BridgeErrorCode,
+        message: string,
+        public readonly details?: string,
+    ) {
+        super(message);
+        this.name = 'BlackiyaBridgeError';
+    }
+}
+
+const createBridgeFailureError = (rawError: string | undefined) => {
+    if (rawError === BRIDGE_ERROR_CODES.NOT_FOUND) {
+        return new BlackiyaBridgeError(
+            BRIDGE_ERROR_CODES.NOT_FOUND,
+            'Requested conversation data was not found',
+            rawError,
+        );
+    }
+    return new BlackiyaBridgeError(BRIDGE_ERROR_CODES.REQUEST_FAILED, 'Blackiya bridge request failed', rawError);
 };
 
 const defaultRequestId = (): string => {
@@ -75,7 +98,7 @@ export const createWindowJsonRequester = (
                     resolve(message.data);
                     return;
                 }
-                reject(new Error(message.error || 'FAILED'));
+                reject(createBridgeFailureError(message.error));
             };
 
             targetWindow.addEventListener('message', handler);
@@ -87,7 +110,7 @@ export const createWindowJsonRequester = (
             targetWindow.postMessage(stampToken(request), targetWindow.location.origin);
             timeoutId = targetWindow.setTimeout(() => {
                 cleanup();
-                reject(new Error('TIMEOUT'));
+                reject(new BlackiyaBridgeError(BRIDGE_ERROR_CODES.TIMEOUT, 'Blackiya bridge request timed out'));
             }, timeoutMs);
         });
 };

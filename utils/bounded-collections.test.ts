@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { addBoundedSetValue, setBoundedMapValue } from '@/utils/bounded-collections';
+import { addBoundedSetValue, setBoundedMapValue, touchBoundedMapKey } from '@/utils/bounded-collections';
 
 describe('bounded-collections', () => {
     describe('setBoundedMapValue', () => {
@@ -32,6 +32,28 @@ describe('bounded-collections', () => {
             expect(map.size).toBe(3);
             expect(map.has('k2')).toBeFalse(); // k2 evicted
             expect(map.get('k1')).toBe('v1-new'); // k1 kept
+        });
+    });
+
+    describe('touchBoundedMapKey', () => {
+        it('should return false for missing keys', () => {
+            const map = new Map<string, string>();
+            expect(touchBoundedMapKey(map, 'missing')).toBeFalse();
+        });
+
+        it('should promote key recency without changing its value', () => {
+            const map = new Map<string, string>();
+            setBoundedMapValue(map, 'a', '1', 3);
+            setBoundedMapValue(map, 'b', '2', 3);
+            setBoundedMapValue(map, 'c', '3', 3);
+
+            expect(touchBoundedMapKey(map, 'a')).toBeTrue();
+            setBoundedMapValue(map, 'd', '4', 3);
+
+            expect(map.has('b')).toBeFalse();
+            expect(map.get('a')).toBe('1');
+            expect(map.has('c')).toBeTrue();
+            expect(map.has('d')).toBeTrue();
         });
     });
 

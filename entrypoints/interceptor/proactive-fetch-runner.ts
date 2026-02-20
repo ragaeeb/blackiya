@@ -6,7 +6,7 @@ import {
 import { safePathname } from '@/entrypoints/interceptor/discovery';
 import { ProactiveFetcher } from '@/entrypoints/interceptor/proactive-fetcher';
 import type { LLMPlatform } from '@/platforms/types';
-import { setBoundedMapValue } from '@/utils/bounded-collections';
+import { setBoundedMapValue, touchBoundedMapKey } from '@/utils/bounded-collections';
 import { type HeaderRecord, mergeHeaderRecords } from '@/utils/proactive-fetch-headers';
 import type { ConversationData } from '@/utils/types';
 
@@ -60,6 +60,7 @@ export class ProactiveFetchRunner {
         await this.fetcher.withInFlight(key, async () => {
             try {
                 if (Date.now() - (this.successAtByKey.get(key) ?? 0) < SUCCESS_COOLDOWN_MS) {
+                    touchBoundedMapKey(this.successAtByKey, key);
                     return;
                 }
                 this.emitter.log('info', `trigger ${adapter.name} ${conversationId}`);

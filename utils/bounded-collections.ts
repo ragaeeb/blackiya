@@ -22,6 +22,20 @@ export const setBoundedMapValue = <K, V>(map: Map<K, V>, key: K, value: V, maxEn
 };
 
 /**
+ * Promotes an existing map key to most-recent without changing its value.
+ * Useful for bounded maps that act as LRU read caches.
+ */
+export const touchBoundedMapKey = <K, V>(map: Map<K, V>, key: K) => {
+    if (!map.has(key)) {
+        return false;
+    }
+    const value = map.get(key) as V;
+    map.delete(key);
+    map.set(key, value);
+    return true;
+};
+
+/**
  * Adds {`@link` value} to {`@link` set} if not already present.
  * Existing values are NOT promoted (order is NOT refreshed).
  * Evicts oldest entries when size would exceed {`@link` maxEntries}.

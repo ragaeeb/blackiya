@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { appendToCaptureQueue, appendToLogQueue, getRawCaptureHistory } from '@/entrypoints/interceptor/capture-queue';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import {
+    appendToCaptureQueue,
+    appendToLogQueue,
+    getCaptureQueueDropStats,
+    getRawCaptureHistory,
+} from '@/entrypoints/interceptor/capture-queue';
 
 describe('capture-queue', () => {
     let originalWindow: unknown;
@@ -13,6 +18,7 @@ describe('capture-queue', () => {
         delete win.__BLACKIYA_LOG_QUEUE__;
         delete win.__BLACKIYA_CAPTURE_QUEUE__;
         delete win.__BLACKIYA_RAW_CAPTURE_HISTORY__;
+        delete win.__BLACKIYA_QUEUE_DROP_STATS__;
     });
 
     afterEach(() => {
@@ -36,6 +42,26 @@ describe('capture-queue', () => {
             expect(queue.length).toBe(100);
             expect(queue[0].message).toBe('msg-10'); // Old ones evicted
             expect(queue[99].message).toBe('msg-109');
+        });
+
+        it('should track dropped log entries in queue-drop stats', () => {
+            const warn = mock(() => {});
+            const originalWarn = console.warn;
+            console.warn = warn;
+            try {
+                for (let i = 0; i < 110; i++) {
+                    appendToLogQueue({
+                        type: 'log',
+                        level: 'info',
+                        message: `msg-${i}`,
+                        __blackiyaToken: 'token',
+                    } as any);
+                }
+                expect(getCaptureQueueDropStats().logDropped).toBe(10);
+                expect(warn).toHaveBeenCalledTimes(1);
+            } finally {
+                console.warn = originalWarn;
+            }
         });
     });
 
@@ -66,6 +92,23 @@ describe('capture-queue', () => {
             expect(history.length).toBe(30); // MAX_CAPTURE_HISTORY_SIZE
             expect(history[0].data).toBe('30');
             expect(history[29].data).toBe('59');
+        });
+
+        it('should track dropped capture/history entries in queue-drop stats', () => {
+            const warn = mock(() => {});
+            const originalWarn = console.warn;
+            console.warn = warn;
+            try {
+                for (let i = 0; i < 60; i++) {
+                    appendToCaptureQueue({ url: 'http', platform: 'test', data: `${i}`, __blackiyaToken: 't' } as any);
+                }
+                const stats = getCaptureQueueDropStats();
+                expect(stats.captureDropped).toBe(10);
+                expect(stats.historyDropped).toBe(30);
+                expect(warn.mock.calls.length).toBeGreaterThan(0);
+            } finally {
+                console.warn = originalWarn;
+            }
         });
 
         it('getRawCaptureHistory should return empty array if uninitialized or invalid', () => {

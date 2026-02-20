@@ -1,4 +1,5 @@
 import { parseBatchexecuteResponse } from '@/utils/google-rpc';
+import { collectLikelyTextCandidates } from '@/utils/text-candidate-collector';
 import { dedupePreserveOrder } from '@/utils/text-utils';
 import { isGenericConversationTitle } from '@/utils/title-resolver';
 
@@ -34,41 +35,7 @@ const isLikelyGeminiText = (value: string): boolean => {
     return true;
 };
 
-const collectLikelyTextValues = (node: unknown, out: string[], depth = 0) => {
-    if (depth > 8 || out.length > 120) {
-        return;
-    }
-
-    if (typeof node === 'string') {
-        if (isLikelyGeminiText(node)) {
-            out.push(node.trim());
-        }
-        return;
-    }
-
-    if (!node || typeof node !== 'object') {
-        return;
-    }
-
-    if (Array.isArray(node)) {
-        for (const child of node) {
-            collectLikelyTextValues(child, out, depth + 1);
-        }
-        return;
-    }
-
-    const obj = node as Record<string, unknown>;
-    const preferredKeys = ['text', 'delta', 'content', 'message', 'output_text', 'part', 'parts', 'summary'];
-    for (const key of preferredKeys) {
-        if (key in obj) {
-            collectLikelyTextValues(obj[key], out, depth + 1);
-        }
-    }
-
-    for (const value of Object.values(obj)) {
-        collectLikelyTextValues(value, out, depth + 1);
-    }
-};
+const GEMINI_TEXT_PREFERRED_KEYS = ['text', 'delta', 'content', 'message', 'output_text', 'part', 'parts', 'summary'];
 
 const extractConversationIdFromPayload = (payload: string): string | undefined => {
     const match = payload.match(GEMINI_CONVERSATION_ID_REGEX);
@@ -152,7 +119,14 @@ export const extractGeminiStreamSignalsFromBuffer = (
 
         try {
             const parsed = JSON.parse(payload);
-            collectLikelyTextValues(parsed, textCandidates);
+            textCandidates.push(
+                ...collectLikelyTextCandidates(parsed, {
+                    preferredKeys: GEMINI_TEXT_PREFERRED_KEYS,
+                    maxDepth: 8,
+                    maxCandidates: 120,
+                    isLikelyText: isLikelyGeminiText,
+                }),
+            );
             collectGeminiTitleCandidates(parsed, titleCandidates);
         } catch {
             // Ignore partial payloads that are not valid JSON yet.
