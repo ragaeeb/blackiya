@@ -23,8 +23,17 @@ import type {
     StreamDumpConfigMessage,
 } from '@/utils/protocol/messages';
 import { generateSessionToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
-import { createAttemptCoordinator } from '@/utils/runner/attempt-coordinator';
-import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from '@/utils/runner/attempt-state';
+import { DEFAULT_EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
+import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
+import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
+import { ReadinessGate } from '@/utils/sfe/readiness-gate';
+import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
+import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
+import { resolveExportConversationTitleDecision as resolveExportTitleDecision } from '@/utils/title-resolver';
+import type { ConversationData } from '@/utils/types';
+import { ButtonManager } from '@/utils/ui/button-manager';
+import { createAttemptCoordinator } from './attempt-coordinator';
+import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from './attempt-state';
 import {
     type ButtonStateManagerDeps,
     injectSaveButton as injectSaveButtonCore,
@@ -32,56 +41,56 @@ import {
     refreshButtonState as refreshButtonStateCore,
     resolveReadinessDecision as resolveReadinessDecisionCore,
     scheduleButtonRefresh as scheduleButtonRefreshCore,
-} from '@/utils/runner/button-state-manager';
+} from './button-state-manager';
 import {
     type CalibrationCaptureDeps,
     isConversationDataLike,
     runCalibrationStep as runCalibrationStepPure,
-} from '@/utils/runner/calibration-capture';
-import { handleCalibrationClick as handleCalibrationClickCore } from '@/utils/runner/calibration-orchestration';
+} from './calibration-capture';
+import { handleCalibrationClick as handleCalibrationClickCore } from './calibration-orchestration';
 import {
     buildCalibrationOrderForMode,
     type CalibrationMode,
     shouldPersistCalibrationProfile,
-} from '@/utils/runner/calibration-policy';
-import type { CalibrationStep } from '@/utils/runner/calibration-runner';
+} from './calibration-policy';
+import type { CalibrationStep } from './calibration-runner';
 import {
     beginCanonicalStabilizationTick,
     type CanonicalStabilizationAttemptState,
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
-} from '@/utils/runner/canonical-stabilization';
+} from './canonical-stabilization';
 import {
     type CanonicalStabilizationTickDeps,
     clearCanonicalStabilizationRetry as clearCanonicalStabilizationRetryCore,
     hasCanonicalStabilizationTimedOut as hasCanonicalStabilizationTimedOutCore,
     maybeRestartCanonicalRecoveryAfterTimeout as maybeRestartCanonicalRecoveryAfterTimeoutCore,
     scheduleCanonicalStabilizationRetry as scheduleCanonicalStabilizationRetryCore,
-} from '@/utils/runner/canonical-stabilization-tick';
-import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
+} from './canonical-stabilization-tick';
+import { buildIsolatedDomSnapshot } from './dom-snapshot';
 import {
     buildExportPayloadForFormat as buildExportPayloadForFormatPure,
     extractResponseTextFromConversation,
-} from '@/utils/runner/export-helpers';
-import { detectPlatformGenerating } from '@/utils/runner/generation-guard';
+} from './export-helpers';
+import { detectPlatformGenerating } from './generation-guard';
 import {
     type InterceptionCaptureDeps,
     processInterceptionCapture as processInterceptionCaptureCore,
-} from '@/utils/runner/interception-capture';
-import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
-import { createCalibrationRuntime } from '@/utils/runner/platform-runtime-calibration';
-import { createStreamProbeRuntime } from '@/utils/runner/platform-runtime-stream-probe';
-import { createRuntimeWiring } from '@/utils/runner/platform-runtime-wiring';
-import { removeStreamProbePanel } from '@/utils/runner/probe-panel';
+} from './interception-capture';
+import { requestPageSnapshot } from './page-snapshot-bridge';
+import { createCalibrationRuntime } from './platform-runtime-calibration';
+import { createStreamProbeRuntime } from './platform-runtime-stream-probe';
+import { createRuntimeWiring } from './platform-runtime-wiring';
+import { removeStreamProbePanel } from './probe-panel';
 import {
     emitPublicStatusSnapshot as emitPublicStatusSnapshotCore,
     type PublicStatusDeps,
     type PublicStatusState,
-} from '@/utils/runner/public-status';
-import { evaluateReadinessForData as evaluateReadinessForDataPure } from '@/utils/runner/readiness-evaluation';
-import type { ResponseFinishedDeps } from '@/utils/runner/response-finished-handler';
-import { processResponseFinished as processResponseFinishedCore } from '@/utils/runner/response-finished-handler';
-import { createCleanupRuntime, type RunnerCleanupDeps } from '@/utils/runner/runtime-cleanup';
+} from './public-status';
+import { evaluateReadinessForData as evaluateReadinessForDataPure } from './readiness-evaluation';
+import type { ResponseFinishedDeps } from './response-finished-handler';
+import { processResponseFinished as processResponseFinishedCore } from './response-finished-handler';
+import { createCleanupRuntime, type RunnerCleanupDeps } from './runtime-cleanup';
 import {
     createStorageChangeListener as createStorageChangeListenerCore,
     createVisibilityChangeHandler as createVisibilityChangeHandlerCore,
@@ -93,38 +102,29 @@ import {
     type StreamProbeVisibilitySettingDeps,
     scheduleButtonInjectionRetries as scheduleButtonInjectionRetriesCore,
     type VisibilityRecoveryDeps,
-} from '@/utils/runner/runtime-settings';
+} from './runtime-settings';
 import {
     getConversationData as getConversationDataCore,
     handleSaveClick as handleSaveClickCore,
     type SavePipelineDeps,
-} from '@/utils/runner/save-pipeline';
-import type { SfeIngestionDeps } from '@/utils/runner/sfe-ingestion';
+} from './save-pipeline';
+import type { SfeIngestionDeps } from './sfe-ingestion';
 import {
     emitAttemptDisposed as emitAttemptDisposedCore,
     ingestSfeCanonicalSample as ingestSfeCanonicalSampleCore,
     ingestSfeLifecycleFromWirePhase as ingestSfeLifecycleFromWirePhaseCore,
     ingestSfeLifecycleSignal as ingestSfeLifecycleSignalCore,
     logSfeMismatchIfNeeded as logSfeMismatchIfNeededCore,
-} from '@/utils/runner/sfe-ingestion';
+} from './sfe-ingestion';
 import {
     isStaleAttemptMessage as isStaleAttemptMessageCore,
     type StaleAttemptFilterDeps,
-} from '@/utils/runner/stale-attempt-filter';
-import { RunnerState } from '@/utils/runner/state';
-import { createStreamDoneCoordinator } from '@/utils/runner/stream-done-coordinator';
-import type { RunnerStreamPreviewState } from '@/utils/runner/stream-preview';
-import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from '@/utils/runner/url-candidates';
-import type { WarmFetchDeps } from '@/utils/runner/warm-fetch';
-import { DEFAULT_EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
-import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
-import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
-import { ReadinessGate } from '@/utils/sfe/readiness-gate';
-import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
-import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
-import { resolveExportConversationTitleDecision as resolveExportTitleDecision } from '@/utils/title-resolver';
-import type { ConversationData } from '@/utils/types';
-import { ButtonManager } from '@/utils/ui/button-manager';
+} from './stale-attempt-filter';
+import { RunnerState } from './state';
+import { createStreamDoneCoordinator } from './stream-done-coordinator';
+import type { RunnerStreamPreviewState } from './stream-preview';
+import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from './url-candidates';
+import type { WarmFetchDeps } from './warm-fetch';
 
 // Local types
 
