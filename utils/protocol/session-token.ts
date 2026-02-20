@@ -30,7 +30,7 @@ export const getSessionToken = (): string | undefined => {
     }
 };
 
-export const setSessionToken = (token: string): void => {
+export const setSessionToken = (token: string) => {
     try {
         (window as any)[SESSION_TOKEN_KEY] = token;
     } catch {

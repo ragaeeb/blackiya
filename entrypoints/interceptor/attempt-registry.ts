@@ -20,22 +20,19 @@ export type InterceptorAttemptRegistry = {
     isAttemptDisposed: (attemptId: string | undefined) => boolean;
 };
 
-export function toInterceptorAttemptPrefix(platformName: string): string {
+export const toInterceptorAttemptPrefix = (platformName: string): string => {
     return platformName
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
-}
+};
 
-export function createInterceptorAttemptRegistry(
+export const createInterceptorAttemptRegistry = (
     input: CreateInterceptorAttemptRegistryInput,
-): InterceptorAttemptRegistry {
+): InterceptorAttemptRegistry => {
     const { state, maxAttemptBindings, defaultPlatformName } = input;
 
-    const bindAttemptToConversation = (
-        attemptId: string | null | undefined,
-        conversationId: string | undefined,
-    ): void => {
+    const bindAttemptToConversation = (attemptId: string | null | undefined, conversationId: string | undefined) => {
         if (!attemptId || !conversationId) {
             return;
         }
@@ -119,4 +116,4 @@ export function createInterceptorAttemptRegistry(
         peekAttemptIdForConversation,
         isAttemptDisposed,
     };
-}
+};

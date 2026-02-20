@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
+import { DEFAULT_GROK_MODEL_SLUG } from './constants';
 import { grokState } from './state';
 
 export const extractThinkingContent = (chatItem: any): any[] | undefined => {
@@ -27,6 +28,19 @@ const createAuthor = (senderType: string): Author => ({
     metadata: {},
 });
 
+const extractModelSlug = (item: any): string | null => {
+    const candidates = [item?.model, item?.model_slug, item?.modelSlug, item?.model_name, item?.metadata?.model];
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string') {
+            const trimmed = candidate.trim();
+            if (trimmed.length > 0) {
+                return trimmed;
+            }
+        }
+    }
+    return null;
+};
+
 export const parseGrokItem = (item: any) => {
     const chatItemId = item?.chat_item_id;
     if (!chatItemId) {
@@ -39,6 +53,7 @@ export const parseGrokItem = (item: any) => {
     const senderType = item?.sender_type || 'Agent';
     const isPartial = item?.is_partial || false;
     const thoughts = extractThinkingContent(item);
+    const modelSlug = extractModelSlug(item);
 
     const content: MessageContent = {
         content_type: thoughts ? 'thoughts' : 'text',
@@ -59,6 +74,7 @@ export const parseGrokItem = (item: any) => {
             grok_mode: grokMode,
             sender_type: senderType,
             is_partial: isPartial,
+            model: modelSlug ?? null,
             thinking_trace: item?.thinking_trace || '',
             ui_layout: item?.ui_layout || {},
         },
@@ -66,7 +82,7 @@ export const parseGrokItem = (item: any) => {
         channel: null,
     };
 
-    return { chatItemId, createdAtMs, senderType, messageText, messageObj };
+    return { chatItemId, createdAtMs, senderType, messageText, modelSlug, messageObj };
 };
 
 const getConversationId = (conversationIdOverride: string | undefined, chatItemId: string | undefined) =>
@@ -96,6 +112,7 @@ type ConversationBuildState = {
     previousNodeId: string;
     conversationId: string;
     conversationTitle: string;
+    modelSlug: string;
     createTime: number;
     updateTime: number;
 };
@@ -105,7 +122,7 @@ const updateConversationFromItem = (
     parsedItem: NonNullable<ReturnType<typeof parseGrokItem>>,
     index: number,
     conversationIdOverride?: string,
-): void => {
+) => {
     if (index === 0) {
         state.conversationId = getConversationId(conversationIdOverride, parsedItem.chatItemId);
         const titleCandidate = getTitleFromFirstItem(
@@ -126,6 +143,10 @@ const updateConversationFromItem = (
         state.updateTime = Math.max(state.updateTime, timestamp);
     }
 
+    if (parsedItem.modelSlug) {
+        state.modelSlug = parsedItem.modelSlug;
+    }
+
     state.mapping[parsedItem.chatItemId] = {
         id: parsedItem.chatItemId,
         message: parsedItem.messageObj,
@@ -139,8 +160,6 @@ const updateConversationFromItem = (
     }
     state.previousNodeId = parsedItem.chatItemId;
 };
-
-// ── GraphQL conversation parser ────────────────────────────────────────────────
 
 /**
  * Parse a GrokConversationItemsByRestId GraphQL response into ConversationData.
@@ -167,6 +186,7 @@ export const parseGrokResponse = (data: any, conversationIdOverride?: string): C
             previousNodeId: rootNode.id,
             conversationId: '',
             conversationTitle: 'Grok Conversation',
+            modelSlug: DEFAULT_GROK_MODEL_SLUG,
             createTime: Date.now() / 1000,
             updateTime: Date.now() / 1000,
         };
@@ -187,7 +207,10 @@ export const parseGrokResponse = (data: any, conversationIdOverride?: string): C
             logger.info('[Blackiya/Grok] Using cached title:', conversationTitle);
         }
 
-        const lastNodeId = items.length > 0 ? items[items.length - 1].chat_item_id : rootNode.id;
+        const lastNodeId =
+            typeof state.previousNodeId === 'string' && state.previousNodeId.length > 0 && mapping[state.previousNodeId]
+                ? state.previousNodeId
+                : rootNode.id;
 
         const result: ConversationData = {
             title: conversationTitle,
@@ -201,7 +224,7 @@ export const parseGrokResponse = (data: any, conversationIdOverride?: string): C
             gizmo_id: null,
             gizmo_type: null,
             is_archived: false,
-            default_model_slug: 'grok-2',
+            default_model_slug: state.modelSlug,
             safe_urls: [],
             blocked_urls: [],
         };

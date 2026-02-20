@@ -124,6 +124,46 @@ describe('Grok Adapter — grok.com REST parsing', () => {
             }).not.toThrow();
             expect(result).toBeNull();
         });
+
+        it('should set current_node to the latest load-responses message even when cached update_time is newer', () => {
+            const conversationMeta = {
+                conversation: {
+                    conversationId: CONV_ID,
+                    title: 'Future timestamp metadata',
+                    createTime: '2026-01-26T15:18:04.730551Z',
+                    modifyTime: '2030-01-26T15:19:21.015693Z',
+                },
+            };
+            const seeded = grokAdapter.parseInterceptedData(JSON.stringify(conversationMeta), META_URL);
+            expect(seeded).toBeNull();
+
+            const loadResponses = {
+                responses: [
+                    {
+                        responseId: 'resp-old',
+                        message: 'Older assistant message',
+                        sender: 'assistant',
+                        createTime: '2026-01-26T15:18:04.766Z',
+                        partial: false,
+                        model: 'grok-4',
+                    },
+                    {
+                        responseId: 'resp-newer',
+                        message: 'Newer assistant message',
+                        sender: 'assistant',
+                        createTime: '2026-01-26T15:19:19.160Z',
+                        parentResponseId: 'resp-old',
+                        partial: false,
+                        model: 'grok-4',
+                    },
+                ],
+            };
+
+            const result = grokAdapter.parseInterceptedData(JSON.stringify(loadResponses), LOAD_RESPONSES_URL);
+            expect(result).not.toBeNull();
+            expect(result?.current_node).toBe('resp-newer');
+            expect(result?.mapping['resp-newer']?.parent).toBe('resp-old');
+        });
     });
 
     describe('conversations_v2 metadata endpoint', () => {

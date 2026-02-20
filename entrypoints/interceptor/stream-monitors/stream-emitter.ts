@@ -36,7 +36,7 @@ export const consumeReadableStreamChunks = async (
     attemptId: string,
     isAttemptDisposed: (id: string) => boolean,
     onChunk: (chunkText: string, chunkBytes: number) => void | Promise<void>,
-): Promise<void> => {
+) => {
     while (true) {
         if (isAttemptDisposed(attemptId)) {
             return;

@@ -16,9 +16,7 @@
  *   - Window / document references (they differ per test-file Window instance)
  */
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export type MockAdapter = {
     name: string;
@@ -48,9 +46,15 @@ export type ReadinessResult = {
     latestAssistantTextLength: number;
 };
 
-// ---------------------------------------------------------------------------
+type UnknownRecord = Record<string, unknown>;
+type AssistantMessageLike = {
+    author: { role: string };
+    content?: { parts?: unknown };
+    status?: unknown;
+    end_turn?: unknown;
+};
+
 // Conversation fixture builder
-// ---------------------------------------------------------------------------
 
 /**
  * Builds a minimal canonical conversation fixture with one user turn and one
@@ -126,22 +130,16 @@ export const buildConversation = (
     };
 };
 
-// ---------------------------------------------------------------------------
 // Readiness evaluator (mirrors the real adapter contract)
-// ---------------------------------------------------------------------------
 
 /**
  * Deterministic readiness evaluator used in tests that need SFE to reach
  * captured_ready.  Matches the shape returned by real platform adapters.
  */
 export const evaluateReadinessMock = (data: unknown): ReadinessResult => {
-    const mapping = (data as any)?.mapping ?? {};
-    const assistants = Object.values(mapping)
-        .map((node: any) => node?.message)
-        .filter((message: any) => message?.author?.role === 'assistant');
-    const latest = assistants[assistants.length - 1] as any;
-    const text = (latest?.content?.parts ?? []).join('').trim();
-    const terminal = latest?.status !== 'in_progress' && latest?.end_turn === true;
+    const latest = getLatestAssistantMessage(data);
+    const text = latest ? extractAssistantText(latest) : '';
+    const terminal = latest ? isTerminalAssistantMessage(latest) : false;
     return {
         ready: terminal && text.length > 0,
         terminal,
@@ -151,9 +149,46 @@ export const evaluateReadinessMock = (data: unknown): ReadinessResult => {
     };
 };
 
-// ---------------------------------------------------------------------------
+const isRecord = (value: unknown): value is UnknownRecord => !!value && typeof value === 'object';
+
+const isMappingRecord = (value: unknown): value is Record<string, unknown> => isRecord(value);
+
+const isAssistantMessage = (value: unknown): value is AssistantMessageLike => {
+    if (!isRecord(value)) {
+        return false;
+    }
+    const author = value.author;
+    return isRecord(author) && author.role === 'assistant';
+};
+
+const getLatestAssistantMessage = (data: unknown): AssistantMessageLike | null => {
+    if (!isRecord(data) || !isMappingRecord(data.mapping)) {
+        return null;
+    }
+    const assistants = Object.values(data.mapping).flatMap((node) => {
+        if (!isRecord(node) || !isAssistantMessage(node.message)) {
+            return [];
+        }
+        return [node.message];
+    });
+    return assistants.length > 0 ? assistants[assistants.length - 1] : null;
+};
+
+const extractAssistantText = (message: AssistantMessageLike): string => {
+    const parts = message.content?.parts;
+    if (!Array.isArray(parts)) {
+        return '';
+    }
+    return parts
+        .filter((part): part is string => typeof part === 'string')
+        .join('')
+        .trim();
+};
+
+const isTerminalAssistantMessage = (message: AssistantMessageLike): boolean =>
+    message.status !== 'in_progress' && message.end_turn === true;
+
 // Adapter factory
-// ---------------------------------------------------------------------------
 
 /**
  * Returns a minimal mock adapter that satisfies the PlatformAdapter interface.
@@ -170,9 +205,16 @@ export const createMockAdapter = (document: DocumentLike): MockAdapter => ({
     parseInterceptedData: () => ({ conversation_id: '123' }),
 });
 
-// ---------------------------------------------------------------------------
+export const parseInterceptedDataMock = (raw: string): object | null => {
+    try {
+        const parsed = JSON.parse(raw) as { conversation_id?: unknown };
+        return typeof parsed?.conversation_id === 'string' ? parsed : null;
+    } catch {
+        return null;
+    }
+};
+
 // postStampedMessage factory
-// ---------------------------------------------------------------------------
 
 /**
  * Returns a `postStampedMessage` helper bound to the test file's local
@@ -185,21 +227,40 @@ export const createMockAdapter = (document: DocumentLike): MockAdapter => ({
  */
 export const makePostStampedMessage =
     (win: Window & typeof globalThis, getToken: () => string | null | undefined) =>
-    (data: Record<string, unknown>, origin: string): void => {
+    (data: Record<string, unknown>, origin: string) => {
         const token = getToken();
         win.postMessage(token ? { ...data, __blackiyaToken: token } : data, origin);
     };
 
-// ---------------------------------------------------------------------------
-// Logger call recorder factory
-// ---------------------------------------------------------------------------
+export const waitFor = async (
+    predicate: () => boolean,
+    { timeout = 2000, interval = 10 }: { timeout?: number; interval?: number } = {},
+) => {
+    const start = Date.now();
+    while (!predicate()) {
+        if (Date.now() - start > timeout) {
+            throw new Error('waitFor timed out');
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+};
+
+export const setupHappyDomGlobals = (window: Window & typeof globalThis): Document => {
+    (window as any).SyntaxError = SyntaxError;
+    const document = window.document as unknown as Document;
+    (global as any).window = window;
+    (global as any).document = document;
+    (global as any).history = window.history;
+    (global as any).HTMLElement = window.HTMLElement;
+    (global as any).HTMLButtonElement = window.HTMLButtonElement;
+    (global as any).MutationObserver = window.MutationObserver;
+    return document;
+};
 
 /**
- * Creates a set of mutable arrays that accumulate logger calls.  Pass these
- * into mock.module('@/utils/logger', …) to capture log output for assertions.
- *
- * Returns:
- *   { calls, logger } — `calls` is the raw buckets; `logger` is the mock object.
+ * Creates a logger mock wired to the provided `calls` buckets.  Pass the
+ * returned `{ logger }` object into mock.module('@/utils/logger', …).
+ * Captured calls accumulate in `calls` (passed by reference).
  */
 export type LoggerCalls = {
     debug: Array<{ message: unknown; args: unknown[] }>;
@@ -240,9 +301,7 @@ export const buildLoggerMock = (calls: LoggerCalls) => ({
     },
 });
 
-// ---------------------------------------------------------------------------
 // Browser mock factory
-// ---------------------------------------------------------------------------
 
 export type BrowserMockState = {
     storageData: Record<string, unknown>;

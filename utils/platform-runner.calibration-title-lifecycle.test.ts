@@ -158,7 +158,7 @@ mock.module('wxt/browser', () => ({
 
 import { getSessionToken } from '@/utils/protocol/session-token';
 // Import subject under test AFTER mocking
-import { resolveExportConversationTitle, runPlatform } from './platform-runner';
+import { resolveExportConversationTitle, runPlatform } from '@/utils/runner/platform-runtime';
 
 /** Stamps the session token onto a test message before posting via window.postMessage */
 const postStampedMessage = (data: Record<string, unknown>, origin: string) => {

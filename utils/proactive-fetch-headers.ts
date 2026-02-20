@@ -54,7 +54,7 @@ const appendHeaders = (target: Map<string, string>, headers: HeadersInit | undef
     }
 };
 
-export function toForwardableHeaderRecord(headers: HeadersInit | undefined): HeaderRecord | undefined {
+export const toForwardableHeaderRecord = (headers: HeadersInit | undefined): HeaderRecord | undefined => {
     const collected = new Map<string, string>();
     appendHeaders(collected, headers);
 
@@ -71,9 +71,9 @@ export function toForwardableHeaderRecord(headers: HeadersInit | undefined): Hea
     }
 
     return Object.keys(result).length > 0 ? result : undefined;
-}
+};
 
-export function mergeHeaderRecords(base?: HeaderRecord, incoming?: HeaderRecord): HeaderRecord | undefined {
+export const mergeHeaderRecords = (base?: HeaderRecord, incoming?: HeaderRecord): HeaderRecord | undefined => {
     if (!base && !incoming) {
         return undefined;
     }
@@ -81,9 +81,9 @@ export function mergeHeaderRecords(base?: HeaderRecord, incoming?: HeaderRecord)
         ...(base ?? {}),
         ...(incoming ?? {}),
     };
-}
+};
 
-export function extractForwardableHeadersFromFetchArgs(args: Parameters<typeof fetch>): HeaderRecord | undefined {
+export const extractForwardableHeadersFromFetchArgs = (args: Parameters<typeof fetch>): HeaderRecord | undefined => {
     const merged = new Map<string, string>();
     if (args[0] instanceof Request) {
         appendHeaders(merged, args[0].headers);
@@ -103,4 +103,4 @@ export function extractForwardableHeadersFromFetchArgs(args: Parameters<typeof f
     }
 
     return Object.keys(result).length > 0 ? result : undefined;
-}
+};

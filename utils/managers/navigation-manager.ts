@@ -7,11 +7,11 @@
  */
 import { logger } from '@/utils/logger';
 
-interface HistoryHook {
+type HistoryHook = {
     originalPushState: History['pushState'];
     originalReplaceState: History['replaceState'];
     listeners: Set<() => void>;
-}
+};
 
 const HISTORY_HOOK_KEY = '__BLACKIYA_NAV_HISTORY_HOOK__';
 
@@ -34,14 +34,14 @@ export class NavigationManager {
         this.onNavigationChange = onNavigationChange;
     }
 
-    public start(): void {
+    public start() {
         this.lastKnownUrl = window.location.href;
         this.setupMutationObserver();
         this.setupHistoryListeners();
         logger.info('NavigationManager started');
     }
 
-    public stop(): void {
+    public stop() {
         if (this.observer) {
             this.observer.disconnect();
             this.observer = null;
@@ -56,7 +56,7 @@ export class NavigationManager {
         this.unregisterHistoryListener();
     }
 
-    private setupMutationObserver(): void {
+    private setupMutationObserver() {
         this.observer = new MutationObserver(() => {
             if (this.navigationTimeout) {
                 clearTimeout(this.navigationTimeout);
@@ -77,12 +77,12 @@ export class NavigationManager {
         });
     }
 
-    private setupHistoryListeners(): void {
+    private setupHistoryListeners() {
         window.addEventListener('popstate', this.handlePotentialNavigation);
         this.registerHistoryListener();
     }
 
-    private registerHistoryListener(): void {
+    private registerHistoryListener() {
         const registry = window as Window & { [HISTORY_HOOK_KEY]?: HistoryHook };
         let hook = registry[HISTORY_HOOK_KEY];
         if (!hook) {
@@ -115,7 +115,7 @@ export class NavigationManager {
         hook.listeners.add(this.handlePotentialNavigation);
     }
 
-    private unregisterHistoryListener(): void {
+    private unregisterHistoryListener() {
         const registry = window as Window & { [HISTORY_HOOK_KEY]?: HistoryHook };
         const hook = registry[HISTORY_HOOK_KEY];
         if (!hook) {

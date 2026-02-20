@@ -6,19 +6,19 @@ type ProbeLeaseRecord = {
     updatedAtMs: number;
 };
 
-export interface ProbeLeaseCoordinatorStore {
+export type ProbeLeaseCoordinatorStore = {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
     remove(key: string): Promise<void>;
     getAll?: () => Promise<Record<string, string>>;
-}
+};
 
-export interface ProbeLeaseCoordinatorOptions {
+export type ProbeLeaseCoordinatorOptions = {
     store: ProbeLeaseCoordinatorStore;
     now?: () => number;
     keyPrefix?: string;
     maxEntries?: number;
-}
+};
 
 const DEFAULT_KEY_PREFIX = 'blackiya:probe-lease:';
 const DEFAULT_MAX_ENTRIES = 2_000;

@@ -34,8 +34,8 @@ Two-world design:
 
 2. ISOLATED world runner:
 - `entrypoints/main.content.ts`
-- `utils/platform-runner.ts` (compat re-export)
-- Core implementation: `utils/runner/index.ts`
+- Core implementation entry: `utils/runner/platform-runtime.ts`
+- Main orchestration engine: `utils/runner/platform-runner-engine.ts`
 - Handles lifecycle state, SFE readiness, UI gating, export
 
 Supporting modules:
@@ -52,6 +52,20 @@ Supporting modules:
   - `utils/runner/calibration-policy.ts`
   - `utils/runner/canonical-stabilization.ts`
   - `utils/runner/stream-preview.ts`
+  - `utils/runner/sfe-ingestion.ts`
+  - `utils/runner/response-finished-handler.ts`
+  - `utils/runner/navigation-handler.ts`
+  - `utils/runner/page-snapshot-bridge.ts`
+  - `utils/runner/readiness-evaluation.ts`
+  - `utils/runner/url-candidates.ts`
+  - `utils/runner/save-pipeline.ts`
+  - `utils/runner/calibration-orchestration.ts`
+  - `utils/runner/interception-capture.ts`
+  - `utils/runner/stale-attempt-filter.ts`
+  - `utils/runner/lifecycle-phase-handler.ts`
+  - `utils/runner/public-status.ts`
+  - `utils/runner/button-state-manager.ts`
+  - `utils/runner/wire-message-handlers.ts`
 - Protocol types: `utils/protocol/messages.ts`
 - Protocol contract: lifecycle/finished/delta messages require `attemptId` (legacy attempt-less messages removed)
 
@@ -79,6 +93,7 @@ Supporting modules:
 - Prefer inferred function return types; add explicit return types only when they materially improve clarity/safety.
 - Prefer `type` aliases over `interface` in TypeScript unless interface-specific behavior is required.
 - Prefer arrow functions over classic `function` declarations for new code.
+- Do not add decorative section-divider comments (for example `// ----` blocks); they add noise and waste tokens. Use meaningful names and concise functional comments only when needed.
 - Keep platform logic isolated to adapter/parser/classifier modules.
 - Avoid broad DOM heuristics as lifecycle source of truth for non-ChatGPT platforms.
 - No silent behavior changes without tests.
@@ -91,7 +106,7 @@ For any bug fix:
 2. Implement minimal fix.
 3. Re-run targeted tests.
 4. Re-run typecheck.
-5. Update `docs/handoff.md` status and `docs/architecture.md` when behavior/invariants change.
+5. Update `docs/architecture.md` (and `docs/PR.md` when present) when behavior/invariants change.
 
 Minimum commands:
 ```bash
@@ -107,6 +122,12 @@ bun test platforms/chatgpt.test.ts --bail
 bun test utils/platform-runner*.test.ts
 bun run test:e2e
 ```
+
+Test isolation rules (avoid cross-module pollution):
+- Do not use broad top-level `mock.module(...)` for shared modules unless the file is fully isolated; prefer scoped mocking or dependency injection patterns.
+- Always restore per-test monkey patches to globals/prototypes/DOM methods in `afterEach`.
+- Prefer creating a fresh `Window`/`document` per test and resetting `globalThis.window`/`globalThis.document` in teardown.
+- If a test needs selector-engine failure simulation, patch only the local instance method and keep a deterministic manual fallback assertion.
 
 ## 7) Logging and Diagnostics
 
@@ -145,7 +166,7 @@ When changing title handling:
 ## 9) Files Most Likely to Need Careful Review
 
 - `entrypoints/interceptor/bootstrap.ts`
-- `utils/runner/index.ts`
+- `utils/runner/platform-runner-engine.ts`
 - `platforms/gemini.ts`
 - `platforms/grok.ts`
 

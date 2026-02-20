@@ -34,11 +34,10 @@ mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { runPlatform } from '@/utils/platform-runner';
+import { runPlatform } from '@/utils/runner/platform-runtime';
 
-// ---------------------------------------------------------------------------
 // Shared calibration profile fixture
-// ---------------------------------------------------------------------------
+
 const makeCalibrationProfile = (platform: string, updatedAt?: string) => ({
     'userSettings.calibrationProfiles': {
         [platform]: {

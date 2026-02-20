@@ -6,9 +6,7 @@ import {
 } from '@/entrypoints/interceptor/text-extraction';
 import { consumeReadableStreamChunks, type StreamMonitorEmitter } from './stream-emitter';
 
-// ---------------------------------------------------------------------------
 // SSE frame parsing
-// ---------------------------------------------------------------------------
 
 const extractSseFramesFromBuffer = (buffer: string): { frames: string[]; remainingBuffer: string } => {
     const frames: string[] = [];
@@ -31,13 +29,26 @@ const extractSseDataPayload = (frame: string): string =>
         .join('\n')
         .trim();
 
-// ---------------------------------------------------------------------------
 // Per-frame processing
-// ---------------------------------------------------------------------------
 
 const appendAdapterBuffer = (buf: string, dataPayload: string): string => {
     const next = `${buf}data: ${dataPayload}\n\n`;
-    return next.length <= 400_000 ? next : next.slice(-250_000);
+    if (next.length <= 400_000) {
+        return next;
+    }
+    const trimmedTail = next.slice(-250_000);
+    if (trimmedTail.startsWith('data: ')) {
+        return trimmedTail;
+    }
+    const frameBoundary = trimmedTail.indexOf('\n\ndata: ');
+    if (frameBoundary >= 0) {
+        return trimmedTail.slice(frameBoundary + 2);
+    }
+    const firstFrameStart = trimmedTail.indexOf('data: ');
+    if (firstFrameStart >= 0) {
+        return trimmedTail.slice(firstFrameStart);
+    }
+    return `data: ${dataPayload}\n\n`;
 };
 
 type SseFrameContext = {
@@ -184,9 +195,7 @@ const processChunkText = (
     );
 };
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Attaches to a cloned ChatGPT SSE response stream and emits lifecycle,
@@ -197,7 +206,7 @@ export const monitorChatGptSseLifecycle = async (
     attemptId: string,
     emit: StreamMonitorEmitter,
     conversationId?: string,
-): Promise<void> => {
+) => {
     if (!response.body) {
         return;
     }

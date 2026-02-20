@@ -2,40 +2,40 @@ import { resolveTokenValidationFailureReason, stampToken } from '@/utils/protoco
 
 export type JsonBridgeFormat = 'original' | 'common';
 
-interface JsonBridgeRequestMessage {
+type JsonBridgeRequestMessage = {
     type: string;
     requestId: string;
     format: JsonBridgeFormat;
     __blackiyaToken?: string;
-}
+};
 
-interface JsonBridgeResponseMessage {
+type JsonBridgeResponseMessage = {
     type: string;
     requestId: string;
     success: boolean;
     data?: unknown;
     error?: string;
     __blackiyaToken?: string;
-}
+};
 
-export interface CreateWindowJsonRequesterOptions {
+export type CreateWindowJsonRequesterOptions = {
     requestType: string;
     responseType: string;
     timeoutMs?: number;
     makeRequestId?: () => string;
-}
+};
 
-function defaultRequestId(): string {
+const defaultRequestId = (): string => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
         return crypto.randomUUID();
     }
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+};
 
-export function createWindowJsonRequester(
+export const createWindowJsonRequester = (
     targetWindow: Window,
     options: CreateWindowJsonRequesterOptions,
-): (format: JsonBridgeFormat) => Promise<unknown> {
+): ((format: JsonBridgeFormat) => Promise<unknown>) => {
     const timeoutMs = options.timeoutMs ?? 5_000;
     const makeRequestId = options.makeRequestId ?? defaultRequestId;
     return (format: JsonBridgeFormat) =>
@@ -90,4 +90,4 @@ export function createWindowJsonRequester(
                 reject(new Error('TIMEOUT'));
             }, timeoutMs);
         });
-}
+};

@@ -42,7 +42,7 @@ const hasReasoningMetadata = (message: Message) => {
     );
 };
 
-export function hasMeaningfulAssistantContent(message: Message): boolean {
+export const hasMeaningfulAssistantContent = (message: Message): boolean => {
     if (message.author?.role !== 'assistant') {
         return false;
     }
@@ -53,9 +53,9 @@ export function hasMeaningfulAssistantContent(message: Message): boolean {
         hasNonEmptyThoughts(message) ||
         hasReasoningMetadata(message)
     );
-}
+};
 
-export function isConversationReady(conversation: ConversationData): boolean {
+export const isConversationReady = (conversation: ConversationData): boolean => {
     if (!conversation || typeof conversation !== 'object') {
         return false;
     }
@@ -84,4 +84,4 @@ export function isConversationReady(conversation: ConversationData): boolean {
     }
 
     return finished.some((message) => hasMeaningfulAssistantContent(message));
-}
+};

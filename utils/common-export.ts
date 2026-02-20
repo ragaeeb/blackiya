@@ -8,7 +8,7 @@
 
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
-export interface CommonConversationExport {
+export type CommonConversationExport = {
     format: 'common';
     llm: string;
     model?: string;
@@ -19,7 +19,7 @@ export interface CommonConversationExport {
     prompt: string;
     response: string;
     reasoning: string[];
-}
+};
 
 const toIsoTimestamp = (seconds?: number | null): string | undefined => {
     if (typeof seconds !== 'number' || Number.isNaN(seconds)) {
@@ -44,7 +44,7 @@ const extractMessageText = (message: Message): string => {
     return '';
 };
 
-const pushTrimmedIfString = (fragments: string[], value: unknown): void => {
+const pushTrimmedIfString = (fragments: string[], value: unknown) => {
     if (typeof value !== 'string') {
         return;
     }

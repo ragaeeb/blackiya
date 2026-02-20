@@ -30,7 +30,7 @@ export { resetGeminiAdapterState } from './state';
 
 const MAX_TITLE_LENGTH = 80;
 
-const maybeUpdateActiveConversationTitle = (convId: string, title: string): void => {
+const maybeUpdateActiveConversationTitle = (convId: string, title: string) => {
     const activeObj = geminiState.activeConversations.get(convId);
     if (!activeObj?.title || activeObj.title === title) {
         return;
@@ -152,7 +152,7 @@ export const geminiAdapter: LLMPlatform = {
     },
 
     isPlatformGenerating() {
-        // TODO(v2.0.x): Implement Gemini DOM generation detection once selectors are stable.
+        // Gemini generation gating is driven by network lifecycle/SFE signals.
         return false;
     },
 

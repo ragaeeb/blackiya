@@ -5,11 +5,7 @@ import { logger } from '@/utils/logger';
 import type { LRUCache } from '@/utils/lru-cache';
 import { extractTitleCandidatesFromPayload } from './title-utils';
 
-// ── Titles endpoint detection ──────────────────────────────────────────────────
-
 export const isTitlesEndpoint = (url: string) => url.includes(`rpcids=${GEMINI_RPC_IDS.TITLES}`);
-
-// ── Conversation ID extraction from URL ───────────────────────────────────────
 
 const CONVERSATION_ID_IN_PAYLOAD_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 
@@ -32,14 +28,12 @@ export const extractConversationIdFromSourcePath = (url: string): string | null 
 const extractConversationIdFromRawPayload = (rawPayload: string): string | null =>
     rawPayload.match(CONVERSATION_ID_IN_PAYLOAD_REGEX)?.[1] ?? null;
 
-// ── RPC title hydration ────────────────────────────────────────────────────────
-
 export const hydrateGeminiTitleCandidatesFromRpcResults = (
     rpcResults: BatchexecuteResult[],
     url: string,
     titlesCache: LRUCache<string, string>,
     onTitleUpdated?: (conversationId: string, title: string) => void,
-): void => {
+) => {
     const sourcePathConversationId = extractConversationIdFromSourcePath(url);
 
     for (const rpcResult of rpcResults) {
@@ -83,9 +77,7 @@ export const hydrateGeminiTitleCandidatesFromRpcResults = (
     }
 };
 
-// ── Conversation-list titles (MaZiqc) ─────────────────────────────────────────
-
-const parseGeminiTitlesPayload = (data: string): unknown | null => {
+const parseGeminiTitlesPayload = (data: string): unknown => {
     const rpcResults = parseBatchexecuteResponse(data);
     const titleRpc = rpcResults.find((res) => res.rpcId === GEMINI_RPC_IDS.TITLES);
     if (!titleRpc?.payload) {
@@ -152,9 +144,7 @@ export const parseTitlesResponse = (
     }
 };
 
-// ── Conversation RPC finding ───────────────────────────────────────────────────
-
-const parseRpcPayload = (payload: string, rpcId: string): unknown | null => {
+const parseRpcPayload = (payload: string, rpcId: string): unknown => {
     try {
         return JSON.parse(payload);
     } catch (error) {
@@ -181,7 +171,7 @@ const findExactConversationRpc = (results: BatchexecuteResult[]): { rpcId: strin
 
 const findHeuristicConversationRpc = (
     results: BatchexecuteResult[],
-    isConversationPayload?: (payload: unknown) => boolean,
+    isConversationPayload: (payload: unknown) => boolean = () => true,
 ): { rpcId: string; payload: unknown } | null => {
     for (let i = results.length - 1; i >= 0; i--) {
         const res = results[i];

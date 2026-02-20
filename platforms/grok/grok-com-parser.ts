@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
+import { DEFAULT_GROK_MODEL_SLUG } from './constants';
 import { grokState } from './state';
 import {
     extractGrokComConversationIdFromUrl,
@@ -8,7 +9,7 @@ import {
     isGrokComResponseNodesEndpoint,
 } from './url-utils';
 
-export const tryParseJsonIfNeeded = (data: string | any): any | null => {
+export const tryParseJsonIfNeeded = (data: unknown): unknown => {
     if (typeof data !== 'string') {
         return data;
     }
@@ -38,7 +39,7 @@ export const createGrokComConversation = (conversationId: string): ConversationD
         gizmo_id: null,
         gizmo_type: null,
         is_archived: false,
-        default_model_slug: 'grok-4',
+        default_model_slug: DEFAULT_GROK_MODEL_SLUG,
         safe_urls: [],
         blocked_urls: [],
     };
@@ -76,7 +77,7 @@ export const attachGrokComNodeToParent = (
     nodeId: string,
     parentId: string,
     rootId: string,
-): void => {
+) => {
     const parentKey = parentId || rootId;
     const node = ensureGrokComNode(conversation, nodeId, rootId);
 
@@ -95,8 +96,6 @@ export const attachGrokComNodeToParent = (
 
 export const hasGrokComMessages = (conversation: ConversationData): boolean =>
     Object.values(conversation.mapping).some((node) => node.message !== null);
-
-// ── Message building ───────────────────────────────────────────────────────────
 
 const createGrokComAuthor = (sender: string): Author => ({
     role: sender === 'human' ? 'user' : 'assistant',
@@ -130,8 +129,6 @@ export const buildGrokComMessage = (
     recipient: 'all',
     channel: null,
 });
-
-// ── Response normalization ─────────────────────────────────────────────────────
 
 const normalizeFromGrokComObject = (data: any): any[] | null => {
     if (typeof data.responseId === 'string') {
@@ -181,8 +178,6 @@ export const normalizeGrokComResponses = (data: any): any[] | null => {
     return null;
 };
 
-// ── Individual response item parsing ──────────────────────────────────────────
-
 export const parseGrokComResponseItem = (response: any, rootId: string) => {
     const responseId = typeof response?.responseId === 'string' ? response.responseId : null;
     if (!responseId) {
@@ -205,8 +200,6 @@ export const parseGrokComResponseItem = (response: any, rootId: string) => {
     };
 };
 
-// ── Endpoint parsers ───────────────────────────────────────────────────────────
-
 export const parseGrokComResponses = (data: any, conversationId: string): ConversationData | null => {
     const responses = normalizeGrokComResponses(data);
     if (!responses) {
@@ -216,7 +209,7 @@ export const parseGrokComResponses = (data: any, conversationId: string): Conver
     const conversation = getOrCreateGrokComConversation(conversationId);
     const rootId = ensureGrokComRoot(conversation);
     let latestNodeId = conversation.current_node;
-    let latestTimestamp = conversation.update_time;
+    let latestTimestamp = 0;
 
     for (const response of responses) {
         const parsed = parseGrokComResponseItem(response, rootId);
@@ -242,6 +235,7 @@ export const parseGrokComResponses = (data: any, conversationId: string): Conver
         }
     }
 
+    conversation.update_time = Math.max(conversation.update_time, latestTimestamp);
     conversation.current_node = latestNodeId;
     return conversation;
 };
@@ -295,11 +289,17 @@ export const parseGrokComResponseNodes = (data: any, conversationId: string): Co
     return hasGrokComMessages(conversation) ? conversation : null;
 };
 
-export const parseGrokComLoadResponsesPayload = (
-    data: string | any,
-    conversationId: string,
-): ConversationData | null => {
-    const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+export const parseGrokComLoadResponsesPayload = (data: unknown, conversationId: string): ConversationData | null => {
+    let dataStr = '';
+    if (typeof data === 'string') {
+        dataStr = data;
+    } else {
+        const serialized = JSON.stringify(data);
+        if (typeof serialized !== 'string') {
+            return null;
+        }
+        dataStr = serialized;
+    }
     const lines = dataStr
         .trim()
         .split('\n')
@@ -330,10 +330,10 @@ export const parseGrokComLoadResponsesPayload = (
 };
 
 const resolveGrokComEndpointContext = (
-    data: string | any,
+    data: unknown,
     url: string,
     options: { parsePayload: boolean },
-): { conversationId: string; parsed: any } | { conversationId: string; parsed: string | any } | null => {
+): { conversationId: string; parsed: unknown } | null => {
     const conversationId = extractGrokComConversationIdFromUrl(url);
     if (!conversationId) {
         return null;
@@ -353,7 +353,7 @@ const resolveGrokComEndpointContext = (
  * Returns `undefined` when the URL does not match any known grok.com REST path,
  * signalling the caller to try the next parsing strategy.
  */
-export const tryParseGrokComRestEndpoint = (data: string | any, url: string): ConversationData | null | undefined => {
+export const tryParseGrokComRestEndpoint = (data: unknown, url: string): ConversationData | null | undefined => {
     if (isGrokComMetaEndpoint(url)) {
         const context = resolveGrokComEndpointContext(data, url, { parsePayload: true });
         return context ? parseGrokComConversationMeta(context.parsed, context.conversationId) : null;

@@ -1,4 +1,4 @@
-export function appendStreamProbePreview(existing: string, delta: string, maxLength = 12000) {
+export const appendStreamProbePreview = (existing: string, delta: string, maxLength = 12000) => {
     const merged = `${existing}${delta}`;
     if (merged.length <= maxLength) {
         return merged;
@@ -7,4 +7,4 @@ export function appendStreamProbePreview(existing: string, delta: string, maxLen
         return merged.slice(merged.length - maxLength);
     }
     return `...${merged.slice(merged.length - (maxLength - 3))}`;
-}
+};

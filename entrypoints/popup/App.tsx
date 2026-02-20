@@ -9,7 +9,7 @@ import { downloadMinimalDebugReport } from '@/utils/minimal-logs';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import packageJson from '../../package.json';
 
-function App() {
+const App = () => {
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
@@ -242,6 +242,6 @@ function App() {
             </div>
         </div>
     );
-}
+};
 
 export default App;

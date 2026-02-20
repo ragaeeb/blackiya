@@ -12,7 +12,7 @@ export type RunnerStreamPreviewState = {
     maxPreviewLength?: number;
 };
 
-export function mergeRunnerStreamProbeText(current: string, text: string): string {
+export const mergeRunnerStreamProbeText = (current: string, text: string): string => {
     if (text.startsWith(current)) {
         return text; // Snapshot-style update (preferred)
     }
@@ -32,14 +32,14 @@ export function mergeRunnerStreamProbeText(current: string, text: string): strin
         /[A-Za-z0-9]$/.test(current) &&
         /^[A-Z]/.test(text);
     return needsSpaceJoin ? `${current} ${text}` : `${current}${text}`;
-}
+};
 
-export function withPreservedRunnerStreamMirrorSnapshot(
+export const withPreservedRunnerStreamMirrorSnapshot = (
     state: RunnerStreamPreviewState,
     conversationId: string,
     status: string,
     primaryBody: string,
-): string {
+): string => {
     if (!status.startsWith('stream-done:')) {
         return primaryBody;
     }
@@ -58,38 +58,41 @@ export function withPreservedRunnerStreamMirrorSnapshot(
 
     const boundedSnapshot = normalizedLive.length > 4000 ? `...${normalizedLive.slice(-3800)}` : normalizedLive;
     return `${primaryBody}\n\n--- Preserved live mirror snapshot (pre-final) ---\n${boundedSnapshot}`;
-}
+};
 
-export function appendPendingRunnerStreamPreview(
+export const appendPendingRunnerStreamPreview = (
     state: RunnerStreamPreviewState,
     canonicalAttemptId: string,
     text: string,
-): string {
+): string => {
     const current = state.liveByAttemptWithoutConversation.get(canonicalAttemptId) ?? '';
     const next = mergeRunnerStreamProbeText(current, text);
     const capped = appendStreamProbePreview('', next, state.maxPreviewLength ?? DEFAULT_MAX_PREVIEW_LENGTH);
     setBoundedMapValue(state.liveByAttemptWithoutConversation, canonicalAttemptId, capped, state.maxEntries);
     return capped;
-}
+};
 
-export function removePendingRunnerStreamPreview(state: RunnerStreamPreviewState, canonicalAttemptId: string): boolean {
+export const removePendingRunnerStreamPreview = (
+    state: RunnerStreamPreviewState,
+    canonicalAttemptId: string,
+): boolean => {
     return state.liveByAttemptWithoutConversation.delete(canonicalAttemptId);
-}
+};
 
-export function ensureLiveRunnerStreamPreview(state: RunnerStreamPreviewState, conversationId: string): string {
+export const ensureLiveRunnerStreamPreview = (state: RunnerStreamPreviewState, conversationId: string): string => {
     const current = state.liveByConversation.get(conversationId);
     if (current !== undefined) {
         return current;
     }
     setBoundedMapValue(state.liveByConversation, conversationId, '', state.maxEntries);
     return '';
-}
+};
 
-export function migratePendingRunnerStreamPreview(
+export const migratePendingRunnerStreamPreview = (
     state: RunnerStreamPreviewState,
     conversationId: string,
     canonicalAttemptId: string,
-): string | null {
+): string | null => {
     const pending = state.liveByAttemptWithoutConversation.get(canonicalAttemptId);
     if (!pending) {
         return null;
@@ -100,16 +103,16 @@ export function migratePendingRunnerStreamPreview(
     const capped = appendStreamProbePreview('', merged, state.maxPreviewLength ?? DEFAULT_MAX_PREVIEW_LENGTH);
     setBoundedMapValue(state.liveByConversation, conversationId, capped, state.maxEntries);
     return capped;
-}
+};
 
-export function appendLiveRunnerStreamPreview(
+export const appendLiveRunnerStreamPreview = (
     state: RunnerStreamPreviewState,
     conversationId: string,
     text: string,
-): string {
+): string => {
     const current = state.liveByConversation.get(conversationId) ?? '';
     const next = mergeRunnerStreamProbeText(current, text);
     const capped = appendStreamProbePreview('', next, state.maxPreviewLength ?? DEFAULT_MAX_PREVIEW_LENGTH);
     setBoundedMapValue(state.liveByConversation, conversationId, capped, state.maxEntries);
     return capped;
-}
+};

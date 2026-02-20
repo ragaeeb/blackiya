@@ -77,7 +77,7 @@ export const downloadAsJSON = (
     data: unknown,
     filename: string,
     downloadImpl: DownloadStringAsJsonFileFn = downloadStringAsJsonFile,
-): void => {
+) => {
     try {
         const jsonString = JSON.stringify(data, null, 2);
         downloadImpl(jsonString, `${filename}.json`);

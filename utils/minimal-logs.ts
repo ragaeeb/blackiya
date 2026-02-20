@@ -12,26 +12,26 @@ import type { LogEntry } from './logs-storage';
 const UUID_RE = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
 const SHORT_HEX_ID_RE = /\b[a-f0-9]{16}\b/i;
 
-function extractConvId(msg: string): string | null {
+const extractConvId = (msg: string): string | null => {
     const m = msg.match(UUID_RE);
     if (m) {
         return m[0];
     }
     const short = msg.match(SHORT_HEX_ID_RE);
     return short ? short[0] : null;
-}
+};
 
-function extractConvIdFromData(data: unknown): string | null {
+const extractConvIdFromData = (data: unknown): string | null => {
     if (data == null) {
         return null;
     }
     const serialized = typeof data === 'string' ? data : JSON.stringify(data);
     return extractConvId(serialized);
-}
+};
 
 const PREFIX_RE = /^\[\w+\]\s*/;
 
-function extractPlatform(msg: string): string | null {
+const extractPlatform = (msg: string): string | null => {
     const afterBracket = msg.replace(PREFIX_RE, '').trim();
     const parts = afterBracket.split(/\s+/);
     if (afterBracket.startsWith('API match ') && parts[2]) {
@@ -41,18 +41,18 @@ function extractPlatform(msg: string): string | null {
         return parts[1];
     }
     return null;
-}
+};
 
-function isSessionStart(msg: string): boolean {
+const isSessionStart = (msg: string): boolean => {
     const s = msg.replace(PREFIX_RE, '').trim();
     return s.startsWith('API match ') || s.startsWith('trigger ');
-}
+};
 
-function normalizeLine(msg: string): string {
+const normalizeLine = (msg: string): string => {
     return msg.replace(PREFIX_RE, '').trim();
-}
+};
 
-function isInterceptorMessage(msg: string): boolean {
+const isInterceptorMessage = (msg: string): boolean => {
     // Include interceptor logs, content script logs, discovery logs, and platform-specific logs
     return (
         msg.includes('[i]') ||
@@ -64,9 +64,9 @@ function isInterceptorMessage(msg: string): boolean {
         msg.includes('captured/cached') ||
         msg.includes('Failed to parse')
     );
-}
+};
 
-function isNoiseLine(line: string): boolean {
+const isNoiseLine = (line: string): boolean => {
     const isUnmatchedIntercept = line.includes('Intercepted XHR:') && line.includes('Adapter: None');
     if (isUnmatchedIntercept) {
         return false;
@@ -84,9 +84,9 @@ function isNoiseLine(line: string): boolean {
         line.includes('Response text preview') ||
         line.includes('Full response text')
     );
-}
+};
 
-function isCriticalLine(line: string): boolean {
+const isCriticalLine = (line: string): boolean => {
     // Keep lines that indicate success/failure or important state changes
     return (
         line.includes('[DISCOVERY]') ||
@@ -155,9 +155,9 @@ function isCriticalLine(line: string): boolean {
         line.includes('Title resolved from DOM fallback') ||
         line.includes('Export title decision')
     );
-}
+};
 
-function pickFallbackDiagnosticLines(logs: LogEntry[]): string[] {
+const pickFallbackDiagnosticLines = (logs: LogEntry[]): string[] => {
     const patterns = [
         'Content script running for',
         'Runner init',
@@ -210,21 +210,21 @@ function pickFallbackDiagnosticLines(logs: LogEntry[]): string[] {
 
     const unique = Array.from(new Set(picked));
     return unique.slice(Math.max(0, unique.length - 20));
-}
+};
 
-interface SessionGroup {
+type SessionGroup = {
     platform: string;
     convId: string | null;
     events: string[];
     count: number;
-}
+};
 
 type RawSession = { platform: string; convId: string | null; events: string[] };
 
-function processLogEntry(
+const processLogEntry = (
     entry: LogEntry,
     _current: RawSession | null,
-): { action: 'skip' } | { action: 'start'; session: RawSession } | { action: 'append'; line: string } {
+): { action: 'skip' } | { action: 'start'; session: RawSession } | { action: 'append'; line: string } => {
     const msg = entry.message;
     const line = normalizeLine(msg);
 
@@ -253,9 +253,9 @@ function processLogEntry(
         return { action: 'start', session: { platform, convId, events: [line] } };
     }
     return { action: 'append', line };
-}
+};
 
-function dedupeByPlatformConvId(sessions: RawSession[]): SessionGroup[] {
+const dedupeByPlatformConvId = (sessions: RawSession[]): SessionGroup[] => {
     const key = (g: RawSession) => `${g.platform}\n${g.convId ?? ''}`;
     const map = new Map<string, { platform: string; convId: string | null; events: string[]; count: number }>();
     for (const s of sessions) {
@@ -270,9 +270,9 @@ function dedupeByPlatformConvId(sessions: RawSession[]): SessionGroup[] {
         }
     }
     return [...map.values()];
-}
+};
 
-function inferPlatformFromLine(line: string, entry: LogEntry): string {
+const inferPlatformFromLine = (line: string, entry: LogEntry): string => {
     if (line.includes('Gemini')) {
         return 'Gemini';
     }
@@ -290,9 +290,9 @@ function inferPlatformFromLine(line: string, entry: LogEntry): string {
         }
     }
     return 'Unknown';
-}
+};
 
-function isSyntheticSessionAnchor(line: string): boolean {
+const isSyntheticSessionAnchor = (line: string): boolean => {
     return (
         line.includes('Successfully captured') ||
         line.includes('captured/cached') ||
@@ -308,17 +308,17 @@ function isSyntheticSessionAnchor(line: string): boolean {
         line.includes('Gemini stream title emitted') ||
         line.includes('title resolved from stream')
     );
-}
+};
 
-function appendEntryData(line: string, entry: LogEntry): string {
+const appendEntryData = (line: string, entry: LogEntry): string => {
     if (!entry.data || entry.data.length === 0 || !entry.data[0]) {
         return line;
     }
     const dataStr = typeof entry.data[0] === 'object' ? JSON.stringify(entry.data[0]) : String(entry.data[0]);
     return `${line} ${dataStr}`;
-}
+};
 
-function processAppendResult(current: RawSession | null, entry: LogEntry, line: string): void {
+const processAppendResult = (current: RawSession | null, entry: LogEntry, line: string) => {
     if (!current) {
         return;
     }
@@ -343,9 +343,9 @@ function processAppendResult(current: RawSession | null, entry: LogEntry, line: 
             }
         }
     }
-}
+};
 
-function buildSessionGroups(logs: LogEntry[]): SessionGroup[] {
+const buildSessionGroups = (logs: LogEntry[]): SessionGroup[] => {
     const rawSessions: RawSession[] = [];
     let current: RawSession | null = null;
 
@@ -363,9 +363,9 @@ function buildSessionGroups(logs: LogEntry[]): SessionGroup[] {
     }
 
     return dedupeByPlatformConvId(rawSessions);
-}
+};
 
-function buildSyntheticSessionGroups(logs: LogEntry[]): SessionGroup[] {
+const buildSyntheticSessionGroups = (logs: LogEntry[]): SessionGroup[] => {
     const groupsByConvId = new Map<string, SessionGroup>();
     const convOrder: string[] = [];
 
@@ -406,9 +406,9 @@ function buildSyntheticSessionGroups(logs: LogEntry[]): SessionGroup[] {
     }
 
     return convOrder.map((convId) => groupsByConvId.get(convId)).filter((group): group is SessionGroup => !!group);
-}
+};
 
-function buildEmptyReport(logs: LogEntry[]): string {
+const buildEmptyReport = (logs: LogEntry[]): string => {
     const fallbackDiagnostics = pickFallbackDiagnosticLines(logs);
     const lines = [
         '# Blackiya Debug Report',
@@ -426,9 +426,9 @@ function buildEmptyReport(logs: LogEntry[]): string {
     }
 
     return lines.join('\n');
-}
+};
 
-function buildSessionSection(groups: SessionGroup[]): string[] {
+const buildSessionSection = (groups: SessionGroup[]): string[] => {
     const lines: string[] = [
         '# Blackiya Debug Report',
         '',
@@ -448,9 +448,9 @@ function buildSessionSection(groups: SessionGroup[]): string[] {
     }
 
     return lines;
-}
+};
 
-function appendErrorSection(lines: string[], logs: LogEntry[]): void {
+const appendErrorSection = (lines: string[], logs: LogEntry[]) => {
     const errors = logs.filter(
         (e) => e.level === 'error' && (e.message.includes('[i]') || e.message.includes('[interceptor]')),
     );
@@ -469,13 +469,13 @@ function appendErrorSection(lines: string[], logs: LogEntry[]): void {
         }
     }
     lines.push('');
-}
+};
 
 /**
  * Generate minimal debug report: deduplicated, no emojis, [i] context.
  * Includes compact timestamps (seconds from start) for timing analysis.
  */
-export function generateMinimalDebugReport(logs: LogEntry[]): string {
+export const generateMinimalDebugReport = (logs: LogEntry[]): string => {
     let groups = buildSessionGroups(logs);
     if (groups.length === 0) {
         groups = buildSyntheticSessionGroups(logs);
@@ -489,9 +489,9 @@ export function generateMinimalDebugReport(logs: LogEntry[]): string {
     appendErrorSection(lines, logs);
 
     return lines.join('\n');
-}
+};
 
-export function downloadMinimalDebugReport(logs: LogEntry[]): void {
+export const downloadMinimalDebugReport = (logs: LogEntry[]) => {
     const report = generateMinimalDebugReport(logs);
     const blob = new Blob([report], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -501,4 +501,4 @@ export function downloadMinimalDebugReport(logs: LogEntry[]): void {
     link.download = `blackiya-debug-${timestamp}.txt`;
     link.click();
     URL.revokeObjectURL(url);
-}
+};

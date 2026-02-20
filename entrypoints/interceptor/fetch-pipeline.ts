@@ -18,7 +18,7 @@ export type FetchInterceptorContext = {
     lifecycleAttemptId: string | undefined;
 };
 
-export interface CreateFetchInterceptorContextDeps {
+export type CreateFetchInterceptorContextDeps = {
     getRequestUrl: (input: Parameters<typeof fetch>[0]) => string;
     getRequestMethod: (args: Parameters<typeof fetch>) => string;
     getPlatformAdapterByApiUrl: (url: string) => LLMPlatform | null;
@@ -29,7 +29,7 @@ export interface CreateFetchInterceptorContextDeps {
     resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string;
     resolveLifecycleConversationId: (args: Parameters<typeof fetch>) => string | undefined;
     safePathname: (url: string) => string;
-}
+};
 
 const shouldResolveAttemptForRequest = (adapter: LLMPlatform | null, method: string, url: string) => {
     return !!adapter && (method === 'POST' || (adapter.name === 'Grok' && isGrokStreamingEndpoint(url)));
@@ -47,10 +47,10 @@ const resolveNonChatAttemptId = (
     return deps.resolveAttemptIdForConversation(conversationId, adapter.name);
 };
 
-export function createFetchInterceptorContext(
+export const createFetchInterceptorContext = (
     args: Parameters<typeof fetch>,
     deps: CreateFetchInterceptorContextDeps,
-): FetchInterceptorContext {
+): FetchInterceptorContext => {
     const outgoingUrl = deps.getRequestUrl(args[0]);
     const outgoingMethod = deps.getRequestMethod(args).toUpperCase();
     const outgoingPath = deps.safePathname(outgoingUrl);
@@ -89,4 +89,4 @@ export function createFetchInterceptorContext(
         lifecycleConversationId,
         lifecycleAttemptId,
     };
-}
+};

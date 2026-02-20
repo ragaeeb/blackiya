@@ -9,15 +9,18 @@ export type XhrLifecycleContext = {
     attemptId?: string;
 };
 
-export interface BuildXhrLifecycleContextDeps {
+export type BuildXhrLifecycleContextDeps = {
     getPlatformAdapterByApiUrl: (url: string) => LLMPlatform | null;
     chatGptPlatformName: string;
     shouldEmitNonChatLifecycleForRequest: (adapter: LLMPlatform, url: string) => boolean;
     resolveRequestConversationId: (adapter: LLMPlatform, requestUrl: string) => string | undefined;
     peekAttemptIdForConversation: (conversationId: string | undefined, platformName?: string) => string | undefined;
-}
+};
 
-export function buildXhrLifecycleContext(xhr: XMLHttpRequest, deps: BuildXhrLifecycleContextDeps): XhrLifecycleContext {
+export const buildXhrLifecycleContext = (
+    xhr: XMLHttpRequest,
+    deps: BuildXhrLifecycleContextDeps,
+): XhrLifecycleContext => {
     const method = ((xhr as any)._method as string | undefined) ?? 'GET';
     const requestUrl = ((xhr as any)._url as string | undefined) ?? '';
     const methodUpper = method.toUpperCase();
@@ -42,4 +45,4 @@ export function buildXhrLifecycleContext(xhr: XMLHttpRequest, deps: BuildXhrLife
         conversationId,
         attemptId,
     };
-}
+};

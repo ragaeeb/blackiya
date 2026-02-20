@@ -1,14 +1,14 @@
-interface ProbeTask {
+type ProbeTask = {
     controller: AbortController;
     startedAtMs: number;
-}
+};
 
-export interface ProbeScheduler {
+export type ProbeScheduler = {
     start(attemptId: string): AbortSignal;
     cancel(attemptId: string): void;
     isRunning(attemptId: string): boolean;
     cancelAll(): void;
-}
+};
 
 export class InMemoryProbeScheduler implements ProbeScheduler {
     private tasks = new Map<string, ProbeTask>();
@@ -23,7 +23,7 @@ export class InMemoryProbeScheduler implements ProbeScheduler {
         return controller.signal;
     }
 
-    public cancel(attemptId: string): void {
+    public cancel(attemptId: string) {
         const task = this.tasks.get(attemptId);
         if (!task) {
             return;
@@ -36,7 +36,7 @@ export class InMemoryProbeScheduler implements ProbeScheduler {
         return this.tasks.has(attemptId);
     }
 
-    public cancelAll(): void {
+    public cancelAll() {
         for (const task of this.tasks.values()) {
             task.controller.abort();
         }

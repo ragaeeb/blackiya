@@ -11,25 +11,26 @@ const COMMON_GENERIC_TITLES = new Set([
     'gemini conversation',
     'conversation with gemini',
     'grok conversation',
+    'grok / x',
 ]);
 
-function normalizeTitle(title: string | null | undefined): string {
+const normalizeTitle = (title: string | null | undefined): string => {
     if (typeof title !== 'string') {
         return '';
     }
     return title.replace(/\s+/g, ' ').trim();
-}
+};
 
-export function normalizeConversationTitle(title: string | null | undefined): string {
+export const normalizeConversationTitle = (title: string | null | undefined): string => {
     return normalizeTitle(title);
-}
+};
 
-export function isGenericConversationTitle(
+export const isGenericConversationTitle = (
     title: string | null | undefined,
     options: {
         platformDefaultTitles?: string[];
     } = {},
-): boolean {
+): boolean => {
     const normalized = normalizeTitle(title).toLowerCase();
     if (normalized.length === 0) {
         return true;
@@ -46,9 +47,9 @@ export function isGenericConversationTitle(
         return true;
     }
     return false;
-}
+};
 
-export function deriveConversationTitleFromFirstUserMessage(data: ConversationData, maxLength = 80): string | null {
+export const deriveConversationTitleFromFirstUserMessage = (data: ConversationData, maxLength = 80): string | null => {
     const userMessages = Object.values(data.mapping)
         .map((node) => node.message)
         .filter(
@@ -70,18 +71,18 @@ export function deriveConversationTitleFromFirstUserMessage(data: ConversationDa
         return normalized.length > maxLength ? normalized.slice(0, maxLength).trimEnd() : normalized;
     }
     return null;
-}
+};
 
 export type ResolvedConversationTitleSource = 'stream' | 'cache' | 'dom' | 'first-user-message' | 'fallback';
 
-export function resolveConversationTitleByPrecedence(options: {
+export const resolveConversationTitleByPrecedence = (options: {
     streamTitle?: string | null;
     cachedTitle?: string | null;
     domTitle?: string | null;
     firstUserMessageTitle?: string | null;
     fallbackTitle?: string | null;
     platformDefaultTitles?: string[];
-}): { title: string; source: ResolvedConversationTitleSource } {
+}): { title: string; source: ResolvedConversationTitleSource } => {
     const sourceCandidates: Array<{ source: ResolvedConversationTitleSource; title: string | null | undefined }> = [
         { source: 'stream', title: options.streamTitle },
         { source: 'cache', title: options.cachedTitle },
@@ -106,14 +107,16 @@ export function resolveConversationTitleByPrecedence(options: {
 
     const fallback = normalizeTitle(options.fallbackTitle) || 'Conversation';
     return { title: fallback, source: 'fallback' };
-}
+};
 
 export type ExportTitleSource = 'existing' | 'first-user-message' | 'fallback';
 
-export function resolveExportConversationTitleDecision(data: ConversationData): {
+export const resolveExportConversationTitleDecision = (
+    data: ConversationData,
+): {
     title: string;
     source: ExportTitleSource;
-} {
+} => {
     if (!isGenericConversationTitle(data.title)) {
         return { title: normalizeTitle(data.title), source: 'existing' };
     }
@@ -122,4 +125,4 @@ export function resolveExportConversationTitleDecision(data: ConversationData): 
         return { title: firstUserMessageTitle, source: 'first-user-message' };
     }
     return { title: normalizeTitle(data.title) || 'Conversation', source: 'fallback' };
-}
+};

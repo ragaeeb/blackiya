@@ -12,11 +12,11 @@ class DelayedHydrationStore implements ProbeLeaseCoordinatorStore {
         this.delayMs = delayMs;
     }
 
-    public setGetAllFailure(shouldFail: boolean): void {
+    public setGetAllFailure(shouldFail: boolean) {
         this.shouldFailGetAll = shouldFail;
     }
 
-    public async seed(key: string, value: string): Promise<void> {
+    public async seed(key: string, value: string) {
         this.entries.set(key, value);
     }
 
@@ -24,11 +24,11 @@ class DelayedHydrationStore implements ProbeLeaseCoordinatorStore {
         return this.entries.get(key) ?? null;
     }
 
-    public async set(key: string, value: string): Promise<void> {
+    public async set(key: string, value: string) {
         this.entries.set(key, value);
     }
 
-    public async remove(key: string): Promise<void> {
+    public async remove(key: string) {
         this.entries.delete(key);
     }
 

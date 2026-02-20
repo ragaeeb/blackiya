@@ -66,7 +66,7 @@ Use this when you already have a DevTools `.har` export and want a repeatable, a
 
 1. Export HAR from DevTools after a clean repro window.
 2. Run the analyzer:
-   - `bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking" --hint "I have the full text broken into segments P101391 to P101395a."`
+   - `bun run har:analyze --input logs/grok.com.har --host grok.com --host x.com --host grok.x.com --hint "Agents thinking" --hint "I have the full text broken into segments P101391 to P101395a."`
 3. Review generated files:
    - `logs/har-analysis/grok.com.analysis.json`
    - `logs/har-analysis/grok.com.analysis.md`
@@ -81,7 +81,7 @@ Notes:
 - The analyzer redacts sensitive URL/header fields (`token`, `authorization`, `cookie`, etc.).
 - The analyzer decodes base64 HAR response bodies before hint matching.
 - `--hint` is repeatable; pass exact strings you suspect appear in reasoning or stream payloads.
-- `--host` is repeatable; useful for mixed captures (e.g., `grok.com` + `x.com`).
+- `--host` is repeatable; useful for mixed captures (e.g., `grok.com` + `x.com` + `grok.x.com`).
 - Override output paths with `--output` and `--report` as needed.
 
 To disable:

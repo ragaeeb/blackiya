@@ -39,15 +39,46 @@ mock.module('@/platforms/factory', () => ({
 mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
+mock.module('@/utils/common-export', () => ({
+    buildCommonExport: (data: any, llmName: string) => ({
+        format: 'common' as const,
+        llm: llmName,
+        title: data.title,
+        conversation_id: data.conversation_id,
+        prompt: '',
+        response: '',
+        reasoning: [],
+    }),
+}));
 
-import { runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
+import { runPlatform } from '@/utils/runner/platform-runtime';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
-// ---------------------------------------------------------------------------
+const waitForReadyStatus = async () =>
+    await new Promise<any>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            window.removeEventListener('message', handler as any);
+            reject(new Error('Timed out waiting for ready status'));
+        }, 2000);
+        const handler = (event: any) => {
+            if (event?.data?.type !== 'BLACKIYA_PUBLIC_STATUS') {
+                return;
+            }
+            const status = event.data?.status;
+            if (!status?.canGetJSON || !status?.canGetCommonJSON) {
+                return;
+            }
+            clearTimeout(timeout);
+            window.removeEventListener('message', handler as any);
+            resolve(status);
+        };
+        window.addEventListener('message', handler as any);
+    });
+
 // Shared fixture
-// ---------------------------------------------------------------------------
+
 const twoTurnConversation = {
     title: 'Test',
     create_time: 1_700_000_000,
@@ -197,6 +228,63 @@ describe('Platform Runner – window bridge', () => {
         expect(response.data.llm).toBe('TestPlatform');
     });
 
+    it('should allow getJSON when ready event is emitted', async () => {
+        currentAdapterMock.parseInterceptedData = () => twoTurnConversation;
+        runPlatform();
+        const readyPromise = waitForReadyStatus();
+        await ingestAndStabilise();
+        await readyPromise;
+
+        const responsePromise = new Promise<any>((resolve) => {
+            const handler = (event: any) => {
+                if (event?.data?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
+                    return;
+                }
+                window.removeEventListener('message', handler as any);
+                resolve(event.data);
+            };
+            window.addEventListener('message', handler as any);
+        });
+
+        postStampedMessage(
+            { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'req-ready-original' },
+            window.location.origin,
+        );
+
+        const response = await responsePromise;
+        expect(response.success).toBeTrue();
+        expect(response.data).toEqual(twoTurnConversation);
+    });
+
+    it('should allow getCommonJSON when ready event is emitted', async () => {
+        currentAdapterMock.parseInterceptedData = () => twoTurnConversation;
+        runPlatform();
+        const readyPromise = waitForReadyStatus();
+        await ingestAndStabilise();
+        await readyPromise;
+
+        const responsePromise = new Promise<any>((resolve) => {
+            const handler = (event: any) => {
+                if (event?.data?.type !== 'BLACKIYA_GET_JSON_RESPONSE') {
+                    return;
+                }
+                window.removeEventListener('message', handler as any);
+                resolve(event.data);
+            };
+            window.addEventListener('message', handler as any);
+        });
+
+        postStampedMessage(
+            { type: 'BLACKIYA_GET_JSON_REQUEST', requestId: 'req-ready-common', format: 'common' },
+            window.location.origin,
+        );
+
+        const response = await responsePromise;
+        expect(response.success).toBeTrue();
+        expect(response.data.format).toBe('common');
+        expect(response.data.llm).toBe('TestPlatform');
+    });
+
     it('should gracefully reject bridge request when no conversation data has been captured', async () => {
         runPlatform();
 
@@ -231,8 +319,9 @@ describe('Platform Runner – window bridge', () => {
             type: 'BLACKIYA_GET_JSON_RESPONSE',
             requestId: 'req-incomplete',
             success: false,
-            data: undefined,
             error: 'NO_CONVERSATION_DATA',
         });
+        expect(response.data).toBeUndefined();
+        expect(typeof response.__blackiyaToken).toBe('string');
     });
 });

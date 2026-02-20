@@ -16,7 +16,7 @@ type CliOptions = {
 
 const LARGE_HAR_WARN_BYTES = 25 * 1024 * 1024;
 
-const printUsage = (): void => {
+const printUsage = () => {
     console.log(
         [
             'Usage:',
@@ -157,7 +157,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     };
 };
 
-const ensureParentDirectory = async (filePath: string): Promise<void> => {
+const ensureParentDirectory = async (filePath: string) => {
     const directory = path.dirname(filePath);
     await mkdir(directory, { recursive: true });
 };
@@ -173,7 +173,7 @@ const deriveDefaultPaths = (inputFile: string): { jsonPath: string; markdownPath
     };
 };
 
-const run = async (): Promise<void> => {
+const run = async () => {
     const options = parseArgs(process.argv.slice(2));
     const defaults = deriveDefaultPaths(options.input);
     const jsonPath = path.resolve(options.outputJson ?? defaults.jsonPath);

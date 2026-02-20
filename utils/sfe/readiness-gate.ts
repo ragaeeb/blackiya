@@ -1,26 +1,26 @@
 import type { BlockingCondition, PlatformReadiness } from '@/utils/sfe/types';
 
-interface ReadinessGateOptions {
+type ReadinessGateOptions = {
     minStableMs?: number;
     maxStabilizationWaitMs?: number;
     sampleTtlMs?: number;
     maxSamples?: number;
     pruneMinIntervalMs?: number;
-}
+};
 
-interface SampleState {
+type SampleState = {
     firstSeenAtMs: number;
     stabilizationStartedAtMs: number;
     lastSeenAtMs: number;
     contentHash: string;
     terminal: boolean;
     textLength: number;
-}
+};
 
-export interface ReadinessGateResult {
+export type ReadinessGateResult = {
     ready: boolean;
     blockingConditions: BlockingCondition[];
-}
+};
 
 export class ReadinessGate {
     private samples = new Map<string, SampleState>();
@@ -39,7 +39,7 @@ export class ReadinessGate {
         this.pruneMinIntervalMs = Math.max(0, options.pruneMinIntervalMs ?? 1000);
     }
 
-    public reset(attemptId: string): void {
+    public reset(attemptId: string) {
         this.samples.delete(attemptId);
     }
 
@@ -111,7 +111,7 @@ export class ReadinessGate {
         };
     }
 
-    private pruneSamples(nowMs: number): void {
+    private pruneSamples(nowMs: number) {
         if (nowMs - this.lastPruneAtMs < this.pruneMinIntervalMs) {
             return;
         }

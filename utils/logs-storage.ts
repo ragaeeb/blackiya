@@ -1,18 +1,18 @@
 import { browser } from 'wxt/browser';
 
-interface StorageBackend {
+type StorageBackend = {
     get: (key: string) => Promise<Record<string, unknown>>;
     set: (value: Record<string, unknown>) => Promise<void>;
     remove: (key: string) => Promise<void>;
-}
+};
 
-export interface LogEntry {
+export type LogEntry = {
     timestamp: string;
     level: string;
     message: string;
     data?: any[];
     context: 'background' | 'content' | 'popup' | 'unknown';
-}
+};
 
 export const MAX_LOGS = 4000;
 const STORAGE_KEY = 'logs';
@@ -53,7 +53,7 @@ export class BufferedLogsStorage {
      * Append a log entry to the buffer.
      * Flushes immediately if threshold is reached.
      */
-    async saveLog(entry: LogEntry): Promise<void> {
+    async saveLog(entry: LogEntry) {
         this.buffer.push(entry);
 
         if (this.buffer.length >= FLUSH_THRESHOLD) {
@@ -75,7 +75,7 @@ export class BufferedLogsStorage {
     /**
      * Clear all logs
      */
-    async clearLogs(): Promise<void> {
+    async clearLogs() {
         this.buffer = [];
         if (this.flushTimer) {
             clearTimeout(this.flushTimer);

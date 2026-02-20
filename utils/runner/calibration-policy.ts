@@ -2,11 +2,11 @@ import { type CalibrationStep, prioritizeCalibrationStep } from '@/utils/runner/
 
 export type CalibrationMode = 'manual' | 'auto';
 
-export function buildCalibrationOrderForMode(
+export const buildCalibrationOrderForMode = (
     preferredStep: CalibrationStep | null,
     mode: CalibrationMode,
     platformName?: string,
-): CalibrationStep[] {
+): CalibrationStep[] => {
     const defaultOrder: CalibrationStep[] = ['queue-flush', 'passive-wait', 'endpoint-retry', 'page-snapshot'];
     if (!preferredStep) {
         return defaultOrder;
@@ -28,8 +28,8 @@ export function buildCalibrationOrderForMode(
     // In auto mode, keep page-snapshot as a last resort to reduce premature partial captures.
     const withoutSnapshot = reordered.filter((step) => step !== 'page-snapshot');
     return [...withoutSnapshot, 'page-snapshot'];
-}
+};
 
-export function shouldPersistCalibrationProfile(mode: CalibrationMode): boolean {
+export const shouldPersistCalibrationProfile = (mode: CalibrationMode): boolean => {
     return mode === 'manual';
-}
+};

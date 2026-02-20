@@ -2,7 +2,7 @@ import { addBoundedSetValue } from '@/utils/bounded-collections';
 
 const DEFAULT_MAX_INTERCEPTOR_DISPOSED_ATTEMPTS = 500;
 
-export function pruneTimestampCache(map: Map<string, number>, ttlMs: number, nowMs = Date.now()): number {
+export const pruneTimestampCache = (map: Map<string, number>, ttlMs: number, nowMs = Date.now()): number => {
     let removed = 0;
     for (const [key, timestamp] of map.entries()) {
         if (nowMs - timestamp <= ttlMs) {
@@ -12,9 +12,9 @@ export function pruneTimestampCache(map: Map<string, number>, ttlMs: number, now
         removed += 1;
     }
     return removed;
-}
+};
 
-export function cleanupDisposedAttemptState(
+export const cleanupDisposedAttemptState = (
     attemptIdToRemove: string,
     state: {
         disposedAttemptIds: Set<string>;
@@ -24,7 +24,7 @@ export function cleanupDisposedAttemptState(
         attemptByConversationId: Map<string, string>;
     },
     maxDisposedAttempts = DEFAULT_MAX_INTERCEPTOR_DISPOSED_ATTEMPTS,
-): void {
+) => {
     addBoundedSetValue(state.disposedAttemptIds, attemptIdToRemove, maxDisposedAttempts);
     state.streamDumpFrameCountByAttempt.delete(attemptIdToRemove);
     state.streamDumpLastTextByAttempt.delete(attemptIdToRemove);
@@ -38,4 +38,4 @@ export function cleanupDisposedAttemptState(
             state.attemptByConversationId.delete(conversationId);
         }
     }
-}
+};

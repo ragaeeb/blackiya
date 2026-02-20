@@ -3,9 +3,7 @@ import { shouldProcessGeminiChunk } from '@/entrypoints/interceptor/stream-monit
 import { extractGeminiStreamSignalsFromBuffer } from '@/utils/gemini-stream-parser';
 import { consumeReadableStreamChunks, type StreamMonitorEmitter } from './stream-emitter';
 
-// ---------------------------------------------------------------------------
 // Shared types
-// ---------------------------------------------------------------------------
 
 export type GeminiXhrStreamState = {
     attemptId: string;
@@ -21,11 +19,9 @@ export type GeminiXhrStreamState = {
     emittedCompleted: boolean;
 };
 
-// ---------------------------------------------------------------------------
 // Shared history-trimming helpers
-// ---------------------------------------------------------------------------
 
-const trimPayloadHistory = (order: string[], set: Set<string>, max = 220): void => {
+const trimPayloadHistory = (order: string[], set: Set<string>, max = 220) => {
     while (order.length > max) {
         const oldest = order.shift();
         if (oldest) {
@@ -34,7 +30,7 @@ const trimPayloadHistory = (order: string[], set: Set<string>, max = 220): void 
     }
 };
 
-const trimDeltaHistory = (order: string[], set: Set<string>, max = 260): void => {
+const trimDeltaHistory = (order: string[], set: Set<string>, max = 260) => {
     while (order.length > max) {
         const oldest = order.shift();
         if (oldest) {
@@ -43,16 +39,14 @@ const trimDeltaHistory = (order: string[], set: Set<string>, max = 260): void =>
     }
 };
 
-// ---------------------------------------------------------------------------
 // Buffer helpers
-// ---------------------------------------------------------------------------
 
 const appendGeminiBuffer = (buffer: string, chunk: string): string => {
     const next = buffer + chunk;
     return next.length <= 900_000 ? next : next.slice(-700_000);
 };
 
-const syncSeenPayloadOrder = (seenPayloads: Set<string>, seenPayloadOrder: string[]): void => {
+const syncSeenPayloadOrder = (seenPayloads: Set<string>, seenPayloadOrder: string[]) => {
     for (const payload of seenPayloads) {
         if (!seenPayloadOrder.includes(payload)) {
             seenPayloadOrder.push(payload);
@@ -61,9 +55,7 @@ const syncSeenPayloadOrder = (seenPayloads: Set<string>, seenPayloadOrder: strin
     trimPayloadHistory(seenPayloadOrder, seenPayloads);
 };
 
-// ---------------------------------------------------------------------------
 // Candidate emission helpers
-// ---------------------------------------------------------------------------
 
 const emitTextCandidates = (
     attemptId: string,
@@ -73,7 +65,7 @@ const emitTextCandidates = (
     emittedTextOrder: string[],
     emit: StreamMonitorEmitter,
     platform: string,
-): void => {
+) => {
     for (const candidate of candidates) {
         if (emittedText.has(candidate)) {
             continue;
@@ -100,7 +92,7 @@ const emitTitleCandidates = (
     titleCandidates: string[],
     emittedTitles: Set<string>,
     emit: StreamMonitorEmitter,
-): void => {
+) => {
     if (!conversationId) {
         return;
     }
@@ -117,9 +109,7 @@ const emitTitleCandidates = (
     }
 };
 
-// ---------------------------------------------------------------------------
 // Fetch stream monitor
-// ---------------------------------------------------------------------------
 
 const processFetchChunk = (
     attemptId: string,
@@ -183,7 +173,7 @@ export const monitorGeminiResponseStream = async (
     attemptId: string,
     emit: StreamMonitorEmitter,
     seedConversationId?: string,
-): Promise<void> => {
+) => {
     if (!response.body || emit.isAttemptDisposed(attemptId)) {
         return;
     }
@@ -239,9 +229,7 @@ export const monitorGeminiResponseStream = async (
     }
 };
 
-// ---------------------------------------------------------------------------
 // XHR progress monitor
-// ---------------------------------------------------------------------------
 
 const createXhrStreamState = (attemptId: string, seedConversationId?: string): GeminiXhrStreamState => ({
     attemptId,
@@ -257,7 +245,7 @@ const createXhrStreamState = (attemptId: string, seedConversationId?: string): G
     emittedCompleted: false,
 });
 
-const processXhrChunk = (state: GeminiXhrStreamState, chunkText: string, emit: StreamMonitorEmitter): void => {
+const processXhrChunk = (state: GeminiXhrStreamState, chunkText: string, emit: StreamMonitorEmitter) => {
     if (!chunkText || emit.isAttemptDisposed(state.attemptId)) {
         return;
     }
@@ -315,7 +303,7 @@ export const wireGeminiXhrProgressMonitor = (
     emit: StreamMonitorEmitter,
     seedConversationId: string | undefined,
     requestUrl: string,
-): void => {
+) => {
     if (emit.shouldLogTransient(`gemini:xhr-stream:start:${attemptId}`, 8000)) {
         emit.log('info', 'Gemini XHR stream monitor start', {
             attemptId,

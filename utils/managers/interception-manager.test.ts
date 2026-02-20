@@ -305,6 +305,55 @@ describe('InterceptionManager', () => {
         expect(loggerSpies.info).toHaveBeenCalledWith('[i] missing-token');
     });
 
+    it('should cap queued messages pending token revalidation', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+        const managerAny = manager as any;
+        const maxPending = (InterceptionManager as any).MAX_PENDING_TOKEN_MESSAGES;
+
+        (windowInstance as any).__BLACKIYA_SESSION_TOKEN__ = undefined;
+        for (let i = 0; i < maxPending + 25; i++) {
+            managerAny.tryQueueMessageForTokenRevalidation(
+                {
+                    type: 'LLM_LOG_ENTRY',
+                    payload: { level: 'info', message: `queued-${i}`, context: 'interceptor', data: [] },
+                },
+                'LLM_LOG_ENTRY',
+                'missing-message-token',
+            );
+        }
+
+        expect(managerAny.pendingTokenRevalidationMessages.length).toBe(maxPending);
+        manager.stop();
+    });
+
+    it('should stop retrying missing-token revalidation and drain pending messages after retry cap', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+        const managerAny = manager as any;
+        const maxRetries = (InterceptionManager as any).MAX_TOKEN_REVALIDATION_RETRIES;
+
+        (windowInstance as any).__BLACKIYA_SESSION_TOKEN__ = undefined;
+        managerAny.pendingTokenRevalidationMessages = [
+            {
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info', message: 'pending-token-revalidation', context: 'interceptor', data: [] },
+            },
+        ];
+
+        for (let i = 0; i < maxRetries + 1; i++) {
+            managerAny.processPendingTokenRevalidationMessages();
+        }
+
+        expect(managerAny.pendingTokenRevalidationMessages).toEqual([]);
+        expect(managerAny.pendingTokenRevalidationTimer).toBeNull();
+        manager.stop();
+    });
+
     it('should drop queued capture/log messages when token is mismatched', () => {
         const captured: string[] = [];
         const globalRef = {} as any;
@@ -354,6 +403,8 @@ describe('InterceptionManager', () => {
 
         expect(captured).toEqual([]);
         expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] wrong-token');
+        expect(globalRef.__BLACKIYA_CAPTURE_QUEUE__).toEqual([]);
+        expect(globalRef.__BLACKIYA_LOG_QUEUE__).toEqual([]);
     });
 
     it('should drop live window messages when token validation fails', () => {

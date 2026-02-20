@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { isConversationReady } from '@/utils/conversation-readiness';
 import type { ConversationData } from '@/utils/types';
 
-function createBaseConversation(): ConversationData {
+const createBaseConversation = (): ConversationData => {
     return {
         title: 'Test',
         create_time: 1_700_000_000,
@@ -57,7 +57,7 @@ function createBaseConversation(): ConversationData {
         safe_urls: [],
         blocked_urls: [],
     };
-}
+};
 
 describe('conversation readiness', () => {
     it('returns true for finished assistant message with non-empty parts', () => {

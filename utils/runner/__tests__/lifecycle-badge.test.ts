@@ -12,6 +12,7 @@ import { Window } from 'happy-dom';
 import { STORAGE_KEYS } from '@/utils/settings';
 
 const window = new Window();
+(window as any).SyntaxError = SyntaxError;
 const document = window.document;
 (global as any).window = window;
 (global as any).document = document;
@@ -26,6 +27,7 @@ import {
     createLoggerCalls,
     createMockAdapter,
     makePostStampedMessage,
+    waitFor,
 } from './helpers';
 
 let currentAdapterMock: any = createMockAdapter(document);
@@ -42,23 +44,10 @@ mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
+import { runPlatform } from '@/utils/runner/platform-runtime';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
-
-const waitFor = async (
-    condition: () => boolean,
-    { timeout = 2000, interval = 10 }: { timeout?: number; interval?: number } = {},
-): Promise<void> => {
-    const deadline = Date.now() + timeout;
-    while (!condition()) {
-        if (Date.now() > deadline) {
-            throw new Error('waitFor timed out');
-        }
-        await new Promise((resolve) => setTimeout(resolve, interval));
-    }
-};
 
 const waitForRunnerReady = () => waitFor(() => !!document.getElementById('blackiya-save-btn'));
 

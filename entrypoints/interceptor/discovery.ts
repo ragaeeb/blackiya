@@ -1,4 +1,4 @@
-export function safePathname(url: string) {
+export const safePathname = (url: string) => {
     try {
         const fallbackOrigin =
             typeof window !== 'undefined' && typeof window.location?.origin === 'string'
@@ -8,9 +8,11 @@ export function safePathname(url: string) {
     } catch {
         return url.slice(0, 120);
     }
-}
+};
 
-export function detectPlatformFromHostname(hostname = typeof window !== 'undefined' ? window.location.hostname : '') {
+export const detectPlatformFromHostname = (
+    hostname = typeof window !== 'undefined' ? window.location.hostname : '',
+) => {
     if (hostname.includes('gemini')) {
         return 'Gemini';
     }
@@ -21,9 +23,9 @@ export function detectPlatformFromHostname(hostname = typeof window !== 'undefin
         return 'ChatGPT';
     }
     return 'Discovery';
-}
+};
 
-export function isDiscoveryDiagnosticsEnabled(
+export const isDiscoveryDiagnosticsEnabled = (
     storage: Pick<Storage, 'getItem'> | null = (() => {
         try {
             return window.localStorage;
@@ -31,10 +33,10 @@ export function isDiscoveryDiagnosticsEnabled(
             return null;
         }
     })(),
-): boolean {
+): boolean => {
     try {
         return storage?.getItem('blackiya.discovery') === '1';
     } catch {
         return false;
     }
-}
+};

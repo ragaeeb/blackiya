@@ -6,21 +6,21 @@ export type CanonicalStabilizationAttemptState = {
     inProgress: Set<string>;
 };
 
-export function beginCanonicalStabilizationTick(attemptId: string, inProgress: Set<string>): boolean {
+export const beginCanonicalStabilizationTick = (attemptId: string, inProgress: Set<string>): boolean => {
     if (inProgress.has(attemptId)) {
         return false;
     }
     inProgress.add(attemptId);
     return true;
-}
+};
 
-export function clearCanonicalStabilizationAttemptState(
+export const clearCanonicalStabilizationAttemptState = (
     attemptId: string,
     state: CanonicalStabilizationAttemptState,
     clearTimer: (timerId: number) => void = (timerId) => {
         clearTimeout(timerId);
     },
-): void {
+) => {
     const timerId = state.timerIds.get(attemptId);
     if (timerId !== undefined) {
         clearTimer(timerId);
@@ -30,14 +30,14 @@ export function clearCanonicalStabilizationAttemptState(
     state.startedAt.delete(attemptId);
     state.timeoutWarnings.delete(attemptId);
     state.inProgress.delete(attemptId);
-}
+};
 
-export function resolveShouldSkipCanonicalRetryAfterAwait(
+export const resolveShouldSkipCanonicalRetryAfterAwait = (
     attemptId: string,
     disposedOrSuperseded: boolean,
     mappedAttemptId: string | undefined,
     resolveAttemptId: (attemptId: string) => string,
-): boolean {
+): boolean => {
     if (disposedOrSuperseded) {
         return true;
     }
@@ -45,4 +45,4 @@ export function resolveShouldSkipCanonicalRetryAfterAwait(
         return false;
     }
     return resolveAttemptId(mappedAttemptId) !== resolveAttemptId(attemptId);
-}
+};

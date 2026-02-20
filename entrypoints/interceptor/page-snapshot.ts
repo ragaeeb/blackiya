@@ -1,6 +1,22 @@
 import { buildDomConversationSnapshot } from '@/entrypoints/interceptor/dom-snapshot';
 import type { CaptureInterceptedMessage as CapturePayload } from '@/utils/protocol/messages';
 
+const CONVERSATION_ID_KEYS = new Set(['conversationId', 'conversation_id']);
+const NATIVE_OBJECT_NAMES = new Set([
+    'Date',
+    'RegExp',
+    'Error',
+    'Promise',
+    'Map',
+    'Set',
+    'WeakMap',
+    'WeakSet',
+    'ArrayBuffer',
+    'DataView',
+    'URL',
+    'URLSearchParams',
+]);
+
 const isConversationLike = (candidate: unknown, conversationId: string): boolean => {
     if (!candidate || typeof candidate !== 'object') {
         return false;
@@ -29,16 +45,49 @@ const pickConversationCandidate = (item: unknown, conversationId: string): unkno
     return null;
 };
 
-const enqueueObjectChildren = (item: unknown, queue: unknown[]): void => {
+const enqueueObjectChildren = (item: unknown, queue: unknown[]) => {
     if (Array.isArray(item)) {
         queue.push(...item);
         return;
     }
-    queue.push(...Object.values(item as Record<string, unknown>));
+    try {
+        queue.push(...Object.values(item as Record<string, unknown>));
+    } catch {
+        // Ignore objects with getter-backed properties that throw.
+    }
+};
+
+const isDomNodeLike = (item: unknown): boolean => {
+    if (!item || typeof item !== 'object') {
+        return false;
+    }
+    const nodeType = (item as { nodeType?: unknown }).nodeType;
+    const nodeName = (item as { nodeName?: unknown }).nodeName;
+    return typeof nodeType === 'number' && typeof nodeName === 'string';
+};
+
+const isNativeObjectLike = (item: unknown): boolean => {
+    if (!item || typeof item !== 'object') {
+        return false;
+    }
+    const ctorName = (item as { constructor?: { name?: unknown } }).constructor?.name;
+    return typeof ctorName === 'string' && NATIVE_OBJECT_NAMES.has(ctorName);
 };
 
 const shouldSkipScanItem = (item: unknown, seen: Set<unknown>): boolean => {
-    return !item || typeof item !== 'object' || seen.has(item);
+    if (!item || seen.has(item)) {
+        return true;
+    }
+    if (typeof item === 'function') {
+        return true;
+    }
+    if (typeof item !== 'object') {
+        return true;
+    }
+    if (isDomNodeLike(item) || isNativeObjectLike(item)) {
+        return true;
+    }
+    return false;
 };
 
 /**
@@ -68,9 +117,85 @@ const findConversationInGlobals = (root: unknown, conversationId: string): unkno
     return null;
 };
 
-// ---------------------------------------------------------------------------
+const hasConversationIdInMessages = (messages: unknown, conversationId: string): boolean => {
+    if (!Array.isArray(messages)) {
+        return false;
+    }
+    return messages.some((message) => {
+        if (!message || typeof message !== 'object') {
+            return false;
+        }
+        const msg = message as Record<string, unknown>;
+        return (
+            msg.conversationId === conversationId ||
+            msg.conversation_id === conversationId ||
+            (typeof msg.conversation === 'object' &&
+                msg.conversation !== null &&
+                ((msg.conversation as Record<string, unknown>).conversationId === conversationId ||
+                    (msg.conversation as Record<string, unknown>).conversation_id === conversationId))
+        );
+    });
+};
+
+const hasConversationIdInParsedPayload = (
+    node: unknown,
+    conversationId: string,
+    depth = 0,
+    visited = new Set<unknown>(),
+): boolean => {
+    if (!node || typeof node !== 'object' || depth > 7 || visited.has(node)) {
+        return false;
+    }
+    visited.add(node);
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            if (hasConversationIdInParsedPayload(child, conversationId, depth + 1, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    const obj = node as Record<string, unknown>;
+    for (const key of CONVERSATION_ID_KEYS) {
+        if (obj[key] === conversationId) {
+            return true;
+        }
+    }
+    if (hasConversationIdInMessages(obj.messages, conversationId)) {
+        return true;
+    }
+    for (const value of Object.values(obj)) {
+        if (hasConversationIdInParsedPayload(value, conversationId, depth + 1, visited)) {
+            return true;
+        }
+    }
+    return false;
+};
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const hasConversationIdInRawString = (raw: string, conversationId: string): boolean => {
+    const escapedConversationId = escapeRegExp(conversationId);
+    const conversationKeyRegex = new RegExp(
+        `"(?:conversationId|conversation_id)"\\s*:\\s*"${escapedConversationId}"`,
+        'i',
+    );
+    return conversationKeyRegex.test(raw);
+};
+
+const rawCaptureMatchesConversation = (item: CapturePayload, conversationId: string): boolean => {
+    if (item.url.includes(conversationId)) {
+        return true;
+    }
+    try {
+        const parsed = JSON.parse(item.data) as unknown;
+        return hasConversationIdInParsedPayload(parsed, conversationId);
+    } catch {
+        return hasConversationIdInRawString(item.data, conversationId);
+    }
+};
+
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Attempts to resolve a conversation snapshot in priority order:
@@ -85,14 +210,13 @@ export const getPageConversationSnapshot = (
     conversationId: string,
     getRawCaptureHistory: () => CapturePayload[],
 ): unknown | null => {
-    const globals: unknown[] = [
+    const knownGlobals: unknown[] = [
         (window as any).__NEXT_DATA__,
         (window as any).__remixContext,
         (window as any).__INITIAL_STATE__,
         (window as any).__APOLLO_STATE__,
-        window,
     ];
-    for (const root of globals) {
+    for (const root of knownGlobals) {
         const candidate = findConversationInGlobals(root, conversationId);
         if (candidate) {
             return candidate;
@@ -104,6 +228,11 @@ export const getPageConversationSnapshot = (
         return domSnapshot;
     }
 
+    const windowFallback = findConversationInGlobals(window, conversationId);
+    if (windowFallback) {
+        return windowFallback;
+    }
+
     // Fall back to the raw capture ring-buffer
     const history = getRawCaptureHistory();
     for (let i = history.length - 1; i >= 0; i--) {
@@ -111,7 +240,7 @@ export const getPageConversationSnapshot = (
         if (!item || typeof item.url !== 'string' || typeof item.data !== 'string') {
             continue;
         }
-        if (!item.url.includes(conversationId) && !item.data.includes(conversationId)) {
+        if (!rawCaptureMatchesConversation(item, conversationId)) {
             continue;
         }
         return {

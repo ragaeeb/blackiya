@@ -51,13 +51,28 @@ const parseTitlesResponse = (data: string, url: string): Map<string, string> | n
  * Handle a GrokHistory endpoint response: populate `grokState.conversationTitles`
  * and return `true` so the caller knows to stop processing.
  */
-export const tryHandleGrokTitlesEndpoint = (data: string | any, url: string): boolean => {
+export const tryHandleGrokTitlesEndpoint = (data: unknown, url: string): boolean => {
     if (!isTitlesEndpoint(url)) {
         return false;
     }
     logger.info('[Blackiya/Grok/Titles] Detected titles endpoint');
 
-    const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    let dataStr = '';
+    if (typeof data === 'string') {
+        dataStr = data;
+    } else {
+        try {
+            const serialized = JSON.stringify(data);
+            if (typeof serialized !== 'string') {
+                logger.warn('[Blackiya/Grok/Titles] Titles payload is not serializable');
+                return true;
+            }
+            dataStr = serialized;
+        } catch {
+            logger.warn('[Blackiya/Grok/Titles] Failed to stringify titles payload');
+            return true;
+        }
+    }
     const titles = parseTitlesResponse(dataStr, url);
     if (titles) {
         for (const [id, title] of titles) {

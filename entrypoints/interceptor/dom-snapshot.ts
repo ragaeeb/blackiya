@@ -1,5 +1,22 @@
+const findElementByAttribute = (root: Element, attributeName: string): Element | null => {
+    try {
+        const direct = root.querySelector(`[${attributeName}]`);
+        if (direct) {
+            return direct;
+        }
+    } catch {
+        // Fall through to a manual scan when selector engines reject the selector.
+    }
+    for (const element of Array.from(root.getElementsByTagName('*'))) {
+        if (element.hasAttribute(attributeName)) {
+            return element;
+        }
+    }
+    return null;
+};
+
 const extractTurnRole = (turn: Element): 'system' | 'user' | 'assistant' | 'tool' | null => {
-    const role = turn.querySelector('[data-message-author-role]')?.getAttribute('data-message-author-role');
+    const role = findElementByAttribute(turn, 'data-message-author-role')?.getAttribute('data-message-author-role');
     if (role === 'system' || role === 'user' || role === 'assistant' || role === 'tool') {
         return role;
     }
@@ -35,31 +52,57 @@ const extractThoughtFragments = (turn: Element): string[] => {
 
 const normalizeDomTitle = (rawTitle: string) => rawTitle.replace(/\s*[-|]\s*ChatGPT.*$/i, '').trim();
 
+const buildThoughtEntries = (thoughtFragments: string[]) =>
+    thoughtFragments.map((summary) => ({
+        summary,
+        content: summary,
+        chunks: [],
+        finished: true,
+    }));
+
 const buildDomMessageContent = (text: string, thoughtFragments: string[]): Record<string, unknown> => {
-    if (thoughtFragments.length > 0 && text.length === 0) {
+    if (thoughtFragments.length === 0) {
+        return { content_type: 'text', parts: text ? [text] : [] };
+    }
+    const thoughts = buildThoughtEntries(thoughtFragments);
+    if (text.length === 0) {
         return {
             content_type: 'thoughts',
-            thoughts: thoughtFragments.map((summary) => ({
-                summary,
-                content: summary,
-                chunks: [],
-                finished: true,
-            })),
+            thoughts,
         };
     }
-    return { content_type: 'text', parts: text ? [text] : [] };
+    return {
+        content_type: 'text',
+        parts: [text],
+        thoughts,
+    };
 };
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
+
+const findConversationTurns = (): Element[] => {
+    try {
+        const turns = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"]'));
+        if (turns.length > 0) {
+            return turns;
+        }
+    } catch {
+        // Fall through to manual scan for selector-engine incompatibilities.
+    }
+
+    const allElements = Array.from(document.getElementsByTagName('*'));
+    return allElements.filter((element) => {
+        const testId = element.getAttribute('data-testid');
+        return typeof testId === 'string' && testId.startsWith('conversation-turn-');
+    });
+};
 
 /**
  * Walks the ChatGPT DOM and constructs a synthetic conversation payload in the
  * canonical mapping format. Returns null when the page has no conversation turns.
  */
 export const buildDomConversationSnapshot = (conversationId: string): unknown | null => {
-    const turns = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"]'));
+    const turns = findConversationTurns();
     if (turns.length === 0) {
         return null;
     }

@@ -9,18 +9,18 @@
 
 import type { ConversationData } from '../utils/types';
 
-export interface PlatformReadiness {
+export type PlatformReadiness = {
     ready: boolean;
     terminal: boolean;
     reason: string;
     contentHash: string | null;
     latestAssistantTextLength: number;
-}
+};
 
 /**
  * Interface that all LLM platform adapters must implement
  */
-export interface LLMPlatform {
+export type LLMPlatform = {
     /** Display name of the platform (e.g., "ChatGPT", "Gemini") */
     name: string;
 
@@ -141,4 +141,4 @@ export interface LLMPlatform {
      * Used to decide whether `extractTitleFromDom` should be attempted.
      */
     defaultTitles?: string[];
-}
+};

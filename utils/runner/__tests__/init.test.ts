@@ -21,14 +21,12 @@ const document = window.document;
 
 import { buildBrowserMock, buildLoggerMock, createLoggerCalls, createMockAdapter } from './helpers';
 
-// ---- mutable state (closed over by mock factories) -----------------------
 let currentAdapterMock: any = createMockAdapter(document);
 const browserMockState = {
     storageData: {} as Record<string, unknown>,
     sendMessage: async (_: unknown) => undefined as unknown,
 };
 
-// ---- module mocks (must precede subject import) ---------------------------
 mock.module('@/platforms/factory', () => ({
     getPlatformAdapter: () => currentAdapterMock,
     getPlatformAdapterByApiUrl: () => currentAdapterMock,
@@ -37,9 +35,12 @@ mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { runPlatform } from '@/utils/platform-runner';
+import { runPlatform } from '@/utils/runner/platform-runtime';
 
 describe('Platform Runner – initialisation', () => {
+    const countById = (id: string): number =>
+        Array.from(document.getElementsByTagName('*')).filter((node) => node.id === id).length;
+
     beforeEach(() => {
         window.dispatchEvent(new (window as any).Event('beforeunload'));
         document.body.innerHTML = '';
@@ -65,9 +66,9 @@ describe('Platform Runner – initialisation', () => {
         runPlatform();
         await new Promise((r) => setTimeout(r, 80));
 
-        expect(document.querySelectorAll('#blackiya-button-container').length).toBe(1);
-        expect(document.querySelectorAll('#blackiya-save-btn').length).toBe(1);
-        expect(document.querySelectorAll('#blackiya-calibrate-btn').length).toBe(1);
+        expect(countById('blackiya-button-container')).toBe(1);
+        expect(countById('blackiya-save-btn')).toBe(1);
+        expect(countById('blackiya-calibrate-btn')).toBe(1);
     });
 
     it('should keep SFE readiness source enabled', async () => {

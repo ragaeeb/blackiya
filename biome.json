@@ -24,6 +24,13 @@
             },
             "style": {
                 "noNonNullAssertion": "off",
+                "useConsistentTypeDefinitions": {
+                    "level": "warn",
+                    "fix": "none",
+                    "options": {
+                        "style": "type"
+                    }
+                },
                 "useBlockStatements": {
                     "level": "error",
                     "fix": "safe",
@@ -32,6 +39,7 @@
             },
             "complexity": {
                 "noExcessiveCognitiveComplexity": "warn",
+                "useArrowFunction": "warn",
                 "useWhile": "error"
             }
         },

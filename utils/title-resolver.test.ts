@@ -7,7 +7,7 @@ import {
 } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
-function buildConversation(title: string): ConversationData {
+const buildConversation = (title: string): ConversationData => {
     return {
         title,
         create_time: 1,
@@ -62,7 +62,7 @@ function buildConversation(title: string): ConversationData {
             },
         },
     };
-}
+};
 
 describe('title-resolver', () => {
     it('classifies shared generic titles consistently', () => {
@@ -70,6 +70,7 @@ describe('title-resolver', () => {
         expect(isGenericConversationTitle('You said: hello')).toBeTrue();
         expect(isGenericConversationTitle('Chats')).toBeTrue();
         expect(isGenericConversationTitle('New chat')).toBeTrue();
+        expect(isGenericConversationTitle('Grok / X')).toBeTrue();
         expect(isGenericConversationTitle('Specific conversation title')).toBeFalse();
     });
 

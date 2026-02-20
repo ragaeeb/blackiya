@@ -29,6 +29,47 @@ import { parseGrokResponse } from './x-graphql-parser';
 export { GrokAdapterState, resetGrokAdapterState } from './state';
 
 const MAX_TITLE_LENGTH = 80;
+const GROK_GENERIC_DOM_TITLES = new Set(['grok', 'grok / x', 'x / grok']);
+
+const normalizeDomTitle = (value: string | null | undefined): string => value?.replace(/\s+/g, ' ').trim() ?? '';
+
+const normalizeGrokDomTitleCandidate = (raw: string, defaultTitles: string[]): string | null => {
+    const normalized = normalizeDomTitle(raw);
+    if (!normalized) {
+        return null;
+    }
+    const lower = normalized.toLowerCase();
+    if (GROK_GENERIC_DOM_TITLES.has(lower)) {
+        return null;
+    }
+    if (defaultTitles.some((title) => normalizeDomTitle(title).toLowerCase() === lower)) {
+        return null;
+    }
+    return normalized;
+};
+
+const queryGrokTitleFromDom = (defaultTitles: string[]): string | null => {
+    const selectors = [
+        '[aria-current="page"][href*="/i/grok?conversation="] [dir="ltr"]',
+        '[aria-current="page"][href*="/i/grok?conversation="] span',
+        '[data-testid="grok-header"] h1',
+        'main h1',
+    ];
+
+    for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        const text = normalizeDomTitle(element?.textContent ?? null);
+        if (!text) {
+            continue;
+        }
+        const normalized = normalizeGrokDomTitleCandidate(text, defaultTitles);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    return null;
+};
 
 const parseDefaultGrokPayload = (data: string | any, url: string): ConversationData | null => {
     try {
@@ -157,6 +198,15 @@ export const grokAdapter: LLMPlatform = {
     },
 
     getButtonInjectionTarget(): HTMLElement | null {
+        try {
+            const { hostname, pathname } = window.location;
+            if (hostname === 'x.com' && pathname.startsWith('/i/grok')) {
+                return document.body ?? document.documentElement;
+            }
+        } catch {
+            // Fallback to selector-based target resolution.
+        }
+
         const selectors = ['[data-testid="grok-header"]', '[role="banner"]', 'header nav', 'header', 'body'];
         for (const selector of selectors) {
             const target = document.querySelector(selector);
@@ -172,24 +222,21 @@ export const grokAdapter: LLMPlatform = {
     },
 
     isPlatformGenerating() {
-        // TODO(v2.0.x): Implement Grok DOM generation detection once stable selectors are identified.
+        // Grok generation gating is driven by network lifecycle/SFE signals.
         return false;
     },
 
-    defaultTitles: ['New conversation', 'Grok Conversation'],
+    defaultTitles: ['New conversation', 'Grok Conversation', 'Grok / X'],
 
     extractTitleFromDom(): string | null {
-        const raw = document.title?.trim();
-        if (!raw) {
-            return null;
+        const defaultTitles = this.defaultTitles ?? [];
+        const titleFromPage = normalizeGrokDomTitleCandidate(
+            normalizeDomTitle(document.title).replace(/\s*-\s*Grok$/i, ''),
+            defaultTitles,
+        );
+        if (titleFromPage) {
+            return titleFromPage;
         }
-        const cleaned = raw.replace(/\s*-\s*Grok$/i, '').trim();
-        if (!cleaned || cleaned.toLowerCase() === 'grok') {
-            return null;
-        }
-        if (this.defaultTitles?.some((d: string) => d.toLowerCase() === cleaned.toLowerCase())) {
-            return null;
-        }
-        return cleaned;
+        return queryGrokTitleFromDom(defaultTitles);
     },
 };

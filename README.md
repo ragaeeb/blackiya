@@ -111,7 +111,7 @@ touch entrypoints/background.ts
 touch entrypoints/main.content.ts entrypoints/interceptor.content.ts
 mkdir -p entrypoints/interceptor
 touch platforms/chatgpt.ts platforms/gemini.ts platforms/grok.ts
-touch utils/platform-runner.ts utils/protocol/messages.ts
+touch utils/protocol/messages.ts
 mkdir -p utils/runner
 ```
 
@@ -223,9 +223,12 @@ blackiya/
 │   ├── grok.ts               # Grok platform adapter
 │   └── types.ts              # Platform interface definitions
 ├── utils/
-│   ├── platform-runner.ts    # Compatibility re-export for runner
 │   ├── runner/
-│   │   ├── index.ts          # Main orchestration + readiness gating
+│   │   ├── platform-runtime.ts         # Runner entrypoint
+│   │   ├── platform-runner-engine.ts   # Main orchestration + readiness gating
+│   │   ├── platform-runtime-wiring.ts  # Wire handlers + observer/navigation wiring
+│   │   ├── platform-runtime-calibration.ts # Calibration runtime orchestration
+│   │   ├── platform-runtime-stream-probe.ts # Stream-probe runtime wiring
 │   │   ├── state.ts
 │   │   ├── lifecycle-manager.ts
 │   │   ├── message-bridge.ts
@@ -315,17 +318,31 @@ The extension requires the following permissions:
 Blackiya exposes a lightweight bridge on supported LLM pages:
 
 ```js
-window.__blackiya.getJSON().then((data) => {
-    console.log(data);
+const unsubscribeStatus = window.__blackiya.subscribe('status', (status) => {
+    console.log('blackiya status:', status.lifecycle, status.readiness, status.conversationId);
 });
 
-window.__blackiya.getCommonJSON().then((data) => {
-    console.log(data);
+const unsubscribeReady = window.__blackiya.onReady(async (status) => {
+    console.log('blackiya ready:', status.conversationId);
+
+    // Both are safe when ready is emitted:
+    const original = await window.__blackiya.getJSON();
+    const common = await window.__blackiya.getCommonJSON();
+    console.log({ original, common });
 });
+
+// Optional immediate snapshot:
+console.log(window.__blackiya.getStatus());
+
+// Later:
+unsubscribeStatus();
+unsubscribeReady();
 ```
 
 Notes:
-- `getJSON()` returns a Promise and rejects if no conversation data is captured yet.
+- `subscribe('status', cb)` and `onStatusChange(cb)` are tab-local lifecycle/readiness streams.
+- `subscribe('ready', cb)` and `onReady(cb)` emit when canonical capture is ready.
+- On `ready`, both `getJSON()` and `getCommonJSON()` should resolve for that active tab conversation.
 - This runs in the page context, so only use it on pages you trust.
 
 ## 🔒 Privacy & Compliance

@@ -5,7 +5,7 @@ import { isGenericConversationTitle } from '@/utils/title-resolver';
 const GEMINI_CONVERSATION_ID_REGEX = /\bc_([a-zA-Z0-9_-]{8,})\b/;
 const ISO_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
-function isLikelyGeminiText(value: string): boolean {
+const isLikelyGeminiText = (value: string): boolean => {
     const trimmed = value.trim();
     if (trimmed.length < 8 || trimmed.length > 12000) {
         return false;
@@ -32,9 +32,9 @@ function isLikelyGeminiText(value: string): boolean {
         return false;
     }
     return true;
-}
+};
 
-function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void {
+const collectLikelyTextValues = (node: unknown, out: string[], depth = 0) => {
     if (depth > 8 || out.length > 120) {
         return;
     }
@@ -68,14 +68,14 @@ function collectLikelyTextValues(node: unknown, out: string[], depth = 0): void 
     for (const value of Object.values(obj)) {
         collectLikelyTextValues(value, out, depth + 1);
     }
-}
+};
 
-function extractConversationIdFromPayload(payload: string): string | undefined {
+const extractConversationIdFromPayload = (payload: string): string | undefined => {
     const match = payload.match(GEMINI_CONVERSATION_ID_REGEX);
     return match?.[1];
-}
+};
 
-function isLikelyGeminiTitle(value: string): boolean {
+const isLikelyGeminiTitle = (value: string): boolean => {
     const trimmed = value.trim().replace(/\s+/g, ' ');
     if (trimmed.length < 3 || trimmed.length > 180) {
         return false;
@@ -93,9 +93,9 @@ function isLikelyGeminiTitle(value: string): boolean {
         return false;
     }
     return true;
-}
+};
 
-function collectGeminiTitleCandidates(node: unknown, out: string[], depth = 0): void {
+const collectGeminiTitleCandidates = (node: unknown, out: string[], depth = 0) => {
     if (depth > 8 || out.length > 20) {
         return;
     }
@@ -121,7 +121,7 @@ function collectGeminiTitleCandidates(node: unknown, out: string[], depth = 0): 
     for (const value of Object.values(obj)) {
         collectGeminiTitleCandidates(value, out, depth + 1);
     }
-}
+};
 
 export type GeminiStreamSignals = {
     conversationId?: string;
@@ -129,7 +129,10 @@ export type GeminiStreamSignals = {
     titleCandidates: string[];
 };
 
-export function extractGeminiStreamSignalsFromBuffer(buffer: string, seenPayloads: Set<string>): GeminiStreamSignals {
+export const extractGeminiStreamSignalsFromBuffer = (
+    buffer: string,
+    seenPayloads: Set<string>,
+): GeminiStreamSignals => {
     const results = parseBatchexecuteResponse(buffer);
     const textCandidates: string[] = [];
     const titleCandidates: string[] = [];
@@ -161,4 +164,4 @@ export function extractGeminiStreamSignalsFromBuffer(buffer: string, seenPayload
         textCandidates: dedupePreserveOrder(textCandidates),
         titleCandidates: dedupePreserveOrder(titleCandidates),
     };
-}
+};

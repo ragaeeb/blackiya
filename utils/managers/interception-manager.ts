@@ -16,6 +16,8 @@ import type { ConversationData } from '@/utils/types';
 
 export class InterceptionManager {
     private static readonly BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+    private static readonly MAX_PENDING_TOKEN_MESSAGES = 300;
+    private static readonly MAX_TOKEN_REVALIDATION_RETRIES = 40;
     private readonly conversationCache: LRUCache<string, ConversationData>;
     private readonly specificTitleCache: LRUCache<string, string>;
     private currentAdapter: LLMPlatform | null = null;
@@ -24,6 +26,8 @@ export class InterceptionManager {
     private lastInvalidTokenLogAtMs = 0;
     private pendingTokenRevalidationMessages: Array<Record<string, unknown>> = [];
     private pendingTokenRevalidationTimer: ReturnType<typeof setTimeout> | null = null;
+    private pendingTokenRevalidationRetryCount = 0;
+    private pendingTokenRevalidationRetryLimitReached = false;
 
     // Callback to notify the runner (and UI) that new valid data has been intercepted/cached
     private onDataCaptured: (
@@ -51,7 +55,7 @@ export class InterceptionManager {
         this.currentAdapter = adapter;
     }
 
-    public start(): void {
+    public start() {
         this.windowRef.addEventListener('message', this.handleMessage);
         this.processQueuedMessages();
         this.processQueuedLogMessages();
@@ -69,17 +73,19 @@ export class InterceptionManager {
         // #endregion
     }
 
-    public flushQueuedMessages(): void {
+    public flushQueuedMessages() {
         this.processQueuedMessages();
         this.processPendingTokenRevalidationMessages();
     }
 
-    public stop(): void {
+    public stop() {
         this.windowRef.removeEventListener('message', this.handleMessage);
         if (this.pendingTokenRevalidationTimer !== null) {
             clearTimeout(this.pendingTokenRevalidationTimer);
             this.pendingTokenRevalidationTimer = null;
         }
+        this.pendingTokenRevalidationRetryCount = 0;
+        this.pendingTokenRevalidationRetryLimitReached = false;
     }
 
     public getConversation(id: string): ConversationData | undefined {
@@ -91,14 +97,14 @@ export class InterceptionManager {
         return cached;
     }
 
-    public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }): void {
+    public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }) {
         this.handleInterceptedData({
             type: 'LLM_CAPTURE_DATA_INTERCEPTED',
             ...message,
         });
     }
 
-    public ingestConversationData(data: ConversationData, source = 'snapshot'): void {
+    public ingestConversationData(data: ConversationData, source = 'snapshot') {
         if (!this.isValidConversationData(data)) {
             logger.warn('Ignoring invalid ConversationData payload', { source });
             return;
@@ -162,7 +168,7 @@ export class InterceptionManager {
         return isConversationReady(data);
     }
 
-    private handleMessage = (event: MessageEvent): void => {
+    private handleMessage = (event: MessageEvent) => {
         if (event.source !== this.windowRef) {
             return;
         }
@@ -197,7 +203,7 @@ export class InterceptionManager {
         }
     };
 
-    private handleLogEntry(payload: any): void {
+    private handleLogEntry(payload: any) {
         if (!payload || typeof payload.message !== 'string') {
             logger.warn('Malformed LLM_LOG_ENTRY payload', payload);
             return;
@@ -221,7 +227,7 @@ export class InterceptionManager {
         }
     }
 
-    private logTokenValidationDrop(messageType: string, reason: string): void {
+    private logTokenValidationDrop(messageType: string, reason: string) {
         const now = Date.now();
         if (now - this.lastInvalidTokenLogAtMs <= 1500) {
             return;
@@ -241,13 +247,17 @@ export class InterceptionManager {
         if (!message || reason !== 'missing-message-token') {
             return false;
         }
+        if (this.pendingTokenRevalidationMessages.length >= InterceptionManager.MAX_PENDING_TOKEN_MESSAGES) {
+            this.logTokenValidationDrop(messageType, 'missing-message-token-queue-full');
+            return true;
+        }
         this.pendingTokenRevalidationMessages.push(message);
         this.logTokenValidationDrop(messageType, 'missing-message-token-queued-for-revalidation');
         this.schedulePendingTokenRevalidation();
         return true;
     }
 
-    private schedulePendingTokenRevalidation(): void {
+    private schedulePendingTokenRevalidation() {
         if (this.pendingTokenRevalidationTimer !== null) {
             return;
         }
@@ -257,19 +267,25 @@ export class InterceptionManager {
         }, 50);
     }
 
-    private processPendingTokenRevalidationMessages(): void {
+    private processPendingTokenRevalidationMessages() {
         if (this.pendingTokenRevalidationMessages.length === 0) {
             return;
         }
         const sessionToken = this.resolvePendingRevalidationSessionToken();
         if (!sessionToken) {
+            if (this.pendingTokenRevalidationRetryLimitReached) {
+                this.pendingTokenRevalidationMessages = [];
+                this.pendingTokenRevalidationRetryLimitReached = false;
+            }
             return;
         }
 
         const pending = this.pendingTokenRevalidationMessages;
         this.pendingTokenRevalidationMessages = [];
         for (const typed of pending) {
-            this.applyMissingTokenIfNeeded(typed, sessionToken);
+            if (!this.applyMissingTokenIfNeeded(typed, sessionToken)) {
+                continue;
+            }
             this.processPendingTokenRevalidationMessage(typed);
         }
     }
@@ -277,20 +293,39 @@ export class InterceptionManager {
     private resolvePendingRevalidationSessionToken(): string | null {
         const sessionToken = getSessionToken();
         if (sessionToken) {
+            this.pendingTokenRevalidationRetryCount = 0;
+            this.pendingTokenRevalidationRetryLimitReached = false;
             return sessionToken;
+        }
+        this.pendingTokenRevalidationRetryCount += 1;
+        if (this.pendingTokenRevalidationRetryCount >= InterceptionManager.MAX_TOKEN_REVALIDATION_RETRIES) {
+            this.pendingTokenRevalidationRetryCount = 0;
+            this.pendingTokenRevalidationRetryLimitReached = true;
+            if (this.pendingTokenRevalidationTimer !== null) {
+                clearTimeout(this.pendingTokenRevalidationTimer);
+                this.pendingTokenRevalidationTimer = null;
+            }
+            logger.warn('Pending token revalidation retry limit reached; dropping pending messages', {
+                pendingCount: this.pendingTokenRevalidationMessages.length,
+            });
+            return null;
         }
         this.schedulePendingTokenRevalidation();
         return null;
     }
 
-    private applyMissingTokenIfNeeded(message: Record<string, unknown>, sessionToken: string): void {
+    private applyMissingTokenIfNeeded(message: Record<string, unknown>, sessionToken: string | null): boolean {
         if (typeof message.__blackiyaToken === 'string' && message.__blackiyaToken.length > 0) {
-            return;
+            return true;
+        }
+        if (!sessionToken) {
+            return false;
         }
         message.__blackiyaToken = sessionToken;
+        return true;
     }
 
-    private processPendingTokenRevalidationMessage(message: Record<string, unknown>): void {
+    private processPendingTokenRevalidationMessage(message: Record<string, unknown>) {
         const messageType = typeof message.type === 'string' ? message.type : '';
         const tokenFailureReason = resolveTokenValidationFailureReason(message);
         if (tokenFailureReason !== null) {
@@ -337,7 +372,7 @@ export class InterceptionManager {
         return tokenFailureReason;
     }
 
-    private handleInterceptedData(message: any): void {
+    private handleInterceptedData(message: any) {
         logger.info('Intercepted payload received', {
             platform: this.currentAdapter?.name ?? 'unknown',
             size: typeof message.data === 'string' ? message.data.length : 0,
@@ -408,7 +443,7 @@ export class InterceptionManager {
         return isExpectedAuxMiss ? 'info' : 'warn';
     }
 
-    private rememberSpecificTitle(conversationId: string, title: string, source: string): void {
+    private rememberSpecificTitle(conversationId: string, title: string, source: string) {
         const previousTitle = this.specificTitleCache.get(conversationId) ?? null;
         if (previousTitle === title) {
             return;
@@ -427,7 +462,7 @@ export class InterceptionManager {
         incoming: ConversationData,
         source: string,
         existing?: ConversationData,
-    ): void {
+    ) {
         const platformDefaultTitles = this.currentAdapter?.defaultTitles;
         const existingSpecificTitle =
             existing && !isGenericConversationTitle(existing.title, { platformDefaultTitles }) ? existing.title : null;
@@ -451,7 +486,7 @@ export class InterceptionManager {
         }
     }
 
-    private processQueuedMessages(): void {
+    private processQueuedMessages() {
         const queue = this.getQueue('__BLACKIYA_CAPTURE_QUEUE__');
         if (queue.length === 0) {
             return;
@@ -475,7 +510,7 @@ export class InterceptionManager {
         }
     }
 
-    private processQueuedLogMessages(): void {
+    private processQueuedLogMessages() {
         const queue = this.getQueue('__BLACKIYA_LOG_QUEUE__');
         if (queue.length === 0) {
             return;

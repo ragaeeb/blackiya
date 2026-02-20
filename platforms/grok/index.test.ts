@@ -13,6 +13,31 @@ mock.module('@/utils/logger', () => ({
 import sampleConversation from '@/data/grok/sample_grok_conversation.json';
 import sampleHistory from '@/data/grok/sample_grok_history.json';
 
+const withMockDom = (
+    href: string,
+    body: HTMLElement,
+    querySelector: (selector: string) => Element | null,
+    fn: () => void,
+) => {
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    const originalWindow = (globalThis as { window?: unknown }).window;
+
+    (globalThis as { document?: unknown }).document = {
+        body,
+        querySelector,
+    };
+    (globalThis as { window?: unknown }).window = {
+        location: new URL(href),
+    };
+
+    try {
+        fn();
+    } finally {
+        (globalThis as { document?: unknown }).document = originalDocument;
+        (globalThis as { window?: unknown }).window = originalWindow;
+    }
+};
+
 let grokAdapter: any;
 let resetGrokAdapterState: (() => void) | null = null;
 
@@ -293,15 +318,17 @@ describe('Grok Adapter — formatFilename', () => {
 });
 
 describe('Grok Adapter — extractTitleFromDom', () => {
-    const withDocTitle = (title: string, fn: () => void) => {
+    const withDoc = (doc: { title?: string; querySelector?: (selector: string) => Element | null }, fn: () => void) => {
         const orig = (globalThis as any).document;
-        (globalThis as any).document = { title };
+        (globalThis as any).document = doc;
         try {
             fn();
         } finally {
             (globalThis as any).document = orig;
         }
     };
+
+    const withDocTitle = (title: string, fn: () => void) => withDoc({ title, querySelector: () => null }, fn);
 
     it('should have extractTitleFromDom defined', () => {
         expect(typeof grokAdapter.extractTitleFromDom).toBe('function');
@@ -310,6 +337,7 @@ describe('Grok Adapter — extractTitleFromDom', () => {
     it('should have the expected defaultTitles', () => {
         expect(grokAdapter.defaultTitles).toContain('New conversation');
         expect(grokAdapter.defaultTitles).toContain('Grok Conversation');
+        expect(grokAdapter.defaultTitles).toContain('Grok / X');
     });
 
     it('should strip "- Grok" suffix', () => {
@@ -330,6 +358,12 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         });
     });
 
+    it('should return null for generic "Grok / X" page title', () => {
+        withDocTitle('Grok / X', () => {
+            expect(grokAdapter.extractTitleFromDom()).toBeNull();
+        });
+    });
+
     it('should return null for empty document title', () => {
         withDocTitle('', () => {
             expect(grokAdapter.extractTitleFromDom()).toBeNull();
@@ -340,5 +374,38 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         withDocTitle('New conversation - Grok', () => {
             expect(grokAdapter.extractTitleFromDom()).toBeNull();
         });
+    });
+
+    it('should resolve title from x.com active conversation DOM when page title is generic', () => {
+        const activeConversationTitle = { textContent: 'Classical Islamic Text Translation Guidelines' } as Element;
+        withDoc(
+            {
+                title: 'Grok / X',
+                querySelector: (selector: string) =>
+                    selector === '[aria-current="page"][href*="/i/grok?conversation="] [dir="ltr"]'
+                        ? activeConversationTitle
+                        : null,
+            },
+            () => {
+                expect(grokAdapter.extractTitleFromDom()).toBe('Classical Islamic Text Translation Guidelines');
+            },
+        );
+    });
+});
+
+describe('Grok Adapter — getButtonInjectionTarget', () => {
+    it('should force body injection for x.com Grok conversation pages', () => {
+        const body = {} as HTMLElement;
+        const bannerParent = {} as HTMLElement;
+        const banner = { parentElement: bannerParent } as HTMLElement;
+
+        withMockDom(
+            'https://x.com/i/grok?conversation=2024522069224943757',
+            body,
+            () => banner,
+            () => {
+                expect(grokAdapter.getButtonInjectionTarget()).toBe(body);
+            },
+        );
     });
 });

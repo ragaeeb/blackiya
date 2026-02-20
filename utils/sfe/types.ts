@@ -21,7 +21,7 @@ export type SignalSource =
     | 'snapshot_fallback';
 export type { PlatformReadiness } from '@/platforms/types';
 
-export interface FusionSignal {
+export type FusionSignal = {
     attemptId: string;
     platform: string;
     source: SignalSource;
@@ -44,7 +44,7 @@ export interface FusionSignal {
             | 'legacy_message_path'
             | 'stabilization_timeout';
     };
-}
+};
 
 export type BlockingCondition =
     | 'no_canonical_data'
@@ -57,19 +57,19 @@ export type BlockingCondition =
     | 'disposed'
     | 'platform_generating';
 
-export interface ReadinessDecision {
+export type ReadinessDecision = {
     ready: boolean;
     mode: 'canonical_ready' | 'awaiting_stabilization' | 'degraded_manual_only';
     reason: string;
-}
+};
 
-export interface ExportMeta {
+export type ExportMeta = {
     captureSource: 'canonical_api' | 'dom_snapshot_degraded';
     fidelity: 'high' | 'degraded';
     completeness: 'complete' | 'partial';
-}
+};
 
-export interface CaptureResolution {
+export type CaptureResolution = {
     attemptId: string;
     platform: string;
     conversationId?: string | null;
@@ -79,9 +79,9 @@ export interface CaptureResolution {
     reason: 'not_captured' | 'captured_not_ready' | 'awaiting_stabilization' | 'ready' | 'terminated_partial' | 'error';
     blockingConditions: BlockingCondition[];
     updatedAtMs: number;
-}
+};
 
-export interface AttemptDescriptor {
+export type AttemptDescriptor = {
     attemptId: string;
     platform: string;
     createdAtMs: number;
@@ -91,13 +91,13 @@ export interface AttemptDescriptor {
     phase: LifecyclePhase;
     supersededByAttemptId?: string;
     disposed: boolean;
-}
+};
 
-export interface CanonicalSample {
+export type CanonicalSample = {
     attemptId: string;
     platform: string;
     conversationId?: string | null;
     data: ConversationData;
     readiness: PlatformReadiness;
     timestampMs: number;
-}
+};

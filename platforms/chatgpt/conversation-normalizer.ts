@@ -17,9 +17,7 @@ import {
     normalizeText,
 } from './utils';
 
-// ---------------------------------------------------------------------------
 // Conversation ID helpers
-// ---------------------------------------------------------------------------
 
 export const normalizeConversationId = (candidate: Record<string, unknown>): string | null => {
     const conversationId = normalizeText(candidate.conversation_id) ?? normalizeText(candidate.id);
@@ -47,25 +45,28 @@ export const getConversationCandidate = (parsed: unknown): unknown => {
     return parsed;
 };
 
-// ---------------------------------------------------------------------------
 // Mapping-level extraction helpers
-// ---------------------------------------------------------------------------
 
 export const extractMappingModelSlug = (mapping: Record<string, MessageNode>): string | null => {
+    let modelSlugFallback: string | null = null;
+    let modelFallback: string | null = null;
     for (const node of Object.values(mapping)) {
         const metadata = node.message?.metadata;
         if (!metadata) {
             continue;
         }
-        const resolved =
-            normalizeModelSlug(metadata.resolved_model_slug) ||
-            normalizeModelSlug(metadata.model_slug) ||
-            normalizeModelSlug(metadata.model);
+        const resolved = normalizeModelSlug(metadata.resolved_model_slug);
         if (resolved) {
             return resolved;
         }
+        if (!modelSlugFallback) {
+            modelSlugFallback = normalizeModelSlug(metadata.model_slug);
+        }
+        if (!modelFallback) {
+            modelFallback = normalizeModelSlug(metadata.model);
+        }
     }
-    return null;
+    return modelSlugFallback ?? modelFallback;
 };
 
 /** Picks the node id with the latest message timestamp as a current-node fallback. */
@@ -114,18 +115,20 @@ export const deriveConversationTimes = (mapping: Record<string, MessageNode>): {
     return { create: normalizedCreate, update: normalizedUpdate };
 };
 
-// ---------------------------------------------------------------------------
 // Title helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Derives a title from the first user message in the mapping (max 80 chars).
  * Returns empty string when no usable user message exists.
  */
 export const deriveTitleFromFirstUserMessage = (mapping: Record<string, MessageNode>): string => {
+    const timestampOrMax = (message: Message): number =>
+        normalizeNumber(message.create_time) ?? normalizeNumber(message.update_time) ?? Number.MAX_SAFE_INTEGER;
+
     const userMessage = Object.values(mapping)
         .map((node) => node.message)
-        .find((message): message is Message => !!message && message.author.role === 'user');
+        .filter((message): message is Message => !!message && message.author.role === 'user')
+        .sort((left, right) => timestampOrMax(left) - timestampOrMax(right))[0];
 
     if (!userMessage) {
         return '';
@@ -158,9 +161,7 @@ export const resolveConversationTitle = (title: unknown, mapping: Record<string,
     return derived || normalized;
 };
 
-// ---------------------------------------------------------------------------
 // Top-level conversation normalizer
-// ---------------------------------------------------------------------------
 
 /**
  * Attempts to parse an unknown payload into a valid `ConversationData`.

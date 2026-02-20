@@ -3,6 +3,6 @@ export type GeminiStreamMonitorContext = {
     conversationId?: string;
 };
 
-export function shouldProcessGeminiChunk(chunk: string): boolean {
+export const shouldProcessGeminiChunk = (chunk: string): boolean => {
     return chunk.trim().length > 0;
-}
+};

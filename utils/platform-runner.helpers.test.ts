@@ -1,21 +1,24 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
-import { createMockAdapter } from './runner/__tests__/helpers';
+import {
+    buildBrowserMock,
+    buildLoggerMock,
+    createLoggerCalls,
+    createMockAdapter,
+    setupHappyDomGlobals,
+} from './runner/__tests__/helpers';
 
 // Configure Happy DOM
 const window = new Window();
-const document = window.document;
-(global as any).window = window;
-(global as any).document = document;
-(global as any).history = window.history;
-(global as any).HTMLElement = window.HTMLElement;
-(global as any).HTMLButtonElement = window.HTMLButtonElement;
-(global as any).MutationObserver = window.MutationObserver;
+const document = setupHappyDomGlobals(window as any);
 
 // We need a mutable reference to control the mock return value
 const currentAdapterMock: any = createMockAdapter(document);
-const storageDataMock: Record<string, unknown> = {};
-const runtimeSendMessageMock: (message: unknown) => Promise<unknown> = async () => undefined;
+const browserMockState = {
+    storageData: {} as Record<string, unknown>,
+    sendMessage: async (_message: unknown) => undefined as unknown,
+};
+const loggerCalls = createLoggerCalls();
 
 // Mock the factory module
 mock.module('@/platforms/factory', () => ({
@@ -30,48 +33,10 @@ mock.module('@/utils/download', () => ({
     },
 }));
 
-const loggerDebugCalls: Array<{ message: unknown; args: unknown[] }> = [];
-const loggerInfoCalls: Array<{ message: unknown; args: unknown[] }> = [];
-const loggerWarnCalls: Array<{ message: unknown; args: unknown[] }> = [];
-const loggerErrorCalls: Array<{ message: unknown; args: unknown[] }> = [];
-
-mock.module('@/utils/logger', () => ({
-    logger: {
-        debug: (message: unknown, ...args: unknown[]) => {
-            loggerDebugCalls.push({ message, args });
-        },
-        info: (message: unknown, ...args: unknown[]) => {
-            loggerInfoCalls.push({ message, args });
-        },
-        warn: (message: unknown, ...args: unknown[]) => {
-            loggerWarnCalls.push({ message, args });
-        },
-        error: (message: unknown, ...args: unknown[]) => {
-            loggerErrorCalls.push({ message, args });
-        },
-    },
-}));
+mock.module('@/utils/logger', () => buildLoggerMock(loggerCalls));
 
 // Mock wxt/browser explicitly for this test file to prevent logger errors
-const browserMock = {
-    storage: {
-        onChanged: {
-            addListener: () => {},
-            removeListener: () => {},
-        },
-        local: {
-            get: async () => storageDataMock,
-            set: async () => {},
-        },
-    },
-    runtime: {
-        getURL: () => 'chrome-extension://mock/',
-        sendMessage: async (message: unknown) => runtimeSendMessageMock(message),
-    },
-};
-mock.module('wxt/browser', () => ({
-    browser: browserMock,
-}));
+mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
 // Import subject under test AFTER mocking
 import {
@@ -79,7 +44,7 @@ import {
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
     shouldRemoveDisposedAttemptBinding,
-} from './platform-runner';
+} from '@/utils/runner/platform-runtime';
 
 describe('shouldRemoveDisposedAttemptBinding', () => {
     const resolveFromMap = (aliases: Record<string, string>) => (attemptId: string) => {
@@ -134,7 +99,7 @@ describe('canonical stabilization retry helpers', () => {
                 timeoutWarnings,
                 inProgress,
             },
-            (timerId) => {
+            (timerId: any) => {
                 clearedTimers.push(timerId);
             },
         );
@@ -152,7 +117,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-1',
             true,
             undefined,
-            (attemptId) => attemptId,
+            (attemptId: any) => attemptId,
         );
         expect(disposed).toBeTrue();
 
@@ -160,7 +125,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-1',
             false,
             'attempt-2',
-            (attemptId) => attemptId,
+            (attemptId: any) => attemptId,
         );
         expect(mismatched).toBeTrue();
 
@@ -168,7 +133,7 @@ describe('canonical stabilization retry helpers', () => {
             'attempt-1',
             false,
             'alias-attempt-1',
-            (attemptId) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),
+            (attemptId: any) => (attemptId === 'alias-attempt-1' ? 'attempt-1' : attemptId),
         );
         expect(canonicalAliasMatch).toBeFalse();
     });

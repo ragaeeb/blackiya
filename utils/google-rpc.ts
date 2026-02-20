@@ -14,7 +14,7 @@ export type BatchexecuteResult = {
  * @param text - Raw response text
  * @returns Array of parsed RPC results
  */
-export function parseBatchexecuteResponse(text: string) {
+export const parseBatchexecuteResponse = (text: string) => {
     const cleanText = stripMagicHeader(text);
     const results: BatchexecuteResult[] = [];
     let searchFrom = 0;
@@ -46,7 +46,7 @@ export function parseBatchexecuteResponse(text: string) {
     }
 
     return results;
-}
+};
 
 /**
  * Processes the parsed outer array of a Batchexecute response.

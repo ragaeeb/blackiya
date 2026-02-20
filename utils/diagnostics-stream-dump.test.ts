@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { BufferedStreamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { STORAGE_KEYS } from '@/utils/settings';
 
-function createMemoryStorage() {
+const createMemoryStorage = () => {
     const store = new Map<string, unknown>();
     return {
         async get(key: string) {
@@ -17,9 +17,9 @@ function createMemoryStorage() {
             store.delete(key);
         },
     };
-}
+};
 
-function createFlakyStorage(failuresBeforeSuccess = 1) {
+const createFlakyStorage = (failuresBeforeSuccess = 1) => {
     const store = new Map<string, unknown>();
     let remainingFailures = failuresBeforeSuccess;
     return {
@@ -39,7 +39,7 @@ function createFlakyStorage(failuresBeforeSuccess = 1) {
             store.delete(key);
         },
     };
-}
+};
 
 describe('diagnostics-stream-dump', () => {
     it('stores bounded frames grouped by attempt', async () => {

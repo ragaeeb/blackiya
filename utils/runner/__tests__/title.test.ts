@@ -47,8 +47,8 @@ mock.module('@/utils/download', () => ({
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
 
-import { resolveExportConversationTitle, runPlatform } from '@/utils/platform-runner';
 import { getSessionToken } from '@/utils/protocol/session-token';
+import { resolveExportConversationTitle, runPlatform } from '@/utils/runner/platform-runtime';
 
 const postStampedMessage = makePostStampedMessage(window as any, getSessionToken);
 
@@ -72,8 +72,6 @@ describe('Platform Runner – export title resolution', () => {
     afterEach(() => {
         window.dispatchEvent(new (window as any).Event('beforeunload'));
     });
-
-    // ---- unit tests for resolveExportConversationTitle ----------------------
 
     it('should derive export title from first user message when title is generic', () => {
         const conv = buildConversation('gem-1', 'Assistant response', {
@@ -123,8 +121,6 @@ describe('Platform Runner – export title resolution', () => {
         conv.title = 'Custom Thread Title';
         expect(resolveExportConversationTitle(conv as any)).toBe('Custom Thread Title');
     });
-
-    // ---- integration: SSE title override ------------------------------------
 
     it('should update cached title when BLACKIYA_TITLE_RESOLVED arrives from SSE stream', async () => {
         const staleConv = buildConversation('123', 'Full response text', {
@@ -245,8 +241,6 @@ describe('Platform Runner – export title resolution', () => {
         expect((downloadCalls[0].data as any).title).toBe('Translation of Maytah Prohibition');
         expect(downloadCalls[0].filename).toContain('Translation');
     }, 15_000);
-
-    // ---- integration: Gemini DOM title fallback ----------------------------
 
     it('should use Gemini DOM title fallback on Save when cached title is generic', async () => {
         currentAdapterMock = {

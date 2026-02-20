@@ -20,15 +20,11 @@ import { evaluateChatGPTReadiness } from './readiness';
 import { buildConversationFromSsePayloads, extractSsePayloads } from './sse-parser';
 import { CONVERSATION_ID_PATTERN, HOST_CANDIDATES, isPlaceholderTitle, tryParseJson } from './utils';
 
-// ---------------------------------------------------------------------------
 // Exported constants used by the interceptor / runner layers
-// ---------------------------------------------------------------------------
 
 export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = /\/backend-api\/(?:f\/)?conversation(?:\?.*)?$/i;
 
-// ---------------------------------------------------------------------------
 // Adapter factory
-// ---------------------------------------------------------------------------
 
 const MAX_TITLE_LENGTH = 80;
 
