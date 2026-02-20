@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/ragaeeb/blackiya/compare/v2.1.0...v2.2.0) (2026-02-20)
+
+
+### Features
+
+* **emit:** Implement public API onReady status emissions ([#29](https://github.com/ragaeeb/blackiya/issues/29)) ([2dad6b3](https://github.com/ragaeeb/blackiya/commit/2dad6b39254ec92e00f1d2533ec92dbab6868d9c))
+
 # [2.1.0](https://github.com/ragaeeb/blackiya/compare/v2.0.7...v2.1.0) (2026-02-19)
 
 
