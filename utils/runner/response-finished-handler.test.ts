@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
+import * as finishedSignal from '@/utils/runner/finished-signal';
 import {
     processFinishedConversation,
     processResponseFinished,
@@ -9,19 +10,23 @@ import {
 
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
-mock.module('@/utils/runner/finished-signal', () => ({
-    resolveFinishedSignalDebounce: mock(() => ({ minIntervalMs: 1000, effectiveAttemptId: 'eff-id' })),
-    shouldPromoteGrokFromCanonicalCapture: mock(() => false),
-}));
 
 describe('response-finished-handler', () => {
     let deps: ResponseFinishedDeps;
+    let debounceSpy: ReturnType<typeof spyOn>;
+    let promoteSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         logCalls.debug.length = 0;
         logCalls.info.length = 0;
         logCalls.warn.length = 0;
         logCalls.error.length = 0;
+
+        debounceSpy = spyOn(finishedSignal, 'resolveFinishedSignalDebounce').mockReturnValue({
+            minIntervalMs: 1000,
+            effectiveAttemptId: 'eff-id',
+        });
+        promoteSpy = spyOn(finishedSignal, 'shouldPromoteGrokFromCanonicalCapture').mockReturnValue(false);
 
         deps = {
             extractConversationIdFromUrl: mock(() => null),
@@ -52,6 +57,11 @@ describe('response-finished-handler', () => {
             scheduleButtonRefresh: mock(() => {}),
             maybeRunAutoCapture: mock(() => {}),
         };
+    });
+
+    afterEach(() => {
+        debounceSpy.mockRestore();
+        promoteSpy.mockRestore();
     });
 
     describe('shouldProcessFinishedSignal', () => {

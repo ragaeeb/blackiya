@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import type { LLMPlatform } from '@/platforms/types';
-import * as calibrationProfile from '@/utils/calibration-profile';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
     type CalibrationOrchestrationDeps,
@@ -15,16 +14,15 @@ import {
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
-mock.module('@/utils/calibration-profile', () => ({
-    loadCalibrationProfileV2IfPresent: mock(() => Promise.resolve(null)),
-    saveCalibrationProfileV2: mock(() => Promise.resolve()),
-    stepFromStrategy: mock((s) => s),
-    buildCalibrationProfileFromStep: mock((p, s) => ({ platform: p, strategy: s })),
-}));
+import * as calibrationProfile from '@/utils/calibration-profile';
 
 describe('calibration-orchestration', () => {
     let deps: CalibrationOrchestrationDeps;
     let mockAdapter: LLMPlatform;
+    let loadProfileSpy: ReturnType<typeof spyOn>;
+    let saveProfileSpy: ReturnType<typeof spyOn>;
+    let stepFromStrategySpy: ReturnType<typeof spyOn>;
+    let buildProfileSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         logCalls.debug.length = 0;
@@ -32,10 +30,10 @@ describe('calibration-orchestration', () => {
         logCalls.warn.length = 0;
         logCalls.error.length = 0;
 
-        // Clear mocks on the module we created
-        (calibrationProfile.loadCalibrationProfileV2IfPresent as ReturnType<typeof mock>).mockClear();
-        (calibrationProfile.saveCalibrationProfileV2 as ReturnType<typeof mock>).mockClear();
-        (calibrationProfile.stepFromStrategy as ReturnType<typeof mock>).mockClear();
+        loadProfileSpy = spyOn(calibrationProfile, 'loadCalibrationProfileV2IfPresent').mockImplementation(() => Promise.resolve(null));
+        saveProfileSpy = spyOn(calibrationProfile, 'saveCalibrationProfileV2').mockImplementation(() => Promise.resolve());
+        stepFromStrategySpy = spyOn(calibrationProfile, 'stepFromStrategy').mockImplementation((s: any) => s as any);
+        buildProfileSpy = spyOn(calibrationProfile, 'buildCalibrationProfileFromStep').mockImplementation((p: any, s: any) => ({ platform: p, strategy: s }) as any);
 
         (globalThis as any).window = {
             location: { href: 'https://chat.openai.com/c/123' },
@@ -76,6 +74,14 @@ describe('calibration-orchestration', () => {
             buttonManagerSetCalibrationState: mock(() => {}),
             syncRunnerStateCalibration: mock(() => {}),
         };
+    });
+
+    afterEach(() => {
+        loadProfileSpy.mockRestore();
+        saveProfileSpy.mockRestore();
+        stepFromStrategySpy.mockRestore();
+        buildProfileSpy.mockRestore();
+        delete (globalThis as any).window;
     });
 
     describe('loadCalibrationPreference', () => {

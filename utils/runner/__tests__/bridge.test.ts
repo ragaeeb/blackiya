@@ -39,6 +39,17 @@ mock.module('@/platforms/factory', () => ({
 mock.module('@/utils/download', () => ({ downloadAsJSON: () => {} }));
 mock.module('@/utils/logger', () => buildLoggerMock(createLoggerCalls()));
 mock.module('wxt/browser', () => buildBrowserMock(browserMockState));
+mock.module('@/utils/common-export', () => ({
+    buildCommonExport: (data: any, llmName: string) => ({
+        format: 'common' as const,
+        llm: llmName,
+        title: data.title,
+        conversation_id: data.conversation_id,
+        prompt: '',
+        response: '',
+        reasoning: [],
+    }),
+}));
 
 import { getSessionToken } from '@/utils/protocol/session-token';
 import { runPlatform } from '@/utils/runner/platform-runtime';

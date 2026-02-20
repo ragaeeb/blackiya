@@ -1,10 +1,7 @@
 import type { LLMPlatform } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
-import {
-    runStreamDoneProbe as runStreamDoneProbeCore,
-    type StreamDoneProbeDeps,
-} from '@/utils/runner/stream-done-probe';
+import type { StreamDoneProbeDeps } from '@/utils/runner/stream-done-probe';
 import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import type { PlatformReadiness } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
@@ -12,6 +9,11 @@ import type { ConversationData } from '@/utils/types';
 type ProbeCancelReason = 'superseded' | 'disposed' | 'navigation' | 'teardown';
 
 export type StreamDoneCoordinatorDeps = {
+    runStreamDoneProbeCore: (
+        conversationId: string,
+        hintedAttemptId: string | undefined,
+        deps: StreamDoneProbeDeps,
+    ) => Promise<void>;
     probeLease: CrossTabProbeLease;
     probeLeaseTtlMs: number;
     probeLeaseRetryGraceMs: number;
@@ -137,7 +139,7 @@ export const createStreamDoneCoordinator = (deps: StreamDoneCoordinatorDeps) => 
         if (!deps.getCurrentAdapter()) {
             return Promise.resolve();
         }
-        return runStreamDoneProbeCore(conversationId, hintedAttemptId, buildStreamDoneProbeDeps());
+        return deps.runStreamDoneProbeCore(conversationId, hintedAttemptId, buildStreamDoneProbeDeps());
     };
 
     return {

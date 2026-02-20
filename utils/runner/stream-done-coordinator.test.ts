@@ -1,15 +1,18 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { createStreamDoneCoordinator, type StreamDoneCoordinatorDeps } from '@/utils/runner/stream-done-coordinator';
-
-mock.module('@/utils/runner/stream-done-probe', () => ({
-    runStreamDoneProbe: mock((_cid: string, _aid: string, _deps: any) => Promise.resolve()),
-}));
 
 describe('stream-done-coordinator', () => {
     let deps: StreamDoneCoordinatorDeps;
 
+    let originalSetTimeout: any;
+    let originalClearTimeout: any;
+
     beforeEach(() => {
+        originalSetTimeout = (globalThis as any).window?.setTimeout;
+        originalClearTimeout = globalThis.clearTimeout;
+        
         deps = {
+            runStreamDoneProbeCore: mock((_cid: string, _aid: string | undefined, _deps: any) => Promise.resolve()),
             probeLease: {
                 claim: mock(() => Promise.resolve({ acquired: true, ownerAttemptId: null, expiresAtMs: 0 })),
                 release: mock(() => Promise.resolve()),
@@ -53,6 +56,13 @@ describe('stream-done-coordinator', () => {
         globalThis.clearTimeout = mock(() => {}) as any;
     });
 
+    afterEach(() => {
+        if ((globalThis as any).window) {
+            (globalThis as any).window.setTimeout = originalSetTimeout;
+        }
+        globalThis.clearTimeout = originalClearTimeout;
+    });
+
     describe('createStreamDoneCoordinator', () => {
         let coordinator: ReturnType<typeof createStreamDoneCoordinator>;
         beforeEach(() => {
@@ -89,20 +99,12 @@ describe('stream-done-coordinator', () => {
         });
 
         it('should handle unacquired probe leases by establishing retry timer sequence', async () => {
-            // Wait we need to mock out the tryAcquireProbeLease flow. But that is internal to `buildStreamDoneProbeDeps`
-            // `runStreamDoneProbe` initializes the actual inner `StreamDoneProbeDeps.acquireProbeLease()`.
-            // Because we mocked it, it doesn't run.
-
-            // To evaluate the lease retry behaviour, let's grab the built lease from constructing probe.
             let builtAcquire: any;
-            mock.module('@/utils/runner/stream-done-probe', () => ({
-                runStreamDoneProbe: (_c: string, _a: string, p: any) => {
-                    builtAcquire = p.acquireProbeLease;
-                    return Promise.resolve();
-                },
-            }));
+            deps.runStreamDoneProbeCore = mock((_c: string, _a: string | undefined, p: any) => {
+                builtAcquire = p.acquireProbeLease;
+                return Promise.resolve();
+            });
 
-            // Need to re-init after module mock update
             coordinator = createStreamDoneCoordinator(deps);
             await coordinator.runStreamDoneProbe('c-1', 'a-1');
 

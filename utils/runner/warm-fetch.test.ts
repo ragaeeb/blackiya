@@ -11,12 +11,17 @@ mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
 describe('warm-fetch', () => {
     let deps: any;
+    let originalSetTimeout: any;
+    let originalClearTimeout: any;
 
     beforeEach(() => {
         logCalls.debug.length = 0;
         logCalls.info.length = 0;
         logCalls.warn.length = 0;
         logCalls.error.length = 0;
+
+        originalSetTimeout = (globalThis as any).window?.setTimeout;
+        originalClearTimeout = globalThis.clearTimeout;
 
         deps = {
             platformName: 'ChatGPT',
@@ -50,6 +55,10 @@ describe('warm-fetch', () => {
 
     afterEach(() => {
         delete (globalThis as any).fetch;
+        if ((globalThis as any).window) {
+            (globalThis as any).window.setTimeout = originalSetTimeout;
+        }
+        globalThis.clearTimeout = originalClearTimeout;
     });
 
     describe('tryWarmFetchCandidate', () => {

@@ -146,51 +146,75 @@ describe('dom-snapshot', () => {
     });
 
     describe('buildIsolatedDomSnapshot', () => {
-        let originalDocumentQuerySelector: typeof globalThis.document.querySelector;
-        let originalDocumentBody: HTMLElement;
+        let originalDescQuerySelector: PropertyDescriptor | undefined;
+        let originalDescBody: PropertyDescriptor | undefined;
+        let originalDescTitle: PropertyDescriptor | undefined;
 
-        let originalDocumentTitle: string;
+        const getDesc = (obj: any, prop: string) => {
+            if (!obj) return undefined;
+            let current = obj;
+            while (current) {
+                const desc = Object.getOwnPropertyDescriptor(current, prop);
+                if (desc) return desc;
+                // Get proto manually, Object.getPrototypeOf might fail on pure objects but works on DOM
+                current = Object.getPrototypeOf(current);
+            }
+            return undefined;
+        };
+
+        const restoreDesc = (obj: any, prop: string, desc: PropertyDescriptor | undefined) => {
+            if (!obj) return;
+            if (desc) {
+                Object.defineProperty(obj, prop, desc);
+            } else {
+                delete obj[prop];
+            }
+        };
 
         beforeEach(() => {
-            originalDocumentQuerySelector = globalThis.document?.querySelector;
-            originalDocumentBody = globalThis.document?.body;
-            originalDocumentTitle = globalThis.document?.title;
-
             if (!globalThis.document) {
                 (globalThis as any).document = {};
             }
-            (globalThis.document as any).title = 'Test Title';
+
+            originalDescQuerySelector = getDesc(globalThis.document, 'querySelector');
+            originalDescBody = getDesc(globalThis.document, 'body');
+            originalDescTitle = getDesc(globalThis.document, 'title');
+
+            Object.defineProperty(globalThis.document, 'title', { value: 'Test Title', configurable: true });
         });
 
         afterEach(() => {
             if (globalThis.document) {
-                globalThis.document.querySelector = originalDocumentQuerySelector;
-                globalThis.document.body = originalDocumentBody;
-                globalThis.document.title = originalDocumentTitle;
+                restoreDesc(globalThis.document, 'querySelector', originalDescQuerySelector);
+                restoreDesc(globalThis.document, 'body', originalDescBody);
+                restoreDesc(globalThis.document, 'title', originalDescTitle);
             }
         });
 
         it('should return null if no roots or no valid candidates', () => {
-            (globalThis.document as any).querySelector = () => null;
-            (globalThis.document as any).body = null;
+            Object.defineProperty(globalThis.document, 'querySelector', { value: () => null, configurable: true });
+            Object.defineProperty(globalThis.document, 'body', { value: null, configurable: true });
 
             const adapter = { name: 'ChatGPT' } as LLMPlatform;
             expect(buildIsolatedDomSnapshot(adapter, '123')).toBeNull();
         });
 
         it('should build primary snapshot if valid candidates found in body', () => {
-            (globalThis.document as any).querySelector = () => null;
-            (globalThis.document as any).body = {
-                querySelectorAll: (sel: string) => {
-                    if (sel.includes('user')) {
-                        return [{ textContent: 'user msg' }];
-                    }
-                    if (sel.includes('assistant')) {
-                        return [{ textContent: 'assistant msg' }];
-                    }
-                    return [];
+            Object.defineProperty(globalThis.document, 'querySelector', { value: () => null, configurable: true });
+            Object.defineProperty(globalThis.document, 'body', {
+                value: {
+                    querySelectorAll: (sel: string) => {
+                        if (sel.includes('user')) {
+                            return [{ textContent: 'user msg' }];
+                        }
+                        if (sel.includes('assistant')) {
+                            return [{ textContent: 'assistant msg' }];
+                        }
+                        return [];
+                    },
                 },
-            };
+                configurable: true
+            });
 
             const adapter = { name: 'ChatGPT' } as LLMPlatform;
             const result = buildIsolatedDomSnapshot(adapter, '123');
@@ -199,17 +223,20 @@ describe('dom-snapshot', () => {
         });
 
         it('should fallback to loose Grok candidates if Grok adapter and primary fails', () => {
-            (globalThis.document as any).querySelector = () => null;
-            (globalThis.document as any).body = {
-                querySelectorAll: (sel: string) => {
-                    // primary fails by returning empty for user/assistant roles
-                    // but loose fallback returns on main article
-                    if (sel.includes('main article')) {
-                        return [{ textContent: 'long enough user msg' }, { textContent: 'long enough assistant msg' }];
-                    }
-                    return [];
+            Object.defineProperty(globalThis.document, 'querySelector', { value: () => null, configurable: true });
+            Object.defineProperty(globalThis.document, 'body', {
+                value: {
+                    querySelectorAll: (sel: string) => {
+                        // primary fails by returning empty for user/assistant roles
+                        // but loose fallback returns on main article
+                        if (sel.includes('main article')) {
+                            return [{ textContent: 'long enough user msg' }, { textContent: 'long enough assistant msg' }];
+                        }
+                        return [];
+                    },
                 },
-            };
+                configurable: true
+            });
 
             const adapter = { name: 'Grok' } as LLMPlatform;
             const result = buildIsolatedDomSnapshot(adapter, '123');

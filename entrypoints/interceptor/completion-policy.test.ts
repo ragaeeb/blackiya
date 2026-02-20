@@ -1,4 +1,6 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import * as geminiClassifier from '@/utils/gemini-request-classifier';
+import * as grokClassifier from '@/utils/grok-request-classifier';
 import {
     shouldEmitCompletionForParsedData,
     shouldEmitCompletionForUrl,
@@ -6,17 +8,34 @@ import {
     shouldSuppressCompletion,
 } from '@/entrypoints/interceptor/completion-policy';
 
-mock.module('@/utils/gemini-request-classifier', () => ({
-    shouldEmitGeminiCompletion: (url: string) => url.includes('gemini-complete'),
-    shouldEmitGeminiLifecycle: (url: string) => url.includes('gemini-lifecycle'),
-}));
-
-mock.module('@/utils/grok-request-classifier', () => ({
-    shouldEmitGrokCompletion: (url: string) => url.includes('grok-complete'),
-    shouldEmitGrokLifecycle: (url: string) => url.includes('grok-lifecycle'),
-}));
-
 describe('completion-policy', () => {
+    let geminiCompletionSpy: ReturnType<typeof spyOn>;
+    let geminiLifecycleSpy: ReturnType<typeof spyOn>;
+    let grokCompletionSpy: ReturnType<typeof spyOn>;
+    let grokLifecycleSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+        geminiCompletionSpy = spyOn(geminiClassifier, 'shouldEmitGeminiCompletion').mockImplementation(
+            (url: string) => url.includes('gemini-complete'),
+        );
+        geminiLifecycleSpy = spyOn(geminiClassifier, 'shouldEmitGeminiLifecycle').mockImplementation(
+            (url: string) => url.includes('gemini-lifecycle'),
+        );
+        grokCompletionSpy = spyOn(grokClassifier, 'shouldEmitGrokCompletion').mockImplementation(
+            (url: string) => url.includes('grok-complete'),
+        );
+        grokLifecycleSpy = spyOn(grokClassifier, 'shouldEmitGrokLifecycle').mockImplementation(
+            (url: string) => url.includes('grok-lifecycle'),
+        );
+    });
+
+    afterEach(() => {
+        geminiCompletionSpy.mockRestore();
+        geminiLifecycleSpy.mockRestore();
+        grokCompletionSpy.mockRestore();
+        grokLifecycleSpy.mockRestore();
+    });
+
     describe('shouldEmitCompletionForUrl', () => {
         it('should check gemini specific urls', () => {
             const adapter = { name: 'Gemini' } as any;

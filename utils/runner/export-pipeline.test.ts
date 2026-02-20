@@ -1,14 +1,21 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn, beforeEach, afterEach } from 'bun:test';
+import * as titleResolver from '@/utils/title-resolver';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import type { ConversationData } from '@/utils/types';
 
-mock.module('@/utils/title-resolver', () => ({
-    resolveExportConversationTitleDecision: mock((data) => {
-        return { title: `Resolved: ${data.title}`, source: 'fallback' };
-    }),
-}));
-
 describe('export-pipeline', () => {
+    let titleSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+        titleSpy = spyOn(titleResolver, 'resolveExportConversationTitleDecision').mockImplementation((data) => {
+            return { title: `Resolved: ${data.title}`, source: 'fallback' };
+        });
+    });
+
+    afterEach(() => {
+        titleSpy.mockRestore();
+    });
+
     describe('applyResolvedExportTitle', () => {
         it('should mutate data.title and return the decision', () => {
             const data = { title: 'Original' } as ConversationData;

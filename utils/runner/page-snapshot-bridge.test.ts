@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
-
-mock.module('@/utils/protocol/session-token', () => ({
-    resolveTokenValidationFailureReason: mock(() => null),
-    stampToken: mock((obj) => ({ ...obj, token: '123' })),
-}));
+import { setSessionToken } from '@/utils/protocol/session-token';
 
 describe('page-snapshot-bridge', () => {
     let mockAddEventListener: ReturnType<typeof mock>;
@@ -30,6 +26,7 @@ describe('page-snapshot-bridge', () => {
                 return 123;
             }),
         };
+        setSessionToken('123');
         globalThis.clearTimeout = mock(() => {});
     });
 
@@ -56,6 +53,7 @@ describe('page-snapshot-bridge', () => {
                 requestId: mockPostMessage.mock.calls[0][0].requestId,
                 success: true,
                 data: 'snap',
+                __blackiyaToken: '123',
             },
         };
 
@@ -93,21 +91,21 @@ describe('page-snapshot-bridge', () => {
         listener({
             source: {},
             origin: 'http://test',
-            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'snap' },
+            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'snap', __blackiyaToken: '123' },
         } as unknown as MessageEvent);
 
         // Wrong origin
         listener({
             source: globalThis.window,
             origin: 'http://bad',
-            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'snap' },
+            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'snap', __blackiyaToken: '123' },
         } as unknown as MessageEvent);
 
         // Wrong type
         listener({
             source: globalThis.window,
             origin: 'http://test',
-            data: { type: 'OTHER_TYPE', requestId, success: true, data: 'snap' },
+            data: { type: 'OTHER_TYPE', requestId, success: true, data: 'snap', __blackiyaToken: '123' },
         } as unknown as MessageEvent);
 
         expect(mockRemoveEventListener).not.toHaveBeenCalled();
@@ -116,7 +114,7 @@ describe('page-snapshot-bridge', () => {
         listener({
             source: globalThis.window,
             origin: 'http://test',
-            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'valid-snap' },
+            data: { type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE', requestId, success: true, data: 'valid-snap', __blackiyaToken: '123' },
         } as unknown as MessageEvent);
 
         const result = await promise;

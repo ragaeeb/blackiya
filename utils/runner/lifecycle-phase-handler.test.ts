@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
     applyActiveLifecyclePhase,
@@ -9,18 +9,19 @@ import type { ExportMeta } from '@/utils/sfe/types';
 
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
-mock.module('@/utils/runner/stream-preview', () => ({
-    ensureLiveRunnerStreamPreview: mock(() => {}),
-}));
+import * as streamPreview from '@/utils/runner/stream-preview';
 
 describe('lifecycle-phase-handler', () => {
     let deps: LifecyclePhaseHandlerDeps;
+    let previewSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         logCalls.debug.length = 0;
         logCalls.info.length = 0;
         logCalls.warn.length = 0;
         logCalls.error.length = 0;
+
+        previewSpy = spyOn(streamPreview, 'ensureLiveRunnerStreamPreview').mockImplementation(() => '');
 
         deps = {
             getLifecycleState: mock(() => 'idle'),
@@ -42,6 +43,10 @@ describe('lifecycle-phase-handler', () => {
             scheduleCanonicalStabilizationRetry: mock(() => {}),
             runStreamDoneProbe: mock(() => {}),
         };
+    });
+
+    afterEach(() => {
+        previewSpy.mockRestore();
     });
 
     describe('applyActiveLifecyclePhase', () => {
