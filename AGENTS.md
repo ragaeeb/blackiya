@@ -52,6 +52,12 @@ Supporting modules:
   - `utils/runner/calibration-policy.ts`
   - `utils/runner/canonical-stabilization.ts`
   - `utils/runner/stream-preview.ts`
+  - `utils/runner/sfe-ingestion.ts`
+  - `utils/runner/response-finished-handler.ts`
+  - `utils/runner/navigation-handler.ts`
+  - `utils/runner/page-snapshot-bridge.ts`
+  - `utils/runner/readiness-evaluation.ts`
+  - `utils/runner/url-candidates.ts`
 - Protocol types: `utils/protocol/messages.ts`
 - Protocol contract: lifecycle/finished/delta messages require `attemptId` (legacy attempt-less messages removed)
 

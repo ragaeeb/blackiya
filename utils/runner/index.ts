@@ -19,10 +19,8 @@ import {
     saveCalibrationProfileV2,
     stepFromStrategy,
 } from '@/utils/calibration-profile';
-import { isConversationReady } from '@/utils/conversation-readiness';
 import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { downloadAsJSON } from '@/utils/download';
-import { hashText } from '@/utils/hash';
 import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -59,8 +57,6 @@ import {
 import {
     type CalibrationCaptureDeps,
     isConversationDataLike,
-    isRawCaptureSnapshot,
-    type RawCaptureSnapshot,
     runCalibrationStep as runCalibrationStepPure,
 } from '@/utils/runner/calibration-capture';
 import {
@@ -90,7 +86,13 @@ import {
     extractResponseTextFromConversation,
 } from '@/utils/runner/export-helpers';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
-import { resolveFinishedSignalDebounce, shouldPromoteGrokFromCanonicalCapture } from '@/utils/runner/finished-signal';
+import { evaluateReadinessForData as evaluateReadinessForDataPure } from '@/utils/runner/readiness-evaluation';
+import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from '@/utils/runner/url-candidates';
+import { handleNavigationChange as handleNavigationChangeCore } from '@/utils/runner/navigation-handler';
+import type { NavigationDeps } from '@/utils/runner/navigation-handler';
+import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
+import { processResponseFinished as processResponseFinishedCore } from '@/utils/runner/response-finished-handler';
+import type { ResponseFinishedDeps } from '@/utils/runner/response-finished-handler';
 import { detectPlatformGenerating } from '@/utils/runner/generation-guard';
 import { getLifecyclePhasePriority } from '@/utils/runner/lifecycle-manager';
 import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
@@ -122,6 +124,14 @@ import {
     warmFetchConversationSnapshot as warmFetchConversationSnapshotCore,
 } from '@/utils/runner/warm-fetch';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import {
+    emitAttemptDisposed as emitAttemptDisposedCore,
+    ingestSfeCanonicalSample as ingestSfeCanonicalSampleCore,
+    ingestSfeLifecycleFromWirePhase as ingestSfeLifecycleFromWirePhaseCore,
+    ingestSfeLifecycleSignal as ingestSfeLifecycleSignalCore,
+    logSfeMismatchIfNeeded as logSfeMismatchIfNeededCore,
+} from '@/utils/runner/sfe-ingestion';
+import type { SfeIngestionDeps } from '@/utils/runner/sfe-ingestion';
 import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
 import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
@@ -164,8 +174,6 @@ type RunnerControl = { cleanup?: () => void };
 export { beginCanonicalStabilizationTick, clearCanonicalStabilizationAttemptState };
 export type { CanonicalStabilizationAttemptState };
 export { buildCalibrationOrderForMode, shouldPersistCalibrationProfile };
-
-const normalizeContentText = (text: string): string => text.trim().normalize('NFC');
 
 export const resolveExportConversationTitle = (data: ConversationData) => resolveExportTitleDecision(data).title;
 
@@ -741,7 +749,7 @@ export const runPlatform = (): void => {
         getFetchUrlCandidates: (cid) => (currentAdapter ? getFetchUrlCandidates(currentAdapter, cid) : []),
         getRawSnapshotReplayUrls: (cid, snap) =>
             currentAdapter ? getRawSnapshotReplayUrls(currentAdapter, cid, snap) : [snap.url],
-        getConversation: (cid) => interceptionManager.getConversation(cid),
+        getConversation: (cid) => interceptionManager.getConversation(cid) ?? null,
         evaluateReadiness: evaluateReadinessForData,
         ingestConversationData: (data, source) => interceptionManager.ingestConversationData(data, source),
         ingestInterceptedData: (args) => interceptionManager.ingestInterceptedData(args),
@@ -785,12 +793,12 @@ export const runPlatform = (): void => {
         isAttemptDisposedOrSuperseded,
         resolveAliasedAttemptId,
         getSfePhase: (id) => sfe.resolve(id).phase,
-        sfeRestartCanonicalRecovery: (id, now) => sfe.restartCanonicalRecovery(id, now),
+        sfeRestartCanonicalRecovery: (id, now) => !!sfe.restartCanonicalRecovery(id, now),
         warmFetch: (cid) => warmFetchConversationSnapshot(cid, 'stabilization-retry'),
         requestSnapshot: requestPageSnapshot,
         buildIsolatedSnapshot: resolveIsolatedSnapshotData,
         ingestSnapshot: ingestStabilizationRetrySnapshot,
-        getConversation: (cid) => interceptionManager.getConversation(cid),
+        getConversation: (cid) => interceptionManager.getConversation(cid) ?? null,
         evaluateReadiness: evaluateReadinessForData,
         getCaptureMeta,
         ingestSfeCanonicalSample,
@@ -837,208 +845,52 @@ export const runPlatform = (): void => {
         return buildIsolatedDomSnapshot(currentAdapter, conversationId);
     }
 
-    // Readiness evaluation
+    const evaluateReadinessForData = (data: ConversationData): PlatformReadiness =>
+        evaluateReadinessForDataPure(data, currentAdapter);
 
-    function evaluateReadinessForData(data: ConversationData): PlatformReadiness {
-        if (!data || !data.mapping || typeof data.mapping !== 'object') {
-            return {
-                ready: false,
-                terminal: false,
-                reason: 'invalid-conversation-shape',
-                contentHash: null,
-                latestAssistantTextLength: 0,
-            };
-        }
-        if (currentAdapter?.evaluateReadiness) {
-            return currentAdapter.evaluateReadiness(data);
-        }
-        const assistantMessages = Object.values(data.mapping)
-            .map((node) => node?.message)
-            .filter((msg): msg is NonNullable<(typeof data.mapping)[string]['message']> => !!msg)
-            .filter((msg) => msg.author.role === 'assistant');
-        const latestAssistant = assistantMessages[assistantMessages.length - 1];
-        const text = normalizeContentText((latestAssistant?.content.parts ?? []).join(''));
-        const hasInProgress = assistantMessages.some((msg) => msg.status === 'in_progress');
-        const terminal = !hasInProgress;
-        return {
-            ready: isConversationReady(data),
-            terminal,
-            reason: terminal ? 'terminal-snapshot' : 'assistant-in-progress',
-            contentHash: text.length > 0 ? hashText(text) : null,
-            latestAssistantTextLength: text.length,
-        };
-    }
+    // SFE ingestion — thin wrappers delegating to sfe-ingestion module
 
-    // SFE ingestion
+    const buildSfeIngestionDeps = (): SfeIngestionDeps => ({
+        sfeEnabled,
+        sfe,
+        platformName: currentAdapter?.name ?? 'Unknown',
+        resolveAttemptId,
+        bindAttempt,
+        evaluateReadiness: evaluateReadinessForData,
+        getLifecycleState: () => lifecycleState,
+        scheduleCanonicalStabilizationRetry,
+        clearCanonicalStabilizationRetry,
+        syncStreamProbePanelFromCanonical,
+        refreshButtonState,
+        structuredLogger,
+    });
 
-    const ingestSfeLifecycle = (phase: LifecyclePhase, attemptId: string, conversationId?: string | null) => {
-        if (!sfeEnabled) {
-            return;
-        }
-        const resolution = sfe.ingestSignal({
-            attemptId,
-            platform: currentAdapter?.name ?? 'Unknown',
-            source: phase === 'completed_hint' ? 'completion_endpoint' : 'network_stream',
-            phase,
-            conversationId,
-            timestampMs: Date.now(),
-        });
-        if (conversationId) {
-            bindAttempt(conversationId, attemptId);
-        }
-        if (phase === 'completed_hint') {
-            structuredLogger.emit(
-                attemptId,
-                'info',
-                'completed_hint_received',
-                'SFE completed hint received',
-                { conversationId: conversationId ?? null },
-                `completed:${conversationId ?? 'unknown'}`,
-            );
-        }
-        structuredLogger.emit(
-            attemptId,
-            'debug',
-            'sfe_phase_update',
-            'SFE lifecycle phase update',
-            { phase: resolution.phase, ready: resolution.ready, conversationId: conversationId ?? null },
-            `phase:${resolution.phase}:${conversationId ?? 'unknown'}`,
-        );
-    };
+    const ingestSfeLifecycle = (phase: LifecyclePhase, attemptId: string, conversationId?: string | null) =>
+        ingestSfeLifecycleSignalCore(phase, attemptId, conversationId, buildSfeIngestionDeps());
 
-    const emitCanonicalSampleProcessed = (
-        attemptId: string,
-        conversationId: string,
-        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
-        readiness: PlatformReadiness,
-    ) => {
-        structuredLogger.emit(
-            attemptId,
-            'debug',
-            readiness.contentHash ? 'canonical_probe_sample_changed' : 'canonical_probe_started',
-            'SFE canonical sample processed',
-            {
-                conversationId,
-                phase: resolution.phase,
-                ready: resolution.ready,
-                blockingConditions: resolution.blockingConditions,
-            },
-            `canonical:${conversationId}:${readiness.contentHash ?? 'none'}`,
-        );
-    };
-
-    const shouldScheduleCanonicalRetry = (
-        resolution: ReturnType<SignalFusionEngine['applyCanonicalSample']>,
-        activeLifecycleState: LifecycleUiState,
-    ): boolean => {
-        const hitStabilizationTimeout = resolution.blockingConditions.includes('stabilization_timeout');
-        return (
-            !resolution.ready &&
-            !hitStabilizationTimeout &&
-            activeLifecycleState === 'completed' &&
-            (resolution.reason === 'awaiting_stabilization' || resolution.reason === 'captured_not_ready')
-        );
-    };
-
-    function ingestSfeCanonicalSample(
+    const ingestSfeCanonicalSample = (
         data: ConversationData,
         attemptId?: string,
-    ): ReturnType<SignalFusionEngine['applyCanonicalSample']> | null {
-        if (!sfeEnabled) {
-            return null;
-        }
-        const conversationId = data.conversation_id;
-        const effectiveAttemptId = attemptId ?? resolveAttemptId(conversationId);
-        bindAttempt(conversationId, effectiveAttemptId);
-        const readiness = evaluateReadinessForData(data);
-        const resolution = sfe.applyCanonicalSample({
-            attemptId: effectiveAttemptId,
-            platform: currentAdapter?.name ?? 'Unknown',
-            conversationId,
-            data,
-            readiness,
-            timestampMs: Date.now(),
+    ): ReturnType<SignalFusionEngine['applyCanonicalSample']> | null =>
+        ingestSfeCanonicalSampleCore(data, attemptId, buildSfeIngestionDeps());
+
+    const logSfeMismatchIfNeeded = (conversationId: string, legacyReady: boolean) =>
+        logSfeMismatchIfNeededCore(conversationId, legacyReady, {
+            sfeEnabled,
+            sfe,
+            structuredLogger,
+            peekAttemptId: (cid) => peekAttemptId(cid),
         });
-        emitCanonicalSampleProcessed(effectiveAttemptId, conversationId, resolution, readiness);
-        const shouldRetry = shouldScheduleCanonicalRetry(resolution, lifecycleState);
-        if (!shouldRetry && !resolution.ready) {
-            logger.info('Canonical retry skipped', {
-                conversationId,
-                lifecycleState,
-                reason: resolution.reason,
-                blocking: resolution.blockingConditions,
-            });
-        }
-        if (shouldRetry) {
-            scheduleCanonicalStabilizationRetry(conversationId, effectiveAttemptId);
-            structuredLogger.emit(
-                effectiveAttemptId,
-                'info',
-                resolution.reason === 'awaiting_stabilization'
-                    ? 'awaiting_stabilization'
-                    : 'awaiting_canonical_capture',
-                resolution.reason === 'awaiting_stabilization'
-                    ? 'Awaiting canonical stabilization before ready'
-                    : 'Completed stream but canonical sample not terminal yet; scheduling retries',
-                { conversationId, phase: resolution.phase },
-                `${resolution.reason === 'awaiting_stabilization' ? 'awaiting-stabilization' : 'awaiting-canonical'}:${conversationId}:${readiness.contentHash ?? 'none'}`,
-            );
-        }
-        if (resolution.blockingConditions.includes('stabilization_timeout')) {
-            clearCanonicalStabilizationRetry(effectiveAttemptId);
-        }
-        if (resolution.ready) {
-            clearCanonicalStabilizationRetry(effectiveAttemptId);
-            syncStreamProbePanelFromCanonical(conversationId, data);
-            structuredLogger.emit(
-                effectiveAttemptId,
-                'info',
-                'captured_ready',
-                'Capture reached ready state',
-                { conversationId, phase: resolution.phase },
-                `captured-ready:${conversationId}`,
-            );
-        }
-        return resolution;
-    }
 
-    const resolveSfeReady = (conversationId: string): boolean => {
-        const resolution = sfe.resolveByConversation(conversationId);
-        return !!resolution?.ready;
-    };
-
-    const logSfeMismatchIfNeeded = (conversationId: string, legacyReady: boolean) => {
-        if (!sfeEnabled) {
-            return;
-        }
-        const attemptId = peekAttemptId(conversationId) ?? 'unknown';
-        const sfeReady = resolveSfeReady(conversationId);
-        if (legacyReady === sfeReady) {
-            return;
-        }
-        structuredLogger.emit(
-            attemptId,
-            'info',
-            'legacy_sfe_mismatch',
-            'Legacy/SFE readiness mismatch',
-            { conversationId, legacyReady, sfeReady },
-            `mismatch:${conversationId}:${legacyReady}:${sfeReady}`,
-        );
-    };
-
-    function emitAttemptDisposed(attemptId: string, reason: AttemptDisposedMessage['reason']) {
-        pendingLifecycleByAttempt.delete(attemptId);
-        structuredLogger.emit(
-            attemptId,
-            'info',
-            'attempt_disposed',
-            'Attempt disposed',
-            { reason },
-            `attempt-disposed:${reason}`,
-        );
-        const payload: AttemptDisposedMessage = { type: MESSAGE_TYPES.ATTEMPT_DISPOSED, attemptId, reason };
-        window.postMessage(stampToken(payload), window.location.origin);
-    }
+    const emitAttemptDisposed = (attemptId: string, reason: AttemptDisposedMessage['reason']) =>
+        emitAttemptDisposedCore(attemptId, reason, {
+            pendingLifecycleByAttempt,
+            structuredLogger,
+            postDisposedMessage: (aid, r) => {
+                const payload: AttemptDisposedMessage = { type: MESSAGE_TYPES.ATTEMPT_DISPOSED, attemptId: aid, reason: r as AttemptDisposedMessage['reason'] };
+                window.postMessage(stampToken(payload), window.location.origin);
+            },
+        });
 
     const emitStreamDumpConfig = () => {
         const payload: StreamDumpConfigMessage = { type: MESSAGE_TYPES.STREAM_DUMP_CONFIG, enabled: streamDumpEnabled };
@@ -1227,50 +1079,6 @@ export const runPlatform = (): void => {
         refreshButtonState(conversationId);
     };
 
-    // URL candidate helpers
-
-    function getFetchUrlCandidates(adapter: LLMPlatform, conversationId: string): string[] {
-        const urls: string[] = [];
-        for (const url of adapter.buildApiUrls?.(conversationId) ?? []) {
-            if (typeof url === 'string' && url.length > 0 && !urls.includes(url)) {
-                urls.push(url);
-            }
-        }
-        const primary = adapter.buildApiUrl?.(conversationId);
-        if (primary && !urls.includes(primary)) {
-            urls.unshift(primary);
-        }
-        const currentOrigin = window.location.origin;
-        return urls.filter((url) => {
-            try {
-                return new URL(url, currentOrigin).origin === currentOrigin;
-            } catch {
-                return false;
-            }
-        });
-    }
-
-    function getRawSnapshotReplayUrls(
-        adapter: LLMPlatform,
-        conversationId: string,
-        rawSnapshot: { url: string },
-    ): string[] {
-        const urls = [rawSnapshot.url];
-        if (adapter.name !== 'Grok') {
-            return urls;
-        }
-        for (const candidate of [
-            `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`,
-            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
-            `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
-        ]) {
-            if (!urls.includes(candidate)) {
-                urls.push(candidate);
-            }
-        }
-        return urls;
-    }
-
     // Warm fetch
 
     const buildWarmFetchDeps = (): WarmFetchDeps => ({
@@ -1278,7 +1086,7 @@ export const runPlatform = (): void => {
         getFetchUrlCandidates: (conversationId) =>
             currentAdapter ? getFetchUrlCandidates(currentAdapter, conversationId) : [],
         ingestInterceptedData: (args) => interceptionManager.ingestInterceptedData(args),
-        getConversation: (conversationId) => interceptionManager.getConversation(conversationId),
+        getConversation: (conversationId) => interceptionManager.getConversation(conversationId) ?? null,
         evaluateReadiness: (data) => evaluateReadinessForData(data),
         getCaptureMeta: (conversationId) => getCaptureMeta(conversationId),
     });
@@ -1611,45 +1419,6 @@ export const runPlatform = (): void => {
         }
     }
 
-    // Page snapshot bridge
-
-    async function requestPageSnapshot(conversationId: string): Promise<unknown | null> {
-        const requestId =
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-                ? crypto.randomUUID()
-                : `snapshot-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-        return new Promise((resolve) => {
-            const timeout = window.setTimeout(() => {
-                window.removeEventListener('message', onMessage);
-                resolve(null);
-            }, 2500);
-
-            const onMessage = (event: MessageEvent) => {
-                if (event.source !== window || event.origin !== window.location.origin) {
-                    return;
-                }
-                const msg = event.data as Record<string, unknown> | null;
-                if (
-                    msg?.type !== 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE' ||
-                    msg.requestId !== requestId ||
-                    resolveTokenValidationFailureReason(msg) !== null
-                ) {
-                    return;
-                }
-                clearTimeout(timeout);
-                window.removeEventListener('message', onMessage);
-                resolve(msg.success ? msg.data : null);
-            };
-
-            window.addEventListener('message', onMessage);
-            window.postMessage(
-                stampToken({ type: 'BLACKIYA_PAGE_SNAPSHOT_REQUEST', requestId, conversationId }),
-                window.location.origin,
-            );
-        });
-    }
-
     // Lifecycle state management
 
     const isLifecycleActiveGeneration = (): boolean =>
@@ -1926,110 +1695,49 @@ export const runPlatform = (): void => {
         });
     }
 
-    // Response finished signal handling
+    // Response finished signal handling — delegates to response-finished-handler module
 
-    const applyCompletedLifecycleState = (conversationId: string, attemptId: string) => {
-        lifecycleAttemptId = attemptId;
-        lifecycleConversationId = conversationId;
-        setLifecycleState('completed', conversationId);
-    };
-
-    const handleFinishedConversation = (conversationId: string, attemptId: string, source: 'network' | 'dom') => {
-        const cached = interceptionManager.getConversation(conversationId);
-        const cachedReady = !!cached && evaluateReadinessForData(cached).ready;
-
-        if (shouldPromoteGrokFromCanonicalCapture(source, cachedReady, lifecycleState, currentAdapter?.name ?? null)) {
-            applyCompletedLifecycleState(conversationId, attemptId);
-        }
-
-        const shouldPromoteGenericCompleted =
-            lifecycleState !== 'completed' && source === 'dom' && currentAdapter?.name === 'ChatGPT';
-        if (shouldPromoteGenericCompleted) {
-            applyCompletedLifecycleState(conversationId, attemptId);
-        }
-
-        if (!cached || !cachedReady) {
-            if (!shouldPromoteGenericCompleted) {
-                applyCompletedLifecycleState(conversationId, attemptId);
+    const buildResponseFinishedDeps = (): ResponseFinishedDeps => ({
+        extractConversationIdFromUrl: () =>
+            currentAdapter ? currentAdapter.extractConversationId(window.location.href) : null,
+        getCurrentConversationId: () => currentConversationId,
+        peekAttemptId,
+        resolveAttemptId,
+        setActiveAttempt,
+        setCurrentConversation,
+        bindAttempt,
+        ingestSfeLifecycle,
+        getCalibrationState: () => calibrationState,
+        shouldBlockActionsForGeneration,
+        adapterName: () => currentAdapter?.name ?? null,
+        getLastResponseFinished: () => ({
+            at: lastResponseFinishedAt,
+            conversationId: lastResponseFinishedConversationId,
+            attemptId: lastResponseFinishedAttemptId,
+        }),
+        setLastResponseFinished: (at, cid, aid) => {
+            lastResponseFinishedAt = at;
+            lastResponseFinishedConversationId = cid;
+            if (aid) {
+                lastResponseFinishedAttemptId = aid;
             }
-            void runStreamDoneProbe(conversationId, attemptId);
-        }
-
-        refreshButtonState(conversationId);
-        scheduleButtonRefresh(conversationId);
-        maybeRunAutoCapture(conversationId, 'response-finished');
-    };
-
-    const shouldProcessFinishedSignal = (
-        conversationId: string | null,
-        source: 'network' | 'dom',
-        attemptId: string | null,
-    ): boolean => {
-        if (!conversationId) {
-            logger.info('Finished signal ignored: missing conversation context', { source });
-            return false;
-        }
-        if (
-            source === 'network' &&
-            currentAdapter?.name === 'ChatGPT' &&
-            shouldBlockActionsForGeneration(conversationId)
-        ) {
-            logger.info('Finished signal blocked by generation guard', { conversationId, source });
-            return false;
-        }
-        const now = Date.now();
-        const isSameConversation = conversationId === lastResponseFinishedConversationId;
-        const { minIntervalMs, effectiveAttemptId } = resolveFinishedSignalDebounce(
-            conversationId,
-            source,
-            attemptId,
-            lastResponseFinishedConversationId,
-            lastResponseFinishedAttemptId,
-        );
-        if (isSameConversation && now - lastResponseFinishedAt < minIntervalMs) {
-            logger.info('Finished signal debounced', {
-                conversationId,
-                source,
-                attemptId: effectiveAttemptId || null,
-                elapsed: now - lastResponseFinishedAt,
-                minIntervalMs,
-            });
-            return false;
-        }
-        lastResponseFinishedAt = now;
-        lastResponseFinishedConversationId = conversationId;
-        if (effectiveAttemptId) {
-            lastResponseFinishedAttemptId = effectiveAttemptId;
-        }
-        return true;
-    };
+        },
+        getConversation: (cid) => interceptionManager.getConversation(cid),
+        evaluateReadiness: evaluateReadinessForData,
+        getLifecycleState: () => lifecycleState,
+        setCompletedLifecycleState: (cid, aid) => {
+            lifecycleAttemptId = aid;
+            lifecycleConversationId = cid;
+            setLifecycleState('completed', cid);
+        },
+        runStreamDoneProbe,
+        refreshButtonState,
+        scheduleButtonRefresh,
+        maybeRunAutoCapture,
+    });
 
     function handleResponseFinished(source: 'network' | 'dom', hintedConversationId?: string) {
-        const conversationId =
-            hintedConversationId ??
-            (currentAdapter ? currentAdapter.extractConversationId(window.location.href) : null) ??
-            currentConversationId;
-        const peekedAttemptId = conversationId ? peekAttemptId(conversationId) : null;
-        if (!shouldProcessFinishedSignal(conversationId, source, peekedAttemptId)) {
-            return;
-        }
-        const attemptId = peekedAttemptId ?? resolveAttemptId(conversationId ?? undefined);
-        if (!peekedAttemptId) {
-            lastResponseFinishedAttemptId = attemptId;
-        }
-        setActiveAttempt(attemptId);
-        ingestSfeLifecycle('completed_hint', attemptId, conversationId);
-        if (conversationId) {
-            setCurrentConversation(conversationId);
-            bindAttempt(conversationId, attemptId);
-        }
-        logger.info('Response finished signal', { source, attemptId, conversationId, calibrationState });
-        if (calibrationState === 'waiting') {
-            return;
-        }
-        if (conversationId) {
-            handleFinishedConversation(conversationId, attemptId, source);
-        }
+        processResponseFinishedCore(source, hintedConversationId, buildResponseFinishedDeps());
     }
 
     // Wire message handlers
@@ -2130,17 +1838,7 @@ export const runPlatform = (): void => {
         phase: ResponseLifecycleMessage['phase'],
         attemptId: string,
         conversationId?: string | null,
-    ) => {
-        if (phase === 'prompt-sent') {
-            ingestSfeLifecycle('prompt_sent', attemptId, conversationId ?? null);
-        } else if (phase === 'streaming') {
-            ingestSfeLifecycle('streaming', attemptId, conversationId ?? null);
-        } else if (phase === 'completed') {
-            ingestSfeLifecycle('completed_hint', attemptId, conversationId ?? null);
-        } else if (phase === 'terminated') {
-            ingestSfeLifecycle('terminated_partial', attemptId, conversationId ?? null);
-        }
-    };
+    ) => ingestSfeLifecycleFromWirePhaseCore(phase, attemptId, conversationId, buildSfeIngestionDeps());
 
     const applyActiveLifecyclePhase = (
         phase: 'prompt-sent' | 'streaming',
@@ -2498,23 +2196,7 @@ export const runPlatform = (): void => {
         return () => clearInterval(intervalId);
     };
 
-    // Navigation
-
-    function handleNavigationChange() {
-        if (!currentAdapter) {
-            return;
-        }
-        const newConversationId = currentAdapter.extractConversationId(window.location.href);
-        if (newConversationId !== currentConversationId) {
-            handleConversationSwitch(newConversationId);
-        } else {
-            if (newConversationId && !buttonManager.exists()) {
-                setTimeout(injectSaveButton, 500);
-            } else {
-                refreshButtonState(newConversationId || undefined);
-            }
-        }
-    }
+    // Navigation — delegates to navigation-handler module
 
     const disposeInFlightAttemptsOnNavigation = (preserveConversationId?: string | null) => {
         const disposedAttemptIds = sfe
@@ -2535,47 +2217,34 @@ export const runPlatform = (): void => {
         }
     };
 
-    function handleConversationSwitch(newId: string | null) {
-        const isNewConversationNavigation = !currentConversationId && isLifecycleActiveGeneration() && !!newId;
-        if (!isNewConversationNavigation) {
-            disposeInFlightAttemptsOnNavigation(newId);
-        }
-        if (!newId) {
-            setCurrentConversation(null);
-            if (!isLifecycleActiveGeneration()) {
-                setLifecycleState('idle');
-            }
-            setTimeout(injectSaveButton, 300);
-            return;
-        }
-        if (!isNewConversationNavigation) {
-            buttonManager.remove();
-        }
-        setCurrentConversation(newId);
-        const newAdapter = getPlatformAdapter(window.location.href);
-        if (newAdapter && currentAdapter && newAdapter.name !== currentAdapter.name) {
-            currentAdapter = newAdapter;
-            runnerState.adapter = newAdapter;
-            interceptionManager.updateAdapter(currentAdapter);
+    const buildNavigationDeps = (): NavigationDeps => ({
+        getCurrentAdapter: () => currentAdapter,
+        getCurrentConversationId: () => currentConversationId,
+        getLifecycleState: () => lifecycleState,
+        isLifecycleActiveGeneration,
+        setCurrentConversation,
+        setLifecycleState,
+        updateAdapter: (adapter) => {
+            currentAdapter = adapter;
+            runnerState.adapter = adapter;
+            interceptionManager.updateAdapter(adapter);
+        },
+        disposeInFlightAttempts: disposeInFlightAttemptsOnNavigation,
+        buttonManagerRemove: () => buttonManager.remove(),
+        buttonManagerExists: () => buttonManager.exists(),
+        injectSaveButton,
+        refreshButtonState,
+        resetCalibrationPreference: () => {
             calibrationPreferenceLoaded = false;
             calibrationPreferenceLoading = null;
-            void ensureCalibrationPreferenceLoaded(currentAdapter.name);
-        }
-        if (isNewConversationNavigation) {
-            logger.info('Conversation switch -> preserving active lifecycle', {
-                newId,
-                preservedState: lifecycleState,
-            });
-            setLifecycleState(lifecycleState, newId);
-        } else {
-            setTimeout(injectSaveButton, 500);
-            logger.info('Conversation switch -> idle', { newId, previousState: lifecycleState });
-            setLifecycleState('idle', newId);
-        }
-        void warmFetchConversationSnapshot(newId, 'conversation-switch');
-        setTimeout(() => {
-            maybeRunAutoCapture(newId, 'navigation');
-        }, 1800);
+        },
+        ensureCalibrationPreferenceLoaded,
+        warmFetch: warmFetchConversationSnapshot,
+        scheduleAutoCapture: maybeRunAutoCapture,
+    });
+
+    function handleNavigationChange() {
+        handleNavigationChangeCore(buildNavigationDeps());
     }
 
     // Helpers
