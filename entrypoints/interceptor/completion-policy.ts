@@ -1,16 +1,14 @@
 import { isCapturedConversationReady } from '@/entrypoints/interceptor/conversation-utils';
 import { safePathname } from '@/entrypoints/interceptor/discovery';
+import { isGeminiTitlesEndpointUrl } from '@/platforms/gemini/registry';
 import type { LLMPlatform } from '@/platforms/types';
 import { shouldEmitGeminiCompletion, shouldEmitGeminiLifecycle } from '@/utils/gemini-request-classifier';
 import { shouldEmitGrokCompletion, shouldEmitGrokLifecycle } from '@/utils/grok-request-classifier';
 import type { ConversationData } from '@/utils/types';
 
-const isGeminiTitlesEndpoint = (url: string) =>
-    /\/_\/BardChatUi\/data\/batchexecute/i.test(url) && /[?&]rpcids=MaZiqc(?:&|$)/i.test(url);
-
 export const shouldEmitCompletionForUrl = (adapter: LLMPlatform, url: string) => {
     if (adapter.name === 'Gemini') {
-        return !isGeminiTitlesEndpoint(url) && shouldEmitGeminiCompletion(url);
+        return !isGeminiTitlesEndpointUrl(url) && shouldEmitGeminiCompletion(url);
     }
     if (adapter.name === 'Grok') {
         return shouldEmitGrokCompletion(url);

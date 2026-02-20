@@ -9,10 +9,14 @@
 import type { LLMPlatform } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
-import { InterceptionManager } from '@/utils/managers/interception-manager';
-import { NavigationManager } from '@/utils/managers/navigation-manager';
+import type { InterceptionManager } from '@/utils/managers/interception-manager';
+import type { NavigationManager } from '@/utils/managers/navigation-manager';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import type { AttemptDisposedMessage, ResponseLifecycleMessage, StreamDumpConfigMessage } from '@/utils/protocol/messages';
+import type {
+    AttemptDisposedMessage,
+    ResponseLifecycleMessage,
+    StreamDumpConfigMessage,
+} from '@/utils/protocol/messages';
 import { stampToken } from '@/utils/protocol/session-token';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
 import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
@@ -22,26 +26,35 @@ import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision }
 import type { ConversationData } from '@/utils/types';
 import type { ButtonManager } from '@/utils/ui/button-manager';
 import type { AttemptCoordinatorDeps } from './attempt-coordinator';
+import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from './attempt-state';
+import type { AutoCaptureReason } from './auto-capture';
 import type { ButtonStateManagerDeps } from './button-state-manager';
-import { isConversationDataLike, type CalibrationCaptureDeps, runCalibrationStep as runCalibrationStepPure } from './calibration-capture';
+import { type CalibrationCaptureDeps, isConversationDataLike } from './calibration-capture';
 import type { CalibrationOrchestrationDeps } from './calibration-orchestration';
 import type { CalibrationMode } from './calibration-policy';
 import type { CalibrationStep } from './calibration-runner';
 import type { CanonicalStabilizationTickDeps } from './canonical-stabilization-tick';
 import { buildIsolatedDomSnapshot } from './dom-snapshot';
-import { buildExportPayloadForFormat as buildExportPayloadForFormatPure, extractResponseTextFromConversation } from './export-helpers';
+import {
+    buildExportPayloadForFormat as buildExportPayloadForFormatPure,
+    extractResponseTextFromConversation,
+} from './export-helpers';
 import { detectPlatformGenerating } from './generation-guard';
 import type { InterceptionCaptureDeps } from './interception-capture';
-import type { LifecyclePhaseHandlerDeps } from './lifecycle-phase-handler';
 import { requestPageSnapshot } from './page-snapshot-bridge';
 import type { CalibrationRuntimeDeps } from './platform-runtime-calibration';
-import type { StreamDoneCoordinatorDeps } from './stream-done-coordinator';
-import { runStreamDoneProbe as runStreamDoneProbeReal } from './stream-done-probe';
+import type { RuntimeWiringDeps } from './platform-runtime-wiring';
+import { removeStreamProbePanel } from './probe-panel';
 import type { PublicStatusDeps, PublicStatusState } from './public-status';
 import { evaluateReadinessForData as evaluateReadinessForDataPure } from './readiness-evaluation';
 import type { ResponseFinishedDeps } from './response-finished-handler';
 import type { RunnerCleanupDeps } from './runtime-cleanup';
-import type { StorageChangeListenerDeps, StreamDumpSettingDeps, StreamProbeVisibilitySettingDeps, VisibilityRecoveryDeps } from './runtime-settings';
+import type {
+    StorageChangeListenerDeps,
+    StreamDumpSettingDeps,
+    StreamProbeVisibilitySettingDeps,
+    VisibilityRecoveryDeps,
+} from './runtime-settings';
 import { getExportFormat as getExportFormatCore } from './runtime-settings';
 import type { SavePipelineDeps } from './save-pipeline';
 import type { SfeIngestionDeps } from './sfe-ingestion';
@@ -52,16 +65,14 @@ import {
     ingestSfeLifecycleSignal as ingestSfeLifecycleSignalCore,
     logSfeMismatchIfNeeded as logSfeMismatchIfNeededCore,
 } from './sfe-ingestion';
-import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from './attempt-state';
 import type { StaleAttemptFilterDeps } from './stale-attempt-filter';
 import { isStaleAttemptMessage as isStaleAttemptMessageCore } from './stale-attempt-filter';
-import { removeStreamProbePanel } from './probe-panel';
 import type { RunnerState } from './state';
+import type { StreamDoneCoordinatorDeps } from './stream-done-coordinator';
+import { runStreamDoneProbe as runStreamDoneProbeReal } from './stream-done-probe';
 import type { RunnerStreamPreviewState } from './stream-preview';
 import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from './url-candidates';
 import type { WarmFetchDeps, WarmFetchReason } from './warm-fetch';
-import type { AutoCaptureReason } from './auto-capture';
-import type { RuntimeWiringDeps } from './platform-runtime-wiring';
 
 // ── Local types ──
 
@@ -117,7 +128,10 @@ export type EngineCtx = {
     // Collections
     attemptByConversation: Map<string, string>;
     attemptAliasForward: Map<string, string>;
-    pendingLifecycleByAttempt: Map<string, { phase: ResponseLifecycleMessage['phase']; platform: string; receivedAtMs: number }>;
+    pendingLifecycleByAttempt: Map<
+        string,
+        { phase: ResponseLifecycleMessage['phase']; platform: string; receivedAtMs: number }
+    >;
     captureMetaByConversation: Map<string, ExportMeta>;
     streamResolvedTitles: Map<string, string>;
     lastCanonicalReadyLogAtByConversation: Map<string, number>;
@@ -158,7 +172,11 @@ export type EngineCtx = {
     forwardAttemptAlias: (from: string, to: string, reason: 'superseded' | 'rebound') => void;
     markSnapshotCaptureMeta: (cid: string) => void;
     markCanonicalCaptureMeta: (cid: string) => void;
-    cachePendingLifecycleSignal: (attemptId: string, phase: ResponseLifecycleMessage['phase'], platform: string) => void;
+    cachePendingLifecycleSignal: (
+        attemptId: string,
+        phase: ResponseLifecycleMessage['phase'],
+        platform: string,
+    ) => void;
     cancelStreamDoneProbe: (aid: string, reason: 'superseded' | 'disposed' | 'navigation' | 'teardown') => void;
     clearProbeLeaseRetry: (aid: string) => void;
     runStreamDoneProbe: (cid: string, aid?: string) => Promise<void>;
@@ -167,7 +185,10 @@ export type EngineCtx = {
     scheduleCanonicalStabilizationRetry: (cid: string, aid: string) => void;
     maybeRestartCanonicalRecoveryAfterTimeout: (cid: string, aid: string) => void;
     ingestSfeLifecycle: (phase: LifecyclePhase, aid: string, cid?: string | null) => void;
-    ingestSfeCanonicalSample: (data: ConversationData, aid?: string) => ReturnType<SignalFusionEngine['applyCanonicalSample']> | null;
+    ingestSfeCanonicalSample: (
+        data: ConversationData,
+        aid?: string,
+    ) => ReturnType<SignalFusionEngine['applyCanonicalSample']> | null;
     logSfeMismatchIfNeeded: (cid: string, legacyReady: boolean) => void;
     emitAttemptDisposed: (aid: string, reason: AttemptDisposedMessage['reason']) => void;
     evaluateReadinessForData: (data: ConversationData) => PlatformReadiness;
@@ -202,10 +223,18 @@ export type EngineCtx = {
     appendPendingStreamProbeText: (aid: string, text: string) => void;
     migratePendingStreamProbeText: (cid: string, aid: string) => void;
     appendLiveStreamProbeText: (cid: string, text: string) => void;
-    isStaleAttemptMessage: (aid: string, cid: string | undefined, signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved') => boolean;
+    isStaleAttemptMessage: (
+        aid: string,
+        cid: string | undefined,
+        signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
+    ) => boolean;
     buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
     getExportFormat: () => Promise<ExportFormat>;
-    ingestSfeLifecycleFromWirePhase: (phase: ResponseLifecycleMessage['phase'], aid: string, cid?: string | null) => void;
+    ingestSfeLifecycleFromWirePhase: (
+        phase: ResponseLifecycleMessage['phase'],
+        aid: string,
+        cid?: string | null,
+    ) => void;
     buildCalibrationOrchestrationDeps: () => CalibrationOrchestrationDeps;
     buildCalibrationCaptureDeps: (cid: string) => CalibrationCaptureDeps;
     runCalibrationStep: (step: CalibrationStep, cid: string, mode: CalibrationMode) => Promise<boolean>;
@@ -310,8 +339,12 @@ const buildSfeIngestionDeps = (ctx: EngineCtx): SfeIngestionDeps => ({
     structuredLogger: ctx.structuredLogger,
 });
 
-export const ingestSfeLifecycle = (ctx: EngineCtx, phase: LifecyclePhase, attemptId: string, conversationId?: string | null) =>
-    ingestSfeLifecycleSignalCore(phase, attemptId, conversationId, buildSfeIngestionDeps(ctx));
+export const ingestSfeLifecycle = (
+    ctx: EngineCtx,
+    phase: LifecyclePhase,
+    attemptId: string,
+    conversationId?: string | null,
+) => ingestSfeLifecycleSignalCore(phase, attemptId, conversationId, buildSfeIngestionDeps(ctx));
 
 export const ingestSfeCanonicalSample = (ctx: EngineCtx, data: ConversationData, attemptId?: string) =>
     ingestSfeCanonicalSampleCore(data, attemptId, buildSfeIngestionDeps(ctx));
@@ -329,15 +362,28 @@ export const emitAttemptDisposed = (ctx: EngineCtx, attemptId: string, reason: A
         pendingLifecycleByAttempt: ctx.pendingLifecycleByAttempt,
         structuredLogger: ctx.structuredLogger,
         postDisposedMessage: (aid, r) => {
-            const payload: AttemptDisposedMessage = { type: MESSAGE_TYPES.ATTEMPT_DISPOSED, attemptId: aid, reason: r as AttemptDisposedMessage['reason'] };
+            const payload: AttemptDisposedMessage = {
+                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
+                attemptId: aid,
+                reason: r as AttemptDisposedMessage['reason'],
+            };
             window.postMessage(stampToken(payload), window.location.origin);
         },
     });
 
-export const ingestSfeLifecycleFromWirePhase = (ctx: EngineCtx, phase: ResponseLifecycleMessage['phase'], attemptId: string, conversationId?: string | null) =>
-    ingestSfeLifecycleFromWirePhaseCore(phase, attemptId, conversationId, buildSfeIngestionDeps(ctx));
+export const ingestSfeLifecycleFromWirePhase = (
+    ctx: EngineCtx,
+    phase: ResponseLifecycleMessage['phase'],
+    attemptId: string,
+    conversationId?: string | null,
+) => ingestSfeLifecycleFromWirePhaseCore(phase, attemptId, conversationId, buildSfeIngestionDeps(ctx));
 
-export const isStaleAttemptMessage = (ctx: EngineCtx, attemptId: string, conversationId: string | undefined, signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved'): boolean => {
+export const isStaleAttemptMessage = (
+    ctx: EngineCtx,
+    attemptId: string,
+    conversationId: string | undefined,
+    signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
+): boolean => {
     const deps: StaleAttemptFilterDeps = {
         resolveAliasedAttemptId: (aid) => ctx.resolveAliasedAttemptId(aid),
         isAttemptDisposedOrSuperseded: (aid) => ctx.isAttemptDisposedOrSuperseded(aid),
@@ -378,11 +424,19 @@ export const buildAttemptCoordinatorDeps = (ctx: EngineCtx): AttemptCoordinatorD
     pendingLifecycleByAttempt: ctx.pendingLifecycleByAttempt,
     captureMetaByConversation: ctx.captureMetaByConversation,
     getCurrentConversationId: () => ctx.currentConversationId,
-    setCurrentConversationId: (cid) => { ctx.currentConversationId = cid; },
+    setCurrentConversationId: (cid) => {
+        ctx.currentConversationId = cid;
+    },
     getActiveAttemptId: () => ctx.activeAttemptId,
-    setActiveAttemptId: (aid) => { ctx.activeAttemptId = aid; },
-    setRunnerConversationId: (cid) => { ctx.runnerState.conversationId = cid; },
-    setRunnerActiveAttemptId: (aid) => { ctx.runnerState.activeAttemptId = aid; },
+    setActiveAttemptId: (aid) => {
+        ctx.activeAttemptId = aid;
+    },
+    setRunnerConversationId: (cid) => {
+        ctx.runnerState.conversationId = cid;
+    },
+    setRunnerActiveAttemptId: (aid) => {
+        ctx.runnerState.activeAttemptId = aid;
+    },
     emitPublicStatusSnapshot: (cidOverride) => ctx.emitPublicStatusSnapshot(cidOverride),
     getAdapterName: () => ctx.currentAdapter?.name,
     sfe: ctx.sfe,
@@ -392,10 +446,16 @@ export const buildAttemptCoordinatorDeps = (ctx: EngineCtx): AttemptCoordinatorD
     emitAttemptDisposed: (aid, reason) => ctx.emitAttemptDisposed(aid, reason),
     migratePendingStreamProbeText: (cid, aid) => ctx.migratePendingStreamProbeText(cid, aid),
     structuredLogger: ctx.structuredLogger,
-    emitWarn: (message, data) => { logger.warn(message, data); },
+    emitWarn: (message, data) => {
+        logger.warn(message, data);
+    },
     lastPendingLifecycleCapacityWarnAtRef: {
-        get value() { return ctx.lastPendingLifecycleCapacityWarnAt; },
-        set value(next: number) { ctx.lastPendingLifecycleCapacityWarnAt = next; },
+        get value() {
+            return ctx.lastPendingLifecycleCapacityWarnAt;
+        },
+        set value(next: number) {
+            ctx.lastPendingLifecycleCapacityWarnAt = next;
+        },
     },
 });
 
@@ -435,8 +495,9 @@ export const buildStreamDoneCoordinatorDeps = (ctx: EngineCtx): StreamDoneCoordi
     withPreservedLiveMirrorSnapshot: (cid, s, b) => ctx.withPreservedLiveMirrorSnapshot(cid, s, b),
     resolveAttemptId: (cid) => ctx.resolveAttemptId(cid),
     getCurrentAdapter: () => ctx.currentAdapter,
-    getFetchUrlCandidates: (cid) => ctx.currentAdapter ? getFetchUrlCandidates(ctx.currentAdapter, cid) : [],
-    getRawSnapshotReplayUrls: (cid, snap) => ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url],
+    getFetchUrlCandidates: (cid) => (ctx.currentAdapter ? getFetchUrlCandidates(ctx.currentAdapter, cid) : []),
+    getRawSnapshotReplayUrls: (cid, snap) =>
+        ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url],
     getConversation: (cid) => ctx.interceptionManager.getConversation(cid) ?? null,
     evaluateReadiness: (data) => evaluateReadinessForData(ctx, data),
     ingestConversationData: (data, source) => ctx.interceptionManager.ingestConversationData(data, source),
@@ -444,7 +505,10 @@ export const buildStreamDoneCoordinatorDeps = (ctx: EngineCtx): StreamDoneCoordi
     requestSnapshot: requestPageSnapshot,
     buildIsolatedSnapshot: (cid) => resolveIsolatedSnapshotData(ctx, cid),
     extractResponseText: (data) => extractResponseTextFromConversation(data, ctx.currentAdapter?.name ?? 'Unknown'),
-    setLastProbeKey: (key, cid) => { ctx.lastStreamProbeKey = key; ctx.lastStreamProbeConversationId = cid; },
+    setLastProbeKey: (key, cid) => {
+        ctx.lastStreamProbeKey = key;
+        ctx.lastStreamProbeConversationId = cid;
+    },
     isProbeKeyActive: (key) => ctx.lastStreamProbeKey === key,
 });
 
@@ -472,8 +536,10 @@ export const buildCanonicalStabilizationTickDeps = (ctx: EngineCtx): CanonicalSt
     ingestSfeCanonicalSample: (data, aid) => ingestSfeCanonicalSample(ctx, data, aid),
     markCanonicalCaptureMeta: (cid) => ctx.markCanonicalCaptureMeta(cid),
     refreshButtonState: (cid) => ctx.refreshButtonState(cid),
-    emitWarn: (attemptId, event, message, payload, key) => ctx.structuredLogger.emit(attemptId, 'warn', event, message, payload, key),
-    emitInfo: (attemptId, event, message, payload, key) => ctx.structuredLogger.emit(attemptId, 'info', event, message, payload, key),
+    emitWarn: (attemptId, event, message, payload, key) =>
+        ctx.structuredLogger.emit(attemptId, 'warn', event, message, payload, key),
+    emitInfo: (attemptId, event, message, payload, key) =>
+        ctx.structuredLogger.emit(attemptId, 'info', event, message, payload, key),
 });
 
 export const buildSavePipelineDeps = (ctx: EngineCtx): SavePipelineDeps => ({
@@ -503,7 +569,7 @@ export const buildSavePipelineDeps = (ctx: EngineCtx): SavePipelineDeps => ({
 
 export const buildWarmFetchDeps = (ctx: EngineCtx): WarmFetchDeps => ({
     platformName: ctx.currentAdapter?.name ?? 'Unknown',
-    getFetchUrlCandidates: (cid) => ctx.currentAdapter ? getFetchUrlCandidates(ctx.currentAdapter, cid) : [],
+    getFetchUrlCandidates: (cid) => (ctx.currentAdapter ? getFetchUrlCandidates(ctx.currentAdapter, cid) : []),
     ingestInterceptedData: (args) => ctx.interceptionManager.ingestInterceptedData(args),
     getConversation: (cid) => ctx.interceptionManager.getConversation(cid) ?? null,
     evaluateReadiness: (data) => evaluateReadinessForData(ctx, data),
@@ -519,30 +585,45 @@ export const buildCalibrationCaptureDeps = (ctx: EngineCtx, _conversationId: str
     ingestConversationData: (data, source) => ctx.interceptionManager.ingestConversationData(data, source),
     ingestInterceptedData: (args) => ctx.interceptionManager.ingestInterceptedData(args),
     getFetchUrlCandidates: (cid) => (ctx.currentAdapter ? getFetchUrlCandidates(ctx.currentAdapter, cid) : []),
-    getRawSnapshotReplayUrls: (cid, snap) => (ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url]),
+    getRawSnapshotReplayUrls: (cid, snap) =>
+        ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url],
 });
 
 export const buildCalibrationRuntimeDeps = (ctx: EngineCtx): CalibrationRuntimeDeps => ({
     getAdapter: () => ctx.currentAdapter,
     getCalibrationState: () => ctx.calibrationState,
-    setCalibrationState: (state) => { ctx.calibrationState = state; },
+    setCalibrationState: (state) => {
+        ctx.calibrationState = state;
+    },
     getRememberedPreferredStep: () => ctx.rememberedPreferredStep,
-    setRememberedPreferredStep: (step) => { ctx.rememberedPreferredStep = step; },
+    setRememberedPreferredStep: (step) => {
+        ctx.rememberedPreferredStep = step;
+    },
     getRememberedCalibrationUpdatedAt: () => ctx.rememberedCalibrationUpdatedAt,
-    setRememberedCalibrationUpdatedAt: (at) => { ctx.rememberedCalibrationUpdatedAt = at; },
+    setRememberedCalibrationUpdatedAt: (at) => {
+        ctx.rememberedCalibrationUpdatedAt = at;
+    },
     isCalibrationPreferenceLoaded: () => ctx.calibrationPreferenceLoaded,
-    setCalibrationPreferenceLoaded: (loaded) => { ctx.calibrationPreferenceLoaded = loaded; },
+    setCalibrationPreferenceLoaded: (loaded) => {
+        ctx.calibrationPreferenceLoaded = loaded;
+    },
     getCalibrationPreferenceLoading: () => ctx.calibrationPreferenceLoading,
-    setCalibrationPreferenceLoading: (promise) => { ctx.calibrationPreferenceLoading = promise; },
+    setCalibrationPreferenceLoading: (promise) => {
+        ctx.calibrationPreferenceLoading = promise;
+    },
     getSfeEnabled: () => ctx.sfeEnabled,
-    setSfeEnabled: (enabled) => { ctx.sfeEnabled = enabled; },
+    setSfeEnabled: (enabled) => {
+        ctx.sfeEnabled = enabled;
+    },
     runCalibrationStep: (step, cid, mode) => ctx.runCalibrationStep(step, cid, mode),
     isConversationReadyForActions: (cid, opts) => ctx.isConversationReadyForActions(cid, opts),
     hasConversationData: (cid) => !!ctx.interceptionManager.getConversation(cid),
     refreshButtonState: (cid) => ctx.refreshButtonState(cid),
     buttonManagerExists: () => ctx.buttonManager.exists(),
     buttonManagerSetCalibrationState: (state, options) => ctx.buttonManager.setCalibrationState(state, options),
-    syncRunnerStateCalibration: (state) => { ctx.runnerState.calibrationState = state; },
+    syncRunnerStateCalibration: (state) => {
+        ctx.runnerState.calibrationState = state;
+    },
     autoCaptureAttempts: ctx.autoCaptureAttempts,
     autoCaptureRetryTimers: ctx.autoCaptureRetryTimers,
     autoCaptureDeferredLogged: ctx.autoCaptureDeferredLogged,
@@ -559,7 +640,9 @@ export const buildButtonStateManagerDeps = (ctx: EngineCtx): ButtonStateManagerD
     getCurrentConversationId: () => ctx.currentConversationId,
     getLifecycleState: () => ctx.lifecycleState,
     getCalibrationState: () => ctx.calibrationState,
-    setCalibrationState: (state) => { ctx.calibrationState = state; },
+    setCalibrationState: (state) => {
+        ctx.calibrationState = state;
+    },
     getRememberedPreferredStep: () => ctx.rememberedPreferredStep,
     getRememberedCalibrationUpdatedAt: () => ctx.rememberedCalibrationUpdatedAt,
     sfeEnabled: () => ctx.sfeEnabled,
@@ -582,7 +665,9 @@ export const buildButtonStateManagerDeps = (ctx: EngineCtx): ButtonStateManagerD
     setCurrentConversation: (cid) => ctx.setCurrentConversation(cid),
     setLifecycleState: (state, cid) => ctx.setLifecycleState(state, cid),
     syncCalibrationButtonDisplay: () => ctx.syncCalibrationButtonDisplay(),
-    syncRunnerStateCalibration: (state) => { ctx.runnerState.calibrationState = state; },
+    syncRunnerStateCalibration: (state) => {
+        ctx.runnerState.calibrationState = state;
+    },
     emitPublicStatusSnapshot: (cidOverride) => ctx.emitPublicStatusSnapshot(cidOverride),
     buttonManager: {
         exists: () => ctx.buttonManager.exists(),
@@ -599,7 +684,8 @@ export const buildButtonStateManagerDeps = (ctx: EngineCtx): ButtonStateManagerD
 });
 
 export const buildResponseFinishedDeps = (ctx: EngineCtx): ResponseFinishedDeps => ({
-    extractConversationIdFromUrl: () => ctx.currentAdapter ? ctx.currentAdapter.extractConversationId(window.location.href) : null,
+    extractConversationIdFromUrl: () =>
+        ctx.currentAdapter ? ctx.currentAdapter.extractConversationId(window.location.href) : null,
     getCurrentConversationId: () => ctx.currentConversationId,
     peekAttemptId: (cid) => ctx.peekAttemptId(cid),
     resolveAttemptId: (cid) => ctx.resolveAttemptId(cid),
@@ -618,7 +704,9 @@ export const buildResponseFinishedDeps = (ctx: EngineCtx): ResponseFinishedDeps 
     setLastResponseFinished: (at, cid, aid) => {
         ctx.lastResponseFinishedAt = at;
         ctx.lastResponseFinishedConversationId = cid;
-        if (aid) { ctx.lastResponseFinishedAttemptId = aid; }
+        if (aid) {
+            ctx.lastResponseFinishedAttemptId = aid;
+        }
     },
     getConversation: (cid) => ctx.interceptionManager.getConversation(cid),
     evaluateReadiness: (data) => evaluateReadinessForData(ctx, data),
@@ -643,13 +731,21 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     forwardAttemptAlias: (from, to, reason) => ctx.forwardAttemptAlias(from, to, reason),
     setActiveAttempt: (aid) => ctx.setActiveAttempt(aid),
     setCurrentConversation: (cid) => ctx.setCurrentConversation(cid),
-    bindAttempt: (cid, aid) => { if (cid) { ctx.bindAttempt(cid, aid); } },
+    bindAttempt: (cid, aid) => {
+        if (cid) {
+            ctx.bindAttempt(cid, aid);
+        }
+    },
     getLifecycleState: () => ctx.lifecycleState,
     setLifecycleState: (state, cid) => ctx.setLifecycleState(state, cid),
     getLifecycleAttemptId: () => ctx.lifecycleAttemptId,
-    setLifecycleAttemptId: (aid) => { ctx.lifecycleAttemptId = aid; },
+    setLifecycleAttemptId: (aid) => {
+        ctx.lifecycleAttemptId = aid;
+    },
     getLifecycleConversationId: () => ctx.lifecycleConversationId,
-    setLifecycleConversationId: (cid) => { ctx.lifecycleConversationId = cid; },
+    setLifecycleConversationId: (cid) => {
+        ctx.lifecycleConversationId = cid;
+    },
     isPlatformGenerating: () => !!ctx.currentAdapter && isPlatformGenerating(ctx.currentAdapter),
     streamResolvedTitles: ctx.streamResolvedTitles,
     maxStreamResolvedTitles: MAX_STREAM_RESOLVED_TITLES,
@@ -677,7 +773,9 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     shouldIngestAsCanonicalSample,
     scheduleCanonicalStabilizationRetry: (cid, aid) => ctx.scheduleCanonicalStabilizationRetry(cid, aid),
     runStreamDoneProbe: (cid, aid) => {
-        if (!cid) { return Promise.resolve(); }
+        if (!cid) {
+            return Promise.resolve();
+        }
         return ctx.runStreamDoneProbe(cid, aid);
     },
     setStreamProbePanel: (s, b) => ctx.setStreamProbePanel(s, b),
@@ -685,7 +783,9 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     sfeEnabled: () => ctx.sfeEnabled,
     sfeResolve: (aid) => ctx.sfe.resolve(aid),
     getLastInvalidSessionTokenLogAt: () => ctx.lastInvalidSessionTokenLogAt,
-    setLastInvalidSessionTokenLogAt: (value) => { ctx.lastInvalidSessionTokenLogAt = value; },
+    setLastInvalidSessionTokenLogAt: (value) => {
+        ctx.lastInvalidSessionTokenLogAt = value;
+    },
     extractConversationIdFromLocation: () => extractConversationIdFromLocation(ctx),
     buttonManagerExists: () => ctx.buttonManager.exists(),
     injectSaveButton: () => ctx.injectSaveButton(),
@@ -693,7 +793,9 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     updateAdapter: (adapter) => {
         ctx.currentAdapter = adapter;
         ctx.runnerState.adapter = adapter;
-        if (adapter) { ctx.interceptionManager.updateAdapter(adapter); }
+        if (adapter) {
+            ctx.interceptionManager.updateAdapter(adapter);
+        }
     },
     buttonManagerRemove: () => ctx.buttonManager.remove(),
     resetCalibrationPreference: () => ctx.resetCalibrationPreference(),
@@ -721,22 +823,32 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
 });
 
 export const buildStreamDumpSettingDeps = (ctx: EngineCtx): StreamDumpSettingDeps => ({
-    setStreamDumpEnabled: (enabled) => { ctx.streamDumpEnabled = enabled; },
+    setStreamDumpEnabled: (enabled) => {
+        ctx.streamDumpEnabled = enabled;
+    },
     emitStreamDumpConfig: () => emitStreamDumpConfig(ctx),
 });
 
 export const buildStreamProbeVisibilitySettingDeps = (ctx: EngineCtx): StreamProbeVisibilitySettingDeps => ({
-    setStreamProbeVisible: (visible) => { ctx.streamProbeVisible = visible; },
+    setStreamProbeVisible: (visible) => {
+        ctx.streamProbeVisible = visible;
+    },
     getStreamProbeVisible: () => ctx.streamProbeVisible,
     removeStreamProbePanel,
 });
 
 export const buildStorageChangeListenerDeps = (ctx: EngineCtx): StorageChangeListenerDeps => ({
-    setStreamDumpEnabled: (enabled) => { ctx.streamDumpEnabled = enabled; },
+    setStreamDumpEnabled: (enabled) => {
+        ctx.streamDumpEnabled = enabled;
+    },
     emitStreamDumpConfig: () => emitStreamDumpConfig(ctx),
-    setStreamProbeVisible: (visible) => { ctx.streamProbeVisible = visible; },
+    setStreamProbeVisible: (visible) => {
+        ctx.streamProbeVisible = visible;
+    },
     removeStreamProbePanel,
-    setSfeEnabled: (enabled) => { ctx.sfeEnabled = enabled; },
+    setSfeEnabled: (enabled) => {
+        ctx.sfeEnabled = enabled;
+    },
     refreshButtonState: (cid) => ctx.refreshButtonState(cid),
     getCurrentConversationId: () => ctx.currentConversationId,
     hasAdapter: () => !!ctx.currentAdapter,
@@ -751,7 +863,9 @@ export const buildVisibilityRecoveryDeps = (ctx: EngineCtx): VisibilityRecoveryD
     maybeRestartCanonicalRecoveryAfterTimeout: (cid, aid) => ctx.maybeRestartCanonicalRecoveryAfterTimeout(cid, aid),
     requestPageSnapshot,
     isConversationDataLike,
-    ingestConversationData: (data, source) => { ctx.interceptionManager.ingestConversationData(data, source); },
+    ingestConversationData: (data, source) => {
+        ctx.interceptionManager.ingestConversationData(data, source);
+    },
     getConversation: (cid) => ctx.interceptionManager.getConversation(cid),
     evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
     markCanonicalCaptureMeta: (cid) => ctx.markCanonicalCaptureMeta(cid),
@@ -760,9 +874,15 @@ export const buildVisibilityRecoveryDeps = (ctx: EngineCtx): VisibilityRecoveryD
     warmFetchConversationSnapshot: (cid, reason) => ctx.warmFetchConversationSnapshot(cid, reason),
 });
 
-export const buildCleanupRuntimeDeps = (ctx: EngineCtx, runnerControl: { cleanup?: () => void }, storageChangeListener: Parameters<typeof import('wxt/browser').browser.storage.onChanged.addListener>[0]): RunnerCleanupDeps => ({
+export const buildCleanupRuntimeDeps = (
+    ctx: EngineCtx,
+    runnerControl: { cleanup?: () => void },
+    storageChangeListener: Parameters<typeof import('wxt/browser').browser.storage.onChanged.addListener>[0],
+): RunnerCleanupDeps => ({
     isCleanedUp: () => ctx.cleanedUp,
-    markCleanedUp: () => { ctx.cleanedUp = true; },
+    markCleanedUp: () => {
+        ctx.cleanedUp = true;
+    },
     removeVisibilityChangeListener: () => {}, // set externally after creation
     disposeAllAttempts: () => ctx.sfe.disposeAll(),
     handleDisposedAttempt: (attemptId, reason) => {
@@ -795,13 +915,21 @@ export const buildCleanupRuntimeDeps = (ctx: EngineCtx, runnerControl: { cleanup
     retryTimeoutIds: ctx.retryTimeoutIds,
     autoCaptureDeferredLogged: ctx.autoCaptureDeferredLogged,
     beforeUnloadHandlerRef: {
-        get value() { return ctx.beforeUnloadHandler; },
-        set value(next: (() => void) | null) { ctx.beforeUnloadHandler = next; },
+        get value() {
+            return ctx.beforeUnloadHandler;
+        },
+        set value(next: (() => void) | null) {
+            ctx.beforeUnloadHandler = next;
+        },
     },
-    removeBeforeUnloadListener: (handler) => { window.removeEventListener('beforeunload', handler); },
+    removeBeforeUnloadListener: (handler) => {
+        window.removeEventListener('beforeunload', handler);
+    },
     clearRunnerControl: () => {
         const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
-        const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as { cleanup?: () => void } | undefined;
+        const globalControl = (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY] as
+            | { cleanup?: () => void }
+            | undefined;
         if (globalControl === runnerControl) {
             delete (window as unknown as Record<string, unknown>)[RUNNER_CONTROL_KEY];
         }

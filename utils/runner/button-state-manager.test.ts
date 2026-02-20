@@ -15,8 +15,6 @@ import type { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
-
-
 describe('button-state-manager', () => {
     let deps: ButtonStateManagerDeps;
     let originalSetTimeout: typeof setTimeout;
@@ -55,7 +53,9 @@ describe('button-state-manager', () => {
             getRememberedCalibrationUpdatedAt: mock(() => null),
             sfeEnabled: mock(() => true),
             sfe: {
-                resolveByConversation: mock(() => ({ ready: true, reason: 'canonical_ready', blockingConditions: [] }) as any),
+                resolveByConversation: mock(
+                    () => ({ ready: true, reason: 'canonical_ready', blockingConditions: [] }) as any,
+                ),
             } as unknown as SignalFusionEngine,
             attemptByConversation: new Map([['123', 'attempt-1']]),
             captureMetaByConversation: new Map(),
@@ -114,7 +114,11 @@ describe('button-state-manager', () => {
 
         it('should emit timeout warning only once per attempt', () => {
             // Force timeout
-            deps.captureMetaByConversation.set('123', { captureSource: 'dom_snapshot_degraded', fidelity: 'degraded', completeness: 'partial' });
+            deps.captureMetaByConversation.set('123', {
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            });
             deps.hasCanonicalStabilizationTimedOut = () => true;
 
             resolveReadinessDecision('123', deps);
@@ -126,10 +130,9 @@ describe('button-state-manager', () => {
         });
 
         it('should throttle canonical ready log decisions over TTL', () => {
-            let loggedCount = 0;
             deps.structuredLogger.emit = () => {};
             deps.evaluateReadinessForData = () => ({ ready: true, terminal: true, reason: 'terminal' }) as any;
-            
+
             // Re-bind shouldLogCanonicalReadyDecision inside deps basically works
             resolveReadinessDecision('123', deps);
             // It uses deps.lastCanonicalReadyLogAtByConversation under the hood
@@ -140,8 +143,10 @@ describe('button-state-manager', () => {
             deps.timeoutWarningByAttempt.add('attempt-1');
             deps.lastCanonicalReadyLogAtByConversation.set('123', Date.now());
 
-            deps.sfe.resolveByConversation = () => ({ ready: false, reason: 'captured_not_ready', blockingConditions: [] }) as any;
-            deps.evaluateReadinessForData = () => ({ ready: false, terminal: false, reason: 'legacy_not_ready' }) as any;
+            deps.sfe.resolveByConversation = () =>
+                ({ ready: false, reason: 'captured_not_ready', blockingConditions: [] }) as any;
+            deps.evaluateReadinessForData = () =>
+                ({ ready: false, terminal: false, reason: 'legacy_not_ready' }) as any;
             deps.getConversation = () => null as any;
 
             resolveReadinessDecision('123', deps);
@@ -157,19 +162,28 @@ describe('button-state-manager', () => {
         });
 
         it('should return false if mode is degraded and includeDegraded is false or omitted', () => {
-            deps.captureMetaByConversation.set('123', { captureSource: 'dom_snapshot_degraded', fidelity: 'degraded', completeness: 'partial' });
+            deps.captureMetaByConversation.set('123', {
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            });
             deps.hasCanonicalStabilizationTimedOut = () => true;
             expect(isConversationReadyForActions('123', {}, deps)).toBeFalse();
         });
 
         it('should return true if mode is degraded and includeDegraded is true', () => {
-            deps.captureMetaByConversation.set('123', { captureSource: 'dom_snapshot_degraded', fidelity: 'degraded', completeness: 'partial' });
+            deps.captureMetaByConversation.set('123', {
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            });
             deps.hasCanonicalStabilizationTimedOut = () => true;
             expect(isConversationReadyForActions('123', { includeDegraded: true }, deps)).toBeTrue();
         });
 
         it('should return false if mode is not_ready', () => {
-            deps.sfe.resolveByConversation = () => ({ ready: false, reason: 'captured_not_ready', blockingConditions: [] }) as any;
+            deps.sfe.resolveByConversation = () =>
+                ({ ready: false, reason: 'captured_not_ready', blockingConditions: [] }) as any;
             deps.evaluateReadinessForData = () => ({ ready: false, terminal: false, reason: 'in_progress' }) as any;
             expect(isConversationReadyForActions('123', { includeDegraded: true }, deps)).toBeFalse();
         });
@@ -223,8 +237,17 @@ describe('button-state-manager', () => {
         it('should enable save button in degraded mode', () => {
             // Configure deps so resolveReadinessDecision naturally returns degraded_manual_only:
             // sfe reports timeout via blockingConditions, data exists but not ready
-            deps.sfe.resolveByConversation = mock(() => ({ ready: false, reason: 'stabilization_timeout', blockingConditions: ['stabilization_timeout'] }) as any);
-            deps.evaluateReadinessForData = mock(() => ({ ready: false, terminal: false, reason: 'in_progress' }) as any);
+            deps.sfe.resolveByConversation = mock(
+                () =>
+                    ({
+                        ready: false,
+                        reason: 'stabilization_timeout',
+                        blockingConditions: ['stabilization_timeout'],
+                    }) as any,
+            );
+            deps.evaluateReadinessForData = mock(
+                () => ({ ready: false, terminal: false, reason: 'in_progress' }) as any,
+            );
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.buttonManager.setSaveButtonMode).toHaveBeenCalledWith('force-degraded');
             expect(deps.buttonManager.setButtonEnabled).toHaveBeenCalledWith('save', true);
@@ -242,8 +265,12 @@ describe('button-state-manager', () => {
         it('should clear calibration success state if no longer ready', () => {
             deps.getCalibrationState = () => 'success';
             // Configure deps so resolveReadinessDecision naturally returns awaiting_stabilization (not ready):
-            deps.sfe.resolveByConversation = mock(() => ({ ready: false, reason: 'captured_not_ready', blockingConditions: [] }) as any);
-            deps.evaluateReadinessForData = mock(() => ({ ready: false, terminal: false, reason: 'in_progress' }) as any);
+            deps.sfe.resolveByConversation = mock(
+                () => ({ ready: false, reason: 'captured_not_ready', blockingConditions: [] }) as any,
+            );
+            deps.evaluateReadinessForData = mock(
+                () => ({ ready: false, terminal: false, reason: 'in_progress' }) as any,
+            );
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.setCalibrationState).toHaveBeenCalledWith('idle');
         });

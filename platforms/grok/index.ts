@@ -16,6 +16,7 @@ import type { ConversationData } from '@/utils/types';
 import { tryParseGrokComRestEndpoint, tryParseJsonIfNeeded } from './grok-com-parser';
 import { tryParseGrokNdjson } from './ndjson-parser';
 import { evaluateGrokReadiness } from './readiness';
+import { GROK_ENDPOINT_REGISTRY, GROK_SELECTOR_REGISTRY, resolveGrokButtonInjectionTarget } from './registry';
 import { tryHandleGrokTitlesEndpoint } from './titles';
 import {
     extractGrokComConversationIdFromUrl,
@@ -49,14 +50,7 @@ const normalizeGrokDomTitleCandidate = (raw: string, defaultTitles: string[]): s
 };
 
 const queryGrokTitleFromDom = (defaultTitles: string[]): string | null => {
-    const selectors = [
-        '[aria-current="page"][href*="/i/grok?conversation="] [dir="ltr"]',
-        '[aria-current="page"][href*="/i/grok?conversation="] span',
-        '[data-testid="grok-header"] h1',
-        'main h1',
-    ];
-
-    for (const selector of selectors) {
+    for (const selector of GROK_SELECTOR_REGISTRY.domTitleCandidates) {
         const element = document.querySelector(selector);
         const text = normalizeDomTitle(element?.textContent ?? null);
         if (!text) {
@@ -94,10 +88,8 @@ export const grokAdapter: LLMPlatform = {
     name: 'Grok',
     urlMatchPattern: 'https://grok.com/*',
 
-    apiEndpointPattern:
-        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/(?:new|reconnect-response-v2\/[^/?#]+|[^/]+(?:\/(response-node|load-responses))?)/,
-    completionTriggerPattern:
-        /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/,
+    apiEndpointPattern: GROK_ENDPOINT_REGISTRY.apiEndpointPattern,
+    completionTriggerPattern: GROK_ENDPOINT_REGISTRY.completionTriggerPattern,
 
     isPlatformUrl(url: string): boolean {
         try {
@@ -206,15 +198,7 @@ export const grokAdapter: LLMPlatform = {
         } catch {
             // Fallback to selector-based target resolution.
         }
-
-        const selectors = ['[data-testid="grok-header"]', '[role="banner"]', 'header nav', 'header', 'body'];
-        for (const selector of selectors) {
-            const target = document.querySelector(selector);
-            if (target) {
-                return (target.parentElement || target) as HTMLElement;
-            }
-        }
-        return null;
+        return resolveGrokButtonInjectionTarget();
     },
 
     evaluateReadiness(data: ConversationData) {

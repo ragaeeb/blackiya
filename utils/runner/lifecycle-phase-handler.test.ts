@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
     applyActiveLifecyclePhase,
@@ -9,6 +9,7 @@ import type { ExportMeta } from '@/utils/sfe/types';
 
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
+
 import * as streamPreview from '@/utils/runner/stream-preview';
 
 describe('lifecycle-phase-handler', () => {

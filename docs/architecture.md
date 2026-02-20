@@ -56,6 +56,10 @@ flowchart LR
   - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
 - Adapter interface + readiness contract:
   - `platforms/types.ts`
+- Adapter drift registries (endpoint + selector constants):
+  - `platforms/chatgpt/registry.ts`
+  - `platforms/gemini/registry.ts`
+  - `platforms/grok/registry.ts`
 - Adapter factory:
   - `platforms/factory.ts`
 - SFE types + transitions:
@@ -133,6 +137,7 @@ Critical invariant:
 - Snapshot/getJSON bridge requests and responses are token-stamped and token-validated symmetrically.
 - Public status snapshots (`BLACKIYA_PUBLIC_STATUS`) are token-stamped in runner and token-validated before exposure via `window.__blackiya.subscribe(...)`.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
+- Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
 - **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
 - **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative/snapshot) and always-disabled `['dom_hint', 'snapshot_fallback']`. `CalibrationStep` mapping is now reversible via a distinct `snapshot` strategy for `page-snapshot`. The runner exclusively uses the manual-strict policy path.
 - **Retention hygiene:** pending lifecycle cache is explicitly bounded with near-cap warning telemetry, and SFE resolution cache prunes stale terminal entries plus enforces a max-resolution bound.

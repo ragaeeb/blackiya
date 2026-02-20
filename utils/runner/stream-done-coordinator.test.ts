@@ -10,7 +10,7 @@ describe('stream-done-coordinator', () => {
     beforeEach(() => {
         originalSetTimeout = (globalThis as any).window?.setTimeout;
         originalClearTimeout = globalThis.clearTimeout;
-        
+
         deps = {
             runStreamDoneProbeCore: mock((_cid: string, _aid: string | undefined, _deps: any) => Promise.resolve()),
             probeLease: {

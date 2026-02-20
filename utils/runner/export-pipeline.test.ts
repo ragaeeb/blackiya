@@ -1,6 +1,6 @@
-import { describe, expect, it, mock, spyOn, beforeEach, afterEach } from 'bun:test';
-import * as titleResolver from '@/utils/title-resolver';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
+import * as titleResolver from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
 describe('export-pipeline', () => {

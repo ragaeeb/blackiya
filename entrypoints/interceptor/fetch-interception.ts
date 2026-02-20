@@ -12,9 +12,9 @@ import {
 import { isDiscoveryDiagnosticsEnabled, safePathname } from '@/entrypoints/interceptor/discovery';
 import {
     isDiscoveryModeHost,
+    logAdapterEndpointMiss,
     logConversationSkip,
     logDiscoveryFetch,
-    logGeminiAdapterMiss,
 } from '@/entrypoints/interceptor/discovery-logging';
 import type { InterceptorEmitter } from '@/entrypoints/interceptor/interceptor-emitter';
 import { chatGPTAdapter } from '@/platforms/chatgpt';
@@ -215,5 +215,5 @@ export const handleFetchInterception = (
     ) {
         logDiscoveryFetch(url, response, deps.emitter.log, deps.emitter.emitStreamDumpFrame);
     }
-    logGeminiAdapterMiss('fetch', url, undefined, deps.emitter.log, deps.emitter.shouldLogTransient);
+    logAdapterEndpointMiss('fetch', url, undefined, deps.emitter.log, deps.emitter.shouldLogTransient);
 };

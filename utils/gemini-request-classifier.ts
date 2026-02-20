@@ -1,5 +1,7 @@
+import { isGeminiGenerationEndpointUrl } from '@/platforms/gemini/registry';
+
 export const isGeminiGenerationEndpoint = (url: string): boolean => {
-    return /\/_\/BardChatUi\/data\/assistant\.lamda\.BardFrontendService\/StreamGenerate/i.test(url);
+    return isGeminiGenerationEndpointUrl(url);
 };
 
 export const shouldEmitGeminiLifecycle = (url: string): boolean => {

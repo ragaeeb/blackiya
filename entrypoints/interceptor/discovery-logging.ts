@@ -3,6 +3,9 @@ import {
     isDiscoveryDiagnosticsEnabled,
     safePathname,
 } from '@/entrypoints/interceptor/discovery';
+import { isLikelyChatGptApiPath } from '@/platforms/chatgpt/registry';
+import { isLikelyGeminiApiPath } from '@/platforms/gemini/registry';
+import { isLikelyGrokApiPath } from '@/platforms/grok/registry';
 import type { StreamDumpFrameMessage } from '@/utils/protocol/messages';
 
 type LogFn = (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
@@ -107,7 +110,20 @@ export const logDiscoveryXhr = (url: string, responseText: string, log: LogFn, s
     emitDiscoveryDumpFrame('XHR DISCOVERY', pathname, responseText, streamDump);
 };
 
-export const logGeminiAdapterMiss = (
+const resolveEndpointMissPlatform = (hostname: string, url: string): 'ChatGPT' | 'Gemini' | 'Grok' | null => {
+    if ((hostname.includes('chatgpt.com') || hostname.includes('chat.openai.com')) && isLikelyChatGptApiPath(url)) {
+        return 'ChatGPT';
+    }
+    if (hostname.includes('gemini.google.com') && isLikelyGeminiApiPath(url)) {
+        return 'Gemini';
+    }
+    if ((hostname.includes('grok.com') || hostname.includes('x.com')) && isLikelyGrokApiPath(url)) {
+        return 'Grok';
+    }
+    return null;
+};
+
+export const logAdapterEndpointMiss = (
     channel: 'fetch' | 'xhr',
     url: string,
     xhrMeta: { method?: string; status?: number } | undefined,
@@ -115,17 +131,28 @@ export const logGeminiAdapterMiss = (
     shouldLogTransient: ShouldLogTransientFn,
 ) => {
     const path = safePathname(url);
-    if (!window.location.hostname.includes('gemini.google.com')) {
+    const platform = resolveEndpointMissPlatform(window.location.hostname, url);
+    if (!platform) {
         return;
     }
-    if (!path.includes('/_/BardChatUi/data/')) {
+    if (!shouldLogTransient(`adapter-miss:${platform.toLowerCase()}:${channel}:${path}`, 8000)) {
         return;
     }
-    if (!shouldLogTransient(`gemini:adapter-miss:${channel}:${path}`, 8000)) {
-        return;
-    }
-    log('warn', 'Gemini endpoint unmatched by adapter', {
+    log('warn', `${platform} endpoint unmatched by adapter`, {
         path,
         ...(xhrMeta ?? {}),
     });
+};
+
+export const logGeminiAdapterMiss = (
+    channel: 'fetch' | 'xhr',
+    url: string,
+    xhrMeta: { method?: string; status?: number } | undefined,
+    log: LogFn,
+    shouldLogTransient: ShouldLogTransientFn,
+) => {
+    if (!window.location.hostname.includes('gemini.google.com')) {
+        return;
+    }
+    logAdapterEndpointMiss(channel, url, xhrMeta, log, shouldLogTransient);
 };

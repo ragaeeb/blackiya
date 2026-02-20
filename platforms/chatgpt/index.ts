@@ -17,12 +17,13 @@ import {
     normalizeConversationCandidate,
 } from './conversation-normalizer';
 import { evaluateChatGPTReadiness } from './readiness';
+import { CHATGPT_ENDPOINT_REGISTRY, isChatGptGeneratingFromDom, resolveChatGptButtonInjectionTarget } from './registry';
 import { buildConversationFromSsePayloads, extractSsePayloads } from './sse-parser';
 import { CONVERSATION_ID_PATTERN, HOST_CANDIDATES, isPlaceholderTitle, tryParseJson } from './utils';
 
 // Exported constants used by the interceptor / runner layers
 
-export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = /\/backend-api\/(?:f\/)?conversation(?:\?.*)?$/i;
+export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = CHATGPT_ENDPOINT_REGISTRY.promptRequestPathPattern;
 
 // Adapter factory
 
@@ -43,10 +44,9 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
      * Matches the GET endpoint for fetching full conversation JSON.
      * Format: backend-api/conversation/{uuid}
      */
-    apiEndpointPattern:
-        /(?:backend-api\/conversation\/[a-f0-9-]+(?:\/)?(?:\?.*)?$|backend-api\/f\/conversation(?:\/[a-f0-9-]+)?(?:\/)?(?:\?.*)?$)/i,
+    apiEndpointPattern: CHATGPT_ENDPOINT_REGISTRY.apiEndpointPattern,
 
-    completionTriggerPattern: /backend-api\/(?:f\/)?conversation\/[a-f0-9-]+\/stream_status(?:\?.*)?$/i,
+    completionTriggerPattern: CHATGPT_ENDPOINT_REGISTRY.completionTriggerPattern,
 
     isPlatformUrl: (url: string) => url.includes('chatgpt.com') || url.includes('chat.openai.com'),
 
@@ -156,33 +156,11 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
         return `${sanitizedTitle}_${timestamp}`;
     },
 
-    getButtonInjectionTarget(): HTMLElement | null {
-        const selectors = [
-            '[data-testid="model-switcher-dropdown-button"]',
-            'header nav',
-            '.flex.items-center.justify-between',
-            'header .flex',
-        ];
-        for (const selector of selectors) {
-            const target = document.querySelector(selector);
-            if (target) {
-                return (target.parentElement || target) as HTMLElement;
-            }
-        }
-        return null;
-    },
+    getButtonInjectionTarget: () => resolveChatGptButtonInjectionTarget(),
 
     evaluateReadiness: (data: ConversationData) => evaluateChatGPTReadiness(data),
 
-    isPlatformGenerating(): boolean {
-        const selectors = [
-            'button[data-testid="stop-button"]',
-            'button[aria-label*="Stop generating"]',
-            'button[aria-label*="Stop response"]',
-            '[data-is-streaming="true"]',
-        ];
-        return selectors.some((selector) => !!document.querySelector(selector));
-    },
+    isPlatformGenerating: () => isChatGptGeneratingFromDom(),
 });
 
 /** ChatGPT Platform Adapter singleton. */
