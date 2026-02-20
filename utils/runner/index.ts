@@ -13,14 +13,7 @@ import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { addBoundedSetValue, setBoundedMapValue } from '@/utils/bounded-collections';
-import {
-    buildCalibrationProfileFromStep,
-    loadCalibrationProfileV2IfPresent,
-    saveCalibrationProfileV2,
-    stepFromStrategy,
-} from '@/utils/calibration-profile';
 import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
-import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -81,18 +74,33 @@ import {
 } from '@/utils/runner/canonical-stabilization-tick';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import {
-    attachExportMeta,
     buildExportPayloadForFormat as buildExportPayloadForFormatPure,
     extractResponseTextFromConversation,
 } from '@/utils/runner/export-helpers';
-import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
+import {
+    type CalibrationOrchestrationDeps,
+    ensureCalibrationPreferenceLoaded as ensureCalibrationPreferenceLoadedCore,
+    handleCalibrationClick as handleCalibrationClickCore,
+    isCalibrationCaptureSatisfied as isCalibrationCaptureSatisfiedCore,
+    runCalibrationCapture as runCalibrationCaptureCore,
+    syncCalibrationButtonDisplay as syncCalibrationButtonDisplayCore,
+} from '@/utils/runner/calibration-orchestration';
 import { evaluateReadinessForData as evaluateReadinessForDataPure } from '@/utils/runner/readiness-evaluation';
-import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from '@/utils/runner/url-candidates';
+import {
+    type InterceptionCaptureDeps,
+    processInterceptionCapture as processInterceptionCaptureCore,
+} from '@/utils/runner/interception-capture';
 import { handleNavigationChange as handleNavigationChangeCore } from '@/utils/runner/navigation-handler';
 import type { NavigationDeps } from '@/utils/runner/navigation-handler';
 import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
 import { processResponseFinished as processResponseFinishedCore } from '@/utils/runner/response-finished-handler';
 import type { ResponseFinishedDeps } from '@/utils/runner/response-finished-handler';
+import {
+    type SavePipelineDeps,
+    getConversationData as getConversationDataCore,
+    handleSaveClick as handleSaveClickCore,
+} from '@/utils/runner/save-pipeline';
+import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from '@/utils/runner/url-candidates';
 import { detectPlatformGenerating } from '@/utils/runner/generation-guard';
 import { getLifecyclePhasePriority } from '@/utils/runner/lifecycle-manager';
 import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
@@ -103,7 +111,6 @@ import {
     setStreamProbePanelContent,
 } from '@/utils/runner/probe-panel';
 import { resolveRunnerReadinessDecision } from '@/utils/runner/readiness';
-import { buildExportMetaForSave, confirmDegradedForceSave } from '@/utils/runner/save-export';
 import { RunnerState } from '@/utils/runner/state';
 import {
     runStreamDoneProbe as runStreamDoneProbeCore,
@@ -138,7 +145,6 @@ import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
 import {
-    deriveConversationTitleFromFirstUserMessage,
     resolveConversationTitleByPrecedence,
     resolveExportConversationTitleDecision as resolveExportTitleDecision,
 } from '@/utils/title-resolver';
@@ -149,7 +155,6 @@ import { ButtonManager } from '@/utils/ui/button-manager';
 
 type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
 type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
-type InterceptionCaptureMeta = { attemptId?: string; source?: string };
 
 // Constants
 
@@ -427,83 +432,31 @@ export const runPlatform = (): void => {
 
     const buttonManager = new ButtonManager(handleSaveClick, handleCalibrationClick);
 
-    const applyStreamResolvedTitleIfNeeded = (conversationId: string, data: ConversationData) => {
-        const streamTitle = streamResolvedTitles.get(conversationId);
-        if (streamTitle && data.title !== streamTitle) {
-            data.title = streamTitle;
-        }
-    };
+    // Interception capture — delegates to interception-capture module
 
-    const updateActiveAttemptFromMeta = (conversationId: string, meta?: InterceptionCaptureMeta) => {
-        if (!meta?.attemptId) {
-            return;
-        }
-        setActiveAttempt(meta.attemptId);
-        bindAttempt(conversationId, meta.attemptId);
-    };
-
-    const handleSnapshotSourceCapture = (conversationId: string, source: string) => {
-        const existingDecision = resolveReadinessDecision(conversationId);
-        if (existingDecision.mode === 'canonical_ready') {
-            markCanonicalCaptureMeta(conversationId);
-        } else {
-            markSnapshotCaptureMeta(conversationId);
-        }
-        const snapshotAttemptId = peekAttemptId(conversationId) ?? resolveAttemptId(conversationId);
-        structuredLogger.emit(
-            snapshotAttemptId,
-            'info',
-            'snapshot_degraded_mode_used',
-            'Snapshot-based capture marked as degraded/manual-only',
-            { conversationId, source },
-            `snapshot-degraded:${conversationId}:${source}`,
-        );
-        if (lifecycleState === 'completed') {
-            scheduleCanonicalStabilizationRetry(conversationId, snapshotAttemptId);
-        }
-    };
-
-    const handleNetworkSourceCapture = (
-        conversationId: string,
-        meta?: InterceptionCaptureMeta,
-        data?: ConversationData,
-    ) => {
-        if (!data) {
-            return;
-        }
-        const source = meta?.source ?? 'network';
-        const effectiveAttemptId = resolveAliasedAttemptId(meta?.attemptId ?? resolveAttemptId(conversationId));
-        maybeRestartCanonicalRecoveryAfterTimeout(conversationId, effectiveAttemptId);
-        logger.info('Network source: marking canonical fidelity', {
-            conversationId,
-            source,
-            effectiveAttemptId,
-            readinessReady: evaluateReadinessForData(data).ready,
-        });
-        markCanonicalCaptureMeta(conversationId);
-        ingestSfeCanonicalSample(data, effectiveAttemptId);
-    };
-
-    const processInterceptionCapture = (capturedId: string, data: ConversationData, meta?: InterceptionCaptureMeta) => {
-        applyStreamResolvedTitleIfNeeded(capturedId, data);
-        setCurrentConversation(capturedId);
-        updateActiveAttemptFromMeta(capturedId, meta);
-
-        const source = meta?.source ?? 'network';
-        if (source.includes('snapshot') || source.includes('dom')) {
-            handleSnapshotSourceCapture(capturedId, source);
-        } else {
-            handleNetworkSourceCapture(capturedId, meta, data);
-        }
-
-        refreshButtonState(capturedId);
-        if (evaluateReadinessForData(data).ready) {
-            handleResponseFinished('network', capturedId);
-        }
-    };
+    const buildInterceptionCaptureDeps = (): InterceptionCaptureDeps => ({
+        getStreamResolvedTitle: (cid) => streamResolvedTitles.get(cid),
+        setCurrentConversation,
+        setActiveAttempt,
+        bindAttempt,
+        peekAttemptId,
+        resolveAttemptId,
+        resolveAliasedAttemptId,
+        evaluateReadinessForData,
+        resolveReadinessDecision,
+        markSnapshotCaptureMeta,
+        markCanonicalCaptureMeta,
+        ingestSfeCanonicalSample,
+        maybeRestartCanonicalRecoveryAfterTimeout,
+        scheduleCanonicalStabilizationRetry,
+        refreshButtonState,
+        handleResponseFinished,
+        getLifecycleState: () => lifecycleState,
+        structuredLogger,
+    });
 
     const interceptionManager = new InterceptionManager((capturedId, data, meta) => {
-        processInterceptionCapture(capturedId, data, meta);
+        processInterceptionCaptureCore(capturedId, data, meta, buildInterceptionCaptureDeps());
     });
 
     const navigationManager = new NavigationManager(() => {
@@ -977,107 +930,43 @@ export const runPlatform = (): void => {
         setStreamProbePanel('stream: live mirror', capped);
     };
 
-    // Export pipeline
+    // Save pipeline — thin wrappers delegating to save-pipeline module
 
     const buildExportPayloadForFormat = (data: ConversationData, format: ExportFormat): unknown =>
         buildExportPayloadForFormatPure(data, format, currentAdapter?.name ?? 'Unknown');
 
-    const buildExportPayload = async (data: ConversationData, meta: ExportMeta): Promise<unknown> => {
-        const format = await getExportFormat();
-        return attachExportMeta(buildExportPayloadForFormat(data, format), meta);
-    };
-
-    // Save readiness and force-save
-
-    const resolveSaveReadiness = (
-        conversationId: string | null,
-    ): { conversationId: string; decision: ReadinessDecision; allowDegraded: boolean } | null => {
-        if (!conversationId) {
-            return null;
-        }
-        const decision = resolveReadinessDecision(conversationId);
-        return { conversationId, decision, allowDegraded: decision.mode === 'degraded_manual_only' };
-    };
-
-    const maybeIngestFreshSnapshotForForceSave = (conversationId: string, freshSnapshot: unknown): boolean => {
-        if (!freshSnapshot || !isConversationDataLike(freshSnapshot)) {
-            return false;
-        }
-        interceptionManager.ingestConversationData(freshSnapshot, 'force-save-snapshot-recovery');
-        const cached = interceptionManager.getConversation(conversationId);
-        if (!cached) {
-            return false;
-        }
-        if (!evaluateReadinessForData(cached).ready) {
-            return false;
-        }
-        markCanonicalCaptureMeta(conversationId);
-        ingestSfeCanonicalSample(cached, resolveAttemptId(conversationId));
-        refreshButtonState(conversationId);
-        logger.info('Force Save recovered via fresh snapshot — using canonical path', { conversationId });
-        return true;
-    };
-
-    const recoverCanonicalBeforeForceSave = async (conversationId: string): Promise<boolean> => {
-        const freshSnapshot = await requestPageSnapshot(conversationId);
-        if (maybeIngestFreshSnapshotForForceSave(conversationId, freshSnapshot)) {
-            return true;
-        }
-        await warmFetchConversationSnapshot(conversationId, 'force-save');
-        refreshButtonState(conversationId);
-        return resolveReadinessDecision(conversationId).mode !== 'degraded_manual_only';
-    };
-
-    // Save / calibration click handlers
+    const buildSavePipelineDeps = (): SavePipelineDeps => ({
+        getAdapter: () => currentAdapter,
+        resolveConversationIdForUserAction,
+        getConversation: (cid) => interceptionManager.getConversation(cid),
+        resolveReadinessDecision,
+        shouldBlockActionsForGeneration,
+        getCaptureMeta,
+        getExportFormat,
+        getStreamResolvedTitle: (cid) => streamResolvedTitles.get(cid) ?? null,
+        evaluateReadinessForData,
+        markCanonicalCaptureMeta,
+        ingestSfeCanonicalSample,
+        resolveAttemptId,
+        peekAttemptId,
+        refreshButtonState,
+        requestPageSnapshot,
+        warmFetchConversationSnapshot,
+        ingestConversationData: (data, source) => interceptionManager.ingestConversationData(data, source),
+        isConversationDataLike,
+        buttonManagerExists: () => buttonManager.exists(),
+        buttonManagerSetLoading: (loading, button) => buttonManager.setLoading(loading, button),
+        buttonManagerSetSuccess: (button) => buttonManager.setSuccess(button),
+        structuredLogger,
+    });
 
     async function handleSaveClick() {
-        if (!currentAdapter) {
-            return;
-        }
-        const readiness = resolveSaveReadiness(resolveConversationIdForUserAction());
-        if (!readiness) {
-            return;
-        }
-        let allowDegraded = readiness.allowDegraded;
-        if (allowDegraded) {
-            const recovered = await recoverCanonicalBeforeForceSave(readiness.conversationId);
-            allowDegraded = !recovered;
-        }
-        if (allowDegraded && !confirmDegradedForceSave()) {
-            return;
-        }
-        const data = await getConversationData({ allowDegraded });
-        if (!data) {
-            return;
-        }
-        await saveConversation(data, { allowDegraded });
+        await handleSaveClickCore(buildSavePipelineDeps());
     }
 
     async function handleCalibrationClick() {
-        if (calibrationState === 'capturing') {
-            return;
-        }
-        if (calibrationState === 'waiting') {
-            await runCalibrationCapture('manual');
-            return;
-        }
-        setCalibrationStatus('waiting');
-        logger.info('Calibration armed. Click Done when response is complete.');
+        await handleCalibrationClickCore(buildCalibrationOrchestrationDeps());
     }
-
-    function setCalibrationStatus(status: CalibrationUiState) {
-        calibrationState = status;
-        runnerState.calibrationState = status;
-        buttonManager.setCalibrationState(status, {
-            timestampLabel:
-                status === 'success' ? formatCalibrationTimestampLabel(rememberedCalibrationUpdatedAt) : null,
-        });
-    }
-
-    const markCalibrationSuccess = (conversationId: string) => {
-        setCalibrationStatus('success');
-        refreshButtonState(conversationId);
-    };
 
     // Warm fetch
 
@@ -1096,7 +985,7 @@ export const runPlatform = (): void => {
 
     // Calibration capture
 
-    const buildCalibrationCaptureDeps = (conversationId: string): CalibrationCaptureDeps => ({
+    const buildCalibrationCaptureDeps = (_conversationId: string): CalibrationCaptureDeps => ({
         adapter: currentAdapter!,
         isCaptureSatisfied: (cid, mode) => isCalibrationCaptureSatisfied(cid, mode),
         flushQueuedMessages: () => interceptionManager.flushQueuedMessages(),
@@ -1116,7 +1005,7 @@ export const runPlatform = (): void => {
     ): Promise<boolean> =>
         runCalibrationStepPure(step, conversationId, mode, buildCalibrationCaptureDeps(conversationId));
 
-    // Calibration orchestration
+    // Calibration orchestration — thin wrappers delegating to calibration-orchestration module
 
     const loadSfeSettings = async () => {
         try {
@@ -1129,117 +1018,38 @@ export const runPlatform = (): void => {
         }
     };
 
-    const loadCalibrationPreference = async (platformName: string) => {
-        try {
-            const profileV2 = await loadCalibrationProfileV2IfPresent(platformName);
-            if (profileV2) {
-                rememberedPreferredStep = stepFromStrategy(profileV2.strategy);
-                rememberedCalibrationUpdatedAt = profileV2.updatedAt;
-            } else {
-                rememberedPreferredStep = null;
-                rememberedCalibrationUpdatedAt = null;
-            }
-            calibrationPreferenceLoaded = true;
-            syncCalibrationButtonDisplay();
-        } catch (error) {
-            logger.warn('Failed to load calibration profile', error);
-            calibrationPreferenceLoaded = true;
-            syncCalibrationButtonDisplay();
-        }
-    };
+    const buildCalibrationOrchestrationDeps = (): CalibrationOrchestrationDeps => ({
+        getAdapter: () => currentAdapter,
+        getCalibrationState: () => calibrationState,
+        setCalibrationState: (state) => { calibrationState = state; },
+        getRememberedPreferredStep: () => rememberedPreferredStep,
+        setRememberedPreferredStep: (step) => { rememberedPreferredStep = step; },
+        getRememberedCalibrationUpdatedAt: () => rememberedCalibrationUpdatedAt,
+        setRememberedCalibrationUpdatedAt: (at) => { rememberedCalibrationUpdatedAt = at; },
+        isCalibrationPreferenceLoaded: () => calibrationPreferenceLoaded,
+        setCalibrationPreferenceLoaded: (loaded) => { calibrationPreferenceLoaded = loaded; },
+        getCalibrationPreferenceLoading: () => calibrationPreferenceLoading,
+        setCalibrationPreferenceLoading: (promise) => { calibrationPreferenceLoading = promise; },
+        runCalibrationStep,
+        isConversationReadyForActions,
+        hasConversationData: (cid) => !!interceptionManager.getConversation(cid),
+        refreshButtonState,
+        buttonManagerExists: () => buttonManager.exists(),
+        buttonManagerSetCalibrationState: (state, options) => buttonManager.setCalibrationState(state, options),
+        syncRunnerStateCalibration: (state) => { runnerState.calibrationState = state; },
+    });
 
-    const ensureCalibrationPreferenceLoaded = (platformName: string): Promise<void> => {
-        if (calibrationPreferenceLoaded) {
-            return Promise.resolve();
-        }
-        if (calibrationPreferenceLoading) {
-            return calibrationPreferenceLoading;
-        }
-        calibrationPreferenceLoading = loadCalibrationPreference(platformName).finally(() => {
-            calibrationPreferenceLoading = null;
-        });
-        return calibrationPreferenceLoading;
-    };
+    const ensureCalibrationPreferenceLoaded = (platformName: string): Promise<void> =>
+        ensureCalibrationPreferenceLoadedCore(platformName, buildCalibrationOrchestrationDeps());
 
-    const rememberCalibrationSuccess = async (platformName: string, step: CalibrationStep) => {
-        try {
-            rememberedPreferredStep = step;
-            rememberedCalibrationUpdatedAt = new Date().toISOString();
-            calibrationPreferenceLoaded = true;
-            await saveCalibrationProfileV2(buildCalibrationProfileFromStep(platformName, step));
-        } catch (error) {
-            logger.warn('Failed to save calibration profile', error);
-        }
-    };
+    const syncCalibrationButtonDisplay = () =>
+        syncCalibrationButtonDisplayCore(buildCalibrationOrchestrationDeps());
 
-    function syncCalibrationButtonDisplay() {
-        if (!buttonManager.exists() || !currentAdapter) {
-            return;
-        }
-        const displayState = resolveCalibrationDisplayState(calibrationState, !!rememberedPreferredStep);
-        buttonManager.setCalibrationState(displayState, {
-            timestampLabel:
-                displayState === 'success' ? formatCalibrationTimestampLabel(rememberedCalibrationUpdatedAt) : null,
-        });
-    }
+    const isCalibrationCaptureSatisfied = (conversationId: string, mode: CalibrationMode): boolean =>
+        isCalibrationCaptureSatisfiedCore(conversationId, mode, buildCalibrationOrchestrationDeps());
 
-    const isCalibrationCaptureSatisfied = (conversationId: string, mode: CalibrationMode): boolean => {
-        if (mode === 'auto') {
-            return isConversationReadyForActions(conversationId);
-        }
-        return !!interceptionManager.getConversation(conversationId);
-    };
-
-    async function runCalibrationCapture(mode: CalibrationMode = 'manual', hintedConversationId?: string) {
-        if (calibrationState === 'capturing' || !currentAdapter) {
-            return;
-        }
-        const conversationId = hintedConversationId || currentAdapter.extractConversationId(window.location.href);
-        if (!conversationId) {
-            logger.warn('Calibration failed: no conversation ID');
-            setCalibrationStatus('error');
-            return;
-        }
-
-        setCalibrationStatus('capturing');
-        logger.info('Calibration capture started', { conversationId, platform: currentAdapter.name });
-        const strategyOrder = buildCalibrationOrderForMode(rememberedPreferredStep, mode, currentAdapter.name);
-        logger.info('Calibration strategy', {
-            platform: currentAdapter.name,
-            steps: strategyOrder,
-            mode,
-            remembered: rememberedPreferredStep,
-        });
-
-        let successfulStep: CalibrationStep | null = null;
-        for (const step of strategyOrder) {
-            if (await runCalibrationStep(step, conversationId, mode)) {
-                successfulStep = step;
-                break;
-            }
-        }
-
-        if (successfulStep) {
-            if (mode === 'manual') {
-                markCalibrationSuccess(conversationId);
-            } else {
-                setCalibrationStatus('success');
-                refreshButtonState(conversationId);
-            }
-            if (shouldPersistCalibrationProfile(mode)) {
-                await rememberCalibrationSuccess(currentAdapter.name, successfulStep);
-            }
-            logger.info('Calibration capture succeeded', { conversationId, step: successfulStep, mode });
-        } else {
-            if (mode === 'manual') {
-                setCalibrationStatus('error');
-                refreshButtonState(conversationId);
-            } else {
-                setCalibrationStatus('idle');
-            }
-            logger.warn('Calibration capture failed after retries', { conversationId });
-        }
-    }
+    const runCalibrationCapture = (mode?: CalibrationMode, hintedConversationId?: string) =>
+        runCalibrationCaptureCore(mode, hintedConversationId, buildCalibrationOrchestrationDeps());
 
     // Auto-capture — wrappers around the extracted auto-capture module
 
@@ -1267,157 +1077,10 @@ export const runPlatform = (): void => {
     const maybeRunAutoCapture = (conversationId: string, reason: AutoCaptureReason) =>
         maybeRunAutoCaptureCore(conversationId, reason, buildAutoCaptureDeps());
 
-    // Conversation data retrieval and export
+    // Conversation data retrieval and save — delegates to save-pipeline module
 
-    async function getConversationData(options: { silent?: boolean; allowDegraded?: boolean } = {}) {
-        if (!currentAdapter) {
-            return null;
-        }
-        const conversationId = resolveConversationIdOrNotify(options.silent);
-        if (!conversationId) {
-            return null;
-        }
-        const data = resolveCapturedConversationOrNotify(conversationId, options.silent);
-        if (!data) {
-            return null;
-        }
-        if (!canExportConversationData(conversationId, options.allowDegraded === true, options.silent)) {
-            return null;
-        }
-        applyTitleDomFallbackIfNeeded(conversationId, data);
-        return data;
-    }
-
-    function resolveConversationIdOrNotify(silent?: boolean): string | null {
-        const conversationId = resolveConversationIdForUserAction();
-        if (conversationId) {
-            return conversationId;
-        }
-        logger.error('No conversation ID found in URL');
-        if (!silent) {
-            alert('Please select a conversation first.');
-        }
-        return null;
-    }
-
-    function resolveCapturedConversationOrNotify(conversationId: string, silent?: boolean): ConversationData | null {
-        const data = interceptionManager.getConversation(conversationId);
-        if (data) {
-            return data;
-        }
-        logger.warn('No data captured for this conversation yet.');
-        if (!silent) {
-            alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
-        }
-        return null;
-    }
-
-    function canExportConversationData(conversationId: string, allowDegraded: boolean, silent?: boolean): boolean {
-        const decision = resolveReadinessDecision(conversationId);
-        const canExportNow =
-            decision.mode === 'canonical_ready' || (allowDegraded && decision.mode === 'degraded_manual_only');
-        if (canExportNow && !shouldBlockActionsForGeneration(conversationId)) {
-            return true;
-        }
-        logger.warn('Conversation is still generating; export blocked until completion.', {
-            conversationId,
-            platform: currentAdapter?.name ?? 'Unknown',
-            reason: decision.reason,
-        });
-        if (!silent) {
-            alert(
-                decision.mode === 'degraded_manual_only'
-                    ? 'Canonical capture timed out. Use Force Save to export potentially incomplete data.'
-                    : 'Response is still generating. Please wait for completion, then try again.',
-            );
-        }
-        return false;
-    }
-
-    function applyTitleDomFallbackIfNeeded(conversationId: string, data: ConversationData) {
-        if (!currentAdapter?.extractTitleFromDom || !currentAdapter.defaultTitles) {
-            return;
-        }
-        const streamTitle = streamResolvedTitles.get(conversationId) ?? null;
-        const domTitle = currentAdapter.extractTitleFromDom();
-        const promptDerivedTitle = deriveConversationTitleFromFirstUserMessage(data);
-        const titleDecision = resolveConversationTitleByPrecedence({
-            streamTitle,
-            cachedTitle: data.title ?? null,
-            domTitle,
-            firstUserMessageTitle: promptDerivedTitle,
-            fallbackTitle: data.title ?? 'Conversation',
-            platformDefaultTitles: currentAdapter.defaultTitles,
-        });
-        const currentTitle = (data.title ?? '').trim();
-        logger.info('Title fallback check', {
-            conversationId,
-            adapter: currentAdapter.name,
-            streamTitle,
-            cachedTitle: currentTitle || null,
-            domTitle: domTitle ?? null,
-            resolvedSource: titleDecision.source,
-            resolvedTitle: titleDecision.title,
-        });
-        if (titleDecision.title !== currentTitle) {
-            logger.info('Title resolved from shared fallback policy', {
-                conversationId,
-                oldTitle: data.title,
-                newTitle: titleDecision.title,
-                source: titleDecision.source,
-            });
-            data.title = titleDecision.title;
-        }
-    }
-
-    async function saveConversation(
-        data: ConversationData,
-        options: { allowDegraded?: boolean } = {},
-    ): Promise<boolean> {
-        if (!currentAdapter) {
-            return false;
-        }
-        if (buttonManager.exists()) {
-            buttonManager.setLoading(true, 'save');
-        }
-        try {
-            const cachedTitle = data.title ?? null;
-            const titleDecision = applyResolvedExportTitle(data);
-            logger.info('Export title decision', {
-                conversationId: data.conversation_id,
-                adapter: currentAdapter.name,
-                source: titleDecision.source,
-                cachedTitle,
-                resolvedTitle: titleDecision.title,
-            });
-            const filename = currentAdapter.formatFilename(data);
-            const exportMeta = buildExportMetaForSave(data.conversation_id, options.allowDegraded, getCaptureMeta);
-            const exportPayload = await buildExportPayload(data, exportMeta);
-            downloadAsJSON(exportPayload, filename);
-            logger.info(`Saved conversation: ${filename}.json`);
-            if (options.allowDegraded === true) {
-                structuredLogger.emit(
-                    peekAttemptId(data.conversation_id) ?? 'unknown',
-                    'warn',
-                    'force_save_degraded_export',
-                    'Degraded manual export forced by user',
-                    { conversationId: data.conversation_id },
-                    `force-save-degraded:${data.conversation_id}`,
-                );
-            }
-            if (buttonManager.exists()) {
-                buttonManager.setSuccess('save');
-            }
-            return true;
-        } catch (error) {
-            logger.error('Failed to save conversation:', error);
-            alert('Failed to save conversation. Check console for details.');
-            if (buttonManager.exists()) {
-                buttonManager.setLoading(false, 'save');
-            }
-            return false;
-        }
-    }
+    const getConversationData = (options: { silent?: boolean; allowDegraded?: boolean } = {}) =>
+        getConversationDataCore(options, buildSavePipelineDeps());
 
     // Lifecycle state management
 
@@ -1646,10 +1309,12 @@ export const runPlatform = (): void => {
         logButtonStateIfChanged(conversationId, hasData, opacity);
 
         if (isCanonicalReady && calibrationState !== 'capturing') {
-            setCalibrationStatus('success');
+            calibrationState = 'success';
+            runnerState.calibrationState = 'success';
             syncCalibrationButtonDisplay();
         } else if (!isCanonicalReady && calibrationState === 'success') {
-            setCalibrationStatus('idle');
+            calibrationState = 'idle';
+            runnerState.calibrationState = 'idle';
             syncCalibrationButtonDisplay();
         }
 
