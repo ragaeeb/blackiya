@@ -141,24 +141,37 @@ export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDep
 
 type ExternalMessageHandlerDeps = {
     externalApiHub: ReturnType<typeof createExternalApiHub>;
+    logger: BackgroundLogger;
 };
 
 export const createExternalMessageHandler = (deps: ExternalMessageHandlerDeps) => {
     return (message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => {
-        void deps.externalApiHub
-            .handleExternalRequest(message)
-            .then((response) => {
-                sendResponse(response);
-            })
-            .catch(() => {
-                sendResponse({
-                    ok: false,
-                    api: EXTERNAL_API_VERSION,
-                    code: 'INTERNAL_ERROR',
-                    message: 'Failed to handle external API request',
-                    ts: Date.now(),
+        try {
+            void deps.externalApiHub
+                .handleExternalRequest(message)
+                .then((response) => {
+                    sendResponse(response);
+                })
+                .catch((error) => {
+                    deps.logger.error('Failed to handle external API request', error);
+                    sendResponse({
+                        ok: false,
+                        api: EXTERNAL_API_VERSION,
+                        code: 'INTERNAL_ERROR',
+                        message: 'Failed to handle external API request',
+                        ts: Date.now(),
+                    });
                 });
+        } catch (error) {
+            deps.logger.error('External API handler crashed before request dispatch', error);
+            sendResponse({
+                ok: false,
+                api: EXTERNAL_API_VERSION,
+                code: 'INTERNAL_ERROR',
+                message: 'Failed to handle external API request',
+                ts: Date.now(),
             });
+        }
         return true;
     };
 };
@@ -179,6 +192,7 @@ export default defineBackground(() => {
     });
     const externalApiHub = createExternalApiHub({
         storage: browser.storage.local as ExternalStorageLike,
+        logger,
     });
     void externalApiHub.ensureHydrated();
 
@@ -206,6 +220,7 @@ export default defineBackground(() => {
     browser.runtime.onMessageExternal?.addListener(
         createExternalMessageHandler({
             externalApiHub,
+            logger,
         }),
     );
 

@@ -25,6 +25,11 @@ describe('background message handler', () => {
     }) => MessageHandler;
     let externalMessageHandlerFactory: (deps: {
         externalApiHub: { handleExternalRequest: (request: unknown) => Promise<unknown> };
+        logger: {
+            info: (...args: unknown[]) => void;
+            warn: (...args: unknown[]) => void;
+            error: (...args: unknown[]) => void;
+        };
     }) => (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => true;
     let externalConnectHandlerFactory: (deps: {
         externalApiHub: { addSubscriber: (port: unknown) => boolean };
@@ -310,6 +315,11 @@ describe('background message handler', () => {
             externalApiHub: {
                 handleExternalRequest: async (request) => ({ ok: true, request }),
             },
+            logger: {
+                info: () => {},
+                warn: () => {},
+                error: () => {},
+            },
         });
 
         const responses: unknown[] = [];
@@ -320,6 +330,42 @@ describe('background message handler', () => {
         expect(result).toBeTrue();
         await flushAsyncWork();
         expect(responses).toEqual([{ ok: true, request: { api: 'blackiya.events.v1', type: 'health.ping' } }]);
+    });
+
+    it('returns internal error response when external request handling fails', async () => {
+        let didLogError = false;
+        const handler = externalMessageHandlerFactory({
+            externalApiHub: {
+                handleExternalRequest: async () => {
+                    throw new Error('boom');
+                },
+            },
+            logger: {
+                info: () => {},
+                warn: () => {},
+                error: () => {
+                    didLogError = true;
+                },
+            },
+        });
+
+        const responses: unknown[] = [];
+        const result = handler({ api: 'blackiya.events.v1', type: 'health.ping' }, {}, (response) => {
+            responses.push(response);
+        });
+
+        expect(result).toBeTrue();
+        await flushAsyncWork();
+        expect(didLogError).toBeTrue();
+        expect(responses).toEqual([
+            {
+                ok: false,
+                api: 'blackiya.events.v1',
+                code: 'INTERNAL_ERROR',
+                message: 'Failed to handle external API request',
+                ts: expect.any(Number),
+            },
+        ]);
     });
 
     it('attaches external subscribers through the external connect handler', () => {

@@ -91,6 +91,32 @@ const createMemoryStorage = (): ExternalStorageLike & { backing: Record<string, 
     };
 };
 
+const createQuotaConstrainedStorage = (): ExternalStorageLike & {
+    backing: Record<string, unknown>;
+    writes: number;
+} => {
+    const backing: Record<string, unknown> = {};
+    let writes = 0;
+    return {
+        backing,
+        get writes() {
+            return writes;
+        },
+        get: async (key) => ({ [key]: backing[key] }),
+        set: async (items) => {
+            const firstValue = Object.values(items)[0] as { records?: unknown[] } | undefined;
+            const recordCount = Array.isArray(firstValue?.records) ? firstValue.records.length : 0;
+            writes += 1;
+            if (recordCount > 1) {
+                throw new Error('Exceeded QUOTA_BYTES');
+            }
+            for (const [key, value] of Object.entries(items)) {
+                backing[key] = value;
+            }
+        },
+    };
+};
+
 const createFakePort = (name: string): ExternalPortLike & { disconnectNow: () => void } => {
     const disconnectHandlers = new Set<(port: ExternalPortLike) => void>();
     const port: ExternalPortLike & { disconnectNow: () => void } = {
@@ -184,6 +210,25 @@ describe('background external api hub', () => {
         }
     });
 
+    it('should return latest conversation filtered by tab id when requested', async () => {
+        const hub = createExternalApiHub({ storage, now: () => 3_500 });
+        await hub.ingestEvent(buildEvent('conv-tab-1'), 1);
+        await hub.ingestEvent(buildEvent('conv-tab-2'), 2);
+
+        const response = await hub.handleExternalRequest({
+            api: EXTERNAL_API_VERSION,
+            type: 'conversation.getLatest',
+            tab_id: 1,
+        });
+
+        expect(response).toMatchObject({
+            ok: true,
+            api: EXTERNAL_API_VERSION,
+            conversation_id: 'conv-tab-1',
+            format: 'original',
+        });
+    });
+
     it('should return not_found for missing conversation.getById', async () => {
         const hub = createExternalApiHub({ storage, now: () => 4_000 });
         const response = await hub.handleExternalRequest({
@@ -220,6 +265,88 @@ describe('background external api hub', () => {
         });
     });
 
+    it('should recover latest conversation by timestamp when persisted latest id is stale', async () => {
+        storage.backing.blackiya_external_api_cache_v1 = {
+            latestConversationId: 'stale-id',
+            records: [
+                {
+                    conversation_id: 'conv-1',
+                    provider: 'chatgpt',
+                    payload: buildConversation('conv-1'),
+                    attempt_id: 'attempt-1',
+                    capture_meta: {
+                        captureSource: 'canonical_api',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:1',
+                    ts: 10,
+                },
+                {
+                    conversation_id: 'conv-2',
+                    provider: 'chatgpt',
+                    payload: buildConversation('conv-2'),
+                    attempt_id: 'attempt-2',
+                    capture_meta: {
+                        captureSource: 'canonical_api',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:2',
+                    ts: 20,
+                },
+            ],
+        };
+
+        const hub = createExternalApiHub({ storage, now: () => 6_500 });
+        const response = await hub.handleExternalRequest({
+            api: EXTERNAL_API_VERSION,
+            type: 'conversation.getLatest',
+        });
+
+        expect(response).toMatchObject({
+            ok: true,
+            conversation_id: 'conv-2',
+            format: 'original',
+        });
+    });
+
+    it('should ignore malformed persisted capture_meta records during hydration', async () => {
+        storage.backing.blackiya_external_api_cache_v1 = {
+            latestConversationId: 'conv-1',
+            records: [
+                {
+                    conversation_id: 'conv-1',
+                    provider: 'chatgpt',
+                    payload: buildConversation('conv-1'),
+                    attempt_id: 'attempt-1',
+                    capture_meta: {
+                        // malformed values should fail strict validation
+                        captureSource: 'bad-source',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:1',
+                    ts: 10,
+                },
+            ],
+        };
+
+        const hub = createExternalApiHub({ storage, now: () => 6_700 });
+        const response = await hub.handleExternalRequest({
+            api: EXTERNAL_API_VERSION,
+            type: 'conversation.getLatest',
+        });
+
+        expect(response).toEqual({
+            ok: false,
+            api: EXTERNAL_API_VERSION,
+            code: 'UNAVAILABLE',
+            message: 'No conversation data available',
+            ts: 6_700,
+        });
+    });
+
     it('should reject invalid pull request payloads', async () => {
         const hub = createExternalApiHub({ storage, now: () => 7_000 });
         const response = await hub.handleExternalRequest({
@@ -236,6 +363,16 @@ describe('background external api hub', () => {
         });
     });
 
+    it('should disconnect subscribers with invalid port names', () => {
+        const hub = createExternalApiHub({ storage, now: () => 7_500 });
+        const wrongPort = createFakePort('wrong.port');
+
+        const accepted = hub.addSubscriber(wrongPort);
+
+        expect(accepted).toBeFalse();
+        expect(wrongPort.disconnect).toHaveBeenCalledTimes(1);
+    });
+
     it('should ignore disconnected subscribers during broadcast', async () => {
         const hub = createExternalApiHub({ storage, now: () => 8_000 });
         const port = createFakePort(EXTERNAL_API_VERSION);
@@ -244,5 +381,25 @@ describe('background external api hub', () => {
 
         await hub.ingestEvent(buildEvent('conv-1'));
         expect(port.postMessage).not.toHaveBeenCalled();
+    });
+
+    it('should retry persistence with smaller snapshots on quota errors', async () => {
+        const quotaStorage = createQuotaConstrainedStorage();
+        const hub = createExternalApiHub({
+            storage: quotaStorage,
+            now: () => 8_500,
+        });
+
+        await hub.ingestEvent(buildEvent('conv-1'), 1);
+        await hub.ingestEvent(buildEvent('conv-2'), 1);
+
+        const persisted = quotaStorage.backing.blackiya_external_api_cache_v1 as
+            | { latestConversationId: string | null; records: Array<{ conversation_id: string }> }
+            | undefined;
+
+        expect(quotaStorage.writes).toBeGreaterThan(1);
+        expect(persisted?.records).toHaveLength(1);
+        expect(persisted?.latestConversationId).toBe('conv-2');
+        expect(persisted?.records[0]?.conversation_id).toBe('conv-2');
     });
 });

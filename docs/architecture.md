@@ -308,7 +308,7 @@ Save pipeline:
 4. Builds export payload:
    - Original conversation JSON, or
    - Common-export format (`buildCommonExport`) if selected.
-5. Attaches `__blackiya.exportMeta`:
+5. Attaches `capture_meta`:
    - `captureSource`
    - `fidelity`
    - `completeness`

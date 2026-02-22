@@ -9,7 +9,12 @@ import type {
     ExternalResponse,
     ExternalHealthSuccessResponse,
 } from '@/utils/external-api/contracts';
-import { EXTERNAL_API_VERSION, EXTERNAL_EVENTS_PORT_NAME, isExternalRequest } from '@/utils/external-api/contracts';
+import {
+    EXTERNAL_API_VERSION,
+    EXTERNAL_EVENTS_PORT_NAME,
+    isExportMeta,
+    isExternalRequest,
+} from '@/utils/external-api/contracts';
 import type { ConversationData } from '@/utils/types';
 
 export type ExternalStorageLike = {
@@ -48,6 +53,9 @@ type ExternalApiHubDeps = {
     now?: () => number;
     maxCachedConversations?: number;
     storageKey?: string;
+    logger?: {
+        warn: (message: string, data?: unknown) => void;
+    };
 };
 
 const DEFAULT_MAX_CACHED_CONVERSATIONS = 50;
@@ -65,6 +73,12 @@ const isFiniteNumber = (value: unknown): value is number => typeof value === 'nu
 const isConversationDataLike = (value: unknown): value is ConversationData =>
     isRecord(value) && hasString(value.conversation_id) && isRecord(value.mapping);
 
+const isQuotaError = (error: unknown): boolean => {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const normalized = message.toLowerCase();
+    return normalized.includes('quota') || normalized.includes('quota_bytes');
+};
+
 const isCachedConversationRecord = (value: unknown): value is CachedConversationRecord => {
     if (!isRecord(value)) {
         return false;
@@ -74,7 +88,7 @@ const isCachedConversationRecord = (value: unknown): value is CachedConversation
         (value.provider === 'chatgpt' || value.provider === 'gemini' || value.provider === 'grok' || value.provider === 'unknown') &&
         isConversationDataLike(value.payload) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
-        isRecord(value.capture_meta) &&
+        isExportMeta(value.capture_meta) &&
         isNullableString(value.content_hash) &&
         isFiniteNumber(value.ts) &&
         (value.tab_id === undefined || isFiniteNumber(value.tab_id))
@@ -160,7 +174,9 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
                     setBoundedMapValue(recordsByConversation, record.conversation_id, record, maxCachedConversations);
                 }
             })
-            .catch(() => {})
+            .catch((error) => {
+                deps.logger?.warn('Failed to hydrate external API cache from storage', { error });
+            })
             .finally(() => {
                 hydrated = true;
                 hydrationPromise = null;
@@ -169,13 +185,40 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     };
 
     const persist = async () => {
-        const state: PersistedCacheState = {
-            latestConversationId,
-            records: [...recordsByConversation.values()],
-        };
-        try {
-            await deps.storage.set({ [storageKey]: state });
-        } catch {}
+        const allRecords = [...recordsByConversation.values()];
+        let droppedRecords = 0;
+
+        while (droppedRecords <= allRecords.length) {
+            const records = allRecords.slice(droppedRecords);
+            const resolvedLatestConversationId =
+                latestConversationId && records.some((record) => record.conversation_id === latestConversationId)
+                    ? latestConversationId
+                    : records[records.length - 1]?.conversation_id ?? null;
+            const state: PersistedCacheState = {
+                latestConversationId: resolvedLatestConversationId,
+                records,
+            };
+            try {
+                await deps.storage.set({ [storageKey]: state });
+                return;
+            } catch (error) {
+                if (!isQuotaError(error)) {
+                    deps.logger?.warn('Failed to persist external API cache to storage', {
+                        error,
+                        attemptedRecordCount: records.length,
+                    });
+                    return;
+                }
+                droppedRecords += 1;
+                if (droppedRecords > allRecords.length) {
+                    deps.logger?.warn('Failed to persist external API cache after quota retries', {
+                        error,
+                        attemptedRecordCount: records.length,
+                    });
+                    return;
+                }
+            }
+        }
     };
 
     const buildSuccessResponse = (
@@ -228,6 +271,37 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         return true;
     };
 
+    const resolveLatestRecord = (tabId?: number): CachedConversationRecord | null => {
+        if (typeof tabId === 'number') {
+            let latestForTab: CachedConversationRecord | null = null;
+            for (const record of recordsByConversation.values()) {
+                if (record.tab_id !== tabId) {
+                    continue;
+                }
+                if (!latestForTab || record.ts > latestForTab.ts) {
+                    latestForTab = record;
+                }
+            }
+            return latestForTab;
+        }
+
+        if (latestConversationId) {
+            const latestRecord = recordsByConversation.get(latestConversationId);
+            if (latestRecord) {
+                return latestRecord;
+            }
+        }
+
+        let fallbackLatest: CachedConversationRecord | null = null;
+        for (const record of recordsByConversation.values()) {
+            if (!fallbackLatest || record.ts > fallbackLatest.ts) {
+                fallbackLatest = record;
+            }
+        }
+        latestConversationId = fallbackLatest?.conversation_id ?? null;
+        return fallbackLatest;
+    };
+
     const ingestEvent = async (event: ExternalConversationEvent, senderTabId?: number) => {
         await ensureHydrated();
         const resolvedTabId = event.tab_id ?? (typeof senderTabId === 'number' ? senderTabId : undefined);
@@ -266,10 +340,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
 
         if (request.type === 'conversation.getLatest') {
-            if (!latestConversationId) {
-                return buildFailureResponse(now, 'UNAVAILABLE', 'No conversation data available');
-            }
-            const record = recordsByConversation.get(latestConversationId);
+            const record = resolveLatestRecord(request.tab_id);
             if (!record) {
                 return buildFailureResponse(now, 'UNAVAILABLE', 'No conversation data available');
             }

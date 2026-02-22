@@ -1,3 +1,4 @@
+import { setBoundedMapValue } from '@/utils/bounded-collections';
 import type { ExternalConversationEvent, ExternalInternalEventMessage } from '@/utils/external-api/contracts';
 import { EXTERNAL_API_VERSION, EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE, normalizeExternalProvider } from '@/utils/external-api/contracts';
 import type { ExportMeta, PlatformReadiness } from '@/utils/sfe/types';
@@ -10,6 +11,7 @@ type ExternalDispatchStatus = {
 
 export type ExternalEventDispatcherState = {
     byConversation: Map<string, ExternalDispatchStatus>;
+    maxEntries: number;
 };
 
 type MaybeBuildExternalConversationEventArgs = {
@@ -35,8 +37,13 @@ const defaultCreateEventId = (): string => {
     return `evt:${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-export const createExternalEventDispatcherState = (): ExternalEventDispatcherState => ({
+const DEFAULT_MAX_EXTERNAL_DISPATCH_ENTRIES = 250;
+
+export const createExternalEventDispatcherState = (
+    maxEntries = DEFAULT_MAX_EXTERNAL_DISPATCH_ENTRIES,
+): ExternalEventDispatcherState => ({
     byConversation: new Map(),
+    maxEntries,
 });
 
 const shouldEmit = (args: MaybeBuildExternalConversationEventArgs): args is MaybeBuildExternalConversationEventArgs & { data: ConversationData } => {
@@ -71,7 +78,12 @@ export const maybeBuildExternalConversationEvent = (
     }
 
     const eventType: ExternalConversationEvent['type'] = existing?.hasReady ? 'conversation.updated' : 'conversation.ready';
-    args.state.byConversation.set(args.conversationId, { hasReady: true, lastContentHash: contentHash });
+    setBoundedMapValue(
+        args.state.byConversation,
+        args.conversationId,
+        { hasReady: true, lastContentHash: contentHash },
+        args.state.maxEntries,
+    );
 
     return {
         api: EXTERNAL_API_VERSION,

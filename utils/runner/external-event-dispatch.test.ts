@@ -167,6 +167,109 @@ describe('runner/external-event-dispatch', () => {
         expect(event).toBeNull();
     });
 
+    it('should not emit when actions are blocked', () => {
+        const state = createExternalEventDispatcherState();
+        const event = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversation('conv-1'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: true,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-1',
+        });
+
+        expect(event).toBeNull();
+    });
+
+    it('should evict oldest dispatch entries when max state size is reached', () => {
+        const state = createExternalEventDispatcherState(2);
+
+        expect(
+            maybeBuildExternalConversationEvent({
+                conversationId: 'conv-1',
+                data: buildConversation('conv-1'),
+                providerName: 'ChatGPT',
+                readinessMode: 'canonical_ready',
+                captureMeta: CANONICAL_META,
+                attemptId: 'attempt-1',
+                shouldBlockActions: false,
+                evaluateReadinessForData: () =>
+                    ({
+                        ready: true,
+                        terminal: true,
+                        reason: 'terminal',
+                        contentHash: 'hash:1',
+                        latestAssistantTextLength: 10,
+                    }) as any,
+                state,
+                now: () => 123,
+                createEventId: () => 'evt-1',
+            }),
+        ).not.toBeNull();
+
+        expect(
+            maybeBuildExternalConversationEvent({
+                conversationId: 'conv-2',
+                data: buildConversation('conv-2'),
+                providerName: 'ChatGPT',
+                readinessMode: 'canonical_ready',
+                captureMeta: CANONICAL_META,
+                attemptId: 'attempt-2',
+                shouldBlockActions: false,
+                evaluateReadinessForData: () =>
+                    ({
+                        ready: true,
+                        terminal: true,
+                        reason: 'terminal',
+                        contentHash: 'hash:2',
+                        latestAssistantTextLength: 10,
+                    }) as any,
+                state,
+                now: () => 124,
+                createEventId: () => 'evt-2',
+            }),
+        ).not.toBeNull();
+
+        expect(
+            maybeBuildExternalConversationEvent({
+                conversationId: 'conv-3',
+                data: buildConversation('conv-3'),
+                providerName: 'ChatGPT',
+                readinessMode: 'canonical_ready',
+                captureMeta: CANONICAL_META,
+                attemptId: 'attempt-3',
+                shouldBlockActions: false,
+                evaluateReadinessForData: () =>
+                    ({
+                        ready: true,
+                        terminal: true,
+                        reason: 'terminal',
+                        contentHash: 'hash:3',
+                        latestAssistantTextLength: 10,
+                    }) as any,
+                state,
+                now: () => 125,
+                createEventId: () => 'evt-3',
+            }),
+        ).not.toBeNull();
+
+        expect(state.byConversation.has('conv-1')).toBeFalse();
+        expect(state.byConversation.has('conv-2')).toBeTrue();
+        expect(state.byConversation.has('conv-3')).toBeTrue();
+    });
+
     it('should build internal background message wrapper for emitted event', () => {
         const state = createExternalEventDispatcherState();
         const event = maybeBuildExternalConversationEvent({

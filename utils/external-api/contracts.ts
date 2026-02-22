@@ -107,7 +107,7 @@ const isExternalPushEventType = (value: unknown): value is ExternalPushEventType
 const isExternalPullFormat = (value: unknown): value is ExternalPullFormat =>
     value === 'original' || value === 'common';
 
-const isExportMeta = (value: unknown): value is ExportMeta => {
+export const isExportMeta = (value: unknown): value is ExportMeta => {
     if (!isRecord(value)) {
         return false;
     }
