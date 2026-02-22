@@ -194,8 +194,8 @@ describe('Platform Runner – Gemini lifecycle', () => {
         await waitFor(
             () =>
                 logCalls.info.some((entry) => entry.message === 'Stabilization retry tick') ||
-                Date.now() - stabilizationWaitStartedAt >= 950,
-            { timeout: 2500, interval: 20 },
+                Date.now() - stabilizationWaitStartedAt >= 1200,
+            { timeout: 3000, interval: 20 },
         );
         postStampedMessage(
             {

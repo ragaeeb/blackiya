@@ -324,24 +324,9 @@ export const scheduleButtonRefresh = (
         if (!deps.buttonManager.exists()) {
             return;
         }
-        const decision = resolveReadinessDecision(conversationId, deps);
-        if (decision.mode === 'canonical_ready' || decision.mode === 'degraded_manual_only') {
-            refreshButtonState(conversationId, deps, lastButtonStateLog);
-            return;
-        }
-        deps.buttonManager.setSaveButtonMode('default');
-        deps.buttonManager.setActionButtonsEnabled(false);
+        refreshButtonState(conversationId, deps, lastButtonStateLog);
         if (attempts < maxAttempts) {
             setTimeout(tick, 500);
-        } else {
-            logButtonStateIfChanged(
-                conversationId,
-                false,
-                '0.6',
-                lastButtonStateLog,
-                deps.getLifecycleState(),
-                deps.getConversation,
-            );
         }
     };
     setTimeout(tick, 500);
