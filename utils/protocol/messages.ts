@@ -3,26 +3,6 @@ import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 export type LifecyclePhaseWire = 'prompt-sent' | 'streaming' | 'completed' | 'terminated';
 
 export type LogLevelWire = 'debug' | 'info' | 'warn' | 'error';
-export type BlackiyaPublicEventName = 'status' | 'ready';
-export type BlackiyaPublicLifecycleState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
-export type BlackiyaPublicReadinessState =
-    | 'unknown'
-    | 'awaiting_stabilization'
-    | 'canonical_ready'
-    | 'degraded_manual_only';
-
-export type BlackiyaPublicStatus = {
-    platform: string | null;
-    conversationId: string | null;
-    attemptId: string | null;
-    lifecycle: BlackiyaPublicLifecycleState;
-    readiness: BlackiyaPublicReadinessState;
-    readinessReason: string | null;
-    canGetJSON: boolean;
-    canGetCommonJSON: boolean;
-    sequence: number;
-    timestampMs: number;
-};
 
 type TokenStampedWireMessage = {
     __blackiyaToken?: string;
@@ -112,11 +92,6 @@ export type SessionInitMessage = {
     token: string;
 };
 
-export type PublicStatusMessage = {
-    type: typeof MESSAGE_TYPES.PUBLIC_STATUS;
-    status: BlackiyaPublicStatus;
-} & TokenStampedWireMessage;
-
 export type BlackiyaMessage =
     | ResponseLifecycleMessage
     | ResponseFinishedMessage
@@ -128,8 +103,7 @@ export type BlackiyaMessage =
     | StreamDumpFrameMessage
     | CaptureInterceptedMessage
     | LogEntryMessage
-    | SessionInitMessage
-    | PublicStatusMessage;
+    | SessionInitMessage;
 
 const hasString = (value: unknown): value is string => {
     return typeof value === 'string' && value.length > 0;
@@ -137,39 +111,6 @@ const hasString = (value: unknown): value is string => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return !!value && typeof value === 'object' && !Array.isArray(value);
-};
-
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
-
-const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
-
-const isPublicLifecycleState = (value: unknown): value is BlackiyaPublicLifecycleState =>
-    value === 'idle' || value === 'prompt-sent' || value === 'streaming' || value === 'completed';
-
-const isPublicReadinessState = (value: unknown): value is BlackiyaPublicReadinessState =>
-    value === 'unknown' ||
-    value === 'awaiting_stabilization' ||
-    value === 'canonical_ready' ||
-    value === 'degraded_manual_only';
-
-export const isBlackiyaPublicStatus = (value: unknown): value is BlackiyaPublicStatus => {
-    if (!isRecord(value)) {
-        return false;
-    }
-    return (
-        isNullableString(value.platform) &&
-        isNullableString(value.conversationId) &&
-        isNullableString(value.attemptId) &&
-        isPublicLifecycleState(value.lifecycle) &&
-        isPublicReadinessState(value.readiness) &&
-        isNullableString(value.readinessReason) &&
-        isBoolean(value.canGetJSON) &&
-        isBoolean(value.canGetCommonJSON) &&
-        isNumber(value.sequence) &&
-        isNumber(value.timestampMs)
-    );
 };
 
 export const isBlackiyaMessage = (value: unknown): value is BlackiyaMessage => {
@@ -210,8 +151,6 @@ export const isBlackiyaMessage = (value: unknown): value is BlackiyaMessage => {
             return isRecord(value.payload) && hasString(value.payload.level) && hasString(value.payload.message);
         case MESSAGE_TYPES.SESSION_INIT:
             return hasString(value.token);
-        case MESSAGE_TYPES.PUBLIC_STATUS:
-            return isBlackiyaPublicStatus(value.status);
         default:
             return false;
     }

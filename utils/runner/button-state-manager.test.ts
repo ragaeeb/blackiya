@@ -78,7 +78,7 @@ describe('button-state-manager', () => {
             setLifecycleState: mock(() => {}),
             syncCalibrationButtonDisplay: mock(() => {}),
             syncRunnerStateCalibration: mock(() => {}),
-            emitPublicStatusSnapshot: mock(() => {}),
+            emitExternalConversationEvent: mock(() => {}),
 
             buttonManager: {
                 exists: mock(() => true),
@@ -207,21 +207,18 @@ describe('button-state-manager', () => {
         it('should exit and snapshot if adapter is null', () => {
             deps.getAdapter = () => null;
             refreshButtonState('123', deps, lastButtonStateLog);
-            expect(deps.emitPublicStatusSnapshot).toHaveBeenCalledWith(null);
             expect(deps.buttonManager.setSaveButtonMode).not.toHaveBeenCalled();
         });
 
         it('should exit and snapshot if button does not exist', () => {
             deps.buttonManager.exists = () => false;
             refreshButtonState('123', deps, lastButtonStateLog);
-            expect(deps.emitPublicStatusSnapshot).toHaveBeenCalledWith('123');
             expect(deps.buttonManager.setSaveButtonMode).not.toHaveBeenCalled();
         });
 
         it('should clear UI if no conversation is found in URL and no arg provided', () => {
             mockAdapter.extractConversationId = () => null;
             refreshButtonState(undefined, deps, lastButtonStateLog);
-            expect(deps.emitPublicStatusSnapshot).toHaveBeenCalledWith(null);
             expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
         });
@@ -231,7 +228,6 @@ describe('button-state-manager', () => {
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('0.6');
-            expect(deps.emitPublicStatusSnapshot).toHaveBeenCalledWith('123');
         });
 
         it('should enable save button in degraded mode', () => {
@@ -260,6 +256,17 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(true);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('1');
             expect(deps.setCalibrationState).toHaveBeenCalledWith('success');
+            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
+                conversationId: '123',
+                data: { conversation_id: '123' },
+                readinessMode: 'canonical_ready',
+                captureMeta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                attemptId: 'attempt-1',
+            });
         });
 
         it('should clear calibration success state if no longer ready', () => {
@@ -273,6 +280,7 @@ describe('button-state-manager', () => {
             );
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.setCalibrationState).toHaveBeenCalledWith('idle');
+            expect(deps.emitExternalConversationEvent).not.toHaveBeenCalled();
         });
 
         it('should extract canonical sample if fully completed', () => {

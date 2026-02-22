@@ -32,14 +32,13 @@ flowchart LR
 - Interceptor (MAIN world):
   - `entrypoints/interceptor.content.ts`
   - `entrypoints/interceptor/bootstrap.ts`
+  - `entrypoints/interceptor/bootstrap-main-bridge.ts`
   - `entrypoints/interceptor/attempt-registry.ts`
   - `entrypoints/interceptor/fetch-pipeline.ts`
   - `entrypoints/interceptor/xhr-pipeline.ts`
-  - `entrypoints/interceptor/snapshot-bridge.ts`
   - `entrypoints/interceptor/state.ts`
   - `entrypoints/interceptor/signal-emitter.ts`
   - `entrypoints/interceptor/discovery.ts`
-  - `entrypoints/interceptor/public-api-contract.ts`
 - Platform orchestrator:
   - `utils/runner/platform-runtime.ts`
   - `utils/runner/platform-runner-engine.ts`
@@ -72,6 +71,9 @@ flowchart LR
   - `utils/sfe/cross-tab-probe-lease.ts`
 - Background lease coordinator:
   - `entrypoints/background.ts`
+- External API hub + contract:
+  - `utils/external-api/background-hub.ts`
+  - `utils/external-api/contracts.ts`
 - Protocol message definitions:
   - `utils/protocol/messages.ts`
 - Shared text candidate collector:
@@ -92,26 +94,22 @@ Primary events:
 See:
 - `utils/protocol/messages.ts`
 
-### 3.1 Public Window Status Bridge (ISOLATED -> MAIN -> Page)
+### 3.1 External Extension API (ISOLATED -> Background -> Other Extensions)
 
-To support external clients on the same tab, runner emits:
-- `BLACKIYA_PUBLIC_STATUS` (token-stamped)
+Runner emits canonical-ready conversation events to background via:
+- `BLACKIYA_EXTERNAL_EVENT` (internal runtime message)
 
-Flow:
-1. ISOLATED runner computes lifecycle + readiness snapshot.
-2. Runner posts `BLACKIYA_PUBLIC_STATUS`.
-3. MAIN interceptor validates token and updates `window.__blackiya` subscription hub.
-4. Page clients subscribe via:
-   - `window.__blackiya.subscribe('status', cb)`
-   - `window.__blackiya.subscribe('ready', cb)` (or `onReady`)
+Background owns the public API surface and provides:
+1. Push stream (`runtime.onConnectExternal`) on port `blackiya.events.v1`
+   - Event types: `conversation.ready`, `conversation.updated`
+2. Pull API (`runtime.onMessageExternal`)
+   - `health.ping`
+   - `conversation.getLatest` (`format: "original" | "common"`)
+   - `conversation.getById` (`format: "original" | "common"`)
 
-`ready` semantics:
-- `ready` is emitted only when canonical readiness is reached and export gating allows retrieval.
-- When `ready` is emitted, both `window.__blackiya.getJSON()` and `window.__blackiya.getCommonJSON()` are expected to resolve for the active tab conversation.
-- Public API also exposes:
-  - `version` (contract/runtime compatibility marker)
-  - `waitForReady({ timeoutMs? })` promise helper
-- JSON bridge failures are surfaced with structured `BlackiyaBridgeError` codes (`TIMEOUT`, `REQUEST_FAILED`, `NOT_FOUND`).
+Notes:
+- Background caches recent canonical payloads and rebroadcasts to subscribers.
+- Legacy page-global API (`window.__blackiya`) and `BLACKIYA_GET_JSON_*` bridge are removed.
 
 ## 4) Lifecycle and Readiness Model
 
@@ -141,8 +139,7 @@ Critical invariant:
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - Cross-world message ingress is token-validated for both live `postMessage` traffic and late-start queue drains (`__BLACKIYA_CAPTURE_QUEUE__`, `__BLACKIYA_LOG_QUEUE__`).
-- Snapshot/getJSON bridge requests and responses are token-stamped and token-validated symmetrically.
-- Public status snapshots (`BLACKIYA_PUBLIC_STATUS`) are token-stamped in runner and token-validated before exposure via `window.__blackiya.subscribe(...)`.
+- External API emissions are canonical-ready only, deduped by content hash, and surfaced via background `blackiya.events.v1`.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
 - Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
 - Interceptor queue trimming increments bounded drop counters and emits throttled warnings (log/capture/history queues) to surface silent drop pressure.

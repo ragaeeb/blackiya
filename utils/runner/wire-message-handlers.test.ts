@@ -3,7 +3,6 @@ import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
     handleConversationIdResolvedMessage,
-    handleJsonBridgeRequest,
     handleLifecycleMessage,
     handleResponseFinishedMessage,
     handleTitleResolvedMessage,
@@ -59,9 +58,6 @@ describe('wire-message-handlers', () => {
             streamPreviewState: { liveByAttemptWithoutConversation: new Map(), liveByConversation: new Map() } as any,
             attemptByConversation: new Map(),
             shouldRemoveDisposedAttemptBinding: mock(() => true),
-            getConversationData: mock(() => Promise.resolve({} as any)),
-            buildExportPayloadForFormat: mock(() => ({})),
-            stampToken: mock((t) => t),
         };
 
         if (!(globalThis as any).window) {
@@ -160,28 +156,4 @@ describe('wire-message-handlers', () => {
         });
     });
 
-    describe('handleJsonBridgeRequest', () => {
-        it('should send response data with postMessage', async () => {
-            if (!(globalThis as any).window) {
-                (globalThis as any).window = {};
-            }
-            const postMessageMock = mock(() => {});
-            const oldPostMessage = globalThis.window.postMessage;
-            globalThis.window.postMessage = postMessageMock;
-
-            const msg = { type: MESSAGE_TYPES.GET_JSON_REQUEST, requestId: 'req-1', format: 'common' };
-            handleJsonBridgeRequest(msg, deps);
-
-            // Wait for microtasks
-            await Promise.resolve();
-            await Promise.resolve();
-
-            expect(postMessageMock).toHaveBeenCalledWith(
-                expect.objectContaining({ type: MESSAGE_TYPES.GET_JSON_RESPONSE, success: true, requestId: 'req-1' }),
-                expect.any(String),
-            );
-
-            globalThis.window.postMessage = oldPostMessage;
-        });
-    });
 });

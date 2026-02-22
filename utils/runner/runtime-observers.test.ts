@@ -20,7 +20,6 @@ describe('runtime-observers', () => {
         it('should register and unregister event listener', () => {
             const untrack = registerWindowBridge({
                 messageHandlers: [],
-                handleJsonBridgeRequest: mock(() => {}),
                 invalidSessionTokenLogAtRef: { value: 0 },
             });
 

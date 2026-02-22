@@ -76,10 +76,10 @@ blackiya/
 │   ├── interceptor.content.ts # Thin MAIN-world entrypoint
 │   ├── interceptor/
 │   │   ├── bootstrap.ts       # MAIN-world interceptor implementation
+│   │   ├── bootstrap-main-bridge.ts
 │   │   ├── attempt-registry.ts
 │   │   ├── fetch-pipeline.ts
 │   │   ├── xhr-pipeline.ts
-│   │   ├── snapshot-bridge.ts
 │   │   ├── state.ts
 │   │   ├── signal-emitter.ts
 │   │   ├── discovery.ts
@@ -117,6 +117,7 @@ blackiya/
 │   │   ├── attempt-registry.ts
 │   │   ├── readiness.ts
 │   │   └── stream-preview.ts
+│   ├── external-api/          # Extension-to-extension API contracts + hub
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities
@@ -176,45 +177,50 @@ The extension requires the following permissions:
 - `https://gemini.google.com/*` - Gemini platform
 - `https://x.com/i/grok*` - Grok platform
 
-### Window API
+### External Extension API
 
-Blackiya exposes a lightweight bridge on supported LLM pages:
+Blackiya exposes an extension-to-extension API from background (`window.__blackiya` is removed).
 
-```js
-const unsubscribeStatus = window.__blackiya.subscribe('status', (status) => {
-    console.log('blackiya status:', status.lifecycle, status.readiness, status.conversationId);
+Push subscription:
+
+```ts
+const port = chrome.runtime.connect(BLACKIYA_EXTENSION_ID, {
+    name: 'blackiya.events.v1',
 });
 
-const unsubscribeReady = window.__blackiya.onReady(async (status) => {
-    console.log('blackiya ready:', status.conversationId);
+port.onMessage.addListener((event) => {
+    // event.type: 'conversation.ready' | 'conversation.updated'
+    // event.payload: canonical ConversationData
+    console.log(event.type, event.conversation_id, event.provider);
+});
+```
 
-    // Both are safe when ready is emitted:
-    const original = await window.__blackiya.getJSON();
-    const common = await window.__blackiya.getCommonJSON();
-    console.log({ original, common });
+Pull requests:
+
+```ts
+const latest = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'conversation.getLatest',
+    format: 'common', // 'original' | 'common'
 });
 
-// Optional immediate snapshot:
-console.log(window.__blackiya.getStatus());
+const byId = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'conversation.getById',
+    conversation_id: '...',
+    format: 'original',
+});
 
-// Optional promise-based readiness gate:
-await window.__blackiya.waitForReady({ timeoutMs: 10000 });
-
-// Public API version for compatibility checks:
-console.log(window.__blackiya.version);
-
-// Later:
-unsubscribeStatus();
-unsubscribeReady();
+const health = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'health.ping',
+});
 ```
 
 Notes:
-- `subscribe('status', cb)` and `onStatusChange(cb)` are tab-local lifecycle/readiness streams.
-- `subscribe('ready', cb)` and `onReady(cb)` emit when canonical capture is ready.
-- `waitForReady()` resolves once canonical readiness is reached (or rejects on timeout).
-- On `ready`, both `getJSON()` and `getCommonJSON()` should resolve for that active tab conversation.
-- Bridge request errors are structured (`name: "BlackiyaBridgeError"`, `code: "TIMEOUT" | "REQUEST_FAILED" | "NOT_FOUND"`).
-- This runs in the page context, so only use it on pages you trust.
+- `conversation.ready` emits once per conversation when canonical-ready first lands.
+- `conversation.updated` emits when canonical content hash changes.
+- Pull response errors use `code: "INVALID_REQUEST" | "NOT_FOUND" | "UNAVAILABLE" | "INTERNAL_ERROR"`.
 
 ## 🔒 Privacy & Compliance
 

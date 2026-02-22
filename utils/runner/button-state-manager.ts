@@ -50,7 +50,13 @@ export type ButtonStateManagerDeps = {
     setLifecycleState: (state: LifecycleUiState, conversationId?: string) => void;
     syncCalibrationButtonDisplay: () => void;
     syncRunnerStateCalibration: (state: CalibrationUiState) => void;
-    emitPublicStatusSnapshot: (conversationId?: string | null) => void;
+    emitExternalConversationEvent: (args: {
+        conversationId: string;
+        data: ConversationData;
+        readinessMode: ReadinessDecision['mode'];
+        captureMeta: ExportMeta;
+        attemptId: string | null;
+    }) => void;
 
     buttonManager: {
         exists: () => boolean;
@@ -198,7 +204,6 @@ export const refreshButtonState = (
     }
     if (shouldDisableButtonActions(conversationId, deps)) {
         applyDisabledButtonState(conversationId, deps, lastButtonStateLog);
-        deps.emitPublicStatusSnapshot(conversationId);
         return;
     }
 
@@ -216,6 +221,7 @@ export const refreshButtonState = (
     const isCanonicalReady = decision.mode === 'canonical_ready';
     const isDegraded = decision.mode === 'degraded_manual_only';
     const hasData = isCanonicalReady || isDegraded;
+    const attemptId = deps.peekAttemptId(conversationId);
 
     deps.buttonManager.setReadinessSource(deps.sfeEnabled() ? 'sfe' : 'legacy');
     deps.buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
@@ -223,6 +229,16 @@ export const refreshButtonState = (
         deps.buttonManager.setButtonEnabled('save', true);
     } else {
         deps.buttonManager.setActionButtonsEnabled(isCanonicalReady);
+    }
+
+    if (isCanonicalReady && cached) {
+        deps.emitExternalConversationEvent({
+            conversationId,
+            data: cached,
+            readinessMode: decision.mode,
+            captureMeta,
+            attemptId,
+        });
     }
 
     const opacity = hasData ? '1' : '0.6';
@@ -247,7 +263,6 @@ export const refreshButtonState = (
         deps.syncCalibrationButtonDisplay();
     }
 
-    deps.emitPublicStatusSnapshot(conversationId);
 };
 
 const resolveRefreshConversationId = (
@@ -256,17 +271,14 @@ const resolveRefreshConversationId = (
 ): string | null => {
     const adapter = deps.getAdapter();
     if (!adapter) {
-        deps.emitPublicStatusSnapshot(null);
         return null;
     }
     const conversationId = forConversationId || adapter.extractConversationId(window.location.href);
     if (!deps.buttonManager.exists()) {
-        deps.emitPublicStatusSnapshot(conversationId);
         return null;
     }
     if (!conversationId) {
         resetButtonStateForNoConversation(deps);
-        deps.emitPublicStatusSnapshot(null);
         return null;
     }
     return conversationId;

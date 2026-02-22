@@ -3,7 +3,7 @@
  *
  * Processes cross-world postMessage events (lifecycle, response-finished,
  * stream-delta, title-resolved, conversation-id-resolved, attempt-disposed,
- * stream-dump-frame, and JSON bridge requests).
+ * and stream-dump-frame).
  */
 
 import type { LLMPlatform } from '@/platforms/types';
@@ -21,7 +21,6 @@ import type {
     TitleResolvedMessage,
 } from '@/utils/protocol/messages';
 import { type RunnerStreamPreviewState, removePendingRunnerStreamPreview } from '@/utils/runner/stream-preview';
-import type { ExportFormat } from '@/utils/settings';
 import { resolveConversationTitleByPrecedence } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
@@ -93,10 +92,6 @@ export type WireMessageHandlerDeps = {
     streamPreviewState: RunnerStreamPreviewState;
     attemptByConversation: Map<string, string>;
     shouldRemoveDisposedAttemptBinding: (mapped: string, disposed: string, resolve: (id: string) => string) => boolean;
-
-    getConversationData: (options: { silent?: boolean; allowDegraded?: boolean }) => Promise<ConversationData | null>;
-    buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
-    stampToken: <T extends Record<string, unknown>>(payload: T) => T;
 };
 
 export const handleTitleResolvedMessage = (message: unknown, deps: WireMessageHandlerDeps): boolean => {
@@ -355,49 +350,4 @@ export const handleAttemptDisposedMessage = (message: unknown, deps: WireMessage
         deps.setActiveAttempt(null);
     }
     return true;
-};
-
-export const handleJsonBridgeRequest = (message: unknown, deps: WireMessageHandlerDeps) => {
-    const typedMessage = (message as { type?: unknown; requestId?: unknown; format?: unknown } | null) ?? null;
-    if (typedMessage?.type !== MESSAGE_TYPES.GET_JSON_REQUEST || typeof typedMessage.requestId !== 'string') {
-        return;
-    }
-    const requestId = typedMessage.requestId;
-    const requestFormat = typedMessage.format === 'common' ? 'common' : 'original';
-    deps.getConversationData({ silent: true })
-        .then((data) => {
-            if (!data) {
-                window.postMessage(
-                    deps.stampToken({
-                        type: MESSAGE_TYPES.GET_JSON_RESPONSE,
-                        requestId,
-                        success: false,
-                        error: 'NO_CONVERSATION_DATA',
-                    }),
-                    window.location.origin,
-                );
-                return;
-            }
-            window.postMessage(
-                deps.stampToken({
-                    type: MESSAGE_TYPES.GET_JSON_RESPONSE,
-                    requestId,
-                    success: true,
-                    data: deps.buildExportPayloadForFormat(data, requestFormat),
-                }),
-                window.location.origin,
-            );
-        })
-        .catch((error) => {
-            logger.error('Failed to handle window get request:', error);
-            window.postMessage(
-                deps.stampToken({
-                    type: MESSAGE_TYPES.GET_JSON_RESPONSE,
-                    requestId,
-                    success: false,
-                    error: 'INTERNAL_ERROR',
-                }),
-                window.location.origin,
-            );
-        });
 };

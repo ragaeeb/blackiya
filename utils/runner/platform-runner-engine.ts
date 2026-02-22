@@ -40,7 +40,7 @@ import { processInterceptionCapture as processInterceptionCaptureCore } from './
 import { createCalibrationRuntime } from './platform-runtime-calibration';
 import { createStreamProbeRuntime } from './platform-runtime-stream-probe';
 import { createRuntimeWiring } from './platform-runtime-wiring';
-import { emitPublicStatusSnapshot as emitPublicStatusSnapshotCore } from './public-status';
+import { createExternalEventDispatcherState } from './external-event-dispatch';
 import { processResponseFinished as processResponseFinishedCore } from './response-finished-handler';
 import type { EngineCtx } from './runner-engine-context';
 import {
@@ -52,7 +52,6 @@ import {
     buildCleanupRuntimeDeps,
     buildExportPayloadForFormat,
     buildInterceptionCaptureDeps,
-    buildPublicStatusDeps,
     buildResponseFinishedDeps,
     buildRuntimeWiringDeps,
     buildSavePipelineDeps,
@@ -62,6 +61,7 @@ import {
     buildStreamProbeVisibilitySettingDeps,
     buildVisibilityRecoveryDeps,
     buildWarmFetchDeps,
+    emitExternalConversationEvent,
     emitAttemptDisposed,
     evaluateReadinessForData,
     extractConversationIdFromLocation,
@@ -181,7 +181,7 @@ export const runPlatform = (): void => {
             preservedByConversation: new Map(),
             maxEntries: MAX_STREAM_PREVIEWS,
         },
-        publicStatusState: { sequence: 0, lastSignature: '' },
+        externalEventDispatchState: createExternalEventDispatcherState(),
         streamProbeRuntime: null,
         // Function stubs — populated below during coordinator wiring
         setCurrentConversation: null!,
@@ -227,7 +227,6 @@ export const runPlatform = (): void => {
         resetCalibrationPreference: null!,
         handleCalibrationProfilesChanged: null!,
         loadSfeSettings: null!,
-        emitPublicStatusSnapshot: null!,
         extractConversationIdFromLocation: null!,
         resolveConversationIdForUserAction: null!,
         getCaptureMeta: null!,
@@ -241,6 +240,7 @@ export const runPlatform = (): void => {
         isStaleAttemptMessage: null!,
         buildExportPayloadForFormat: null!,
         getExportFormat: null!,
+        emitExternalConversationEvent: null!,
         ingestSfeLifecycleFromWirePhase: null!,
         buildCalibrationOrchestrationDeps: null!,
         buildCalibrationCaptureDeps: null!,
@@ -257,8 +257,6 @@ export const runPlatform = (): void => {
     ctx.evaluateReadinessForData = (data) => evaluateReadinessForData(ctx, data);
     ctx.shouldBlockActionsForGeneration = (cid) => shouldBlockActionsForGeneration(ctx, cid);
     ctx.isLifecycleActiveGeneration = () => ctx.lifecycleState === 'prompt-sent' || ctx.lifecycleState === 'streaming';
-    ctx.emitPublicStatusSnapshot = (cidOverride) =>
-        emitPublicStatusSnapshotCore(cidOverride, ctx.publicStatusState, buildPublicStatusDeps(ctx));
     ctx.emitAttemptDisposed = (aid, reason) => emitAttemptDisposed(ctx, aid, reason);
     ctx.ingestSfeLifecycle = (phase, aid, cid) => ingestSfeLifecycle(ctx, phase, aid, cid);
     ctx.ingestSfeCanonicalSample = (data, aid) => ingestSfeCanonicalSample(ctx, data, aid);
@@ -266,6 +264,7 @@ export const runPlatform = (): void => {
     ctx.isStaleAttemptMessage = (aid, cid, st) => isStaleAttemptMessage(ctx, aid, cid, st);
     ctx.buildExportPayloadForFormat = (data, format) => buildExportPayloadForFormat(ctx, data, format);
     ctx.getExportFormat = getExportFormat;
+    ctx.emitExternalConversationEvent = (args) => emitExternalConversationEvent(ctx, args);
 
     // ── Stream probe runtime ──
 
@@ -405,7 +404,6 @@ export const runPlatform = (): void => {
         syncLifecycleConversationBinding(state, resolvedCid);
         ctx.buttonManager.setLifecycleState(state);
         applyLifecycleUiState(state, conversationId);
-        ctx.emitPublicStatusSnapshot(resolvedCid);
     };
 
     // ── Response finished ──

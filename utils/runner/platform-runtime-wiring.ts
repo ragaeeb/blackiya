@@ -23,14 +23,12 @@ import type { WireMessageHandlerDeps } from '@/utils/runner/wire-message-handler
 import {
     handleAttemptDisposedMessage as handleAttemptDisposedMessageCore,
     handleConversationIdResolvedMessage as handleConversationIdResolvedMessageCore,
-    handleJsonBridgeRequest as handleJsonBridgeRequestCore,
     handleLifecycleMessage as handleLifecycleMessageCore,
     handleResponseFinishedMessage as handleResponseFinishedMessageCore,
     handleStreamDeltaMessage as handleStreamDeltaMessageCore,
     handleStreamDumpFrameMessage as handleStreamDumpFrameMessageCore,
     handleTitleResolvedMessage as handleTitleResolvedMessageCore,
 } from '@/utils/runner/wire-message-handlers';
-import type { ExportFormat } from '@/utils/settings';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 
@@ -88,9 +86,6 @@ export type RuntimeWiringDeps = {
         disposedAttemptId: string,
         resolveAttemptId: (attemptId: string) => string,
     ) => boolean;
-    getConversationData: (options?: { silent?: boolean; allowDegraded?: boolean }) => Promise<ConversationData | null>;
-    buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
-    stampToken: <T extends Record<string, unknown>>(payload: T) => T & { __blackiyaToken: string };
     getCaptureMeta: (conversationId: string) => ExportMeta;
     shouldIngestAsCanonicalSample: typeof import('@/utils/sfe/capture-fidelity').shouldIngestAsCanonicalSample;
     scheduleCanonicalStabilizationRetry: (conversationId: string, attemptId: string) => void;
@@ -198,9 +193,6 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
         streamPreviewState: deps.streamPreviewState,
         attemptByConversation: deps.attemptByConversation,
         shouldRemoveDisposedAttemptBinding: deps.shouldRemoveDisposedAttemptBinding,
-        getConversationData: deps.getConversationData,
-        buildExportPayloadForFormat: deps.buildExportPayloadForFormat,
-        stampToken: deps.stampToken,
     });
 
     const handleTitleResolvedMessage = (message: unknown) =>
@@ -224,9 +216,6 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
     const handleAttemptDisposedMessage = (message: unknown) =>
         handleAttemptDisposedMessageCore(message, buildWireMessageHandlerDeps());
 
-    const handleJsonBridgeRequest = (message: unknown) =>
-        handleJsonBridgeRequestCore(message, buildWireMessageHandlerDeps());
-
     const buildWindowBridgeDeps = (): RunnerWindowBridgeDeps => ({
         messageHandlers: [
             handleAttemptDisposedMessage,
@@ -237,7 +226,6 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
             handleLifecycleMessage,
             handleResponseFinishedMessage,
         ],
-        handleJsonBridgeRequest,
         invalidSessionTokenLogAtRef: {
             get value() {
                 return deps.getLastInvalidSessionTokenLogAt();

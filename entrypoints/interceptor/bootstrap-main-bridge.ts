@@ -1,24 +1,11 @@
 import { getPageConversationSnapshot } from '@/entrypoints/interceptor/page-snapshot';
-import {
-    BLACKIYA_PUBLIC_API_VERSION,
-    BLACKIYA_WAIT_FOR_READY_TIMEOUT_MS,
-} from '@/entrypoints/interceptor/public-api-contract';
-import {
-    type BlackiyaPublicSubscriptionOptions,
-    createBlackiyaPublicStatusApi,
-} from '@/entrypoints/interceptor/public-status-api';
-import { createWindowJsonRequester } from '@/entrypoints/interceptor/snapshot-bridge';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import type {
     AttemptDisposedMessage,
-    BlackiyaPublicEventName,
-    BlackiyaPublicStatus,
     CaptureInterceptedMessage,
-    PublicStatusMessage,
     SessionInitMessage,
     StreamDumpConfigMessage,
 } from '@/utils/protocol/messages';
-import { isBlackiyaPublicStatus } from '@/utils/protocol/messages';
 import {
     getSessionToken,
     resolveTokenValidationFailureReason,
@@ -42,8 +29,7 @@ type PageSnapshotResponse = {
     __blackiyaToken?: string;
 };
 
-const JSON_FORMAT_ORIGINAL = 'original';
-const JSON_FORMAT_COMMON = 'common';
+const MAIN_BRIDGE_INSTALLED_KEY = '__BLACKIYA_MAIN_BRIDGE_INSTALLED__';
 
 export const shouldApplySessionInitToken = (existingToken: string | undefined, incomingToken: string): boolean => {
     if (typeof incomingToken !== 'string' || incomingToken.length === 0) {
@@ -71,24 +57,18 @@ const buildSnapshotResponse = (requestId: string, snapshot: unknown | null): Pag
         ? { type: MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE, requestId, success: true, data: snapshot }
         : { type: MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE, requestId, success: false, error: 'NOT_FOUND' };
 
-export type BootstrapPublicApiDeps = {
+export type MainWorldBridgeDeps = {
     getRawCaptureHistory: () => CaptureInterceptedMessage[];
     cleanupDisposedAttempt: (attemptId: string) => void;
     setStreamDumpEnabled: (enabled: boolean) => void;
     clearStreamDumpCaches: () => void;
 };
 
-export const setupPublicWindowApi = (deps: BootstrapPublicApiDeps) => {
-    if ((window as any).__blackiya) {
+export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
+    if ((window as any)[MAIN_BRIDGE_INSTALLED_KEY] === true) {
         return;
     }
-
-    const requestJson = createWindowJsonRequester(window, {
-        requestType: MESSAGE_TYPES.GET_JSON_REQUEST,
-        responseType: MESSAGE_TYPES.GET_JSON_RESPONSE,
-        timeoutMs: 5000,
-    });
-    const publicStatusApi = createBlackiyaPublicStatusApi();
+    (window as any)[MAIN_BRIDGE_INSTALLED_KEY] = true;
 
     window.addEventListener('message', (event: MessageEvent) => {
         const message = isSnapshotRequestEvent(event);
@@ -145,86 +125,4 @@ export const setupPublicWindowApi = (deps: BootstrapPublicApiDeps) => {
             setSessionToken(message.token);
         }
     });
-
-    window.addEventListener('message', (event: MessageEvent) => {
-        if (!isSameWindowOriginEvent(event)) {
-            return;
-        }
-        const message = event.data as PublicStatusMessage;
-        if (
-            message?.type !== MESSAGE_TYPES.PUBLIC_STATUS ||
-            resolveTokenValidationFailureReason(message) !== null ||
-            !isBlackiyaPublicStatus(message.status)
-        ) {
-            return;
-        }
-        publicStatusApi.applyStatus(message.status);
-    });
-
-    const subscribePublicEvent = (
-        event: BlackiyaPublicEventName,
-        callback: (status: BlackiyaPublicStatus) => void,
-        options?: BlackiyaPublicSubscriptionOptions,
-    ) => publicStatusApi.subscribe(event, callback, options);
-
-    const waitForReady = (options?: { timeoutMs?: number; emitCurrent?: boolean }) =>
-        new Promise<BlackiyaPublicStatus>((resolve, reject) => {
-            const timeoutMs = options?.timeoutMs ?? BLACKIYA_WAIT_FOR_READY_TIMEOUT_MS;
-            const current = publicStatusApi.getStatus();
-            if (current.canGetJSON && current.canGetCommonJSON) {
-                resolve(current);
-                return;
-            }
-
-            let settled = false;
-            let timeoutId: number | undefined;
-            const cleanup = (unsubscribe?: (() => void) | null, timeoutId?: number) => {
-                if (unsubscribe) {
-                    unsubscribe();
-                }
-                if (timeoutId !== undefined) {
-                    clearTimeout(timeoutId);
-                }
-            };
-
-            const unsubscribe = subscribePublicEvent(
-                'ready',
-                (status) => {
-                    if (settled) {
-                        return;
-                    }
-                    settled = true;
-                    cleanup(unsubscribe, timeoutId);
-                    resolve(status);
-                },
-                { emitCurrent: options?.emitCurrent ?? true },
-            );
-
-            timeoutId = window.setTimeout(
-                () => {
-                    if (settled) {
-                        return;
-                    }
-                    settled = true;
-                    cleanup(unsubscribe, timeoutId);
-                    reject(new Error('waitForReady timed out'));
-                },
-                Math.max(0, timeoutMs),
-            );
-        });
-
-    (window as any).__blackiya = {
-        version: BLACKIYA_PUBLIC_API_VERSION,
-        getJSON: () => requestJson(JSON_FORMAT_ORIGINAL),
-        getCommonJSON: () => requestJson(JSON_FORMAT_COMMON),
-        getStatus: () => publicStatusApi.getStatus(),
-        waitForReady,
-        subscribe: subscribePublicEvent,
-        onStatusChange: (
-            callback: (status: BlackiyaPublicStatus) => void,
-            options?: BlackiyaPublicSubscriptionOptions,
-        ) => subscribePublicEvent('status', callback, options),
-        onReady: (callback: (status: BlackiyaPublicStatus) => void, options?: BlackiyaPublicSubscriptionOptions) =>
-            subscribePublicEvent('ready', callback, options),
-    };
 };
