@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/ragaeeb/blackiya/compare/v2.4.0...v2.4.1) (2026-02-22)
+
+
+### Bug Fixes
+
+* **x:** Fix x.com bug where it doesn't track user prompts ([#38](https://github.com/ragaeeb/blackiya/issues/38)) ([cdf97a2](https://github.com/ragaeeb/blackiya/commit/cdf97a270a15f7af71cc166f3024664af0aa1b50))
+
 # [2.4.0](https://github.com/ragaeeb/blackiya/compare/v2.3.0...v2.4.0) (2026-02-22)
 
 
