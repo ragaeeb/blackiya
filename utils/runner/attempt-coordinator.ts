@@ -31,7 +31,6 @@ export type AttemptCoordinatorDeps = {
     setActiveAttemptId: (attemptId: string | null) => void;
     setRunnerConversationId: (conversationId: string | null) => void;
     setRunnerActiveAttemptId: (attemptId: string | null) => void;
-    emitPublicStatusSnapshot: (conversationIdOverride?: string | null) => void;
 
     getAdapterName: () => string | undefined;
     sfe: SignalFusionEngine;
@@ -49,13 +48,11 @@ export const createAttemptCoordinator = (deps: AttemptCoordinatorDeps) => {
     const setCurrentConversation = (conversationId: string | null) => {
         deps.setCurrentConversationId(conversationId);
         deps.setRunnerConversationId(conversationId);
-        deps.emitPublicStatusSnapshot(conversationId);
     };
 
     const setActiveAttempt = (attemptId: string | null) => {
         deps.setActiveAttemptId(attemptId);
         deps.setRunnerActiveAttemptId(attemptId);
-        deps.emitPublicStatusSnapshot();
     };
 
     const buildPendingLifecycleCacheDeps = (): PendingLifecycleCacheDeps => ({

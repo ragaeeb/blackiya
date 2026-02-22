@@ -1,11 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { InMemoryLeaseStore } from '@/tests/helpers/in-memory-lease-store';
+import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
 import type { LogEntry } from '@/utils/logs-storage';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 type MessageHandler = (
     message: unknown,
-    sender: { tab?: { url?: string } },
+    sender: { tab?: { url?: string; id?: number } },
     sendResponse: (response: unknown) => void,
 ) => boolean | undefined;
 
@@ -13,12 +14,26 @@ describe('background message handler', () => {
     let handlerFactory: (deps: {
         saveLog: (payload: LogEntry) => Promise<void>;
         leaseCoordinator: ProbeLeaseCoordinator;
+        externalApiHub: {
+            ingestEvent: (event: ExternalConversationEvent, senderTabId?: number) => Promise<void>;
+        };
         logger: {
             info: (...args: unknown[]) => void;
             warn: (...args: unknown[]) => void;
             error: (...args: unknown[]) => void;
         };
     }) => MessageHandler;
+    let externalMessageHandlerFactory: (deps: {
+        externalApiHub: { handleExternalRequest: (request: unknown) => Promise<unknown> };
+        logger: {
+            info: (...args: unknown[]) => void;
+            warn: (...args: unknown[]) => void;
+            error: (...args: unknown[]) => void;
+        };
+    }) => (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => true;
+    let externalConnectHandlerFactory: (deps: {
+        externalApiHub: { addSubscriber: (port: unknown) => boolean };
+    }) => (port: unknown) => void;
     let savedLogs: unknown[];
     let now: number;
 
@@ -50,6 +65,8 @@ describe('background message handler', () => {
         };
         const mod = await import('@/entrypoints/background');
         handlerFactory = mod.createBackgroundMessageHandler as typeof handlerFactory;
+        externalMessageHandlerFactory = mod.createExternalMessageHandler as typeof externalMessageHandlerFactory;
+        externalConnectHandlerFactory = mod.createExternalConnectHandler as typeof externalConnectHandlerFactory;
     });
 
     beforeEach(() => {
@@ -65,6 +82,9 @@ describe('background message handler', () => {
         const handler = handlerFactory({
             saveLog: async () => {},
             leaseCoordinator: coordinator,
+            externalApiHub: {
+                ingestEvent: async () => {},
+            },
             logger: {
                 info: () => {},
                 warn: () => {},
@@ -160,6 +180,9 @@ describe('background message handler', () => {
                 savedLogs.push(payload);
             },
             leaseCoordinator: coordinator,
+            externalApiHub: {
+                ingestEvent: async () => {},
+            },
             logger: {
                 info: () => {},
                 warn: () => {},
@@ -206,6 +229,9 @@ describe('background message handler', () => {
                 savedLogs.push(payload);
             },
             leaseCoordinator: coordinator,
+            externalApiHub: {
+                ingestEvent: async () => {},
+            },
             logger: {
                 info: () => {},
                 warn: () => {
@@ -228,5 +254,152 @@ describe('background message handler', () => {
         await flushAsyncWork();
         expect(savedLogs).toHaveLength(0);
         expect(warned).toBeTrue();
+    });
+
+    it('forwards internal external-api events to hub with sender tab id', async () => {
+        const coordinator = new ProbeLeaseCoordinator({
+            store: new InMemoryLeaseStore(),
+            now: () => now,
+        });
+        const seen: Array<{ event: ExternalConversationEvent; senderTabId?: number }> = [];
+        const handler = handlerFactory({
+            saveLog: async () => {},
+            leaseCoordinator: coordinator,
+            externalApiHub: {
+                ingestEvent: async (event, senderTabId) => {
+                    seen.push({ event, senderTabId });
+                },
+            },
+            logger: {
+                info: () => {},
+                warn: () => {},
+                error: () => {},
+            },
+        });
+
+        const result = handler(
+            {
+                type: 'BLACKIYA_EXTERNAL_EVENT',
+                event: {
+                    api: 'blackiya.events.v1',
+                    type: 'conversation.ready',
+                    event_id: 'evt-1',
+                    ts: 123,
+                    provider: 'chatgpt',
+                    conversation_id: 'conv-1',
+                    payload: {
+                        title: 'Test',
+                        create_time: 1,
+                        update_time: 2,
+                        current_node: 'root',
+                        moderation_results: [],
+                        plugin_ids: null,
+                        gizmo_id: null,
+                        gizmo_type: null,
+                        is_archived: false,
+                        default_model_slug: 'gpt',
+                        safe_urls: [],
+                        blocked_urls: [],
+                        conversation_id: 'conv-1',
+                        mapping: {
+                            root: {
+                                id: 'root',
+                                message: null,
+                                parent: null,
+                                children: [],
+                            },
+                        },
+                    },
+                    capture_meta: {
+                        captureSource: 'canonical_api',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:1',
+                },
+            },
+            { tab: { url: 'https://chatgpt.com/c/conv-1', id: 77 } },
+            () => {},
+        );
+
+        expect(result).toBeTrue();
+        await flushAsyncWork();
+        expect(seen).toHaveLength(1);
+        expect(seen[0]?.senderTabId).toBe(77);
+        expect(seen[0]?.event.conversation_id).toBe('conv-1');
+    });
+
+    it('routes external requests through the external message handler', async () => {
+        const handler = externalMessageHandlerFactory({
+            externalApiHub: {
+                handleExternalRequest: async (request) => ({ ok: true, request }),
+            },
+            logger: {
+                info: () => {},
+                warn: () => {},
+                error: () => {},
+            },
+        });
+
+        const responses: unknown[] = [];
+        const result = handler({ api: 'blackiya.events.v1', type: 'health.ping' }, {}, (response) => {
+            responses.push(response);
+        });
+
+        expect(result).toBeTrue();
+        await flushAsyncWork();
+        expect(responses).toEqual([{ ok: true, request: { api: 'blackiya.events.v1', type: 'health.ping' } }]);
+    });
+
+    it('returns internal error response when external request handling fails', async () => {
+        let didLogError = false;
+        const handler = externalMessageHandlerFactory({
+            externalApiHub: {
+                handleExternalRequest: async () => {
+                    throw new Error('boom');
+                },
+            },
+            logger: {
+                info: () => {},
+                warn: () => {},
+                error: () => {
+                    didLogError = true;
+                },
+            },
+        });
+
+        const responses: unknown[] = [];
+        const result = handler({ api: 'blackiya.events.v1', type: 'health.ping' }, {}, (response) => {
+            responses.push(response);
+        });
+
+        expect(result).toBeTrue();
+        await flushAsyncWork();
+        expect(didLogError).toBeTrue();
+        expect(responses).toEqual([
+            {
+                ok: false,
+                api: 'blackiya.events.v1',
+                code: 'INTERNAL_ERROR',
+                message: 'Failed to handle external API request',
+                ts: expect.any(Number),
+            },
+        ]);
+    });
+
+    it('attaches external subscribers through the external connect handler', () => {
+        const seenPorts: unknown[] = [];
+        const handler = externalConnectHandlerFactory({
+            externalApiHub: {
+                addSubscriber: (port) => {
+                    seenPorts.push(port);
+                    return true;
+                },
+            },
+        });
+
+        const fakePort = { name: 'blackiya.events.v1' };
+        handler(fakePort);
+        expect(seenPorts).toEqual([fakePort]);
     });
 });

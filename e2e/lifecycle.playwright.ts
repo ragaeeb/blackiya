@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { Page, Route } from '@playwright/test';
+import type { Route } from '@playwright/test';
 import { chromium, expect, test } from '@playwright/test';
+import { EXTERNAL_CACHE_STORAGE_KEY } from '../utils/external-api/constants';
+import type { CachedConversationRecord } from '../utils/external-api/background-hub';
 
 const extensionPath = process.env.BLACKIYA_EXTENSION_PATH;
 const CHATGPT_CONVERSATION_ID = '696bc3d5-fa84-8328-b209-4d65cb229e59';
@@ -18,25 +20,6 @@ const createHarnessHtml = (title: string) => `<!doctype html>
     <main id="app">${title}</main>
   </body>
 </html>`;
-
-type PublicStatusSnapshot = {
-    platform: string | null;
-    conversationId: string | null;
-    attemptId: string | null;
-    lifecycle: 'idle' | 'prompt-sent' | 'streaming' | 'completed';
-    readiness: 'unknown' | 'awaiting_stabilization' | 'canonical_ready' | 'degraded_manual_only';
-    readinessReason: string | null;
-    canGetJSON: boolean;
-    canGetCommonJSON: boolean;
-    sequence: number;
-    timestampMs: number;
-};
-
-type StatusSummary = {
-    status: PublicStatusSnapshot;
-    history: PublicStatusSnapshot[];
-    jsonConversationId: string | null;
-};
 
 type HeadersLike = Record<string, string>;
 
@@ -66,65 +49,57 @@ const fulfillJson = async (route: Route, body: string, status = 200, headers: He
     });
 };
 
-const waitForPublicApi = async (page: Page) => {
-    await page.waitForFunction(() => Boolean((window as any).__blackiya), undefined, {
-        timeout: 15_000,
-    });
-};
-
-const installStatusRecorder = async (page: Page) => {
-    await page.evaluate(() => {
-        const api = (window as any).__blackiya;
-        (window as any).__blackiyaStatusHistory = [];
-        api.subscribe(
-            'status',
-            (status: PublicStatusSnapshot) => {
-                (window as any).__blackiyaStatusHistory.push(status);
-            },
-            { emitCurrent: true },
-        );
-    });
-};
-
-const waitForCanonicalReady = async (page: Page) => {
-    await page.waitForFunction(
-        () => {
-            const api = (window as any).__blackiya;
-            if (!api) {
-                return false;
-            }
-            const status = api.getStatus();
-            return status.lifecycle === 'completed' && status.readiness === 'canonical_ready' && status.canGetJSON;
-        },
-        undefined,
-        { timeout: 30_000 },
+const isCachedConversationRecord = (record: unknown): record is CachedConversationRecord => {
+    if (!record || typeof record !== 'object') {
+        return false;
+    }
+    const candidate = record as CachedConversationRecord;
+    return (
+        typeof candidate.conversation_id === 'string' &&
+        typeof candidate.provider === 'string' &&
+        !!candidate.payload &&
+        typeof candidate.payload === 'object' &&
+        typeof candidate.ts === 'number' &&
+        !!candidate.capture_meta &&
+        typeof candidate.capture_meta === 'object' &&
+        (candidate.content_hash === null || typeof candidate.content_hash === 'string')
     );
 };
 
-const readStatusSummary = async (page: Page): Promise<StatusSummary> => {
-    return await page.evaluate(async () => {
-        const api = (window as any).__blackiya;
-        const status = api.getStatus() as PublicStatusSnapshot;
-        const history = ((window as any).__blackiyaStatusHistory ?? []) as PublicStatusSnapshot[];
-        let jsonConversationId: string | null = null;
-
-        try {
-            const data = await api.getJSON();
-            jsonConversationId = typeof data?.conversation_id === 'string' ? data.conversation_id : null;
-        } catch {
-            jsonConversationId = null;
+const readExternalCacheRecords = async (
+    worker: Awaited<ReturnType<typeof resolveExtensionWorker>>,
+): Promise<CachedConversationRecord[]> => {
+    const raw = await worker.evaluate(async (storageKey: string) => {
+        const chromeApi = (globalThis as { chrome?: { storage: { local: { get: (key: string) => Promise<any> } } } })
+            .chrome;
+        if (!chromeApi) {
+            return null;
         }
+        const result = await chromeApi.storage.local.get(storageKey);
+        return result[storageKey];
+    }, EXTERNAL_CACHE_STORAGE_KEY);
 
-        return { status, history, jsonConversationId };
-    });
+    if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { records?: unknown[] }).records)) {
+        return [];
+    }
+
+    return (raw as { records: unknown[] }).records.filter(isCachedConversationRecord);
 };
 
-const expectLifecycleProgression = (summary: StatusSummary) => {
-    expect(summary.history.some((status) => status.lifecycle === 'streaming')).toBeTruthy();
-    expect(summary.history.some((status) => status.lifecycle === 'completed')).toBeTruthy();
-    expect(summary.status.lifecycle).toBe('completed');
-    expect(summary.status.readiness).toBe('canonical_ready');
-    expect(summary.status.canGetJSON).toBeTruthy();
+const waitForCachedConversation = async (
+    worker: Awaited<ReturnType<typeof resolveExtensionWorker>>,
+    conversationId: string,
+) => {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+        const records = await readExternalCacheRecords(worker);
+        const match = records.find((record) => record.conversation_id === conversationId);
+        if (match) {
+            return match;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error(`Timed out waiting for cached external conversation record: ${conversationId}`);
 };
 
 test.describe('blackiya lifecycle capture harness', () => {
@@ -181,7 +156,7 @@ test.describe('blackiya lifecycle capture harness', () => {
     test('should capture ChatGPT lifecycle from streaming to canonical_ready', async () => {
         const context = await launchContext();
         try {
-            await resolveExtensionWorker(context);
+            const extensionWorker = await resolveExtensionWorker(context);
             const page = await context.newPage();
 
             await page.route('https://chatgpt.com/**', async (route) => {
@@ -215,8 +190,6 @@ test.describe('blackiya lifecycle capture harness', () => {
             });
 
             await page.goto(`https://chatgpt.com/c/${CHATGPT_CONVERSATION_ID}`);
-            await waitForPublicApi(page);
-            await installStatusRecorder(page);
 
             await page.evaluate(async (conversationId: string) => {
                 await fetch('/backend-api/f/conversation', {
@@ -230,11 +203,9 @@ test.describe('blackiya lifecycle capture harness', () => {
                 });
             }, CHATGPT_CONVERSATION_ID);
 
-            await waitForCanonicalReady(page);
-            const summary = await readStatusSummary(page);
-            expectLifecycleProgression(summary);
-            expect(summary.status.platform).toBe('ChatGPT');
-            expect(summary.jsonConversationId).toBe(CHATGPT_CONVERSATION_ID);
+            const cached = await waitForCachedConversation(extensionWorker, CHATGPT_CONVERSATION_ID);
+            expect(cached.provider).toBe('chatgpt');
+            expect(cached.payload?.conversation_id).toBe(CHATGPT_CONVERSATION_ID);
         } finally {
             await context.close();
         }
@@ -243,7 +214,7 @@ test.describe('blackiya lifecycle capture harness', () => {
     test('should capture Gemini lifecycle from streaming to canonical_ready', async () => {
         const context = await launchContext();
         try {
-            await resolveExtensionWorker(context);
+            const extensionWorker = await resolveExtensionWorker(context);
             const page = await context.newPage();
 
             await page.route('https://gemini.google.com/**', async (route) => {
@@ -272,8 +243,6 @@ test.describe('blackiya lifecycle capture harness', () => {
             });
 
             await page.goto(`https://gemini.google.com/app/${GEMINI_CONVERSATION_ID}`);
-            await waitForPublicApi(page);
-            await installStatusRecorder(page);
 
             await page.evaluate(async () => {
                 await fetch('/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?rt=c', {
@@ -283,11 +252,9 @@ test.describe('blackiya lifecycle capture harness', () => {
                 });
             });
 
-            await waitForCanonicalReady(page);
-            const summary = await readStatusSummary(page);
-            expectLifecycleProgression(summary);
-            expect(summary.status.platform).toBe('Gemini');
-            expect(summary.jsonConversationId).toBe(GEMINI_CONVERSATION_ID);
+            const cached = await waitForCachedConversation(extensionWorker, GEMINI_CONVERSATION_ID);
+            expect(cached.provider).toBe('gemini');
+            expect(cached.payload?.conversation_id).toBe(GEMINI_CONVERSATION_ID);
         } finally {
             await context.close();
         }
@@ -296,7 +263,7 @@ test.describe('blackiya lifecycle capture harness', () => {
     test('should capture Grok lifecycle from streaming to canonical_ready', async () => {
         const context = await launchContext();
         try {
-            await resolveExtensionWorker(context);
+            const extensionWorker = await resolveExtensionWorker(context);
             const page = await context.newPage();
 
             await page.route('https://grok.com/**', async (route) => {
@@ -326,8 +293,6 @@ test.describe('blackiya lifecycle capture harness', () => {
             });
 
             await page.goto(`https://grok.com/c/${GROK_CONVERSATION_ID}`);
-            await waitForPublicApi(page);
-            await installStatusRecorder(page);
 
             await page.evaluate(async (conversationId: string) => {
                 await fetch('/rest/app-chat/conversations/new', {
@@ -341,11 +306,9 @@ test.describe('blackiya lifecycle capture harness', () => {
                 });
             }, GROK_CONVERSATION_ID);
 
-            await waitForCanonicalReady(page);
-            const summary = await readStatusSummary(page);
-            expectLifecycleProgression(summary);
-            expect(summary.status.platform).toBe('Grok');
-            expect(summary.jsonConversationId).toBe(GROK_CONVERSATION_ID);
+            const cached = await waitForCachedConversation(extensionWorker, GROK_CONVERSATION_ID);
+            expect(cached.provider).toBe('grok');
+            expect(cached.payload?.conversation_id).toBe(GROK_CONVERSATION_ID);
         } finally {
             await context.close();
         }

@@ -5,7 +5,6 @@ import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
 
 export type RunnerWindowBridgeDeps = {
     messageHandlers: Array<(message: unknown) => boolean>;
-    handleJsonBridgeRequest: (message: unknown) => void;
     invalidSessionTokenLogAtRef: { value: number };
     invalidSessionTokenLogThrottleMs?: number;
 };
@@ -29,10 +28,7 @@ export const registerWindowBridge = (deps: RunnerWindowBridgeDeps) => {
             }
             return;
         }
-        const handled = dispatchRunnerMessage(event.data, deps.messageHandlers);
-        if (!handled) {
-            deps.handleJsonBridgeRequest(event.data);
-        }
+        dispatchRunnerMessage(event.data, deps.messageHandlers);
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);

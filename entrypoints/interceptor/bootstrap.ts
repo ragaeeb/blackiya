@@ -1,5 +1,9 @@
 import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/attempt-registry';
 import {
+    type MainWorldBridgeDeps,
+    setupMainWorldBridge as setupMainWorldBridgeCore,
+} from '@/entrypoints/interceptor/bootstrap-main-bridge';
+import {
     type BootstrapRequestLifecycleDeps,
     emitFetchPromptLifecycle as emitFetchPromptLifecycleCore,
     emitXhrRequestLifecycle as emitXhrRequestLifecycleCore,
@@ -7,10 +11,6 @@ import {
     registerXhrLoadHandler as registerXhrLoadHandlerCore,
     shouldEmitNonChatLifecycleForRequest as shouldEmitNonChatLifecycleForRequestCore,
 } from '@/entrypoints/interceptor/bootstrap-lifecycle';
-import {
-    type BootstrapPublicApiDeps,
-    setupPublicWindowApi as setupPublicWindowApiCore,
-} from '@/entrypoints/interceptor/bootstrap-public-api';
 import { appendToCaptureQueue, appendToLogQueue, getRawCaptureHistory } from '@/entrypoints/interceptor/capture-queue';
 import {
     resolveLifecycleConversationId,
@@ -34,7 +34,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { extractForwardableHeadersFromFetchArgs } from '@/utils/proactive-fetch-headers';
 
-export { shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-public-api';
+export { shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 export {
     shouldEmitXhrRequestLifecycle,
     tryEmitGeminiXhrLoadendCompletion,
@@ -105,7 +105,7 @@ const cleanupDisposedAttempt = (attemptId: string) => {
     });
 };
 
-const buildPublicApiDeps = (): BootstrapPublicApiDeps => ({
+const buildMainWorldBridgeDeps = (): MainWorldBridgeDeps => ({
     getRawCaptureHistory,
     cleanupDisposedAttempt,
     setStreamDumpEnabled: (enabled) => {
@@ -251,7 +251,7 @@ export default defineContentScript({
         };
 
         emitter.log('info', 'init', { host: window.location.hostname, runtimeTag: INTERCEPTOR_RUNTIME_TAG });
-        setupPublicWindowApiCore(buildPublicApiDeps());
+        setupMainWorldBridgeCore(buildMainWorldBridgeDeps());
 
         if (!emitterState.streamDumpEnabled) {
             streamDumpFrameCountByAttempt.clear();

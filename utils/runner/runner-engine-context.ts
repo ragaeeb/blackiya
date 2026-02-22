@@ -6,7 +6,14 @@
  * from the context by reference, so they always see the latest state.
  */
 
+import { browser } from 'wxt/browser';
 import type { LLMPlatform } from '@/platforms/types';
+import {
+    buildExternalInternalEventMessage,
+    markExternalConversationEventDispatched,
+    maybeBuildExternalConversationEvent,
+    type ExternalEventDispatcherState,
+} from '@/utils/runner/external-event-dispatch';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import type { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -45,7 +52,6 @@ import { requestPageSnapshot } from './page-snapshot-bridge';
 import type { CalibrationRuntimeDeps } from './platform-runtime-calibration';
 import type { RuntimeWiringDeps } from './platform-runtime-wiring';
 import { removeStreamProbePanel } from './probe-panel';
-import type { PublicStatusDeps, PublicStatusState } from './public-status';
 import { evaluateReadinessForData as evaluateReadinessForDataPure } from './readiness-evaluation';
 import type { ResponseFinishedDeps } from './response-finished-handler';
 import type { RunnerCleanupDeps } from './runtime-cleanup';
@@ -158,7 +164,7 @@ export type EngineCtx = {
     navigationManager: NavigationManager;
     buttonManager: ButtonManager;
     streamPreviewState: RunnerStreamPreviewState;
-    publicStatusState: PublicStatusState;
+    externalEventDispatchState: ExternalEventDispatcherState;
     streamProbeRuntime: ReturnType<typeof import('./platform-runtime-stream-probe').createStreamProbeRuntime> | null;
 
     // Function refs (populated incrementally during init)
@@ -212,7 +218,6 @@ export type EngineCtx = {
     resetCalibrationPreference: () => void;
     handleCalibrationProfilesChanged: () => void;
     loadSfeSettings: () => Promise<void>;
-    emitPublicStatusSnapshot: (cidOverride?: string | null) => void;
     extractConversationIdFromLocation: () => string | null;
     resolveConversationIdForUserAction: () => string | null;
     getCaptureMeta: (cid: string) => ExportMeta;
@@ -230,6 +235,13 @@ export type EngineCtx = {
     ) => boolean;
     buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
     getExportFormat: () => Promise<ExportFormat>;
+    emitExternalConversationEvent: (args: {
+        conversationId: string;
+        data: ConversationData;
+        readinessMode: ReadinessDecision['mode'];
+        captureMeta: ExportMeta;
+        attemptId: string | null;
+    }) => void;
     ingestSfeLifecycleFromWirePhase: (
         phase: ResponseLifecycleMessage['phase'],
         aid: string,
@@ -322,6 +334,48 @@ export const buildExportPayloadForFormat = (ctx: EngineCtx, data: ConversationDa
 
 export const getExportFormat = (): Promise<ExportFormat> => getExportFormatCore(DEFAULT_EXPORT_FORMAT);
 
+export const emitExternalConversationEvent = (
+    ctx: EngineCtx,
+    args: {
+        conversationId: string;
+        data: ConversationData;
+        readinessMode: ReadinessDecision['mode'];
+        captureMeta: ExportMeta;
+        attemptId: string | null;
+    },
+) => {
+    const event = maybeBuildExternalConversationEvent({
+        conversationId: args.conversationId,
+        data: args.data,
+        providerName: ctx.currentAdapter?.name,
+        readinessMode: args.readinessMode,
+        captureMeta: args.captureMeta,
+        attemptId: args.attemptId,
+        shouldBlockActions: shouldBlockActionsForGeneration(ctx, args.conversationId),
+        evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
+        state: ctx.externalEventDispatchState,
+    });
+    if (!event) {
+        return;
+    }
+    void browser.runtime
+        .sendMessage(buildExternalInternalEventMessage(event))
+        .then(() => {
+            markExternalConversationEventDispatched(
+                ctx.externalEventDispatchState,
+                event.conversation_id,
+                event.content_hash,
+            );
+        })
+        .catch((error) => {
+            logger.debug('Failed to send external conversation event to background', {
+                conversationId: event.conversation_id,
+                type: event.type,
+                error,
+            });
+        });
+};
+
 // ── SFE ingestion wrappers ──
 
 const buildSfeIngestionDeps = (ctx: EngineCtx): SfeIngestionDeps => ({
@@ -395,27 +449,6 @@ export const isStaleAttemptMessage = (
 
 // ── Deps builder factories ──
 
-export const buildPublicStatusDeps = (ctx: EngineCtx): PublicStatusDeps => ({
-    getCurrentConversationId: () => ctx.currentConversationId,
-    resolveLocationConversationId: () => {
-        if (!ctx.currentAdapter) {
-            return null;
-        }
-        try {
-            return ctx.currentAdapter.extractConversationId(window.location.href);
-        } catch {
-            return null;
-        }
-    },
-    peekAttemptId: (cid) => ctx.peekAttemptId(cid),
-    getActiveAttemptId: () => ctx.activeAttemptId,
-    getAdapterName: () => ctx.currentAdapter?.name ?? null,
-    getLifecycleState: () => ctx.lifecycleState,
-    resolveReadinessDecision: (cid) => ctx.resolveReadinessDecision(cid),
-    shouldBlockActionsForGeneration: (cid) => shouldBlockActionsForGeneration(ctx, cid),
-    hasAdapter: () => !!ctx.currentAdapter,
-});
-
 export const buildAttemptCoordinatorDeps = (ctx: EngineCtx): AttemptCoordinatorDeps => ({
     maxConversationAttempts: MAX_CONVERSATION_ATTEMPTS,
     maxPendingLifecycleAttempts: MAX_PENDING_LIFECYCLE_ATTEMPTS,
@@ -437,7 +470,6 @@ export const buildAttemptCoordinatorDeps = (ctx: EngineCtx): AttemptCoordinatorD
     setRunnerActiveAttemptId: (aid) => {
         ctx.runnerState.activeAttemptId = aid;
     },
-    emitPublicStatusSnapshot: (cidOverride) => ctx.emitPublicStatusSnapshot(cidOverride),
     getAdapterName: () => ctx.currentAdapter?.name,
     sfe: ctx.sfe,
     cancelStreamDoneProbe: (aid, reason) => ctx.cancelStreamDoneProbe(aid, reason),
@@ -668,7 +700,7 @@ export const buildButtonStateManagerDeps = (ctx: EngineCtx): ButtonStateManagerD
     syncRunnerStateCalibration: (state) => {
         ctx.runnerState.calibrationState = state;
     },
-    emitPublicStatusSnapshot: (cidOverride) => ctx.emitPublicStatusSnapshot(cidOverride),
+    emitExternalConversationEvent: (args) => ctx.emitExternalConversationEvent(args),
     buttonManager: {
         exists: () => ctx.buttonManager.exists(),
         inject: (target, cid) => ctx.buttonManager.inject(target, cid),
@@ -766,9 +798,6 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     attemptByConversation: ctx.attemptByConversation,
     shouldRemoveDisposedAttemptBinding: (mapped, disposed, resolve) =>
         shouldRemoveDisposedAttemptBindingFromRegistry(mapped, disposed, resolve),
-    getConversationData: (opts) => ctx.getConversationData(opts),
-    buildExportPayloadForFormat: (data, format) => buildExportPayloadForFormat(ctx, data, format),
-    stampToken,
     getCaptureMeta: (cid) => getCaptureMeta(ctx, cid),
     shouldIngestAsCanonicalSample,
     scheduleCanonicalStabilizationRetry: (cid, aid) => ctx.scheduleCanonicalStabilizationRetry(cid, aid),

@@ -6,7 +6,7 @@
 
 [![wakatime](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/c697711b-e0aa-47e9-96bd-1ec21e640d07.svg)](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/c697711b-e0aa-47e9-96bd-1ec21e640d07)
 [![codecov](https://codecov.io/gh/ragaeeb/blackiya/graph/badge.svg?token=M52GQARSGD)](https://codecov.io/gh/ragaeeb/blackiya)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/ragaeeb/blackiya/ci.yml?branch=main)](https://github.com/ragaeeb/blackiya/actions)
+[![Node.js CI](https://github.com/ragaeeb/blackiya/actions/workflows/build.yml/badge.svg)](https://github.com/ragaeeb/blackiya/actions/workflows/build.yml)
 [![Version](https://img.shields.io/github/v/release/ragaeeb/blackiya)](https://github.com/ragaeeb/blackiya/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun&logoColor=white)](https://bun.sh)
@@ -38,130 +38,6 @@ See related docs:
 - `docs/discovery-mode.md` for end-to-end discovery workflow
 - `docs/debug-logs-guide.md` for artifact selection and log interpretation
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Bun** v1.3+ ([Install Bun](https://bun.sh/docs/installation))
-- **Chrome** or **Chromium-based browser**
-- **Git**
-
-### Bootstrap Instructions
-
-#### Step 1: Install Bun (if not already installed)
-
-**macOS/Linux:**
-```bash
-curl -fsSL https://bun.sh/install | bash
-```
-
-**Windows:**
-```powershell
-powershell -c "irm bun.sh/install.ps1 | iex"
-```
-
-Verify installation:
-```bash
-bun --version
-```
-
-#### Step 2: Clone or Create Project
-
-### Option A: Clone this repository
-```bash
-git clone <your-repo-url>
-cd blackiya
-```
-
-### Option B: Create from scratch
-```bash
-# Create project directory
-mkdir blackiya
-cd blackiya
-
-# Initialize git
-git init
-
-# Create package.json (see configuration files below)
-```
-
-#### Step 3: Install Dependencies
-
-```bash
-# Install all dependencies
-bun install
-
-# This will install:
-# - WXT (extension framework)
-# - Biome (linter & formatter)
-# - TypeScript dependencies
-```
-
-#### Step 4: Project Structure Setup
-
-Create the following directory structure:
-
-```bash
-# Create directories
-mkdir -p entrypoints/popup public/icon platforms utils docs
-
-# Create necessary files
-touch wxt.config.ts biome.json tsconfig.json
-touch entrypoints/background.ts
-touch entrypoints/main.content.ts entrypoints/interceptor.content.ts
-mkdir -p entrypoints/interceptor
-touch platforms/chatgpt.ts platforms/gemini.ts platforms/grok.ts
-touch utils/protocol/messages.ts
-mkdir -p utils/runner
-```
-
-#### Step 5: Configure Project Files
-
-Copy the configuration files from the source code section below:
-- `package.json`
-- `wxt.config.ts`
-- `biome.json`
-- `tsconfig.json`
-- `.gitignore`
-
-#### Step 6: Add Extension Icons
-
-Place icon files in `public/icon/`:
-- `16.png` (16x16px)
-- `48.png` (48x48px)
-- `128.png` (128x128px)
-
-> **Tip:** Use a tool like [IconKitchen](https://icon.kitchen/) to generate icons from a single source image.
-
-#### Step 7: Development Server
-
-Start the development server with hot module reload:
-
-```bash
-bun run dev
-```
-
-This will:
-1. Build the extension in development mode
-2. Watch for file changes
-3. Output to `.output/chrome-mv3/` directory
-4. Enable Hot Module Replacement for instant updates
-
-#### Step 8: Load Extension in Chrome
-
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in top-right corner)
-3. Click **Load unpacked**
-4. Select the `.output/chrome-mv3/` directory from your project
-5. The extension should now appear in your extensions list
-
-#### Step 9: Test the Extension
-
-1. Navigate to [ChatGPT](https://chat.openai.com)
-2. Start or open a conversation
-3. Look for the injected "Save Conversation" button
-4. Click the button to download the conversation JSON
-
 ## 📦 Available Scripts
 
 ```bash
@@ -185,14 +61,14 @@ bun test utils/har-analysis.integration.test.ts
 
 Playwright smoke usage:
 ```bash
-BLACKIYA_EXTENSION_PATH="$(pwd)/.output/chrome-mv3" bun run test:e2e
+BLACKIYA_EXTENSION_PATH="$(pwd)/dist/chrome-mv3" bun run test:e2e
 ```
 
 ## 🏗️ Project Structure
 
 ```text
 blackiya/
-├── .output/                    # Build output (git-ignored)
+├── dist/                    # Build output (git-ignored)
 │   └── chrome-mv3/            # Chrome extension build
 ├── entrypoints/
 │   ├── background.ts          # Service worker for API interception
@@ -200,10 +76,10 @@ blackiya/
 │   ├── interceptor.content.ts # Thin MAIN-world entrypoint
 │   ├── interceptor/
 │   │   ├── bootstrap.ts       # MAIN-world interceptor implementation
+│   │   ├── bootstrap-main-bridge.ts
 │   │   ├── attempt-registry.ts
 │   │   ├── fetch-pipeline.ts
 │   │   ├── xhr-pipeline.ts
-│   │   ├── snapshot-bridge.ts
 │   │   ├── state.ts
 │   │   ├── signal-emitter.ts
 │   │   ├── discovery.ts
@@ -241,6 +117,7 @@ blackiya/
 │   │   ├── attempt-registry.ts
 │   │   ├── readiness.ts
 │   │   └── stream-preview.ts
+│   ├── external-api/          # Extension-to-extension API contracts + hub
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities
@@ -284,19 +161,6 @@ blackiya/
 - ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 - ✅ **Advanced Logging**: Structured, exportable debug logs with privacy-focused persistent storage.
 
-
-### Roadmap
-
-- ✅ **Phase 1:** ChatGPT support
-- ✅ **Phase 2:** Gemini support (including Reasoning & Titles)
-- ✅ **Phase 2.5:** Robust Unit Testing Suite
-- ✅ **Phase 3:** Grok support
-- ✅ **Phase 3.5:** Absolute Import Refactoring & Release Automation
-- 🔲 **Phase 4:** Claude support
-- 🔲 **Phase 5:** Export formats (Markdown, HTML, PDF)
-- 🔲 **Phase 6:** Settings UI for customization
-- 🔲 **Phase 7:** Conversation history browser
-
 ## 🔧 Configuration
 
 ### Manifest V3 Permissions
@@ -313,45 +177,56 @@ The extension requires the following permissions:
 - `https://gemini.google.com/*` - Gemini platform
 - `https://x.com/i/grok*` - Grok platform
 
-### Window API
+### External Extension API
 
-Blackiya exposes a lightweight bridge on supported LLM pages:
+Blackiya exposes an extension-to-extension API from background (`window.__blackiya` is removed).
 
-```js
-const unsubscribeStatus = window.__blackiya.subscribe('status', (status) => {
-    console.log('blackiya status:', status.lifecycle, status.readiness, status.conversationId);
+`BLACKIYA_EXTENSION_ID`:
+- **Published build:** use the extension ID shown on the Chrome Web Store listing URL (the final path segment in `https://chromewebstore.google.com/detail/<name>/<extension-id>`).
+- **Local/dev build:** open `chrome://extensions`, enable Developer mode, and copy the ID from the Blackiya card.
+- **Packed build:** after packing, read the `key`/ID metadata generated by Chrome for that package and use the same extension ID.
+
+Push subscription:
+
+```ts
+const port = chrome.runtime.connect(BLACKIYA_EXTENSION_ID, {
+    name: 'blackiya.events.v1',
 });
 
-const unsubscribeReady = window.__blackiya.onReady(async (status) => {
-    console.log('blackiya ready:', status.conversationId);
+port.onMessage.addListener((event) => {
+    // event.type: 'conversation.ready' | 'conversation.updated'
+    // event.payload: canonical ConversationData
+    console.log(event.type, event.conversation_id, event.provider);
+});
+```
 
-    // Both are safe when ready is emitted:
-    const original = await window.__blackiya.getJSON();
-    const common = await window.__blackiya.getCommonJSON();
-    console.log({ original, common });
+Pull requests:
+
+```ts
+const latest = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'conversation.getLatest',
+    format: 'common', // 'original' | 'common'
 });
 
-// Optional immediate snapshot:
-console.log(window.__blackiya.getStatus());
+const byId = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'conversation.getById',
+    conversation_id: '...',
+    format: 'original',
+});
 
-// Optional promise-based readiness gate:
-await window.__blackiya.waitForReady({ timeoutMs: 10000 });
-
-// Public API version for compatibility checks:
-console.log(window.__blackiya.version);
-
-// Later:
-unsubscribeStatus();
-unsubscribeReady();
+const health = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'health.ping',
+});
 ```
 
 Notes:
-- `subscribe('status', cb)` and `onStatusChange(cb)` are tab-local lifecycle/readiness streams.
-- `subscribe('ready', cb)` and `onReady(cb)` emit when canonical capture is ready.
-- `waitForReady()` resolves once canonical readiness is reached (or rejects on timeout).
-- On `ready`, both `getJSON()` and `getCommonJSON()` should resolve for that active tab conversation.
-- Bridge request errors are structured (`name: "BlackiyaBridgeError"`, `code: "TIMEOUT" | "REQUEST_FAILED" | "NOT_FOUND"`).
-- This runs in the page context, so only use it on pages you trust.
+- `conversation.ready` emits once per conversation when canonical-ready first lands.
+- `conversation.updated` emits when canonical content hash changes.
+- Pull response errors use `code: "INVALID_REQUEST" | "NOT_FOUND" | "UNAVAILABLE" | "INTERNAL_ERROR"`.
+- Security model: external-extension messaging (`chrome.runtime.connect(BLACKIYA_EXTENSION_ID, { name: 'blackiya.events.v1' })` and `chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, ...)`) is allowed by default for extensions. To restrict access, add `externally_connectable.ids` to Blackiya's manifest and whitelist only trusted extension IDs.
 
 ## 🔒 Privacy & Compliance
 
@@ -423,7 +298,7 @@ bun run build
 bun run zip
 ```
 
-The ZIP file will be in `.output/` directory.
+The ZIP file will be in `dist/` directory.
 
 ## 📝 Usage
 
@@ -467,40 +342,6 @@ Debugging references:
 
 For bottom-left stream/probe toast meanings (`stream-done:*`, canonical vs degraded states), see `docs/debug-logs-guide.md` section **Bottom-Left Toast / Probe Panel Statuses**.
 
-## 🐛 Troubleshooting
-
-### Extension Not Loading
-
-1. Check Chrome console for errors: `chrome://extensions/` > Details > Inspect views
-2. Ensure `.output/chrome-mv3/` directory exists
-3. Rebuild: `bun run build`
-
-### Button Not Appearing
-
-1. Check if you're on a supported platform (`chatgpt.com`, `gemini.google.com`, `grok.com`, `x.com/i/grok/*`)
-2. Open browser console and check for errors
-3. Reload the extension: `chrome://extensions/` > Reload
-4. Refresh the webpage
-
-### Build Errors
-
-1. Clear output: `rm -rf .output/`
-2. Clear cache: `rm -rf node_modules/ bun.lock`
-3. Reinstall: `bun install`
-4. Rebuild: `bun run dev`
-
-### Biome Errors
-
-If Biome complains about formatting:
-
-```bash
-# Auto-fix all issues
-bun run check
-
-# Or format specific files
-bunx biome format --write ./entrypoints/
-```
-
 ## 🤝 Contributing
 
 ### Setup for Contributors
@@ -511,14 +352,6 @@ bunx biome format --write ./entrypoints/
 4. Make changes and commit
 5. Run code quality checks: `bun run check`
 6. Push and create Pull Request
-
-### Code Style
-
-- Use **Biome** for formatting (configured in `biome.json`)
-- Follow TypeScript best practices
-- Use meaningful variable names
-- Add JSDoc comments for public APIs
-- Keep functions small and focused
 
 ### Commit Guidelines
 
@@ -537,10 +370,6 @@ Use **[Conventional Commits](https://www.conventionalcommits.org/)**:
 
 > **Note:** Pull Requests must be squashed or use these conventions in the merge commit message to trigger the release workflow properly.
 
-## 📄 License
-
-MIT License - see LICENSE file for details
-
 ## 🔗 Resources
 
 - [WXT Documentation](https://wxt.dev)
@@ -548,10 +377,3 @@ MIT License - see LICENSE file for details
 - [Biome Documentation](https://biomejs.dev)
 - [Bun Documentation](https://bun.sh)
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/)
-
-## 💬 Support
-
-For issues and questions:
-- Open an issue on GitHub
-- Check existing issues for solutions
-- Read the AGENTS.md file for architecture details

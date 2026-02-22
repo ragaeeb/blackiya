@@ -2,11 +2,16 @@
  * Background Service Worker
  *
  * Handles extension lifecycle events and message passing.
- * Currently minimal as the content script handles most functionality.
  *
  * @module entrypoints/background
  */
 
+import {
+    createExternalApiHub,
+    type ExternalPortLike,
+    type ExternalStorageLike,
+} from '@/utils/external-api/background-hub';
+import { EXTERNAL_API_VERSION, isExternalInternalEventMessage } from '@/utils/external-api/contracts';
 import { logger } from '@/utils/logger';
 import { type LogEntry, logsStorage } from '@/utils/logs-storage';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
@@ -19,6 +24,7 @@ import {
 import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 
 type BackgroundLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>;
+type BackgroundSender = { tab?: { url?: string; id?: number } };
 
 const isLogContext = (value: unknown): value is LogEntry['context'] => {
     return value === 'background' || value === 'content' || value === 'popup' || value === 'unknown';
@@ -41,12 +47,13 @@ const isLogEntryPayload = (payload: unknown): payload is LogEntry => {
 type BackgroundMessageHandlerDeps = {
     saveLog: (payload: LogEntry) => Promise<void>;
     leaseCoordinator: ProbeLeaseCoordinator;
+    externalApiHub: ReturnType<typeof createExternalApiHub>;
     logger: BackgroundLogger;
 };
 
 const handleGenericBackgroundMessage = (
     message: unknown,
-    sender: { tab?: { url?: string } },
+    sender: BackgroundSender,
     sendResponse: (response: unknown) => void,
     loggerInstance: BackgroundLogger,
 ): true => {
@@ -68,7 +75,15 @@ const handleGenericBackgroundMessage = (
 };
 
 export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDeps) => {
-    return (message: unknown, sender: { tab?: { url?: string } }, sendResponse: (response: unknown) => void) => {
+    return (message: unknown, sender: BackgroundSender, sendResponse: (response: unknown) => void) => {
+        if (isExternalInternalEventMessage(message)) {
+            void deps.externalApiHub.ingestEvent(message.event, sender.tab?.id).catch((error) => {
+                deps.logger.error('Failed to ingest external API event in background', error);
+            });
+            sendResponse({ success: true });
+            return true;
+        }
+
         if (isProbeLeaseClaimRequest(message)) {
             void deps.leaseCoordinator
                 .claim(message.conversationId, message.attemptId, message.ttlMs)
@@ -117,6 +132,7 @@ export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDep
             } else {
                 deps.logger.warn('Discarding malformed LOG_ENTRY payload');
             }
+            // LOG_ENTRY is fire-and-forget and does not use sendResponse.
             return;
         }
 
@@ -124,16 +140,67 @@ export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDep
     };
 };
 
+type ExternalMessageHandlerDeps = {
+    externalApiHub: ReturnType<typeof createExternalApiHub>;
+    logger: BackgroundLogger;
+};
+
+export const createExternalMessageHandler = (deps: ExternalMessageHandlerDeps) => {
+    return (message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => {
+        try {
+            void deps.externalApiHub
+                .handleExternalRequest(message)
+                .then((response) => {
+                    sendResponse(response);
+                })
+                .catch((error) => {
+                    deps.logger.error('Failed to handle external API request', error);
+                    sendResponse({
+                        ok: false,
+                        api: EXTERNAL_API_VERSION,
+                        code: 'INTERNAL_ERROR',
+                        message: 'Failed to handle external API request',
+                        ts: Date.now(),
+                    });
+                });
+        } catch (error) {
+            deps.logger.error('External API handler crashed before request dispatch', error);
+            sendResponse({
+                ok: false,
+                api: EXTERNAL_API_VERSION,
+                code: 'INTERNAL_ERROR',
+                message: 'Failed to handle external API request',
+                ts: Date.now(),
+            });
+        }
+        return true;
+    };
+};
+
+type ExternalConnectHandlerDeps = {
+    externalApiHub: ReturnType<typeof createExternalApiHub>;
+};
+
+export const createExternalConnectHandler = (deps: ExternalConnectHandlerDeps) => {
+    return (port: ExternalPortLike) => {
+        deps.externalApiHub.addSubscriber(port);
+    };
+};
+
 export default defineBackground(() => {
     const leaseCoordinator = new ProbeLeaseCoordinator({
         store: createProbeLeaseStore(),
     });
+    const externalApiHub = createExternalApiHub({
+        storage: browser.storage.local as ExternalStorageLike,
+        logger,
+    });
+    void externalApiHub.ensureHydrated();
 
     logger.info('Background service worker started', {
         id: browser.runtime.id,
     });
 
-    // Listen for installation/update events
     browser.runtime.onInstalled.addListener((details) => {
         if (details.reason === 'install') {
             logger.info('Extension installed');
@@ -142,13 +209,25 @@ export default defineBackground(() => {
         }
     });
 
-    // Message handler for future extensibility
-    // Currently content script handles everything locally
     browser.runtime.onMessage.addListener(
         createBackgroundMessageHandler({
             saveLog: (payload) => logsStorage.saveLog(payload),
             leaseCoordinator,
+            externalApiHub,
             logger,
+        }),
+    );
+
+    browser.runtime.onMessageExternal?.addListener(
+        createExternalMessageHandler({
+            externalApiHub,
+            logger,
+        }),
+    );
+
+    browser.runtime.onConnectExternal?.addListener(
+        createExternalConnectHandler({
+            externalApiHub,
         }),
     );
 });
