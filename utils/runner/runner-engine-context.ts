@@ -10,6 +10,7 @@ import { browser } from 'wxt/browser';
 import type { LLMPlatform } from '@/platforms/types';
 import {
     buildExternalInternalEventMessage,
+    markExternalConversationEventDispatched,
     maybeBuildExternalConversationEvent,
     type ExternalEventDispatcherState,
 } from '@/utils/runner/external-event-dispatch';
@@ -357,13 +358,22 @@ export const emitExternalConversationEvent = (
     if (!event) {
         return;
     }
-    void browser.runtime.sendMessage(buildExternalInternalEventMessage(event)).catch((error) => {
-        logger.debug('Failed to send external conversation event to background', {
-            conversationId: event.conversation_id,
-            type: event.type,
-            error,
+    void browser.runtime
+        .sendMessage(buildExternalInternalEventMessage(event))
+        .then(() => {
+            markExternalConversationEventDispatched(
+                ctx.externalEventDispatchState,
+                event.conversation_id,
+                event.content_hash,
+            );
+        })
+        .catch((error) => {
+            logger.debug('Failed to send external conversation event to background', {
+                conversationId: event.conversation_id,
+                type: event.type,
+                error,
+            });
         });
-    });
 };
 
 // ── SFE ingestion wrappers ──

@@ -1,6 +1,7 @@
 import type { CommonConversationExport } from '@/utils/common-export';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
+import { hasString, isFiniteNumber, isNullableString, isRecord } from '@/utils/type-guards';
 
 export const EXTERNAL_API_VERSION = 'blackiya.events.v1';
 export const EXTERNAL_EVENTS_PORT_NAME = EXTERNAL_API_VERSION;
@@ -87,15 +88,6 @@ export type ExternalInternalEventMessage = {
     event: ExternalConversationEvent;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    !!value && typeof value === 'object' && !Array.isArray(value);
-
-const hasString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
-
-const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-
 const isExternalApiVersion = (value: unknown): value is ExternalApiVersion => value === EXTERNAL_API_VERSION;
 
 const isExternalProvider = (value: unknown): value is ExternalProvider =>
@@ -118,11 +110,29 @@ export const isExportMeta = (value: unknown): value is ExportMeta => {
     );
 };
 
+const isStringArray = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.every((item) => typeof item === 'string');
+
 export const isConversationDataLike = (value: unknown): value is ConversationData => {
     if (!isRecord(value)) {
         return false;
     }
-    return hasString(value.conversation_id) && isRecord(value.mapping);
+    return (
+        hasString(value.title) &&
+        isFiniteNumber(value.create_time) &&
+        isFiniteNumber(value.update_time) &&
+        isRecord(value.mapping) &&
+        hasString(value.conversation_id) &&
+        hasString(value.current_node) &&
+        Array.isArray(value.moderation_results) &&
+        (value.plugin_ids === null || isStringArray(value.plugin_ids)) &&
+        isNullableString(value.gizmo_id) &&
+        isNullableString(value.gizmo_type) &&
+        typeof value.is_archived === 'boolean' &&
+        hasString(value.default_model_slug) &&
+        isStringArray(value.safe_urls) &&
+        isStringArray(value.blocked_urls)
+    );
 };
 
 export const isExternalConversationEvent = (value: unknown): value is ExternalConversationEvent => {

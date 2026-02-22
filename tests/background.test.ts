@@ -6,7 +6,7 @@ import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 type MessageHandler = (
     message: unknown,
-    sender: { tab?: { url?: string } },
+    sender: { tab?: { url?: string; id?: number } },
     sendResponse: (response: unknown) => void,
 ) => boolean | undefined;
 
@@ -288,8 +288,27 @@ describe('background message handler', () => {
                     provider: 'chatgpt',
                     conversation_id: 'conv-1',
                     payload: {
+                        title: 'Test',
+                        create_time: 1,
+                        update_time: 2,
+                        current_node: 'root',
+                        moderation_results: [],
+                        plugin_ids: null,
+                        gizmo_id: null,
+                        gizmo_type: null,
+                        is_archived: false,
+                        default_model_slug: 'gpt',
+                        safe_urls: [],
+                        blocked_urls: [],
                         conversation_id: 'conv-1',
-                        mapping: {},
+                        mapping: {
+                            root: {
+                                id: 'root',
+                                message: null,
+                                parent: null,
+                                children: [],
+                            },
+                        },
                     },
                     capture_meta: {
                         captureSource: 'canonical_api',
@@ -299,7 +318,7 @@ describe('background message handler', () => {
                     content_hash: 'hash:1',
                 },
             },
-            { tab: { url: 'https://chatgpt.com/c/conv-1', id: 77 } } as any,
+            { tab: { url: 'https://chatgpt.com/c/conv-1', id: 77 } },
             () => {},
         );
 

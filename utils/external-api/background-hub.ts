@@ -1,5 +1,6 @@
 import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { buildCommonExport } from '@/utils/common-export';
+import { EXTERNAL_CACHE_STORAGE_KEY } from '@/utils/external-api/constants';
 import type {
     ExternalConversationEvent,
     ExternalConversationSuccessResponse,
@@ -13,8 +14,10 @@ import {
     EXTERNAL_API_VERSION,
     EXTERNAL_EVENTS_PORT_NAME,
     isExportMeta,
+    isConversationDataLike,
     isExternalRequest,
 } from '@/utils/external-api/contracts';
+import { hasString, isFiniteNumber, isNullableString, isRecord } from '@/utils/type-guards';
 import type { ConversationData } from '@/utils/types';
 
 export type ExternalStorageLike = {
@@ -32,7 +35,7 @@ export type ExternalPortLike = {
     };
 };
 
-type CachedConversationRecord = {
+export type CachedConversationRecord = {
     conversation_id: string;
     provider: ExternalConversationEvent['provider'];
     payload: ConversationData;
@@ -53,25 +56,14 @@ type ExternalApiHubDeps = {
     now?: () => number;
     maxCachedConversations?: number;
     storageKey?: string;
+    persistDebounceMs?: number;
     logger?: {
         warn: (message: string, data?: unknown) => void;
     };
 };
 
 const DEFAULT_MAX_CACHED_CONVERSATIONS = 50;
-const DEFAULT_STORAGE_KEY = 'blackiya_external_api_cache_v1';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    !!value && typeof value === 'object' && !Array.isArray(value);
-
-const hasString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
-
-const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-
-const isConversationDataLike = (value: unknown): value is ConversationData =>
-    isRecord(value) && hasString(value.conversation_id) && isRecord(value.mapping);
+const DEFAULT_PERSIST_DEBOUNCE_MS = 500;
 
 const isQuotaError = (error: unknown): boolean => {
     const message = error instanceof Error ? error.message : String(error ?? '');
@@ -142,13 +134,16 @@ const toFormat = (format: ExternalPullFormat | undefined): ExternalPullFormat =>
 export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     const now = deps.now ?? (() => Date.now());
     const maxCachedConversations = deps.maxCachedConversations ?? DEFAULT_MAX_CACHED_CONVERSATIONS;
-    const storageKey = deps.storageKey ?? DEFAULT_STORAGE_KEY;
+    const storageKey = deps.storageKey ?? EXTERNAL_CACHE_STORAGE_KEY;
+    const persistDebounceMs = deps.persistDebounceMs ?? DEFAULT_PERSIST_DEBOUNCE_MS;
     const recordsByConversation = new Map<string, CachedConversationRecord>();
     const subscribers = new Set<ExternalPortLike>();
 
     let latestConversationId: string | null = null;
     let hydrated = false;
     let hydrationPromise: Promise<void> | null = null;
+    let persistTimer: ReturnType<typeof setTimeout> | null = null;
+    let persistInFlight: Promise<void> | null = null;
 
     const removeSubscriber = (port: ExternalPortLike) => {
         subscribers.delete(port);
@@ -188,6 +183,11 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         const allRecords = [...recordsByConversation.values()];
         let droppedRecords = 0;
 
+        // Progressive shed strategy: on quota errors we increase `droppedRecords` so
+        // `allRecords.slice(droppedRecords)` drops oldest records, recomputes
+        // `latestConversationId` for the reduced snapshot, and retries. We run up to
+        // n+1 attempts (where n is `allRecords.length`) so the final iteration can
+        // still persist an empty state.
         while (droppedRecords <= allRecords.length) {
             const records = allRecords.slice(droppedRecords);
             const resolvedLatestConversationId =
@@ -219,6 +219,39 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
                 }
             }
         }
+    };
+
+    const runPersistNow = async () => {
+        if (persistInFlight) {
+            await persistInFlight;
+            return;
+        }
+        persistInFlight = persist().finally(() => {
+            persistInFlight = null;
+        });
+        await persistInFlight;
+    };
+
+    const debouncedPersist = () => {
+        if (persistDebounceMs <= 0) {
+            void runPersistNow();
+            return;
+        }
+        if (persistTimer !== null) {
+            clearTimeout(persistTimer);
+        }
+        persistTimer = setTimeout(() => {
+            persistTimer = null;
+            void runPersistNow();
+        }, persistDebounceMs);
+    };
+
+    const flushPersist = async () => {
+        if (persistTimer !== null) {
+            clearTimeout(persistTimer);
+            persistTimer = null;
+        }
+        await runPersistNow();
     };
 
     const buildSuccessResponse = (
@@ -271,7 +304,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         return true;
     };
 
-    const resolveLatestRecord = (tabId?: number): CachedConversationRecord | null => {
+    const resolveAndUpdateLatestRecord = (tabId?: number): CachedConversationRecord | null => {
         if (typeof tabId === 'number') {
             let latestForTab: CachedConversationRecord | null = null;
             for (const record of recordsByConversation.values()) {
@@ -320,7 +353,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         };
         setBoundedMapValue(recordsByConversation, enrichedEvent.conversation_id, record, maxCachedConversations);
         latestConversationId = enrichedEvent.conversation_id;
-        await persist();
+        debouncedPersist();
         broadcast(enrichedEvent);
     };
 
@@ -340,7 +373,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
 
         if (request.type === 'conversation.getLatest') {
-            const record = resolveLatestRecord(request.tab_id);
+            const record = resolveAndUpdateLatestRecord(request.tab_id);
             if (!record) {
                 return buildFailureResponse(now, 'UNAVAILABLE', 'No conversation data available');
             }
@@ -360,5 +393,6 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         ingestEvent,
         handleExternalRequest,
         ensureHydrated,
+        flushPersist,
     };
 };

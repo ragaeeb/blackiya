@@ -5,6 +5,7 @@ import { EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE } from '@/utils/external-api/contr
 import {
     buildExternalInternalEventMessage,
     createExternalEventDispatcherState,
+    markExternalConversationEventDispatched,
     maybeBuildExternalConversationEvent,
 } from './external-event-dispatch';
 
@@ -63,6 +64,33 @@ describe('runner/external-event-dispatch', () => {
         expect(event?.provider).toBe('chatgpt');
     });
 
+    it('should keep dispatch state unchanged until send is acknowledged', () => {
+        const state = createExternalEventDispatcherState();
+        const event = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversation('conv-1'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-1',
+        });
+
+        expect(event).not.toBeNull();
+        expect(state.byConversation.has('conv-1')).toBeFalse();
+    });
+
     it('should not emit duplicate event when canonical hash is unchanged', () => {
         const state = createExternalEventDispatcherState();
         const baseArgs = {
@@ -86,34 +114,42 @@ describe('runner/external-event-dispatch', () => {
             createEventId: () => 'evt',
         };
 
-        expect(maybeBuildExternalConversationEvent(baseArgs)).not.toBeNull();
+        const first = maybeBuildExternalConversationEvent(baseArgs);
+        expect(first).not.toBeNull();
+        if (!first) {
+            throw new Error('Expected first event');
+        }
+        markExternalConversationEventDispatched(state, 'conv-1', first.content_hash);
         expect(maybeBuildExternalConversationEvent(baseArgs)).toBeNull();
     });
 
     it('should emit conversation.updated when canonical hash changes', () => {
         const state = createExternalEventDispatcherState();
-        expect(
-            maybeBuildExternalConversationEvent({
-                conversationId: 'conv-1',
-                data: buildConversation('conv-1'),
-                providerName: 'ChatGPT',
-                readinessMode: 'canonical_ready',
-                captureMeta: CANONICAL_META,
-                attemptId: 'attempt-1',
-                shouldBlockActions: false,
-                evaluateReadinessForData: () =>
-                    ({
-                        ready: true,
-                        terminal: true,
-                        reason: 'terminal',
-                        contentHash: 'hash:1',
-                        latestAssistantTextLength: 10,
-                    }) as any,
-                state,
-                now: () => 123,
-                createEventId: () => 'evt-1',
-            }),
-        ).not.toBeNull();
+        const first = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversation('conv-1'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-1',
+        });
+        expect(first).not.toBeNull();
+        if (!first) {
+            throw new Error('Expected first event');
+        }
+        markExternalConversationEventDispatched(state, 'conv-1', first.content_hash);
 
         const second = maybeBuildExternalConversationEvent({
             conversationId: 'conv-1',
@@ -196,74 +232,83 @@ describe('runner/external-event-dispatch', () => {
     it('should evict oldest dispatch entries when max state size is reached', () => {
         const state = createExternalEventDispatcherState(2);
 
-        expect(
-            maybeBuildExternalConversationEvent({
-                conversationId: 'conv-1',
-                data: buildConversation('conv-1'),
-                providerName: 'ChatGPT',
-                readinessMode: 'canonical_ready',
-                captureMeta: CANONICAL_META,
-                attemptId: 'attempt-1',
-                shouldBlockActions: false,
-                evaluateReadinessForData: () =>
-                    ({
-                        ready: true,
-                        terminal: true,
-                        reason: 'terminal',
-                        contentHash: 'hash:1',
-                        latestAssistantTextLength: 10,
-                    }) as any,
-                state,
-                now: () => 123,
-                createEventId: () => 'evt-1',
-            }),
-        ).not.toBeNull();
+        const first = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversation('conv-1'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-1',
+        });
+        expect(first).not.toBeNull();
+        if (!first) {
+            throw new Error('Expected first event');
+        }
+        markExternalConversationEventDispatched(state, 'conv-1', first.content_hash);
 
-        expect(
-            maybeBuildExternalConversationEvent({
-                conversationId: 'conv-2',
-                data: buildConversation('conv-2'),
-                providerName: 'ChatGPT',
-                readinessMode: 'canonical_ready',
-                captureMeta: CANONICAL_META,
-                attemptId: 'attempt-2',
-                shouldBlockActions: false,
-                evaluateReadinessForData: () =>
-                    ({
-                        ready: true,
-                        terminal: true,
-                        reason: 'terminal',
-                        contentHash: 'hash:2',
-                        latestAssistantTextLength: 10,
-                    }) as any,
-                state,
-                now: () => 124,
-                createEventId: () => 'evt-2',
-            }),
-        ).not.toBeNull();
+        const second = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-2',
+            data: buildConversation('conv-2'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-2',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:2',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 124,
+            createEventId: () => 'evt-2',
+        });
+        expect(second).not.toBeNull();
+        if (!second) {
+            throw new Error('Expected second event');
+        }
+        markExternalConversationEventDispatched(state, 'conv-2', second.content_hash);
 
-        expect(
-            maybeBuildExternalConversationEvent({
-                conversationId: 'conv-3',
-                data: buildConversation('conv-3'),
-                providerName: 'ChatGPT',
-                readinessMode: 'canonical_ready',
-                captureMeta: CANONICAL_META,
-                attemptId: 'attempt-3',
-                shouldBlockActions: false,
-                evaluateReadinessForData: () =>
-                    ({
-                        ready: true,
-                        terminal: true,
-                        reason: 'terminal',
-                        contentHash: 'hash:3',
-                        latestAssistantTextLength: 10,
-                    }) as any,
-                state,
-                now: () => 125,
-                createEventId: () => 'evt-3',
-            }),
-        ).not.toBeNull();
+        const third = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-3',
+            data: buildConversation('conv-3'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-3',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:3',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 125,
+            createEventId: () => 'evt-3',
+        });
+        expect(third).not.toBeNull();
+        if (!third) {
+            throw new Error('Expected third event');
+        }
+        markExternalConversationEventDispatched(state, 'conv-3', third.content_hash);
 
         expect(state.byConversation.has('conv-1')).toBeFalse();
         expect(state.byConversation.has('conv-2')).toBeTrue();

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { EXTERNAL_CACHE_STORAGE_KEY } from '@/utils/external-api/constants';
 import type { ConversationData } from '@/utils/types';
 import { EXTERNAL_API_VERSION, type ExternalConversationEvent } from '@/utils/external-api/contracts';
 import { createExternalApiHub, type ExternalPortLike, type ExternalStorageLike } from '@/utils/external-api/background-hub';
@@ -91,6 +92,10 @@ const createMemoryStorage = (): ExternalStorageLike & { backing: Record<string, 
     };
 };
 
+// This helper intentionally couples to the persisted hub snapshot shape
+// (`{ [storageKey]: { records: [...] } }`) to force quota failures when record
+// count is greater than one. The quota test also asserts writes/backing state,
+// so if serialization changes this helper should be updated with the test.
 const createQuotaConstrainedStorage = (): ExternalStorageLike & {
     backing: Record<string, unknown>;
     writes: number;
@@ -148,7 +153,7 @@ describe('background external api hub', () => {
     });
 
     it('should broadcast ingested events to connected subscribers', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 1_000 });
+        const hub = createExternalApiHub({ storage, now: () => 1_000, persistDebounceMs: 0 });
         const port = createFakePort(EXTERNAL_API_VERSION);
         hub.addSubscriber(port);
 
@@ -166,7 +171,7 @@ describe('background external api hub', () => {
     });
 
     it('should return latest conversation for conversation.getLatest pull request', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 2_000 });
+        const hub = createExternalApiHub({ storage, now: () => 2_000, persistDebounceMs: 0 });
         await hub.ingestEvent(buildEvent('conv-1'), 9);
 
         const response = await hub.handleExternalRequest({
@@ -186,7 +191,7 @@ describe('background external api hub', () => {
     });
 
     it('should return common-format payload for pull format common', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 3_000 });
+        const hub = createExternalApiHub({ storage, now: () => 3_000, persistDebounceMs: 0 });
         await hub.ingestEvent(buildEvent('conv-1'), 9);
 
         const response = await hub.handleExternalRequest({
@@ -211,7 +216,7 @@ describe('background external api hub', () => {
     });
 
     it('should return latest conversation filtered by tab id when requested', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 3_500 });
+        const hub = createExternalApiHub({ storage, now: () => 3_500, persistDebounceMs: 0 });
         await hub.ingestEvent(buildEvent('conv-tab-1'), 1);
         await hub.ingestEvent(buildEvent('conv-tab-2'), 2);
 
@@ -230,7 +235,7 @@ describe('background external api hub', () => {
     });
 
     it('should return not_found for missing conversation.getById', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 4_000 });
+        const hub = createExternalApiHub({ storage, now: () => 4_000, persistDebounceMs: 0 });
         const response = await hub.handleExternalRequest({
             api: EXTERNAL_API_VERSION,
             type: 'conversation.getById',
@@ -248,11 +253,11 @@ describe('background external api hub', () => {
 
     it('should restore cached latest conversation from storage backup after restart', async () => {
         {
-            const firstHub = createExternalApiHub({ storage, now: () => 5_000 });
+            const firstHub = createExternalApiHub({ storage, now: () => 5_000, persistDebounceMs: 0 });
             await firstHub.ingestEvent(buildEvent('conv-9'), 7);
         }
 
-        const secondHub = createExternalApiHub({ storage, now: () => 6_000 });
+        const secondHub = createExternalApiHub({ storage, now: () => 6_000, persistDebounceMs: 0 });
         const response = await secondHub.handleExternalRequest({
             api: EXTERNAL_API_VERSION,
             type: 'conversation.getLatest',
@@ -266,7 +271,7 @@ describe('background external api hub', () => {
     });
 
     it('should recover latest conversation by timestamp when persisted latest id is stale', async () => {
-        storage.backing.blackiya_external_api_cache_v1 = {
+        storage.backing[EXTERNAL_CACHE_STORAGE_KEY] = {
             latestConversationId: 'stale-id',
             records: [
                 {
@@ -298,7 +303,7 @@ describe('background external api hub', () => {
             ],
         };
 
-        const hub = createExternalApiHub({ storage, now: () => 6_500 });
+        const hub = createExternalApiHub({ storage, now: () => 6_500, persistDebounceMs: 0 });
         const response = await hub.handleExternalRequest({
             api: EXTERNAL_API_VERSION,
             type: 'conversation.getLatest',
@@ -312,7 +317,7 @@ describe('background external api hub', () => {
     });
 
     it('should ignore malformed persisted capture_meta records during hydration', async () => {
-        storage.backing.blackiya_external_api_cache_v1 = {
+        storage.backing[EXTERNAL_CACHE_STORAGE_KEY] = {
             latestConversationId: 'conv-1',
             records: [
                 {
@@ -332,7 +337,7 @@ describe('background external api hub', () => {
             ],
         };
 
-        const hub = createExternalApiHub({ storage, now: () => 6_700 });
+        const hub = createExternalApiHub({ storage, now: () => 6_700, persistDebounceMs: 0 });
         const response = await hub.handleExternalRequest({
             api: EXTERNAL_API_VERSION,
             type: 'conversation.getLatest',
@@ -348,7 +353,7 @@ describe('background external api hub', () => {
     });
 
     it('should reject invalid pull request payloads', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 7_000 });
+        const hub = createExternalApiHub({ storage, now: () => 7_000, persistDebounceMs: 0 });
         const response = await hub.handleExternalRequest({
             api: 'blackiya.events.v0',
             type: 'conversation.getLatest',
@@ -364,7 +369,7 @@ describe('background external api hub', () => {
     });
 
     it('should disconnect subscribers with invalid port names', () => {
-        const hub = createExternalApiHub({ storage, now: () => 7_500 });
+        const hub = createExternalApiHub({ storage, now: () => 7_500, persistDebounceMs: 0 });
         const wrongPort = createFakePort('wrong.port');
 
         const accepted = hub.addSubscriber(wrongPort);
@@ -374,7 +379,7 @@ describe('background external api hub', () => {
     });
 
     it('should ignore disconnected subscribers during broadcast', async () => {
-        const hub = createExternalApiHub({ storage, now: () => 8_000 });
+        const hub = createExternalApiHub({ storage, now: () => 8_000, persistDebounceMs: 0 });
         const port = createFakePort(EXTERNAL_API_VERSION);
         hub.addSubscriber(port);
         port.disconnectNow();
@@ -388,12 +393,13 @@ describe('background external api hub', () => {
         const hub = createExternalApiHub({
             storage: quotaStorage,
             now: () => 8_500,
+            persistDebounceMs: 0,
         });
 
         await hub.ingestEvent(buildEvent('conv-1'), 1);
         await hub.ingestEvent(buildEvent('conv-2'), 1);
 
-        const persisted = quotaStorage.backing.blackiya_external_api_cache_v1 as
+        const persisted = quotaStorage.backing[EXTERNAL_CACHE_STORAGE_KEY] as
             | { latestConversationId: string | null; records: Array<{ conversation_id: string }> }
             | undefined;
 

@@ -71,58 +71,74 @@ export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
     (window as any)[MAIN_BRIDGE_INSTALLED_KEY] = true;
 
     window.addEventListener('message', (event: MessageEvent) => {
-        const message = isSnapshotRequestEvent(event);
-        if (!message || resolveTokenValidationFailureReason(message) !== null) {
+        const snapshotRequest = isSnapshotRequestEvent(event);
+        if (snapshotRequest) {
+            if (resolveTokenValidationFailureReason(snapshotRequest) !== null) {
+                return;
+            }
+            const conversationId =
+                typeof snapshotRequest.conversationId === 'string' ? snapshotRequest.conversationId : '';
+            const snapshot = conversationId
+                ? getPageConversationSnapshot(conversationId, deps.getRawCaptureHistory)
+                : null;
+            window.postMessage(
+                stampToken(buildSnapshotResponse(snapshotRequest.requestId, snapshot)),
+                window.location.origin,
+            );
             return;
         }
-        const conversationId = typeof message.conversationId === 'string' ? message.conversationId : '';
-        const snapshot = conversationId ? getPageConversationSnapshot(conversationId, deps.getRawCaptureHistory) : null;
-        window.postMessage(stampToken(buildSnapshotResponse(message.requestId, snapshot)), window.location.origin);
-    });
 
-    window.addEventListener('message', (event: MessageEvent) => {
         if (!isSameWindowOriginEvent(event)) {
             return;
         }
-        const message = event.data as AttemptDisposedMessage & { __blackiyaToken?: string };
-        if (message?.type !== MESSAGE_TYPES.ATTEMPT_DISPOSED || typeof message.attemptId !== 'string') {
-            return;
-        }
-        const sessionToken = getSessionToken();
-        if (sessionToken && message.__blackiyaToken !== sessionToken) {
-            return;
-        }
-        deps.cleanupDisposedAttempt(message.attemptId);
-    });
 
-    window.addEventListener('message', (event: MessageEvent) => {
-        if (!isSameWindowOriginEvent(event)) {
+        const message = event.data;
+        if (!message || typeof message !== 'object') {
             return;
         }
-        const message = event.data as StreamDumpConfigMessage & { __blackiyaToken?: string };
-        if (message?.type !== MESSAGE_TYPES.STREAM_DUMP_CONFIG || typeof message.enabled !== 'boolean') {
-            return;
-        }
-        const sessionToken = getSessionToken();
-        if (sessionToken && message.__blackiyaToken !== sessionToken) {
-            return;
-        }
-        deps.setStreamDumpEnabled(message.enabled);
-        if (!message.enabled) {
-            deps.clearStreamDumpCaches();
-        }
-    });
 
-    window.addEventListener('message', (event: MessageEvent) => {
-        if (!isSameWindowOriginEvent(event)) {
-            return;
-        }
-        const message = event.data as SessionInitMessage;
-        if (message?.type !== MESSAGE_TYPES.SESSION_INIT || typeof message.token !== 'string') {
-            return;
-        }
-        if (shouldApplySessionInitToken(getSessionToken(), message.token)) {
-            setSessionToken(message.token);
+        switch ((message as { type?: unknown }).type) {
+            case MESSAGE_TYPES.ATTEMPT_DISPOSED: {
+                const attemptDisposedMessage = message as AttemptDisposedMessage & {
+                    __blackiyaToken?: string;
+                };
+                if (typeof attemptDisposedMessage.attemptId !== 'string') {
+                    return;
+                }
+                if (resolveTokenValidationFailureReason(attemptDisposedMessage) !== null) {
+                    return;
+                }
+                deps.cleanupDisposedAttempt(attemptDisposedMessage.attemptId);
+                return;
+            }
+            case MESSAGE_TYPES.STREAM_DUMP_CONFIG: {
+                const streamDumpConfigMessage = message as StreamDumpConfigMessage & {
+                    __blackiyaToken?: string;
+                };
+                if (typeof streamDumpConfigMessage.enabled !== 'boolean') {
+                    return;
+                }
+                if (resolveTokenValidationFailureReason(streamDumpConfigMessage) !== null) {
+                    return;
+                }
+                deps.setStreamDumpEnabled(streamDumpConfigMessage.enabled);
+                if (!streamDumpConfigMessage.enabled) {
+                    deps.clearStreamDumpCaches();
+                }
+                return;
+            }
+            case MESSAGE_TYPES.SESSION_INIT: {
+                const sessionInitMessage = message as SessionInitMessage;
+                if (typeof sessionInitMessage.token !== 'string') {
+                    return;
+                }
+                if (shouldApplySessionInitToken(getSessionToken(), sessionInitMessage.token)) {
+                    setSessionToken(sessionInitMessage.token);
+                }
+                return;
+            }
+            default:
+                return;
         }
     });
 };

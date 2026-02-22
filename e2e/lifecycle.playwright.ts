@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Route } from '@playwright/test';
 import { chromium, expect, test } from '@playwright/test';
+import { EXTERNAL_CACHE_STORAGE_KEY } from '../utils/external-api/constants';
+import type { CachedConversationRecord } from '../utils/external-api/background-hub';
 
 const extensionPath = process.env.BLACKIYA_EXTENSION_PATH;
 const CHATGPT_CONVERSATION_ID = '696bc3d5-fa84-8328-b209-4d65cb229e59';
@@ -20,7 +22,6 @@ const createHarnessHtml = (title: string) => `<!doctype html>
 </html>`;
 
 type HeadersLike = Record<string, string>;
-const EXTERNAL_CACHE_STORAGE_KEY = 'blackiya_external_api_cache_v1';
 
 const launchContext = async () =>
     chromium.launchPersistentContext('', {
@@ -48,15 +49,26 @@ const fulfillJson = async (route: Route, body: string, status = 200, headers: He
     });
 };
 
-type ExternalCachedRecord = {
-    provider?: string;
-    conversation_id: string;
-    payload?: { conversation_id?: string };
+const isCachedConversationRecord = (record: unknown): record is CachedConversationRecord => {
+    if (!record || typeof record !== 'object') {
+        return false;
+    }
+    const candidate = record as CachedConversationRecord;
+    return (
+        typeof candidate.conversation_id === 'string' &&
+        typeof candidate.provider === 'string' &&
+        !!candidate.payload &&
+        typeof candidate.payload === 'object' &&
+        typeof candidate.ts === 'number' &&
+        !!candidate.capture_meta &&
+        typeof candidate.capture_meta === 'object' &&
+        (candidate.content_hash === null || typeof candidate.content_hash === 'string')
+    );
 };
 
 const readExternalCacheRecords = async (
     worker: Awaited<ReturnType<typeof resolveExtensionWorker>>,
-): Promise<ExternalCachedRecord[]> => {
+): Promise<CachedConversationRecord[]> => {
     const raw = await worker.evaluate(async (storageKey: string) => {
         const chromeApi = (globalThis as { chrome?: { storage: { local: { get: (key: string) => Promise<any> } } } })
             .chrome;
@@ -71,18 +83,7 @@ const readExternalCacheRecords = async (
         return [];
     }
 
-    return (raw as { records: unknown[] }).records
-        .map((record: unknown) => {
-            if (!record || typeof record !== 'object') {
-                return null;
-            }
-            const typed = record as ExternalCachedRecord;
-            if (typeof typed.conversation_id !== 'string') {
-                return null;
-            }
-            return typed;
-        })
-        .filter((record): record is ExternalCachedRecord => record !== null);
+    return (raw as { records: unknown[] }).records.filter(isCachedConversationRecord);
 };
 
 const waitForCachedConversation = async (

@@ -132,6 +132,7 @@ export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDep
             } else {
                 deps.logger.warn('Discarding malformed LOG_ENTRY payload');
             }
+            // LOG_ENTRY is fire-and-forget and does not use sendResponse.
             return;
         }
 

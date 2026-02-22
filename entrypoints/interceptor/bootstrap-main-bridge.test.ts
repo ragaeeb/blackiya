@@ -62,6 +62,31 @@ describe('bootstrap-main-bridge', () => {
         });
     });
 
+    it('should ignore ATTEMPT_DISPOSED when session token is mismatched', () => {
+        const cleanupDisposedAttempt = mock(() => {});
+        setupMainWorldBridge({
+            getRawCaptureHistory: () => [],
+            cleanupDisposedAttempt,
+            setStreamDumpEnabled: () => {},
+            clearStreamDumpCaches: () => {},
+        });
+
+        windowInstance.postMessage(
+            {
+                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
+                attemptId: 'attempt-1',
+                __blackiyaToken: 'bk:wrong-token',
+            },
+            windowInstance.location.origin,
+        );
+        return new Promise<void>((resolve) => {
+            windowInstance.setTimeout(() => {
+                expect(cleanupDisposedAttempt).not.toHaveBeenCalled();
+                resolve();
+            }, 0);
+        });
+    });
+
     it('should update stream dump state and clear caches when disabled', () => {
         const setStreamDumpEnabled = mock(() => {});
         const clearStreamDumpCaches = mock(() => {});

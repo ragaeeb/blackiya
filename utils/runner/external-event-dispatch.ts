@@ -30,11 +30,27 @@ type MaybeBuildExternalConversationEventArgs = {
 
 const defaultNow = () => Date.now();
 
+const buildUuidV4FromRandomValues = (): string => {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
 const defaultCreateEventId = (): string => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
         return crypto.randomUUID();
     }
-    return `evt:${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    if (typeof crypto !== 'undefined' && 'getRandomValues' in crypto) {
+        return buildUuidV4FromRandomValues();
+    }
+    const randomTail = () =>
+        `${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}${Math.random()
+            .toString(16)
+            .slice(2)}`;
+    return `evt:${Date.now().toString(16)}-${randomTail()}`;
 };
 
 const DEFAULT_MAX_EXTERNAL_DISPATCH_ENTRIES = 250;
@@ -78,12 +94,6 @@ export const maybeBuildExternalConversationEvent = (
     }
 
     const eventType: ExternalConversationEvent['type'] = existing?.hasReady ? 'conversation.updated' : 'conversation.ready';
-    setBoundedMapValue(
-        args.state.byConversation,
-        args.conversationId,
-        { hasReady: true, lastContentHash: contentHash },
-        args.state.maxEntries,
-    );
 
     return {
         api: EXTERNAL_API_VERSION,
@@ -97,6 +107,19 @@ export const maybeBuildExternalConversationEvent = (
         capture_meta: args.captureMeta,
         content_hash: contentHash,
     };
+};
+
+export const markExternalConversationEventDispatched = (
+    state: ExternalEventDispatcherState,
+    conversationId: string,
+    contentHash: string | null,
+) => {
+    setBoundedMapValue(
+        state.byConversation,
+        conversationId,
+        { hasReady: true, lastContentHash: contentHash },
+        state.maxEntries,
+    );
 };
 
 export const buildExternalInternalEventMessage = (event: ExternalConversationEvent): ExternalInternalEventMessage => ({

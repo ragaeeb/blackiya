@@ -3,6 +3,7 @@ import type { ConversationData } from '@/utils/types';
 import {
     EXTERNAL_API_VERSION,
     isExternalConversationEvent,
+    isExternalInternalEventMessage,
     isExternalRequest,
     normalizeExternalProvider,
 } from './contracts';
@@ -46,6 +47,42 @@ describe('external-api/contracts', () => {
         ).toBeFalse();
     });
 
+    it('should accept valid conversation.getById request', () => {
+        expect(
+            isExternalRequest({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.getById',
+                conversation_id: 'conv-1',
+                format: 'original',
+            }),
+        ).toBeTrue();
+    });
+
+    it('should reject invalid conversation.getById request conversation_id', () => {
+        expect(
+            isExternalRequest({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.getById',
+                conversation_id: '',
+            }),
+        ).toBeFalse();
+        expect(
+            isExternalRequest({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.getById',
+            }),
+        ).toBeFalse();
+    });
+
+    it('should accept health.ping request', () => {
+        expect(
+            isExternalRequest({
+                api: EXTERNAL_API_VERSION,
+                type: 'health.ping',
+            }),
+        ).toBeTrue();
+    });
+
     it('should accept valid conversation event envelope', () => {
         expect(
             isExternalConversationEvent({
@@ -66,6 +103,27 @@ describe('external-api/contracts', () => {
         ).toBeTrue();
     });
 
+    it('should accept conversation event envelope when content_hash is null and attempt_id is undefined', () => {
+        expect(
+            isExternalConversationEvent({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.updated',
+                event_id: 'evt-2',
+                ts: Date.now(),
+                provider: 'chatgpt',
+                conversation_id: 'conv-1',
+                payload: buildConversation(),
+                capture_meta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                content_hash: null,
+                attempt_id: undefined,
+            }),
+        ).toBeTrue();
+    });
+
     it('should reject invalid conversation event envelope payload', () => {
         expect(
             isExternalConversationEvent({
@@ -82,6 +140,54 @@ describe('external-api/contracts', () => {
                     completeness: 'complete',
                 },
                 content_hash: 'hash:1',
+            }),
+        ).toBeFalse();
+    });
+
+    it('should reject conversation event envelope missing capture_meta', () => {
+        expect(
+            isExternalConversationEvent({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.ready',
+                event_id: 'evt-3',
+                ts: Date.now(),
+                provider: 'chatgpt',
+                conversation_id: 'conv-1',
+                payload: buildConversation(),
+                content_hash: 'hash:1',
+            }),
+        ).toBeFalse();
+    });
+
+    it('should validate external internal event wrapper', () => {
+        expect(
+            isExternalInternalEventMessage({
+                type: 'BLACKIYA_EXTERNAL_EVENT',
+                event: {
+                    api: EXTERNAL_API_VERSION,
+                    type: 'conversation.ready',
+                    event_id: 'evt-1',
+                    ts: Date.now(),
+                    provider: 'chatgpt',
+                    conversation_id: 'conv-1',
+                    payload: buildConversation(),
+                    capture_meta: {
+                        captureSource: 'canonical_api',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:1',
+                },
+            }),
+        ).toBeTrue();
+
+        expect(
+            isExternalInternalEventMessage({
+                type: 'BLACKIYA_EXTERNAL_EVENT',
+                event: {
+                    api: EXTERNAL_API_VERSION,
+                    type: 'conversation.ready',
+                },
             }),
         ).toBeFalse();
     });
