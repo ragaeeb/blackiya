@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE } from '@/utils/external-api/contracts';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
-import { EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE } from '@/utils/external-api/contracts';
 import {
     buildExternalInternalEventMessage,
     createExternalEventDispatcherState,

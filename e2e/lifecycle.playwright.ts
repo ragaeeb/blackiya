@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Route } from '@playwright/test';
 import { chromium, expect, test } from '@playwright/test';
-import { EXTERNAL_CACHE_STORAGE_KEY } from '../utils/external-api/constants';
 import type { CachedConversationRecord } from '../utils/external-api/background-hub';
+import { EXTERNAL_CACHE_STORAGE_KEY } from '../utils/external-api/constants';
 
 const extensionPath = process.env.BLACKIYA_EXTENSION_PATH;
 const CHATGPT_CONVERSATION_ID = '696bc3d5-fa84-8328-b209-4d65cb229e59';

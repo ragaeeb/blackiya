@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import {
+    createExternalApiHub,
+    type ExternalPortLike,
+    type ExternalStorageLike,
+} from '@/utils/external-api/background-hub';
 import { EXTERNAL_CACHE_STORAGE_KEY } from '@/utils/external-api/constants';
-import type { ConversationData } from '@/utils/types';
 import { EXTERNAL_API_VERSION, type ExternalConversationEvent } from '@/utils/external-api/contracts';
-import { createExternalApiHub, type ExternalPortLike, type ExternalStorageLike } from '@/utils/external-api/background-hub';
+import type { ConversationData } from '@/utils/types';
 
 const buildConversation = (conversationId: string, response = 'Assistant response'): ConversationData => ({
     title: 'Test Conversation',
@@ -398,6 +402,7 @@ describe('background external api hub', () => {
 
         await hub.ingestEvent(buildEvent('conv-1'), 1);
         await hub.ingestEvent(buildEvent('conv-2'), 1);
+        await hub.flushPersist();
 
         const persisted = quotaStorage.backing[EXTERNAL_CACHE_STORAGE_KEY] as
             | { latestConversationId: string | null; records: Array<{ conversation_id: string }> }

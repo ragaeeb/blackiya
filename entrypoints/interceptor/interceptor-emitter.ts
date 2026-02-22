@@ -22,6 +22,7 @@ export type InterceptorEmitterState = {
     capturePayloadCache: Map<string, number>;
     lifecycleSignalCache: Map<string, number>;
     conversationResolvedSignalCache: Map<string, number>;
+    promptHintByAttempt: Map<string, string>;
     streamDumpFrameCountByAttempt: Map<string, number>;
     streamDumpLastTextByAttempt: Map<string, string>;
     /** Mutated by the emitter's internal cache-pruning sweep. */
@@ -131,16 +132,26 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         if (isAttemptDisposed(attemptId)) {
             return;
         }
+        const promptHint = attemptId ? state.promptHintByAttempt.get(attemptId) : undefined;
         const payload: CapturePayload = {
             type: MESSAGE_TYPES.CAPTURE_DATA_INTERCEPTED,
             url,
             data,
             platform,
             ...(attemptId ? { attemptId } : {}),
+            ...(promptHint ? { promptHint } : {}),
         };
         const stamped = stampToken(payload);
         appendToCaptureQueue(stamped);
         window.postMessage(stamped, window.location.origin);
+    };
+
+    const cachePromptHintForAttempt = (attemptId: string, promptHint: string) => {
+        const normalized = promptHint.trim();
+        if (!normalized) {
+            return;
+        }
+        setBoundedMapValue(state.promptHintByAttempt, attemptId, normalized, maxDedupeEntries);
     };
 
     const emitConversationIdResolved = (attemptId: string, conversationId: string, platformOverride?: string) => {
@@ -324,6 +335,7 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         shouldLogTransient,
         shouldEmitCapturedPayload,
         shouldEmitLifecycleSignal,
+        cachePromptHintForAttempt,
         isAttemptDisposed,
         emitCapturePayload,
         emitConversationIdResolved,

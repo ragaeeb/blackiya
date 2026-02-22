@@ -138,7 +138,7 @@ export const logAdapterEndpointMiss = (
     if (!shouldLogTransient(`adapter-miss:${platform.toLowerCase()}:${channel}:${path}`, 8000)) {
         return;
     }
-    log('warn', `${platform} endpoint unmatched by adapter`, {
+    log('info', `${platform} endpoint unmatched by adapter`, {
         path,
         ...(xhrMeta ?? {}),
     });

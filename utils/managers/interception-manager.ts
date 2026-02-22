@@ -12,7 +12,7 @@ import { logger } from '@/utils/logger';
 import { LRUCache } from '@/utils/lru-cache';
 import { getSessionToken, resolveTokenValidationFailureReason } from '@/utils/protocol/session-token';
 import { isGenericConversationTitle } from '@/utils/title-resolver';
-import type { ConversationData } from '@/utils/types';
+import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 export class InterceptionManager {
     private static readonly BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -97,7 +97,13 @@ export class InterceptionManager {
         return cached;
     }
 
-    public ingestInterceptedData(message: { type?: string; url: string; data: string; platform?: string }) {
+    public ingestInterceptedData(message: {
+        type?: string;
+        url: string;
+        data: string;
+        platform?: string;
+        promptHint?: string;
+    }) {
         this.handleInterceptedData({
             type: 'LLM_CAPTURE_DATA_INTERCEPTED',
             ...message,
@@ -223,7 +229,11 @@ export class InterceptionManager {
         } else if (level === 'debug') {
             logger.debug(prefixedMsg, ...extra);
         } else {
-            logger.info(prefixedMsg, ...extra);
+            if (ctx === 'i') {
+                logger.debug(prefixedMsg, ...extra);
+            } else {
+                logger.info(prefixedMsg, ...extra);
+            }
         }
     }
 
@@ -385,6 +395,7 @@ export class InterceptionManager {
 
         try {
             const data = this.currentAdapter.parseInterceptedData(message.data, message.url);
+            this.applyGrokPromptHintIfNeeded(data, message);
 
             if (data?.conversation_id) {
                 const conversationId = data.conversation_id;
@@ -417,6 +428,166 @@ export class InterceptionManager {
         } catch (error) {
             logger.error('Error parsing intercepted data:', error);
         }
+    }
+
+    private applyGrokPromptHintIfNeeded(data: ConversationData | null, message: any) {
+        if (!data) {
+            return;
+        }
+        const platform = typeof message?.platform === 'string' ? message.platform : (this.currentAdapter?.name ?? '');
+        if (platform !== 'Grok') {
+            return;
+        }
+        const promptHint = typeof message?.promptHint === 'string' ? message.promptHint.trim() : '';
+        if (!promptHint) {
+            return;
+        }
+        if (this.hasNonEmptyUserPrompt(data)) {
+            return;
+        }
+
+        const assistantNodeId = this.findLatestAssistantNodeId(data);
+        if (!assistantNodeId) {
+            return;
+        }
+        this.upsertPromptHintUserNode(data, assistantNodeId, promptHint);
+    }
+
+    private hasNonEmptyUserPrompt(data: ConversationData): boolean {
+        for (const node of Object.values(data.mapping)) {
+            const message = node.message;
+            if (!message || message.author.role !== 'user') {
+                continue;
+            }
+            if (this.extractMessageText(message).length > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private extractMessageText(message: Message): string {
+        if (Array.isArray(message.content?.parts)) {
+            const text = message.content.parts
+                .filter((part) => typeof part === 'string')
+                .join('\n')
+                .trim();
+            if (text.length > 0) {
+                return text;
+            }
+        }
+        if (typeof message.content?.content === 'string') {
+            return message.content.content.trim();
+        }
+        return '';
+    }
+
+    private findLatestAssistantNodeId(data: ConversationData): string | null {
+        const current = data.mapping[data.current_node];
+        if (current?.message?.author.role === 'assistant') {
+            return current.id;
+        }
+
+        let latestNodeId: string | null = null;
+        let latestTimestamp = Number.NEGATIVE_INFINITY;
+        for (const node of Object.values(data.mapping)) {
+            const message = node.message;
+            if (!message || message.author.role !== 'assistant') {
+                continue;
+            }
+            const timestamp = message.update_time ?? message.create_time ?? Number.NEGATIVE_INFINITY;
+            if (timestamp >= latestTimestamp) {
+                latestTimestamp = timestamp;
+                latestNodeId = node.id;
+            }
+        }
+        return latestNodeId;
+    }
+
+    private findRootNodeId(data: ConversationData): string {
+        const rootNode = Object.values(data.mapping).find((node) => node.parent === null);
+        if (rootNode) {
+            return rootNode.id;
+        }
+        const fallbackRootId = `root-${data.conversation_id}`;
+        if (!data.mapping[fallbackRootId]) {
+            data.mapping[fallbackRootId] = { id: fallbackRootId, message: null, parent: null, children: [] };
+        }
+        return fallbackRootId;
+    }
+
+    private buildPromptHintMessage(
+        nodeId: string,
+        assistantNode: MessageNode,
+        promptHint: string,
+        data: ConversationData,
+    ): Message {
+        const timestamp = assistantNode.message?.create_time ?? data.create_time ?? Date.now() / 1000;
+        return {
+            id: nodeId,
+            author: { role: 'user', name: 'User', metadata: {} },
+            create_time: timestamp,
+            update_time: timestamp,
+            content: { content_type: 'text', parts: [promptHint] },
+            status: 'finished_successfully',
+            end_turn: true,
+            weight: 1,
+            metadata: { sender: 'user', source: 'prompt_hint' },
+            recipient: 'all',
+            channel: null,
+        };
+    }
+
+    private upsertPromptHintUserNode(data: ConversationData, assistantNodeId: string, promptHint: string) {
+        const assistantNode = data.mapping[assistantNodeId];
+        if (!assistantNode || !assistantNode.message) {
+            return;
+        }
+
+        const existingParentId = assistantNode.parent;
+        if (existingParentId && data.mapping[existingParentId]?.message === null) {
+            data.mapping[existingParentId].message = this.buildPromptHintMessage(
+                existingParentId,
+                assistantNode,
+                promptHint,
+                data,
+            );
+            return;
+        }
+
+        const rootId = this.findRootNodeId(data);
+        const hintNodeId = `${assistantNodeId}-prompt-hint`;
+        const parentForHint = existingParentId ?? rootId;
+
+        if (!data.mapping[hintNodeId]) {
+            data.mapping[hintNodeId] = {
+                id: hintNodeId,
+                message: null,
+                parent: parentForHint,
+                children: [],
+            };
+        }
+
+        const hintNode = data.mapping[hintNodeId];
+        if (!hintNode.children.includes(assistantNodeId)) {
+            hintNode.children.push(assistantNodeId);
+        }
+        hintNode.message = this.buildPromptHintMessage(hintNodeId, assistantNode, promptHint, data);
+
+        if (existingParentId && data.mapping[existingParentId]) {
+            const parentNode = data.mapping[existingParentId];
+            parentNode.children = parentNode.children.filter((childId) => childId !== assistantNodeId);
+            if (!parentNode.children.includes(hintNodeId)) {
+                parentNode.children.push(hintNodeId);
+            }
+        } else {
+            const rootNode = data.mapping[rootId];
+            if (!rootNode.children.includes(hintNodeId)) {
+                rootNode.children.push(hintNodeId);
+            }
+        }
+
+        assistantNode.parent = hintNodeId;
     }
 
     private isValidConversationData(data: ConversationData): boolean {

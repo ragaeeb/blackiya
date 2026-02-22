@@ -1,16 +1,17 @@
 import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/attempt-registry';
 import {
-    type MainWorldBridgeDeps,
-    setupMainWorldBridge as setupMainWorldBridgeCore,
-} from '@/entrypoints/interceptor/bootstrap-main-bridge';
-import {
     type BootstrapRequestLifecycleDeps,
+    cachePromptHintFromGrokCreateConversationRequest as cachePromptHintFromGrokCreateConversationRequestCore,
     emitFetchPromptLifecycle as emitFetchPromptLifecycleCore,
     emitXhrRequestLifecycle as emitXhrRequestLifecycleCore,
     maybeMonitorFetchStreams as maybeMonitorFetchStreamsCore,
     registerXhrLoadHandler as registerXhrLoadHandlerCore,
     shouldEmitNonChatLifecycleForRequest as shouldEmitNonChatLifecycleForRequestCore,
 } from '@/entrypoints/interceptor/bootstrap-lifecycle';
+import {
+    type MainWorldBridgeDeps,
+    setupMainWorldBridge as setupMainWorldBridgeCore,
+} from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import { appendToCaptureQueue, appendToLogQueue, getRawCaptureHistory } from '@/entrypoints/interceptor/capture-queue';
 import {
     resolveLifecycleConversationId,
@@ -47,6 +48,7 @@ const transientLogCache = new Map<string, number>();
 const capturePayloadCache = new Map<string, number>();
 const lifecycleSignalCache = new Map<string, number>();
 const conversationResolvedSignalCache = new Map<string, number>();
+const promptHintByAttempt = new Map<string, string>();
 const streamDumpFrameCountByAttempt = new Map<string, number>();
 const streamDumpLastTextByAttempt = new Map<string, string>();
 const attemptByConversationId = new Map<string, string>();
@@ -75,6 +77,7 @@ const emitterState: InterceptorEmitterState = {
     capturePayloadCache,
     lifecycleSignalCache,
     conversationResolvedSignalCache,
+    promptHintByAttempt,
     streamDumpFrameCountByAttempt,
     streamDumpLastTextByAttempt,
     lastCachePruneAtMs: 0,
@@ -100,6 +103,7 @@ const cleanupDisposedAttempt = (attemptId: string) => {
         disposedAttemptIds,
         streamDumpFrameCountByAttempt,
         streamDumpLastTextByAttempt,
+        promptHintByAttempt,
         latestAttemptIdByPlatform,
         attemptByConversationId,
     });
@@ -133,6 +137,9 @@ const shouldEmitNonChatLifecycleForRequest = (adapter: LLMPlatform, url: string)
 const emitFetchPromptLifecycle = (context: FetchInterceptorContext) =>
     emitFetchPromptLifecycleCore(context, buildRequestLifecycleDeps());
 
+const cachePromptHintFromGrokCreateConversationRequest = (context: FetchInterceptorContext) =>
+    cachePromptHintFromGrokCreateConversationRequestCore(context, buildRequestLifecycleDeps());
+
 const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response, emit: StreamMonitorEmitter) =>
     maybeMonitorFetchStreamsCore(context, response, emit, buildRequestLifecycleDeps());
 
@@ -162,7 +169,7 @@ export default defineContentScript({
             };
         }
 
-        const originalFetch = window.fetch;
+        const originalFetch = window.fetch.bind(window);
         const proactiveFetchRunner = new ProactiveFetchRunner(
             originalFetch,
             resolveAttemptIdForConversation,
@@ -190,6 +197,7 @@ export default defineContentScript({
                 resolveLifecycleConversationId,
                 safePathname,
             });
+            await cachePromptHintFromGrokCreateConversationRequest(context);
             emitFetchPromptLifecycle(context);
 
             const response = await originalFetch(...args);

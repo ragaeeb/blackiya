@@ -1,7 +1,7 @@
 import type { CommonConversationExport } from '@/utils/common-export';
 import type { ExportMeta } from '@/utils/sfe/types';
-import type { ConversationData } from '@/utils/types';
 import { hasString, isFiniteNumber, isNullableString, isRecord } from '@/utils/type-guards';
+import type { ConversationData } from '@/utils/types';
 
 export const EXTERNAL_API_VERSION = 'blackiya.events.v1';
 export const EXTERNAL_EVENTS_PORT_NAME = EXTERNAL_API_VERSION;

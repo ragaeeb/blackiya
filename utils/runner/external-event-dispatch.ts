@@ -1,6 +1,10 @@
 import { setBoundedMapValue } from '@/utils/bounded-collections';
 import type { ExternalConversationEvent, ExternalInternalEventMessage } from '@/utils/external-api/contracts';
-import { EXTERNAL_API_VERSION, EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE, normalizeExternalProvider } from '@/utils/external-api/contracts';
+import {
+    EXTERNAL_API_VERSION,
+    EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+    normalizeExternalProvider,
+} from '@/utils/external-api/contracts';
 import type { ExportMeta, PlatformReadiness } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 
@@ -62,7 +66,9 @@ export const createExternalEventDispatcherState = (
     maxEntries,
 });
 
-const shouldEmit = (args: MaybeBuildExternalConversationEventArgs): args is MaybeBuildExternalConversationEventArgs & { data: ConversationData } => {
+const shouldEmit = (
+    args: MaybeBuildExternalConversationEventArgs,
+): args is MaybeBuildExternalConversationEventArgs & { data: ConversationData } => {
     if (!args.data) {
         return false;
     }
@@ -93,7 +99,9 @@ export const maybeBuildExternalConversationEvent = (
         return null;
     }
 
-    const eventType: ExternalConversationEvent['type'] = existing?.hasReady ? 'conversation.updated' : 'conversation.ready';
+    const eventType: ExternalConversationEvent['type'] = existing?.hasReady
+        ? 'conversation.updated'
+        : 'conversation.ready';
 
     return {
         api: EXTERNAL_API_VERSION,
