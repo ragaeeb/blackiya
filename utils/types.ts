@@ -1,10 +1,4 @@
 /**
- * Type definitions for Blackiya extension
- *
- * @module utils/types
- */
-
-/**
  * Author information for a message in a ChatGPT conversation
  */
 export type Author = {
