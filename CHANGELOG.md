@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/ragaeeb/blackiya/compare/v2.3.0...v2.4.0) (2026-02-22)
+
+
+### Features
+
+* **events:** Add new External API Eventing System ([#37](https://github.com/ragaeeb/blackiya/issues/37)) ([881b5ab](https://github.com/ragaeeb/blackiya/commit/881b5abafd8ef2013760aa90be656521dba90660))
+
 # [2.3.0](https://github.com/ragaeeb/blackiya/compare/v2.2.0...v2.3.0) (2026-02-20)
 
 
