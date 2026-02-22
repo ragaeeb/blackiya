@@ -75,6 +75,7 @@ export type CaptureInterceptedMessage = {
     url: string;
     data: string;
     attemptId?: string;
+    promptHint?: string;
 } & TokenStampedWireMessage;
 
 export type LogEntryMessage = {

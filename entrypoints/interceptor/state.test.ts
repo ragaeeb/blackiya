@@ -25,6 +25,10 @@ describe('interceptor state helpers', () => {
                 ['attempt-a', 'aaa'],
                 ['attempt-b', 'bbb'],
             ]),
+            promptHintByAttempt: new Map<string, string>([
+                ['attempt-a', 'Prompt A'],
+                ['attempt-b', 'Prompt B'],
+            ]),
             latestAttemptIdByPlatform: new Map<string, string>([
                 ['Gemini', 'attempt-a'],
                 ['Grok', 'attempt-b'],
@@ -38,11 +42,13 @@ describe('interceptor state helpers', () => {
         expect(state.disposedAttemptIds.has('attempt-a')).toBeTrue();
         expect(state.streamDumpFrameCountByAttempt.has('attempt-a')).toBeFalse();
         expect(state.streamDumpLastTextByAttempt.has('attempt-a')).toBeFalse();
+        expect(state.promptHintByAttempt.has('attempt-a')).toBeFalse();
         expect(state.latestAttemptIdByPlatform.get('Gemini')).toBeUndefined();
         expect(state.attemptByConversationId.get('conv-a')).toBeUndefined();
 
         expect(state.streamDumpFrameCountByAttempt.get('attempt-b')).toBe(1);
         expect(state.streamDumpLastTextByAttempt.get('attempt-b')).toBe('bbb');
+        expect(state.promptHintByAttempt.get('attempt-b')).toBe('Prompt B');
         expect(state.latestAttemptIdByPlatform.get('Grok')).toBe('attempt-b');
         expect(state.attemptByConversationId.get('conv-b')).toBe('attempt-b');
     });
@@ -52,6 +58,7 @@ describe('interceptor state helpers', () => {
             disposedAttemptIds: new Set<string>(['old-1', 'old-2']),
             streamDumpFrameCountByAttempt: new Map<string, number>(),
             streamDumpLastTextByAttempt: new Map<string, string>(),
+            promptHintByAttempt: new Map<string, string>(),
             latestAttemptIdByPlatform: new Map<string, string>(),
             attemptByConversationId: new Map<string, string>(),
         };

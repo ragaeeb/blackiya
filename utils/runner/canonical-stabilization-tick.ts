@@ -272,7 +272,7 @@ const shouldSkipCanonicalRetryTick = (
     const disposed = deps.isAttemptDisposedOrSuperseded(attemptId);
     const mappedAttempt = deps.attemptByConversation.get(conversationId);
     const mappedMismatch = !!mappedAttempt && mappedAttempt !== attemptId;
-    logger.info('Stabilization retry tick', {
+    logger.debug('Stabilization retry tick', {
         conversationId,
         attemptId,
         retries,
@@ -299,7 +299,7 @@ const shouldSkipCanonicalRetryAfterAwait = (
     if (!shouldSkip) {
         return false;
     }
-    logger.info('Stabilization retry skip after await', {
+    logger.debug('Stabilization retry skip after await', {
         conversationId,
         attemptId,
         disposedOrSuperseded,
@@ -317,7 +317,7 @@ const processCanonicalStabilizationRetryTick = async (
     deps: CanonicalStabilizationTickDeps,
 ): Promise<void> => {
     if (!beginCanonicalStabilizationTick(attemptId, deps.inProgress)) {
-        logger.info('Stabilization retry tick skipped: already in progress', { conversationId, attemptId });
+        logger.debug('Stabilization retry tick skipped: already in progress', { conversationId, attemptId });
         return;
     }
     try {
@@ -362,11 +362,11 @@ export const scheduleCanonicalStabilizationRetry = (
     deps: CanonicalStabilizationTickDeps,
 ): void => {
     if (deps.retryTimers.has(attemptId)) {
-        logger.info('Stabilization retry already scheduled (skip)', { conversationId, attemptId });
+        logger.debug('Stabilization retry already scheduled (skip)', { conversationId, attemptId });
         return;
     }
     if (deps.isAttemptDisposedOrSuperseded(attemptId)) {
-        logger.info('Stabilization retry skip: attempt disposed/superseded', { conversationId, attemptId });
+        logger.debug('Stabilization retry skip: attempt disposed/superseded', { conversationId, attemptId });
         return;
     }
     const retries = deps.retryCounts.get(attemptId) ?? 0;
@@ -387,7 +387,7 @@ export const scheduleCanonicalStabilizationRetry = (
         void processCanonicalStabilizationRetryTick(conversationId, attemptId, retries, deps);
     }, deps.retryDelayMs);
     deps.retryTimers.set(attemptId, timerId);
-    logger.info('Stabilization retry scheduled', {
+    logger.debug('Stabilization retry scheduled', {
         conversationId,
         attemptId,
         retryNumber: retries + 1,

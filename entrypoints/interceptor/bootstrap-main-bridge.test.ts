@@ -121,5 +121,4 @@ describe('bootstrap-main-bridge', () => {
             }, 0);
         });
     });
-
 });

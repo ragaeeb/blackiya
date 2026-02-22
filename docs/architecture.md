@@ -88,6 +88,7 @@ Primary events:
 - `BLACKIYA_CONVERSATION_ID_RESOLVED` (late ID resolution)
 - `BLACKIYA_TITLE_RESOLVED` (stream-derived title)
 - `LLM_CAPTURE_DATA_INTERCEPTED` (raw canonical payload)
+  - Optional `promptHint` is attached for Grok attempts when captured from CreateGrokConversation request bodies.
 - `BLACKIYA_STREAM_DUMP_FRAME` (optional diagnostics stream dump)
 - `attemptId` is mandatory for lifecycle/finished/delta wire messages (legacy attempt-less compatibility removed in v2.0.2)
 
@@ -249,11 +250,13 @@ Streaming parser:
 
 Flow:
 1. Interceptor observes Grok generation request.
-2. Emits `prompt-sent` and `streaming` only for generation endpoints.
-3. Parses NDJSON chunks and emits live stream deltas.
-4. Captures canonical payloads from response-node/load-responses.
-5. Emits completion hints only when parsed Grok payload is terminal-ready.
-6. Runner stabilizes and enables Save.
+2. For `CreateGrokConversation`, interceptor extracts a prompt hint from request JSON and binds it to the active attempt.
+3. Emits `prompt-sent` and `streaming` only for generation endpoints.
+4. Parses NDJSON chunks and emits live stream deltas.
+5. Captures canonical payloads from response-node/load-responses.
+6. When an add_response capture is missing a user turn, InterceptionManager backfills a synthetic user message from `promptHint`.
+7. Emits completion hints only when parsed Grok payload is terminal-ready.
+8. Runner stabilizes and enables Save.
 
 Title strategy:
 1. `conversations_v2`/history-derived titles.

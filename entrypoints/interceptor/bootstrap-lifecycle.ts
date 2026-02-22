@@ -33,6 +33,176 @@ export type BootstrapRequestLifecycleDeps = {
     safePathname: (url: string) => string;
 };
 
+const GROK_CREATE_CONVERSATION_PATH_PATTERN = /\/i\/api\/graphql\/[^/]+\/CreateGrokConversation(?:\?|$)/i;
+const GROK_ADD_RESPONSE_PATH_PATTERN = /\/2\/grok\/add_response\.json(?:\?|$)/i;
+
+const normalizePromptCandidate = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+};
+
+const isPromptCandidateKey = (key: string): boolean => {
+    return /(?:^|_)(message|prompt|query|text)(?:$|_)/i.test(key);
+};
+
+const isIgnoredPromptCandidateKey = (key: string): boolean => {
+    return /(messageType|queryId|operationName|model|conversationId)/i.test(key);
+};
+
+const isLikelyGraphqlDocument = (value: string): boolean => {
+    return /^\s*(mutation|query|fragment)\b[\s\S]*\{/.test(value);
+};
+
+const extractPromptFromRecord = (record: Record<string, unknown>): string | null => {
+    for (const [key, candidate] of Object.entries(record)) {
+        if (!isPromptCandidateKey(key) || isIgnoredPromptCandidateKey(key)) {
+            continue;
+        }
+        if (key.toLowerCase() === 'query' && typeof candidate === 'string' && isLikelyGraphqlDocument(candidate)) {
+            continue;
+        }
+        const prompt = normalizePromptCandidate(candidate);
+        if (prompt) {
+            return prompt;
+        }
+    }
+    return null;
+};
+
+const enqueueNestedObjects = (record: Record<string, unknown>, queue: unknown[]) => {
+    for (const value of Object.values(record)) {
+        if (value && typeof value === 'object') {
+            queue.push(value);
+        }
+    }
+};
+
+const extractPromptFromUnknownPayload = (value: unknown): string | null => {
+    const directPrompt = normalizePromptCandidate(value);
+    if (directPrompt) {
+        return directPrompt;
+    }
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const queue: unknown[] = [value];
+    const visited = new Set<object>();
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || typeof current !== 'object') {
+            continue;
+        }
+        if (visited.has(current)) {
+            continue;
+        }
+        visited.add(current);
+        const record = current as Record<string, unknown>;
+        const prompt = extractPromptFromRecord(record);
+        if (prompt) {
+            return prompt;
+        }
+        enqueueNestedObjects(record, queue);
+    }
+    return null;
+};
+
+export const extractGrokPromptHintFromFetchArgs = (args: Parameters<typeof fetch>): string | null => {
+    const body = args[1]?.body;
+    if (typeof body !== 'string' || body.length === 0) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(body);
+        return extractPromptFromUnknownPayload(parsed);
+    } catch {
+        return null;
+    }
+};
+
+const extractPromptHintFromBodyText = (bodyText: string): string | null => {
+    if (!bodyText) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(bodyText);
+        return extractPromptFromUnknownPayload(parsed);
+    } catch {
+        return null;
+    }
+};
+
+const readRequestBodyTextSafely = async (input: RequestInfo | URL): Promise<string | null> => {
+    if (!(input instanceof Request)) {
+        return null;
+    }
+    if (input.bodyUsed) {
+        return null;
+    }
+    try {
+        return await input.clone().text();
+    } catch {
+        return null;
+    }
+};
+
+export const resolveGrokPromptHintFromFetchArgs = async (args: Parameters<typeof fetch>): Promise<string | null> => {
+    const initBodyHint = extractGrokPromptHintFromFetchArgs(args);
+    if (initBodyHint) {
+        return initBodyHint;
+    }
+    const requestBodyText = await readRequestBodyTextSafely(args[0]);
+    if (!requestBodyText) {
+        return null;
+    }
+    return extractPromptHintFromBodyText(requestBodyText);
+};
+
+const isGrokCreateConversationRequest = (url: string): boolean => {
+    return GROK_CREATE_CONVERSATION_PATH_PATTERN.test(url);
+};
+
+const isGrokAddResponseRequest = (url: string): boolean => {
+    return GROK_ADD_RESPONSE_PATH_PATTERN.test(url);
+};
+
+const cachePromptHintFromGrokRequest = (
+    context: FetchInterceptorContext,
+    adapter: LLMPlatform,
+    attemptId: string,
+    emitter: BootstrapRequestLifecycleDeps['emitter'],
+) => {
+    if (adapter.name !== 'Grok' || !isGrokCreateConversationRequest(context.outgoingUrl)) {
+        return;
+    }
+    const promptHint = extractGrokPromptHintFromFetchArgs(context.args);
+    if (!promptHint) {
+        return;
+    }
+    emitter.cachePromptHintForAttempt(attemptId, promptHint);
+};
+
+export const cachePromptHintFromGrokCreateConversationRequest = async (
+    context: Pick<FetchInterceptorContext, 'args' | 'outgoingMethod' | 'outgoingUrl' | 'nonChatAttemptId'>,
+    deps: Pick<BootstrapRequestLifecycleDeps, 'emitter' | 'resolveAttemptIdForConversation'>,
+) => {
+    if (
+        context.outgoingMethod !== 'POST' ||
+        (!isGrokCreateConversationRequest(context.outgoingUrl) && !isGrokAddResponseRequest(context.outgoingUrl))
+    ) {
+        return;
+    }
+    const promptHint = await resolveGrokPromptHintFromFetchArgs(context.args);
+    if (!promptHint) {
+        return;
+    }
+    const attemptId = context.nonChatAttemptId ?? deps.resolveAttemptIdForConversation(undefined, 'Grok');
+    deps.emitter.cachePromptHintForAttempt(attemptId, promptHint);
+};
+
 export const shouldEmitNonChatLifecycleForRequest = (
     adapter: LLMPlatform,
     url: string,
@@ -87,6 +257,7 @@ export const emitFetchPromptLifecycle = (
     if (!attemptId) {
         return;
     }
+    cachePromptHintFromGrokRequest(context, adapter, attemptId, deps.emitter);
     deps.emitter.emitLifecycle(attemptId, 'prompt-sent', context.nonChatConversationId, adapter.name);
     if (adapter.name !== 'Gemini') {
         deps.emitter.emitLifecycle(attemptId, 'streaming', context.nonChatConversationId, adapter.name);

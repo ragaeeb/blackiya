@@ -36,11 +36,11 @@ import {
     maybeRestartCanonicalRecoveryAfterTimeout as maybeRestartCanonicalRecoveryAfterTimeoutCore,
     scheduleCanonicalStabilizationRetry as scheduleCanonicalStabilizationRetryCore,
 } from './canonical-stabilization-tick';
+import { createExternalEventDispatcherState } from './external-event-dispatch';
 import { processInterceptionCapture as processInterceptionCaptureCore } from './interception-capture';
 import { createCalibrationRuntime } from './platform-runtime-calibration';
 import { createStreamProbeRuntime } from './platform-runtime-stream-probe';
 import { createRuntimeWiring } from './platform-runtime-wiring';
-import { createExternalEventDispatcherState } from './external-event-dispatch';
 import { processResponseFinished as processResponseFinishedCore } from './response-finished-handler';
 import type { EngineCtx } from './runner-engine-context';
 import {
@@ -61,8 +61,8 @@ import {
     buildStreamProbeVisibilitySettingDeps,
     buildVisibilityRecoveryDeps,
     buildWarmFetchDeps,
-    emitExternalConversationEvent,
     emitAttemptDisposed,
+    emitExternalConversationEvent,
     evaluateReadinessForData,
     extractConversationIdFromLocation,
     getCaptureMeta,

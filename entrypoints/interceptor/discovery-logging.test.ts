@@ -37,7 +37,7 @@ describe('discovery endpoint miss diagnostics', () => {
             8000,
         );
         expect(log).toHaveBeenCalledWith(
-            'warn',
+            'info',
             'Gemini endpoint unmatched by adapter',
             expect.objectContaining({
                 path: '/_/BardChatUi/data/assistant.lamda.BardFrontendService/UnknownRpc',
@@ -60,7 +60,7 @@ describe('discovery endpoint miss diagnostics', () => {
         });
 
         expect(log).toHaveBeenCalledWith(
-            'warn',
+            'info',
             'ChatGPT endpoint unmatched by adapter',
             expect.objectContaining({ path: '/backend-api/textdocs/something' }),
         );
@@ -81,7 +81,7 @@ describe('discovery endpoint miss diagnostics', () => {
         });
 
         expect(log).toHaveBeenCalledWith(
-            'warn',
+            'info',
             'Grok endpoint unmatched by adapter',
             expect.objectContaining({
                 path: '/i/api/graphql/abc123/UnknownOperation',

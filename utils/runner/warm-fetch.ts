@@ -45,7 +45,7 @@ export const tryWarmFetchCandidate = async (
     try {
         const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
         if (!response.ok) {
-            logger.info('Warm fetch HTTP error', {
+            logger.debug('Warm fetch HTTP error', {
                 conversationId,
                 reason,
                 status: response.status,
@@ -58,7 +58,7 @@ export const tryWarmFetchCandidate = async (
         if (!deps.getConversation(conversationId)) {
             return false;
         }
-        logger.info('Warm fetch captured conversation', {
+        logger.debug('Warm fetch captured conversation', {
             conversationId,
             platform: deps.platformName,
             reason,
@@ -66,7 +66,7 @@ export const tryWarmFetchCandidate = async (
         });
         return true;
     } catch (err) {
-        logger.info('Warm fetch network error', {
+        logger.debug('Warm fetch network error', {
             conversationId,
             reason,
             error: err instanceof Error ? err.message : String(err),
@@ -95,7 +95,7 @@ export const executeWarmFetchCandidates = async (
             return true;
         }
     }
-    logger.info('Warm fetch all candidates failed', { conversationId, reason });
+    logger.debug('Warm fetch all candidates failed', { conversationId, reason });
     return false;
 };
 
@@ -113,14 +113,14 @@ export const warmFetchConversationSnapshot = (
     const cached = deps.getConversation(conversationId);
     const captureMeta = deps.getCaptureMeta(conversationId);
     if (cached && shouldUseCachedConversationForWarmFetch(deps.evaluateReadiness(cached), captureMeta)) {
-        logger.info('Warm fetch skipped: cache is ready+canonical', { conversationId, reason });
+        logger.debug('Warm fetch skipped: cache is ready+canonical', { conversationId, reason });
         return Promise.resolve(true);
     }
 
     const key = `${deps.platformName}:${conversationId}`;
     const existing = inFlight.get(key);
     if (existing) {
-        logger.info('Warm fetch dedup hit (shared in-flight promise)', { conversationId, reason });
+        logger.debug('Warm fetch dedup hit (shared in-flight promise)', { conversationId, reason });
         return existing;
     }
 

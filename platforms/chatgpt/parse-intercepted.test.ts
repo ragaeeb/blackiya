@@ -264,6 +264,10 @@ describe('ChatGPT parseInterceptedData', () => {
             expect(result.title).toBe('What is calibration?');
             expect(Object.keys(result.mapping).length).toBeGreaterThan(2);
             expect(result.default_model_slug).toBe('gpt-5-t-mini');
+            const userMessage = Object.values(result.mapping)
+                .map((node: any) => node.message)
+                .find((message: any) => message?.author?.role === 'user');
+            expect(userMessage?.content?.parts?.[0]).toBe('What is calibration?');
         });
 
         it('should use embedded direct conversation object found in SSE payload', () => {

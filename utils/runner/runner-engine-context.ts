@@ -8,12 +8,6 @@
 
 import { browser } from 'wxt/browser';
 import type { LLMPlatform } from '@/platforms/types';
-import {
-    buildExternalInternalEventMessage,
-    markExternalConversationEventDispatched,
-    maybeBuildExternalConversationEvent,
-    type ExternalEventDispatcherState,
-} from '@/utils/runner/external-event-dispatch';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import type { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -25,6 +19,12 @@ import type {
     StreamDumpConfigMessage,
 } from '@/utils/protocol/messages';
 import { stampToken } from '@/utils/protocol/session-token';
+import {
+    buildExternalInternalEventMessage,
+    type ExternalEventDispatcherState,
+    markExternalConversationEventDispatched,
+    maybeBuildExternalConversationEvent,
+} from '@/utils/runner/external-event-dispatch';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
 import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
 import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';

@@ -223,13 +223,7 @@ export const refreshButtonState = (
     const hasData = isCanonicalReady || isDegraded;
     const attemptId = deps.peekAttemptId(conversationId);
 
-    deps.buttonManager.setReadinessSource(deps.sfeEnabled() ? 'sfe' : 'legacy');
-    deps.buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
-    if (isDegraded) {
-        deps.buttonManager.setButtonEnabled('save', true);
-    } else {
-        deps.buttonManager.setActionButtonsEnabled(isCanonicalReady);
-    }
+    applyActionStateFromDecision(isCanonicalReady, isDegraded, deps);
 
     if (isCanonicalReady && cached) {
         deps.emitExternalConversationEvent({
@@ -252,17 +246,32 @@ export const refreshButtonState = (
         deps.getConversation,
     );
 
+    syncCalibrationStateForReadiness(isCanonicalReady, deps);
+};
+
+const applyActionStateFromDecision = (isCanonicalReady: boolean, isDegraded: boolean, deps: ButtonStateManagerDeps) => {
+    deps.buttonManager.setReadinessSource(deps.sfeEnabled() ? 'sfe' : 'legacy');
+    deps.buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
+    if (isDegraded) {
+        deps.buttonManager.setButtonEnabled('save', true);
+        return;
+    }
+    deps.buttonManager.setActionButtonsEnabled(isCanonicalReady);
+};
+
+const syncCalibrationStateForReadiness = (isCanonicalReady: boolean, deps: ButtonStateManagerDeps) => {
     const calibrationState = deps.getCalibrationState();
     if (isCanonicalReady && calibrationState !== 'capturing') {
         deps.setCalibrationState('success');
         deps.syncRunnerStateCalibration('success');
         deps.syncCalibrationButtonDisplay();
-    } else if (!isCanonicalReady && calibrationState === 'success') {
+        return;
+    }
+    if (!isCanonicalReady && calibrationState === 'success') {
         deps.setCalibrationState('idle');
         deps.syncRunnerStateCalibration('idle');
         deps.syncCalibrationButtonDisplay();
     }
-
 };
 
 const resolveRefreshConversationId = (

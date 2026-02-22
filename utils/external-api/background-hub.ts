@@ -5,16 +5,15 @@ import type {
     ExternalConversationEvent,
     ExternalConversationSuccessResponse,
     ExternalFailureResponse,
-    ExternalPullFormat,
-    ExternalRequest,
-    ExternalResponse,
     ExternalHealthSuccessResponse,
+    ExternalPullFormat,
+    ExternalResponse,
 } from '@/utils/external-api/contracts';
 import {
     EXTERNAL_API_VERSION,
     EXTERNAL_EVENTS_PORT_NAME,
-    isExportMeta,
     isConversationDataLike,
+    isExportMeta,
     isExternalRequest,
 } from '@/utils/external-api/contracts';
 import { hasString, isFiniteNumber, isNullableString, isRecord } from '@/utils/type-guards';
@@ -77,7 +76,10 @@ const isCachedConversationRecord = (value: unknown): value is CachedConversation
     }
     return (
         hasString(value.conversation_id) &&
-        (value.provider === 'chatgpt' || value.provider === 'gemini' || value.provider === 'grok' || value.provider === 'unknown') &&
+        (value.provider === 'chatgpt' ||
+            value.provider === 'gemini' ||
+            value.provider === 'grok' ||
+            value.provider === 'unknown') &&
         isConversationDataLike(value.payload) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
         isExportMeta(value.capture_meta) &&
@@ -129,7 +131,8 @@ const providerToPlatformName = (provider: ExternalConversationEvent['provider'])
     return 'Unknown';
 };
 
-const toFormat = (format: ExternalPullFormat | undefined): ExternalPullFormat => (format === 'common' ? 'common' : 'original');
+const toFormat = (format: ExternalPullFormat | undefined): ExternalPullFormat =>
+    format === 'common' ? 'common' : 'original';
 
 export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     const now = deps.now ?? (() => Date.now());
@@ -179,6 +182,21 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         await hydrationPromise;
     };
 
+    const resolveLatestConversationIdForRecords = (records: CachedConversationRecord[]): string | null => {
+        if (latestConversationId && records.some((record) => record.conversation_id === latestConversationId)) {
+            return latestConversationId;
+        }
+        return records[records.length - 1]?.conversation_id ?? null;
+    };
+
+    const persistState = async (records: CachedConversationRecord[]) => {
+        const state: PersistedCacheState = {
+            latestConversationId: resolveLatestConversationIdForRecords(records),
+            records,
+        };
+        await deps.storage.set({ [storageKey]: state });
+    };
+
     const persist = async () => {
         const allRecords = [...recordsByConversation.values()];
         let droppedRecords = 0;
@@ -190,16 +208,8 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         // still persist an empty state.
         while (droppedRecords <= allRecords.length) {
             const records = allRecords.slice(droppedRecords);
-            const resolvedLatestConversationId =
-                latestConversationId && records.some((record) => record.conversation_id === latestConversationId)
-                    ? latestConversationId
-                    : records[records.length - 1]?.conversation_id ?? null;
-            const state: PersistedCacheState = {
-                latestConversationId: resolvedLatestConversationId,
-                records,
-            };
             try {
-                await deps.storage.set({ [storageKey]: state });
+                await persistState(records);
                 return;
             } catch (error) {
                 if (!isQuotaError(error)) {
@@ -304,20 +314,20 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         return true;
     };
 
-    const resolveAndUpdateLatestRecord = (tabId?: number): CachedConversationRecord | null => {
-        if (typeof tabId === 'number') {
-            let latestForTab: CachedConversationRecord | null = null;
-            for (const record of recordsByConversation.values()) {
-                if (record.tab_id !== tabId) {
-                    continue;
-                }
-                if (!latestForTab || record.ts > latestForTab.ts) {
-                    latestForTab = record;
-                }
+    const resolveLatestRecordForTab = (tabId: number): CachedConversationRecord | null => {
+        let latestForTab: CachedConversationRecord | null = null;
+        for (const record of recordsByConversation.values()) {
+            if (record.tab_id !== tabId) {
+                continue;
             }
-            return latestForTab;
+            if (!latestForTab || record.ts > latestForTab.ts) {
+                latestForTab = record;
+            }
         }
+        return latestForTab;
+    };
 
+    const resolveCurrentLatestRecord = (): CachedConversationRecord | null => {
         if (latestConversationId) {
             const latestRecord = recordsByConversation.get(latestConversationId);
             if (latestRecord) {
@@ -333,6 +343,13 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
         latestConversationId = fallbackLatest?.conversation_id ?? null;
         return fallbackLatest;
+    };
+
+    const resolveAndUpdateLatestRecord = (tabId?: number): CachedConversationRecord | null => {
+        if (typeof tabId === 'number') {
+            return resolveLatestRecordForTab(tabId);
+        }
+        return resolveCurrentLatestRecord();
     };
 
     const ingestEvent = async (event: ExternalConversationEvent, senderTabId?: number) => {

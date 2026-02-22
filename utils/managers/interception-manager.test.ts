@@ -119,10 +119,91 @@ describe('InterceptionManager', () => {
 
         manager.start();
 
-        expect(loggerSpies.info).toHaveBeenCalledWith('[i] API match ChatGPT');
+        expect(loggerSpies.debug).toHaveBeenCalledWith('[i] API match ChatGPT');
         expect((globalThis as any).__BLACKIYA_LOG_QUEUE__).toEqual([]);
 
         manager.stop();
+    });
+
+    it('should backfill a missing Grok user prompt node from prompt hint metadata', () => {
+        const captured: Array<{ id: string; data: any }> = [];
+        const manager = new InterceptionManager(
+            (id, data) => {
+                captured.push({ id, data });
+            },
+            {
+                window: windowInstance as any,
+                global: globalThis,
+            },
+        );
+
+        const conversationId = '2025624158701305984';
+        const userNodeId = '2025624159431098368';
+        const assistantNodeId = '2025624159431098369';
+
+        manager.updateAdapter({
+            name: 'Grok',
+            parseInterceptedData: () => ({
+                title: 'Grok Conversation',
+                create_time: 1771781169.271,
+                update_time: 1771781169.271,
+                mapping: {
+                    [`grok-com-root-${conversationId}`]: {
+                        id: `grok-com-root-${conversationId}`,
+                        message: null,
+                        parent: null,
+                        children: [userNodeId],
+                    },
+                    [userNodeId]: {
+                        id: userNodeId,
+                        message: null,
+                        parent: `grok-com-root-${conversationId}`,
+                        children: [assistantNodeId],
+                    },
+                    [assistantNodeId]: {
+                        id: assistantNodeId,
+                        parent: userNodeId,
+                        children: [],
+                        message: {
+                            id: assistantNodeId,
+                            author: { role: 'assistant', name: 'Grok', metadata: {} },
+                            create_time: 1771781169.271,
+                            update_time: null,
+                            content: { content_type: 'text', parts: ['assistant response'] },
+                            status: 'finished_successfully',
+                            end_turn: true,
+                            weight: 1,
+                            metadata: { sender: 'assistant', model: 'grok-3' },
+                            recipient: 'all',
+                            channel: null,
+                        },
+                    },
+                },
+                conversation_id: conversationId,
+                current_node: assistantNodeId,
+                moderation_results: [],
+                plugin_ids: null,
+                gizmo_id: null,
+                gizmo_type: null,
+                is_archived: false,
+                default_model_slug: 'grok-3',
+                safe_urls: [],
+                blocked_urls: [],
+            }),
+        } as any);
+
+        manager.ingestInterceptedData({
+            url: 'https://x.com/2/grok/add_response.json',
+            data: '{"ok":true}',
+            platform: 'Grok',
+            promptHint: 'What is the ruling on this issue?',
+        } as any);
+
+        expect(captured).toHaveLength(1);
+        const saved = manager.getConversation(conversationId);
+        expect(saved).toBeDefined();
+        expect(saved?.mapping[userNodeId]?.message?.author.role).toBe('user');
+        expect(saved?.mapping[userNodeId]?.message?.content.parts?.[0]).toBe('What is the ruling on this issue?');
     });
 
     it('should continue processing queued capture messages when one queued message throws', () => {
@@ -295,14 +376,14 @@ describe('InterceptionManager', () => {
         manager.flushQueuedMessages();
         (manager as any).processQueuedLogMessages();
         expect(captured).toEqual([]);
-        expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] missing-token');
+        expect(loggerSpies.debug).not.toHaveBeenCalledWith('[i] missing-token');
 
         setSessionToken('bk:test-interception-token');
         manager.flushQueuedMessages();
         expect(captured).toEqual(['queued-missing-token']);
 
         (manager as any).processPendingTokenRevalidationMessages();
-        expect(loggerSpies.info).toHaveBeenCalledWith('[i] missing-token');
+        expect(loggerSpies.debug).toHaveBeenCalledWith('[i] missing-token');
     });
 
     it('should cap queued messages pending token revalidation', () => {
@@ -402,7 +483,7 @@ describe('InterceptionManager', () => {
         (manager as any).processQueuedLogMessages();
 
         expect(captured).toEqual([]);
-        expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] wrong-token');
+        expect(loggerSpies.debug).not.toHaveBeenCalledWith('[i] wrong-token');
         expect(globalRef.__BLACKIYA_CAPTURE_QUEUE__).toEqual([]);
         expect(globalRef.__BLACKIYA_LOG_QUEUE__).toEqual([]);
     });
@@ -459,7 +540,7 @@ describe('InterceptionManager', () => {
             );
 
             expect(captured).toEqual([]);
-            expect(loggerSpies.info).not.toHaveBeenCalledWith('[i] live-missing-token');
+            expect(loggerSpies.debug).not.toHaveBeenCalledWith('[i] live-missing-token');
         } finally {
             manager.stop();
         }
