@@ -89,7 +89,7 @@ describe('warm-fetch', () => {
             globalThis.fetch = mock(() => Promise.reject(new Error('Network error'))) as any;
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
             expect(result).toBeFalse();
-            expect(logCalls.info.length).toBeGreaterThan(0);
+            expect(logCalls.debug.length).toBeGreaterThan(0);
         });
     });
 

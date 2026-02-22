@@ -402,6 +402,7 @@ describe('background external api hub', () => {
 
         await hub.ingestEvent(buildEvent('conv-1'), 1);
         await hub.ingestEvent(buildEvent('conv-2'), 1);
+        await hub.flushPersist();
 
         const persisted = quotaStorage.backing[EXTERNAL_CACHE_STORAGE_KEY] as
             | { latestConversationId: string | null; records: Array<{ conversation_id: string }> }

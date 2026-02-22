@@ -147,6 +147,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     let hydrationPromise: Promise<void> | null = null;
     let persistTimer: ReturnType<typeof setTimeout> | null = null;
     let persistInFlight: Promise<void> | null = null;
+    let persistRequestedWhileInFlight = false;
 
     const removeSubscriber = (port: ExternalPortLike) => {
         subscribers.delete(port);
@@ -233,13 +234,16 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
 
     const runPersistNow = async () => {
         if (persistInFlight) {
-            await persistInFlight;
+            persistRequestedWhileInFlight = true;
             return;
         }
-        persistInFlight = persist().finally(() => {
-            persistInFlight = null;
-        });
-        await persistInFlight;
+        do {
+            persistRequestedWhileInFlight = false;
+            persistInFlight = persist().finally(() => {
+                persistInFlight = null;
+            });
+            await persistInFlight;
+        } while (persistRequestedWhileInFlight);
     };
 
     const debouncedPersist = () => {
