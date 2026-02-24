@@ -12,6 +12,13 @@ describe('interceptor discovery helpers', () => {
         expect(safePathname('other')).toBe('/other');
     });
 
+    it('caps malformed fallback pathnames to 120 characters including leading slash', () => {
+        const long = `http://[${'x'.repeat(300)}`;
+        const derived = safePathname(long);
+        expect(derived.startsWith('/')).toBeTrue();
+        expect(derived.length).toBe(120);
+    });
+
     it('detects known platforms from hostname', () => {
         expect(detectPlatformFromHostname('chatgpt.com')).toBe('ChatGPT');
         expect(detectPlatformFromHostname('gemini.google.com')).toBe('Gemini');

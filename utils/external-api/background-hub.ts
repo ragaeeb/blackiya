@@ -11,6 +11,7 @@ import type {
 } from '@/utils/external-api/contracts';
 import {
     EXTERNAL_API_VERSION,
+    EXTERNAL_PUSH_EVENT_TYPES,
     EXTERNAL_EVENTS_PORT_NAME,
     isConversationDataLike,
     isExportMeta,
@@ -74,7 +75,8 @@ const isQuotaError = (error: unknown): boolean => {
 };
 
 const isExternalEventType = (value: unknown): value is ExternalConversationEvent['type'] =>
-    value === 'conversation.ready' || value === 'conversation.updated';
+    typeof value === 'string' &&
+    (EXTERNAL_PUSH_EVENT_TYPES as readonly string[]).includes(value);
 
 const isCachedConversationRecord = (value: unknown): value is CachedConversationRecord => {
     if (!isRecord(value)) {

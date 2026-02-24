@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { ConversationData } from '@/utils/types';
 import {
     EXTERNAL_API_VERSION,
+    EXTERNAL_PUSH_EVENT_TYPES,
     isExternalConversationEvent,
     isExternalInternalEventMessage,
     isExternalRequest,
@@ -197,5 +198,9 @@ describe('external-api/contracts', () => {
         expect(normalizeExternalProvider('Gemini')).toBe('gemini');
         expect(normalizeExternalProvider('Grok')).toBe('grok');
         expect(normalizeExternalProvider('Unknown Platform')).toBe('unknown');
+    });
+
+    it('should expose a single-source push event type registry', () => {
+        expect(EXTERNAL_PUSH_EVENT_TYPES).toEqual(['conversation.ready', 'conversation.updated']);
     });
 });

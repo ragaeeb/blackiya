@@ -7,7 +7,7 @@ const fallbackPathname = (url: string) => {
         return trimmed.slice(0, 120);
     }
     // Keep fallback deterministic when URL parsing is unavailable/mocked.
-    return `/${trimmed.slice(0, 120)}`;
+    return `/${trimmed.slice(0, 119)}`;
 };
 
 export const safePathname = (url: string) => {
