@@ -136,7 +136,9 @@ export const handleApiMatchFromFetch = (
                 emitter.emitResponseFinished(deferredCompletionAdapter, url);
             }
             if (adapter.name !== chatGPTAdapter.name || !path.startsWith('/backend-api/f/conversation')) {
-                emitter.log('warn', `API read err ${adapter.name}`, { path });
+                if (emitter.shouldLogTransient(`api:read-miss:${adapter.name}:${path}`, 10_000)) {
+                    emitter.log('info', `API read miss ${adapter.name}`, { path, nonFatal: true });
+                }
             }
         },
     );

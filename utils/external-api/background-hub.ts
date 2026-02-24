@@ -37,6 +37,8 @@ export type ExternalPortLike = {
 export type CachedConversationRecord = {
     conversation_id: string;
     provider: ExternalConversationEvent['provider'];
+    event_id?: string;
+    event_type?: ExternalConversationEvent['type'];
     payload: ConversationData;
     attempt_id?: string | null;
     capture_meta: ExternalConversationEvent['capture_meta'];
@@ -57,6 +59,7 @@ type ExternalApiHubDeps = {
     storageKey?: string;
     persistDebounceMs?: number;
     logger?: {
+        debug?: (message: string, data?: unknown) => void;
         warn: (message: string, data?: unknown) => void;
     };
 };
@@ -70,6 +73,9 @@ const isQuotaError = (error: unknown): boolean => {
     return normalized.includes('quota') || normalized.includes('quota_bytes');
 };
 
+const isExternalEventType = (value: unknown): value is ExternalConversationEvent['type'] =>
+    value === 'conversation.ready' || value === 'conversation.updated';
+
 const isCachedConversationRecord = (value: unknown): value is CachedConversationRecord => {
     if (!isRecord(value)) {
         return false;
@@ -80,6 +86,8 @@ const isCachedConversationRecord = (value: unknown): value is CachedConversation
             value.provider === 'gemini' ||
             value.provider === 'grok' ||
             value.provider === 'unknown') &&
+        (value.event_id === undefined || hasString(value.event_id)) &&
+        (value.event_type === undefined || isExternalEventType(value.event_type)) &&
         isConversationDataLike(value.payload) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
         isExportMeta(value.capture_meta) &&
@@ -293,28 +301,58 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     };
 
     const broadcast = (event: ExternalConversationEvent) => {
+        if (subscribers.size === 0) {
+            deps.logger?.debug?.('External hub broadcast skipped: no subscribers', {
+                conversationId: event.conversation_id,
+                eventType: event.type,
+                tabId: event.tab_id ?? null,
+            });
+            return;
+        }
+        let delivered = 0;
+        let dropped = 0;
         for (const port of [...subscribers]) {
             try {
                 port.postMessage(event);
+                delivered += 1;
             } catch {
                 subscribers.delete(port);
+                dropped += 1;
             }
         }
+        deps.logger?.debug?.('External hub broadcast complete', {
+            conversationId: event.conversation_id,
+            eventType: event.type,
+            tabId: event.tab_id ?? null,
+            subscriberCount: subscribers.size,
+            delivered,
+            dropped,
+        });
     };
 
     const addSubscriber = (port: ExternalPortLike): boolean => {
         if (port.name !== EXTERNAL_EVENTS_PORT_NAME) {
+            deps.logger?.warn('External hub rejected subscriber with invalid port name', { portName: port.name });
             try {
                 port.disconnect?.();
             } catch {}
             return false;
         }
         subscribers.add(port);
+        deps.logger?.debug?.('External hub subscriber connected', {
+            portName: port.name,
+            subscriberCount: subscribers.size,
+        });
         const disconnectHandler = () => {
             removeSubscriber(port);
             port.onDisconnect.removeListener?.(disconnectHandler);
+            deps.logger?.debug?.('External hub subscriber disconnected', {
+                portName: port.name,
+                subscriberCount: subscribers.size,
+            });
         };
         port.onDisconnect.addListener(disconnectHandler);
+        void replayLatestToSubscriber(port);
         return true;
     };
 
@@ -356,6 +394,56 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         return resolveCurrentLatestRecord();
     };
 
+    const buildReplayEvent = (record: CachedConversationRecord): ExternalConversationEvent => {
+        const replayEvent: ExternalConversationEvent = {
+            api: EXTERNAL_API_VERSION,
+            type: record.event_type ?? 'conversation.ready',
+            event_id: record.event_id ?? `replay:${record.conversation_id}:${record.ts}`,
+            ts: record.ts,
+            provider: record.provider,
+            conversation_id: record.conversation_id,
+            payload: record.payload,
+            attempt_id: record.attempt_id,
+            capture_meta: record.capture_meta,
+            content_hash: record.content_hash,
+        };
+        if (record.tab_id === undefined) {
+            return replayEvent;
+        }
+        return { ...replayEvent, tab_id: record.tab_id };
+    };
+
+    const replayLatestToSubscriber = async (port: ExternalPortLike) => {
+        await ensureHydrated();
+        if (!subscribers.has(port)) {
+            return;
+        }
+        const latestRecord = resolveCurrentLatestRecord();
+        if (!latestRecord) {
+            deps.logger?.debug?.('External hub replay skipped: no cached conversation', {
+                portName: port.name,
+                subscriberCount: subscribers.size,
+            });
+            return;
+        }
+        try {
+            const replayEvent = buildReplayEvent(latestRecord);
+            port.postMessage(replayEvent);
+            deps.logger?.debug?.('External hub replay delivered', {
+                conversationId: replayEvent.conversation_id,
+                eventType: replayEvent.type,
+                tabId: replayEvent.tab_id ?? null,
+                portName: port.name,
+            });
+        } catch {
+            removeSubscriber(port);
+            deps.logger?.debug?.('External hub replay failed; subscriber removed', {
+                portName: port.name,
+                subscriberCount: subscribers.size,
+            });
+        }
+    };
+
     const ingestEvent = async (event: ExternalConversationEvent, senderTabId?: number) => {
         await ensureHydrated();
         const resolvedTabId = event.tab_id ?? (typeof senderTabId === 'number' ? senderTabId : undefined);
@@ -365,6 +453,8 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         const record: CachedConversationRecord = {
             conversation_id: enrichedEvent.conversation_id,
             provider: enrichedEvent.provider,
+            event_id: enrichedEvent.event_id,
+            event_type: enrichedEvent.type,
             payload: enrichedEvent.payload,
             attempt_id: enrichedEvent.attempt_id,
             capture_meta: enrichedEvent.capture_meta,
@@ -374,6 +464,14 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         };
         setBoundedMapValue(recordsByConversation, enrichedEvent.conversation_id, record, maxCachedConversations);
         latestConversationId = enrichedEvent.conversation_id;
+        deps.logger?.debug?.('External hub ingested event', {
+            conversationId: enrichedEvent.conversation_id,
+            eventType: enrichedEvent.type,
+            tabId: enrichedEvent.tab_id ?? null,
+            provider: enrichedEvent.provider,
+            captureSource: enrichedEvent.capture_meta.captureSource,
+            completeness: enrichedEvent.capture_meta.completeness,
+        });
         debouncedPersist();
         broadcast(enrichedEvent);
     };

@@ -23,7 +23,7 @@ import {
 } from '@/utils/sfe/probe-lease-protocol';
 import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 
-type BackgroundLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>;
+type BackgroundLogger = Pick<typeof logger, 'debug' | 'info' | 'warn' | 'error'>;
 type BackgroundSender = { tab?: { url?: string; id?: number } };
 
 const isLogContext = (value: unknown): value is LogEntry['context'] => {
@@ -77,9 +77,26 @@ const handleGenericBackgroundMessage = (
 export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDeps) => {
     return (message: unknown, sender: BackgroundSender, sendResponse: (response: unknown) => void) => {
         if (isExternalInternalEventMessage(message)) {
-            void deps.externalApiHub.ingestEvent(message.event, sender.tab?.id).catch((error) => {
-                deps.logger.error('Failed to ingest external API event in background', error);
+            const event = message.event;
+            deps.logger.debug?.('External event internal message received', {
+                conversationId: event.conversation_id,
+                eventType: event.type,
+                eventId: event.event_id,
+                senderTabId: sender.tab?.id ?? null,
             });
+            void deps.externalApiHub
+                .ingestEvent(event, sender.tab?.id)
+                .then(() => {
+                    deps.logger.debug?.('External event internal message ingested', {
+                        conversationId: event.conversation_id,
+                        eventType: event.type,
+                        eventId: event.event_id,
+                        senderTabId: sender.tab?.id ?? null,
+                    });
+                })
+                .catch((error) => {
+                    deps.logger.error('Failed to ingest external API event in background', error);
+                });
             sendResponse({ success: true });
             return true;
         }

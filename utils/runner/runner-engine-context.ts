@@ -241,6 +241,7 @@ export type EngineCtx = {
         readinessMode: ReadinessDecision['mode'];
         captureMeta: ExportMeta;
         attemptId: string | null;
+        allowWhenActionsBlocked?: boolean;
     }) => void;
     ingestSfeLifecycleFromWirePhase: (
         phase: ResponseLifecycleMessage['phase'],
@@ -342,8 +343,13 @@ export const emitExternalConversationEvent = (
         readinessMode: ReadinessDecision['mode'];
         captureMeta: ExportMeta;
         attemptId: string | null;
+        allowWhenActionsBlocked?: boolean;
     },
 ) => {
+    const shouldBlockActions = args.allowWhenActionsBlocked
+        ? false
+        : shouldBlockActionsForGeneration(ctx, args.conversationId);
+
     const event = maybeBuildExternalConversationEvent({
         conversationId: args.conversationId,
         data: args.data,
@@ -351,26 +357,51 @@ export const emitExternalConversationEvent = (
         readinessMode: args.readinessMode,
         captureMeta: args.captureMeta,
         attemptId: args.attemptId,
-        shouldBlockActions: shouldBlockActionsForGeneration(ctx, args.conversationId),
+        shouldBlockActions,
         evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
         state: ctx.externalEventDispatchState,
     });
     if (!event) {
         return;
     }
+    logger.debug('External event build attempt', {
+        conversationId: args.conversationId,
+        readinessMode: args.readinessMode,
+        captureSource: args.captureMeta.captureSource,
+        fidelity: args.captureMeta.fidelity,
+        completeness: args.captureMeta.completeness,
+        attemptId: args.attemptId,
+        shouldBlockActions,
+        allowWhenActionsBlocked: !!args.allowWhenActionsBlocked,
+    });
+    logger.debug('External event send start', {
+        conversationId: event.conversation_id,
+        eventType: event.type,
+        eventId: event.event_id,
+        contentHash: event.content_hash,
+    });
     void browser.runtime
         .sendMessage(buildExternalInternalEventMessage(event))
         .then(() => {
             markExternalConversationEventDispatched(
                 ctx.externalEventDispatchState,
                 event.conversation_id,
+                event.attempt_id,
                 event.content_hash,
+                event.payload.title,
             );
+            logger.debug('External event send success', {
+                conversationId: event.conversation_id,
+                eventType: event.type,
+                eventId: event.event_id,
+                contentHash: event.content_hash,
+            });
         })
         .catch((error) => {
-            logger.debug('Failed to send external conversation event to background', {
+            logger.debug('External event send failed', {
                 conversationId: event.conversation_id,
                 type: event.type,
+                eventId: event.event_id,
                 error,
             });
         });

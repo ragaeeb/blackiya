@@ -18,6 +18,7 @@ describe('background message handler', () => {
             ingestEvent: (event: ExternalConversationEvent, senderTabId?: number) => Promise<void>;
         };
         logger: {
+            debug?: (...args: unknown[]) => void;
             info: (...args: unknown[]) => void;
             warn: (...args: unknown[]) => void;
             error: (...args: unknown[]) => void;
@@ -26,6 +27,7 @@ describe('background message handler', () => {
     let externalMessageHandlerFactory: (deps: {
         externalApiHub: { handleExternalRequest: (request: unknown) => Promise<unknown> };
         logger: {
+            debug?: (...args: unknown[]) => void;
             info: (...args: unknown[]) => void;
             warn: (...args: unknown[]) => void;
             error: (...args: unknown[]) => void;
@@ -86,6 +88,7 @@ describe('background message handler', () => {
                 ingestEvent: async () => {},
             },
             logger: {
+                debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {},
@@ -184,6 +187,7 @@ describe('background message handler', () => {
                 ingestEvent: async () => {},
             },
             logger: {
+                debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {},
@@ -233,6 +237,7 @@ describe('background message handler', () => {
                 ingestEvent: async () => {},
             },
             logger: {
+                debug: () => {},
                 info: () => {},
                 warn: () => {
                     warned = true;
@@ -262,6 +267,7 @@ describe('background message handler', () => {
             now: () => now,
         });
         const seen: Array<{ event: ExternalConversationEvent; senderTabId?: number }> = [];
+        const debugCalls: Array<{ message: unknown; data: unknown }> = [];
         const handler = handlerFactory({
             saveLog: async () => {},
             leaseCoordinator: coordinator,
@@ -271,6 +277,9 @@ describe('background message handler', () => {
                 },
             },
             logger: {
+                debug: (message, data) => {
+                    debugCalls.push({ message, data });
+                },
                 info: () => {},
                 warn: () => {},
                 error: () => {},
@@ -327,6 +336,8 @@ describe('background message handler', () => {
         expect(seen).toHaveLength(1);
         expect(seen[0]?.senderTabId).toBe(77);
         expect(seen[0]?.event.conversation_id).toBe('conv-1');
+        expect(debugCalls.some((entry) => entry.message === 'External event internal message received')).toBeTrue();
+        expect(debugCalls.some((entry) => entry.message === 'External event internal message ingested')).toBeTrue();
     });
 
     it('routes external requests through the external message handler', async () => {
@@ -335,6 +346,7 @@ describe('background message handler', () => {
                 handleExternalRequest: async (request) => ({ ok: true, request }),
             },
             logger: {
+                debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {},
@@ -360,6 +372,7 @@ describe('background message handler', () => {
                 },
             },
             logger: {
+                debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {

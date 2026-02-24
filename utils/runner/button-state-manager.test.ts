@@ -210,10 +210,21 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setSaveButtonMode).not.toHaveBeenCalled();
         });
 
-        it('should exit and snapshot if button does not exist', () => {
+        it('should still emit external canonical-ready event when button is not injected', () => {
             deps.buttonManager.exists = () => false;
             refreshButtonState('123', deps, lastButtonStateLog);
-            expect(deps.buttonManager.setSaveButtonMode).not.toHaveBeenCalled();
+            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
+                conversationId: '123',
+                data: { conversation_id: '123' },
+                readinessMode: 'canonical_ready',
+                captureMeta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                attemptId: 'attempt-1',
+                allowWhenActionsBlocked: true,
+            });
         });
 
         it('should clear UI if no conversation is found in URL and no arg provided', () => {
@@ -228,6 +239,18 @@ describe('button-state-manager', () => {
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('0.6');
+            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
+                conversationId: '123',
+                data: { conversation_id: '123' },
+                readinessMode: 'canonical_ready',
+                captureMeta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                attemptId: 'attempt-1',
+                allowWhenActionsBlocked: true,
+            });
         });
 
         it('should enable save button in degraded mode', () => {
@@ -266,6 +289,7 @@ describe('button-state-manager', () => {
                     completeness: 'complete',
                 },
                 attemptId: 'attempt-1',
+                allowWhenActionsBlocked: true,
             });
         });
 

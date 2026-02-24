@@ -149,6 +149,10 @@ const createFakePort = (name: string): ExternalPortLike & { disconnectNow: () =>
     return port;
 };
 
+const flushAsyncTasks = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
 describe('background external api hub', () => {
     let storage: ExternalStorageLike & { backing: Record<string, unknown> };
 
@@ -170,6 +174,62 @@ describe('background external api hub', () => {
                 type: 'conversation.ready',
                 conversation_id: 'conv-1',
                 tab_id: 42,
+            }),
+        );
+    });
+
+    it('should replay latest cached event when subscriber connects after broadcast was missed', async () => {
+        const hub = createExternalApiHub({ storage, now: () => 1_250, persistDebounceMs: 0 });
+        await hub.ingestEvent(buildEvent('conv-replay'), 42);
+
+        const replayPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(replayPort);
+        await flushAsyncTasks();
+
+        expect(replayPort.postMessage).toHaveBeenCalledTimes(1);
+        expect(replayPort.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.ready',
+                event_id: 'evt-conv-replay-conversation.ready',
+                conversation_id: 'conv-replay',
+                tab_id: 42,
+            }),
+        );
+    });
+
+    it('should replay legacy cached records without event metadata using a stable synthesized event id', async () => {
+        storage.backing[EXTERNAL_CACHE_STORAGE_KEY] = {
+            latestConversationId: 'conv-legacy',
+            records: [
+                {
+                    conversation_id: 'conv-legacy',
+                    provider: 'chatgpt',
+                    payload: buildConversation('conv-legacy'),
+                    attempt_id: 'attempt-legacy',
+                    capture_meta: {
+                        captureSource: 'canonical_api',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:legacy',
+                    ts: 10,
+                },
+            ],
+        };
+
+        const hub = createExternalApiHub({ storage, now: () => 1_300, persistDebounceMs: 0 });
+        const replayPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(replayPort);
+        await flushAsyncTasks();
+
+        expect(replayPort.postMessage).toHaveBeenCalledTimes(1);
+        expect(replayPort.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.ready',
+                event_id: 'replay:conv-legacy:10',
+                conversation_id: 'conv-legacy',
             }),
         );
     });

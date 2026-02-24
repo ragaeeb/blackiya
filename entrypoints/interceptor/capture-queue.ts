@@ -39,7 +39,7 @@ const maybeWarnQueueDrop = (queue: 'log' | 'capture' | 'history', dropped: numbe
     stats.lastWarnAtByQueue[queue] = now;
     const totalDropped =
         queue === 'log' ? stats.logDropped : queue === 'capture' ? stats.captureDropped : stats.historyDropped;
-    console.warn(`[Blackiya] ${queue} queue dropped ${dropped} message(s) to enforce max size ${maxSize}`, {
+    console.debug(`[Blackiya] ${queue} queue dropped ${dropped} message(s) to enforce max size ${maxSize}`, {
         queue,
         dropped,
         totalDropped,

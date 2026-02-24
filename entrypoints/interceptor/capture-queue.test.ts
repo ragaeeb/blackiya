@@ -45,9 +45,9 @@ describe('capture-queue', () => {
         });
 
         it('should track dropped log entries in queue-drop stats', () => {
-            const warn = mock(() => {});
-            const originalWarn = console.warn;
-            console.warn = warn;
+            const debug = mock(() => {});
+            const originalDebug = console.debug;
+            console.debug = debug;
             try {
                 for (let i = 0; i < 110; i++) {
                     appendToLogQueue({
@@ -58,9 +58,9 @@ describe('capture-queue', () => {
                     } as any);
                 }
                 expect(getCaptureQueueDropStats().logDropped).toBe(10);
-                expect(warn).toHaveBeenCalledTimes(1);
+                expect(debug).toHaveBeenCalledTimes(1);
             } finally {
-                console.warn = originalWarn;
+                console.debug = originalDebug;
             }
         });
     });
@@ -95,9 +95,9 @@ describe('capture-queue', () => {
         });
 
         it('should track dropped capture/history entries in queue-drop stats', () => {
-            const warn = mock(() => {});
-            const originalWarn = console.warn;
-            console.warn = warn;
+            const debug = mock(() => {});
+            const originalDebug = console.debug;
+            console.debug = debug;
             try {
                 for (let i = 0; i < 60; i++) {
                     appendToCaptureQueue({ url: 'http', platform: 'test', data: `${i}`, __blackiyaToken: 't' } as any);
@@ -105,9 +105,9 @@ describe('capture-queue', () => {
                 const stats = getCaptureQueueDropStats();
                 expect(stats.captureDropped).toBe(10);
                 expect(stats.historyDropped).toBe(30);
-                expect(warn.mock.calls.length).toBeGreaterThan(0);
+                expect(debug.mock.calls.length).toBeGreaterThan(0);
             } finally {
-                console.warn = originalWarn;
+                console.debug = originalDebug;
             }
         });
 
