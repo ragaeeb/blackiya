@@ -1,3 +1,10 @@
+## [2.4.2](https://github.com/ragaeeb/blackiya/compare/v2.4.1...v2.4.2) (2026-02-24)
+
+
+### Bug Fixes
+
+* **events:** Fix long running events providing partial conversations ([#39](https://github.com/ragaeeb/blackiya/issues/39)) ([c1a9ac2](https://github.com/ragaeeb/blackiya/commit/c1a9ac2ce7bc0bc2099aed66fa7d541054dcc791))
+
 ## [2.4.1](https://github.com/ragaeeb/blackiya/compare/v2.4.0...v2.4.1) (2026-02-22)
 
 
