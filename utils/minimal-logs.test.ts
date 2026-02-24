@@ -262,6 +262,90 @@ describe('Minimal Debug Report', () => {
         expect(report).toContain('Export title decision');
     });
 
+    it('should retain external event pipeline debug lines in token-lean report', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] API match Gemini',
+                context: 'content',
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External event build attempt',
+                context: 'content',
+                data: [{ conversationId: 'cf069aa3069b7861', readinessMode: 'canonical_ready' }],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External event send start',
+                context: 'content',
+                data: [{ conversationId: 'cf069aa3069b7861', eventType: 'conversation.ready' }],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External event send success',
+                context: 'content',
+                data: [{ conversationId: 'cf069aa3069b7861', eventType: 'conversation.ready' }],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('External event build attempt');
+        expect(report).toContain('External event send start');
+        expect(report).toContain('External event send success');
+    });
+
+    it('should retain background external hub delivery diagnostics in token-lean report', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External event internal message received',
+                context: 'background',
+                data: [{ conversationId: 'cf069aa3069b7861', eventId: 'evt-1' }],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External event internal message ingested',
+                context: 'background',
+                data: [{ conversationId: 'cf069aa3069b7861', eventId: 'evt-1' }],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External hub ingested event',
+                context: 'background',
+                data: [{ conversationId: 'cf069aa3069b7861', eventType: 'conversation.ready' }],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External hub broadcast complete',
+                context: 'background',
+                data: [{ conversationId: 'cf069aa3069b7861', delivered: 1, dropped: 0 }],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                message: 'External hub broadcast skipped: no subscribers',
+                context: 'background',
+                data: [{ conversationId: 'cf069aa3069b7862' }],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('External event internal message received');
+        expect(report).toContain('External event internal message ingested');
+        expect(report).toContain('External hub ingested event');
+        expect(report).toContain('External hub broadcast complete');
+        expect(report).toContain('External hub broadcast skipped: no subscribers');
+    });
+
     it('should synthesize sessions when start markers are missing but conversation IDs exist', () => {
         const logs: LogEntry[] = [
             {

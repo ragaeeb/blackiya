@@ -9,6 +9,14 @@ describe('interceptor discovery helpers', () => {
     it('derives safe pathname and falls back on malformed URL input', () => {
         expect(safePathname('https://chatgpt.com/backend-api/f/conversation?x=1')).toBe('/backend-api/f/conversation');
         expect(safePathname('not-a-valid-url')).toContain('not-a-valid-url');
+        expect(safePathname('other')).toBe('/other');
+    });
+
+    it('caps malformed fallback pathnames to 120 characters including leading slash', () => {
+        const long = `http://[${'x'.repeat(300)}`;
+        const derived = safePathname(long);
+        expect(derived.startsWith('/')).toBeTrue();
+        expect(derived.length).toBe(120);
     });
 
     it('detects known platforms from hostname', () => {

@@ -6,10 +6,11 @@ import type { ConversationData } from '@/utils/types';
 export const EXTERNAL_API_VERSION = 'blackiya.events.v1';
 export const EXTERNAL_EVENTS_PORT_NAME = EXTERNAL_API_VERSION;
 export const EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE = 'BLACKIYA_EXTERNAL_EVENT';
+export const EXTERNAL_PUSH_EVENT_TYPES = ['conversation.ready', 'conversation.updated'] as const;
 
 export type ExternalApiVersion = typeof EXTERNAL_API_VERSION;
 export type ExternalProvider = 'chatgpt' | 'gemini' | 'grok' | 'unknown';
-export type ExternalPushEventType = 'conversation.ready' | 'conversation.updated';
+export type ExternalPushEventType = (typeof EXTERNAL_PUSH_EVENT_TYPES)[number];
 export type ExternalPullFormat = 'original' | 'common';
 
 export type ExternalConversationEvent = {
@@ -94,7 +95,7 @@ const isExternalProvider = (value: unknown): value is ExternalProvider =>
     value === 'chatgpt' || value === 'gemini' || value === 'grok' || value === 'unknown';
 
 const isExternalPushEventType = (value: unknown): value is ExternalPushEventType =>
-    value === 'conversation.ready' || value === 'conversation.updated';
+    typeof value === 'string' && (EXTERNAL_PUSH_EVENT_TYPES as readonly string[]).includes(value);
 
 const isExternalPullFormat = (value: unknown): value is ExternalPullFormat =>
     value === 'original' || value === 'common';

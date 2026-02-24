@@ -110,6 +110,7 @@ Background owns the public API surface and provides:
 
 Notes:
 - Background caches recent canonical payloads and rebroadcasts to subscribers.
+- Runner emits a follow-up `conversation.updated` when a previously generic title upgrades to a specific title, even if canonical `content_hash` is unchanged. This upgrade emission is bounded to once per `conversationId + attemptId`.
 - Legacy page-global API (`window.__blackiya`) and `BLACKIYA_GET_JSON_*` bridge are removed.
 
 ## 4) Lifecycle and Readiness Model

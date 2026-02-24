@@ -82,7 +82,7 @@ export const geminiAdapter: LLMPlatform = {
         }
 
         try {
-            logger.info('[Blackiya/Gemini] Attempting to parse response from:', url);
+            logger.debug('[Blackiya/Gemini] Attempting to parse response from:', url);
             const rpcResults = parseBatchexecuteResponse(data);
             hydrateGeminiTitleCandidatesFromRpcResults(
                 rpcResults,
@@ -93,7 +93,7 @@ export const geminiAdapter: LLMPlatform = {
 
             const conversationRpc = findConversationRpc(rpcResults, this.isConversationPayload);
             if (!conversationRpc) {
-                logger.info('[Blackiya/Gemini] No RPC result with conversation data found');
+                logger.debug('[Blackiya/Gemini] No RPC result with conversation data found');
                 return null;
             }
 

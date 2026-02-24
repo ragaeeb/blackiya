@@ -153,7 +153,17 @@ const isCriticalLine = (line: string): boolean => {
         line.includes('title resolved from stream') ||
         line.includes('Title fallback check') ||
         line.includes('Title resolved from DOM fallback') ||
-        line.includes('Export title decision')
+        line.includes('Export title decision') ||
+        line.includes('External event build attempt') ||
+        line.includes('External event suppressed') ||
+        line.includes('External event send start') ||
+        line.includes('External event send success') ||
+        line.includes('External event send failed') ||
+        line.includes('External event internal message received') ||
+        line.includes('External event internal message ingested') ||
+        line.includes('External hub ingested event') ||
+        line.includes('External hub broadcast complete') ||
+        line.includes('External hub broadcast skipped: no subscribers')
     );
 };
 
@@ -191,6 +201,16 @@ const pickFallbackDiagnosticLines = (logs: LogEntry[]): string[] => {
         'Title fallback check',
         'Title resolved from DOM fallback',
         'Export title decision',
+        'External event build attempt',
+        'External event suppressed',
+        'External event send start',
+        'External event send success',
+        'External event send failed',
+        'External event internal message received',
+        'External event internal message ingested',
+        'External hub ingested event',
+        'External hub broadcast complete',
+        'External hub broadcast skipped: no subscribers',
     ];
 
     const picked = logs

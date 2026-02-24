@@ -6,9 +6,9 @@ describe('fetch-wrapper', () => {
         const response = new Response('ok', { status: 200 });
         const originalFetch = ((..._args: Parameters<typeof fetch>) =>
             Promise.resolve(response)) as unknown as typeof fetch;
-        const originalConsoleError = console.error;
+        const originalConsoleDebug = console.debug;
         const logged: unknown[] = [];
-        console.error = (...args: unknown[]) => {
+        console.debug = (...args: unknown[]) => {
             logged.push(args);
         };
 
@@ -21,7 +21,7 @@ describe('fetch-wrapper', () => {
             expect(result.status).toBe(200);
             expect(logged.length).toBeGreaterThan(0);
         } finally {
-            console.error = originalConsoleError;
+            console.debug = originalConsoleDebug;
         }
     });
 

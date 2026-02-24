@@ -125,6 +125,57 @@ describe('InterceptionManager', () => {
         manager.stop();
     });
 
+    it('should treat Gemini batchexecute parse misses as metadata-only without warning noise', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.updateAdapter({
+            name: 'Gemini',
+            parseInterceptedData: () => null,
+        } as any);
+
+        manager.ingestInterceptedData({
+            url: '/_/BardChatUi/data/batchexecute?rpcids=aPya6c&source-path=%2Fapp%2Fabc',
+            data: '{"ok":true}',
+            platform: 'Gemini',
+        } as any);
+
+        const parseMissWarned = loggerSpies.warn.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Failed to parse conversation ID from intercepted data',
+        );
+        expect(parseMissWarned).toBeFalse();
+
+        const metadataLogged = loggerSpies.debug.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Metadata-only response (no messages yet)',
+        );
+        expect(metadataLogged).toBeTrue();
+    });
+
+    it('should keep warning on non-aux parse misses', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.updateAdapter({
+            name: 'Gemini',
+            parseInterceptedData: () => null,
+        } as any);
+
+        manager.ingestInterceptedData({
+            url: 'https://gemini.google.com/unexpected-endpoint',
+            data: '{"ok":true}',
+            platform: 'Gemini',
+        } as any);
+
+        const parseMissWarned = loggerSpies.warn.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Failed to parse conversation ID from intercepted data',
+        );
+        expect(parseMissWarned).toBeTrue();
+    });
+
     it('should backfill a missing Grok user prompt node from prompt hint metadata', () => {
         const captured: Array<{ id: string; data: any }> = [];
         const manager = new InterceptionManager(

@@ -56,6 +56,7 @@ export type ButtonStateManagerDeps = {
         readinessMode: ReadinessDecision['mode'];
         captureMeta: ExportMeta;
         attemptId: string | null;
+        allowWhenActionsBlocked?: boolean;
     }) => void;
 
     buttonManager: {
@@ -202,10 +203,6 @@ export const refreshButtonState = (
     if (!conversationId) {
         return;
     }
-    if (shouldDisableButtonActions(conversationId, deps)) {
-        applyDisabledButtonState(conversationId, deps, lastButtonStateLog);
-        return;
-    }
 
     const cached = deps.getConversation(conversationId);
     const captureMeta = deps.captureMetaByConversation.get(conversationId) ?? {
@@ -223,8 +220,8 @@ export const refreshButtonState = (
     const hasData = isCanonicalReady || isDegraded;
     const attemptId = deps.peekAttemptId(conversationId);
 
-    applyActionStateFromDecision(isCanonicalReady, isDegraded, deps);
-
+    // External subscribers should receive canonical-ready events even when
+    // UI actions remain disabled due an in-flight lifecycle state.
     if (isCanonicalReady && cached) {
         deps.emitExternalConversationEvent({
             conversationId,
@@ -232,8 +229,16 @@ export const refreshButtonState = (
             readinessMode: decision.mode,
             captureMeta,
             attemptId,
+            allowWhenActionsBlocked: true,
         });
     }
+
+    if (shouldDisableButtonActions(conversationId, deps)) {
+        applyDisabledButtonState(conversationId, deps, lastButtonStateLog);
+        return;
+    }
+
+    applyActionStateFromDecision(isCanonicalReady, isDegraded, deps);
 
     const opacity = hasData ? '1' : '0.6';
     deps.buttonManager.setOpacity(opacity);
@@ -283,9 +288,6 @@ const resolveRefreshConversationId = (
         return null;
     }
     const conversationId = forConversationId || adapter.extractConversationId(window.location.href);
-    if (!deps.buttonManager.exists()) {
-        return null;
-    }
     if (!conversationId) {
         resetButtonStateForNoConversation(deps);
         return null;

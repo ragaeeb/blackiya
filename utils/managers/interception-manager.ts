@@ -383,7 +383,7 @@ export class InterceptionManager {
     }
 
     private handleInterceptedData(message: any) {
-        logger.info('Intercepted payload received', {
+        logger.debug('Intercepted payload received', {
             platform: this.currentAdapter?.name ?? 'unknown',
             size: typeof message.data === 'string' ? message.data.length : 0,
         });
@@ -420,7 +420,7 @@ export class InterceptionManager {
                 };
 
                 if (level === 'info') {
-                    logger.info('Metadata-only response (no messages yet)', payload);
+                    logger.debug('Metadata-only response (no messages yet)', payload);
                 } else {
                     logger.warn('Failed to parse conversation ID from intercepted data', payload);
                 }
@@ -606,7 +606,12 @@ export class InterceptionManager {
             return 'warn';
         }
 
+        const isGeminiAuxMiss =
+            url.includes('/_/BardChatUi/data/batchexecute') ||
+            url.includes('/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate');
+
         const isExpectedAuxMiss =
+            isGeminiAuxMiss ||
             url.includes('/rest/app-chat/conversations_v2/') ||
             url.includes('/rest/app-chat/conversations/new') ||
             (url.includes('/rest/app-chat/conversations/') && url.includes('/response-node'));

@@ -34,6 +34,11 @@ const buildConversation = (conversationId: string): ConversationData => ({
     blocked_urls: [],
 });
 
+const buildConversationWithTitle = (conversationId: string, title: string): ConversationData => ({
+    ...buildConversation(conversationId),
+    title,
+});
+
 describe('runner/external-event-dispatch', () => {
     it('should emit conversation.ready once for first canonical-ready sample', () => {
         const state = createExternalEventDispatcherState();
@@ -119,7 +124,13 @@ describe('runner/external-event-dispatch', () => {
         if (!first) {
             throw new Error('Expected first event');
         }
-        markExternalConversationEventDispatched(state, 'conv-1', first.content_hash);
+        markExternalConversationEventDispatched(
+            state,
+            'conv-1',
+            first.attempt_id,
+            first.content_hash,
+            first.payload.title,
+        );
         expect(maybeBuildExternalConversationEvent(baseArgs)).toBeNull();
     });
 
@@ -149,7 +160,13 @@ describe('runner/external-event-dispatch', () => {
         if (!first) {
             throw new Error('Expected first event');
         }
-        markExternalConversationEventDispatched(state, 'conv-1', first.content_hash);
+        markExternalConversationEventDispatched(
+            state,
+            'conv-1',
+            first.attempt_id,
+            first.content_hash,
+            first.payload.title,
+        );
 
         const second = maybeBuildExternalConversationEvent({
             conversationId: 'conv-1',
@@ -256,7 +273,13 @@ describe('runner/external-event-dispatch', () => {
         if (!first) {
             throw new Error('Expected first event');
         }
-        markExternalConversationEventDispatched(state, 'conv-1', first.content_hash);
+        markExternalConversationEventDispatched(
+            state,
+            'conv-1',
+            first.attempt_id,
+            first.content_hash,
+            first.payload.title,
+        );
 
         const second = maybeBuildExternalConversationEvent({
             conversationId: 'conv-2',
@@ -282,7 +305,13 @@ describe('runner/external-event-dispatch', () => {
         if (!second) {
             throw new Error('Expected second event');
         }
-        markExternalConversationEventDispatched(state, 'conv-2', second.content_hash);
+        markExternalConversationEventDispatched(
+            state,
+            'conv-2',
+            second.attempt_id,
+            second.content_hash,
+            second.payload.title,
+        );
 
         const third = maybeBuildExternalConversationEvent({
             conversationId: 'conv-3',
@@ -308,11 +337,164 @@ describe('runner/external-event-dispatch', () => {
         if (!third) {
             throw new Error('Expected third event');
         }
-        markExternalConversationEventDispatched(state, 'conv-3', third.content_hash);
+        markExternalConversationEventDispatched(
+            state,
+            'conv-3',
+            third.attempt_id,
+            third.content_hash,
+            third.payload.title,
+        );
 
         expect(state.byConversation.has('conv-1')).toBeFalse();
         expect(state.byConversation.has('conv-2')).toBeTrue();
         expect(state.byConversation.has('conv-3')).toBeTrue();
+    });
+
+    it('should emit one conversation.updated when title upgrades from generic to specific on unchanged hash', () => {
+        const state = createExternalEventDispatcherState();
+        const first = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversationWithTitle('conv-1', 'New chat'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-1',
+        });
+        expect(first?.type).toBe('conversation.ready');
+        if (!first) {
+            throw new Error('Expected first event');
+        }
+        markExternalConversationEventDispatched(
+            state,
+            'conv-1',
+            first.attempt_id,
+            first.content_hash,
+            first.payload.title,
+        );
+
+        const second = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversationWithTitle('conv-1', 'Specific upgraded title'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 124,
+            createEventId: () => 'evt-2',
+        });
+
+        expect(second?.type).toBe('conversation.updated');
+        expect(second?.content_hash).toBe('hash:1');
+    });
+
+    it('should emit title-upgrade conversation.updated only once per attempt', () => {
+        const state = createExternalEventDispatcherState();
+        const first = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversationWithTitle('conv-1', 'New chat'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-1',
+        });
+        if (!first) {
+            throw new Error('Expected first event');
+        }
+        markExternalConversationEventDispatched(
+            state,
+            'conv-1',
+            first.attempt_id,
+            first.content_hash,
+            first.payload.title,
+        );
+
+        const second = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversationWithTitle('conv-1', 'Specific upgraded title'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 124,
+            createEventId: () => 'evt-2',
+        });
+        if (!second) {
+            throw new Error('Expected second event');
+        }
+        markExternalConversationEventDispatched(
+            state,
+            'conv-1',
+            second.attempt_id,
+            second.content_hash,
+            second.payload.title,
+        );
+
+        const third = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversationWithTitle('conv-1', 'Specific upgraded title'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:1',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 125,
+            createEventId: () => 'evt-3',
+        });
+
+        expect(third).toBeNull();
     });
 
     it('should build internal background message wrapper for emitted event', () => {
