@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/ragaeeb/blackiya/compare/v2.4.2...v2.5.0) (2026-02-27)
+
+
+### Features
+
+* **overlay:** Add new debug overlay toast for events ([6e4780c](https://github.com/ragaeeb/blackiya/commit/6e4780cd8b69f09aca1cf6146e47a584630300de))
+
 ## [2.4.2](https://github.com/ragaeeb/blackiya/compare/v2.4.1...v2.4.2) (2026-02-24)
 
 
