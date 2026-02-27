@@ -73,6 +73,22 @@ describe('runtime-settings', () => {
             expect(deps.setStreamDumpEnabled).toHaveBeenCalledWith(true);
             expect(deps.emitStreamDumpConfig).toHaveBeenCalled();
         });
+
+        it('should call setStreamDumpEnabled(false) and emitStreamDumpConfig when storage read fails', async () => {
+            const deps = {
+                setStreamDumpEnabled: mock(() => {}),
+                emitStreamDumpConfig: mock(() => {}),
+            };
+            const { browser } = await import('wxt/browser');
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+                throw new Error('storage read error');
+            });
+
+            await loadStreamDumpSetting(deps);
+
+            expect(deps.setStreamDumpEnabled).toHaveBeenCalledWith(false);
+            expect(deps.emitStreamDumpConfig).toHaveBeenCalled();
+        });
     });
 
     describe('createStorageChangeListener', () => {
@@ -110,24 +126,6 @@ describe('runtime-settings', () => {
             expect(deps.removeStreamProbePanel).toHaveBeenCalled();
             expect(deps.setSfeEnabled).toHaveBeenCalledWith(false);
             expect(deps.refreshButtonState).toHaveBeenCalledWith('conv-1');
-        });
-    });
-
-    describe('loadStreamDumpSetting', () => {
-        it('should call setStreamDumpEnabled(false) and emitStreamDumpConfig when storage read fails', async () => {
-            const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
-            };
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
-                throw new Error('storage read error');
-            });
-
-            await loadStreamDumpSetting(deps);
-
-            expect(deps.setStreamDumpEnabled).toHaveBeenCalledWith(false);
-            expect(deps.emitStreamDumpConfig).toHaveBeenCalled();
         });
     });
 

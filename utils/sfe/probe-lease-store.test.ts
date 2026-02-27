@@ -122,6 +122,7 @@ describe('probe-lease-store', () => {
         it('should return a SessionStorageProbeLeaseStore when browser.storage.session is available', async () => {
             // Provide a minimal browser.storage.session in the global scope
             const stored: Record<string, unknown> = {};
+            const originalBrowser = (globalThis as any).browser;
             const fakeBrowser = {
                 storage: {
                     session: {
@@ -138,10 +139,16 @@ describe('probe-lease-store', () => {
             (globalThis as any).browser = fakeBrowser;
             try {
                 const store = createProbeLeaseStore();
+                expect(store).toBeInstanceOf(SessionStorageProbeLeaseStore);
                 await store.set('testKey', 'testVal');
+                expect(stored).toEqual({ testKey: 'testVal' });
                 expect(await store.get('testKey')).toBe('testVal');
             } finally {
-                delete (globalThis as any).browser;
+                if (originalBrowser === undefined) {
+                    delete (globalThis as any).browser;
+                } else {
+                    (globalThis as any).browser = originalBrowser;
+                }
             }
         });
 
@@ -149,15 +156,14 @@ describe('probe-lease-store', () => {
             const originalBrowser = (globalThis as any).browser;
             delete (globalThis as any).browser;
             try {
-                // createProbeLeaseStore accesses browser.storage?.session — if browser itself
-                // is undefined it throws. Wrap in try/catch to verify InMemory fallback path.
                 const store = createProbeLeaseStore();
+                expect(store).toBeInstanceOf(InMemoryProbeLeaseStore);
                 await store.set('x', '1');
                 expect(await store.get('x')).toBe('1');
-            } catch {
-                // expected when browser global is truly absent; the factory itself throws
             } finally {
-                if (originalBrowser !== undefined) {
+                if (originalBrowser === undefined) {
+                    delete (globalThis as any).browser;
+                } else {
                     (globalThis as any).browser = originalBrowser;
                 }
             }

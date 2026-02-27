@@ -127,8 +127,7 @@ describe('protocol/session-token', () => {
         });
         try {
             const token = generateSessionToken();
-            expect(token.startsWith('bk:')).toBeTrue();
-            expect(token.length).toBeGreaterThan(3);
+            expect(token).toMatch(/^bk:\d+-[0-9a-f]+$/i);
         } finally {
             Object.defineProperty(globalThis, 'crypto', {
                 value: originalCrypto,

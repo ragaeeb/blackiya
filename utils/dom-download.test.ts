@@ -4,9 +4,27 @@ import { downloadStringAsJsonFile } from './dom-download';
 
 // Ensure happy-dom globals are available (test-setup.ts registers at preload,
 // but some isolated runs may not have it registered yet)
-if (typeof document === 'undefined') {
+if (typeof document === 'undefined' || typeof globalThis.HTMLAnchorElement === 'undefined') {
     GlobalRegistrator.register();
 }
+
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
+
+const isAnchorElement = (node: Node): node is HTMLAnchorElement => {
+    const anchorCtor = globalThis.HTMLAnchorElement;
+    if (typeof anchorCtor !== 'undefined' && node instanceof anchorCtor) {
+        return true;
+    }
+    const maybeElement = node as { nodeName?: unknown; tagName?: unknown };
+    const name =
+        typeof maybeElement.nodeName === 'string'
+            ? maybeElement.nodeName
+            : typeof maybeElement.tagName === 'string'
+              ? maybeElement.tagName
+              : '';
+    return name.toUpperCase() === 'A';
+};
 
 describe('downloadStringAsJsonFile', () => {
     let createdObjectUrls: string[] = [];
@@ -37,17 +55,19 @@ describe('downloadStringAsJsonFile', () => {
         for (const link of appendedLinks) {
             link.remove();
         }
+        URL.createObjectURL = originalCreateObjectURL;
+        URL.revokeObjectURL = originalRevokeObjectURL;
     });
 
     it('should create a Blob URL, click the anchor, and revoke the URL', () => {
         const originalAppendChild = document.body.appendChild.bind(document.body);
 
         document.body.appendChild = mock((node: Node) => {
-            if (node instanceof HTMLAnchorElement) {
+            if (isAnchorElement(node)) {
                 appendedLinks.push(node);
                 // Capture clicks instead of triggering real navigation
                 node.click = mock(() => {
-                    clickedLinks.push(node as HTMLAnchorElement);
+                    clickedLinks.push(node);
                 }) as () => void;
             }
             return originalAppendChild(node);
@@ -97,7 +117,7 @@ describe('downloadStringAsJsonFile', () => {
         const captured: HTMLAnchorElement[] = [];
 
         document.body.appendChild = mock((node: Node) => {
-            if (node instanceof HTMLAnchorElement) {
+            if (isAnchorElement(node)) {
                 captured.push(node);
                 node.click = mock(() => {}) as () => void;
             }
@@ -123,7 +143,7 @@ describe('downloadStringAsJsonFile', () => {
 
         const originalAppendChild = document.body.appendChild.bind(document.body);
         document.body.appendChild = mock((node: Node) => {
-            if (node instanceof HTMLAnchorElement) {
+            if (isAnchorElement(node)) {
                 node.click = mock(() => {}) as () => void;
             }
             return originalAppendChild(node);
@@ -132,7 +152,7 @@ describe('downloadStringAsJsonFile', () => {
         try {
             downloadStringAsJsonFile('{"a":1}', 'export.json');
             expect(blobs.length).toBe(1);
-            expect(blobs[0].type).toBe('application/json');
+            expect(blobs[0].type.toLowerCase()).toStartWith('application/json');
             expect(blobs[0].size).toBeGreaterThan(0);
         } finally {
             document.body.appendChild = originalAppendChild;

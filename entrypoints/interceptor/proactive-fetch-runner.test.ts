@@ -41,10 +41,6 @@ type GlobalWithOptionalWindow = {
     window?: unknown;
 };
 
-type WindowWithSetTimeout = {
-    setTimeout?: typeof globalThis.setTimeout;
-};
-
 type TestWindow = {
     setTimeout: typeof globalThis.setTimeout;
     location: {
@@ -72,11 +68,6 @@ describe('ProactiveFetchRunner', () => {
             }
             return 1 as unknown as ReturnType<typeof globalThis.setTimeout>;
         }) as typeof globalThis.setTimeout;
-
-        if (globalWithWindow.window && typeof globalWithWindow.window === 'object') {
-            (globalWithWindow.window as WindowWithSetTimeout).setTimeout = immediateSetTimeout;
-            return;
-        }
 
         const testWindow: TestWindow = {
             setTimeout: immediateSetTimeout,

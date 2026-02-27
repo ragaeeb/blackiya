@@ -37,8 +37,6 @@ const createInMemoryStorage = () => {
     };
 };
 
-const fallbackStorage = createInMemoryStorage();
-
 export class BufferedLogsStorage {
     private buffer: LogEntry[] = [];
     private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -46,7 +44,7 @@ export class BufferedLogsStorage {
     private storage: StorageBackend;
 
     constructor(storageBackend?: StorageBackend) {
-        this.storage = storageBackend || browser?.storage?.local || fallbackStorage;
+        this.storage = storageBackend || browser?.storage?.local || createInMemoryStorage();
     }
 
     /**

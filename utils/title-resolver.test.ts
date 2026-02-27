@@ -131,7 +131,7 @@ describe('title-resolver', () => {
     it('falls back to update_time when create_time is null for sorting', () => {
         const base = buildConversation('New chat');
         // Override u1's create_time to null; update_time drives ordering
-        base.mapping.u1.message!.create_time = null as any;
+        base.mapping.u1.message!.create_time = null;
         base.mapping.u1.message!.update_time = 5;
 
         base.mapping.u0 = {
@@ -141,7 +141,7 @@ describe('title-resolver', () => {
             message: {
                 id: 'u0',
                 author: { role: 'user', name: null, metadata: {} },
-                create_time: null as any,
+                create_time: null,
                 update_time: 3,
                 content: { content_type: 'text', parts: ['Earlier via update_time'] },
                 status: 'finished_successfully',
@@ -167,8 +167,8 @@ describe('title-resolver', () => {
         const longText = 'a'.repeat(200);
         base.mapping.u1.message!.content.parts = [longText];
         const result = deriveConversationTitleFromFirstUserMessage(base, 80);
-        expect(result).not.toBeNull();
-        expect(result!.length).toBeLessThanOrEqual(80);
+        const expected = longText.slice(0, 80).trimEnd();
+        expect(result).toBe(expected);
     });
 
     it('resolves title precedence stream > cache > dom > first-user > fallback', () => {

@@ -54,7 +54,8 @@ export class InMemoryProbeLeaseStore implements ProbeLeaseCoordinatorStore {
 }
 
 export const createProbeLeaseStore = (): ProbeLeaseCoordinatorStore => {
-    const sessionStorage = browser.storage?.session;
+    const sessionStorage = (globalThis as { browser?: { storage?: { session?: typeof browser.storage.session } } })
+        .browser?.storage?.session;
     if (sessionStorage) {
         return new SessionStorageProbeLeaseStore(sessionStorage);
     }

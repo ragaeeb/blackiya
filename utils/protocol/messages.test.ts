@@ -244,7 +244,7 @@ describe('protocol/messages', () => {
         });
         try {
             const id = protocol.createAttemptId('fallback');
-            expect(id.startsWith('fallback:')).toBeTrue();
+            expect(id).toMatch(/^fallback:\d+-[0-9a-f]+$/i);
         } finally {
             Object.defineProperty(globalThis, 'crypto', {
                 value: originalCrypto,

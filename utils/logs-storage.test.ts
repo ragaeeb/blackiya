@@ -171,9 +171,9 @@ describe('BufferedLogsStorage', () => {
 
     it('should exercise in-memory fallback storage when no browser or backend is available', async () => {
         // Simulate an environment where browser.storage.local is absent so the
-        // module-level createInMemoryStorage() fallback is used. We do this by
-        // constructing BufferedLogsStorage with an explicit undefined backend and
-        // temporarily removing the browser.storage.local mock.
+        // constructor-level in-memory fallback is used. We do this by constructing
+        // BufferedLogsStorage with an explicit undefined backend and temporarily
+        // removing the browser.storage.local mock.
         const { browser } = await import('wxt/browser');
         const savedLocal = (browser.storage as any).local;
         (browser.storage as any).local = undefined;
