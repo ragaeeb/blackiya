@@ -133,7 +133,11 @@ describe('runner external event emission', () => {
         (globalThis as any).window = win;
         (globalThis as any).document = win.document;
 
-        const runtime = ((browser as any).runtime ??= {});
+        const browserAny = browser as any;
+        if (!browserAny.runtime) {
+            browserAny.runtime = {};
+        }
+        const runtime = browserAny.runtime;
         hadSendMessage = typeof runtime.sendMessage === 'function';
         originalSendMessage = runtime.sendMessage;
         runtime.sendMessage = async (message: unknown) => {
@@ -147,7 +151,11 @@ describe('runner external event emission', () => {
     afterEach(() => {
         (globalThis as any).window = originalWindow;
         (globalThis as any).document = originalDocument;
-        const runtime = ((browser as any).runtime ??= {});
+        const browserAny = browser as any;
+        if (!browserAny.runtime) {
+            browserAny.runtime = {};
+        }
+        const runtime = browserAny.runtime;
         if (hadSendMessage) {
             runtime.sendMessage = originalSendMessage;
         } else {
