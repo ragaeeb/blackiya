@@ -4,7 +4,7 @@ import { downloadStringAsJsonFile } from './dom-download';
 
 // Ensure happy-dom globals are available (test-setup.ts registers at preload,
 // but some isolated runs may not have it registered yet)
-if (typeof document === 'undefined' || typeof globalThis.HTMLAnchorElement === 'undefined') {
+if (typeof document === 'undefined') {
     GlobalRegistrator.register();
 }
 

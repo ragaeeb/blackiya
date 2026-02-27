@@ -11,6 +11,7 @@ mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
 describe('warm-fetch', () => {
     let deps: any;
+    let originalWindow: any;
     let originalSetTimeout: any;
     let originalClearTimeout: any;
 
@@ -20,7 +21,8 @@ describe('warm-fetch', () => {
         logCalls.warn.length = 0;
         logCalls.error.length = 0;
 
-        originalSetTimeout = (globalThis as any).window?.setTimeout;
+        originalWindow = (globalThis as any).window;
+        originalSetTimeout = originalWindow?.setTimeout;
         originalClearTimeout = globalThis.clearTimeout;
 
         deps = {
@@ -32,15 +34,12 @@ describe('warm-fetch', () => {
             getCaptureMeta: mock(() => ({}) as any),
         };
 
-        // Mock window.setTimeout and clearTimeout
-        if (!(globalThis as any).window) {
-            (globalThis as any).window = {};
-        }
-        if (!(globalThis as any).window.location) {
-            (globalThis as any).window.location = {};
-        }
+        // Install an isolated window stub so readonly browser-like descriptors
+        // from other suites cannot break location/origin assignment.
+        (globalThis as any).window = {
+            location: { origin: 'http://localhost', href: 'http://localhost/' },
+        };
         (globalThis as any).window.setTimeout = mock(() => 123) as any;
-        (globalThis as any).window.location.origin = 'http://localhost';
         globalThis.clearTimeout = mock(() => {}) as any;
 
         // Mock fetch
@@ -55,8 +54,13 @@ describe('warm-fetch', () => {
 
     afterEach(() => {
         delete (globalThis as any).fetch;
-        if ((globalThis as any).window) {
-            (globalThis as any).window.setTimeout = originalSetTimeout;
+        if (originalWindow) {
+            (globalThis as any).window = originalWindow;
+            if (typeof originalSetTimeout !== 'undefined') {
+                (globalThis as any).window.setTimeout = originalSetTimeout;
+            }
+        } else {
+            delete (globalThis as any).window;
         }
         globalThis.clearTimeout = originalClearTimeout;
     });

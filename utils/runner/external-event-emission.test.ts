@@ -1,8 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
-import { browser } from 'wxt/browser';
 
 const sentMessages: unknown[] = [];
+
+mock.module('wxt/browser', () => ({
+    browser: {
+        runtime: {
+            sendMessage: async (message: unknown) => {
+                sentMessages.push(message);
+                return undefined;
+            },
+        },
+    },
+}));
 
 import { EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE } from '@/utils/external-api/contracts';
 import { createExternalEventDispatcherState } from '@/utils/runner/external-event-dispatch';
@@ -123,8 +133,6 @@ const buildGeminiPromptedConversation = (conversationId: string): ConversationDa
 describe('runner external event emission', () => {
     let originalWindow: unknown;
     let originalDocument: unknown;
-    let originalSendMessage: unknown;
-    let hadSendMessage = false;
 
     beforeEach(() => {
         const win = new Window();
@@ -132,35 +140,12 @@ describe('runner external event emission', () => {
         originalDocument = (globalThis as any).document;
         (globalThis as any).window = win;
         (globalThis as any).document = win.document;
-
-        const browserAny = browser as any;
-        if (!browserAny.runtime) {
-            browserAny.runtime = {};
-        }
-        const runtime = browserAny.runtime;
-        hadSendMessage = typeof runtime.sendMessage === 'function';
-        originalSendMessage = runtime.sendMessage;
-        runtime.sendMessage = async (message: unknown) => {
-            sentMessages.push(message);
-            return undefined;
-        };
-
         sentMessages.length = 0;
     });
 
     afterEach(() => {
         (globalThis as any).window = originalWindow;
         (globalThis as any).document = originalDocument;
-        const browserAny = browser as any;
-        if (!browserAny.runtime) {
-            browserAny.runtime = {};
-        }
-        const runtime = browserAny.runtime;
-        if (hadSendMessage) {
-            runtime.sendMessage = originalSendMessage;
-        } else {
-            delete runtime.sendMessage;
-        }
         sentMessages.length = 0;
     });
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import {
     createStorageChangeListener,
     createVisibilityChangeHandler,
@@ -147,7 +147,7 @@ describe('runtime-settings', () => {
             expect(deps.removeStreamProbePanel).not.toHaveBeenCalled();
         });
 
-        it('should remove the probe panel when visibility is false', async () => {
+        it('should remove the probe panel when visibility is missing from storage', async () => {
             const deps = {
                 setStreamProbeVisible: mock(() => {}),
                 getStreamProbeVisible: mock(() => false),
@@ -304,12 +304,15 @@ describe('runtime-settings', () => {
             Object.defineProperty(globalThis.document, 'hidden', { value: hidden, configurable: true });
         };
 
+        afterEach(() => {
+            setDocumentHidden(false);
+        });
+
         it('should ignore if tab is hidden', () => {
             setDocumentHidden(true);
             const deps = buildDeps();
             createVisibilityChangeHandler(deps)();
             expect(deps.resolveConversationId).not.toHaveBeenCalled();
-            setDocumentHidden(false);
         });
 
         it('should ignore if no conversationId is resolved', () => {
@@ -413,6 +416,9 @@ describe('runtime-settings', () => {
             if (!(globalThis as any).window) {
                 (globalThis as any).window = globalThis;
             }
+            if (typeof (globalThis as any).window.setTimeout !== 'function') {
+                (globalThis as any).window.setTimeout = globalThis.setTimeout.bind(globalThis);
+            }
             const injectSaveButton = mock(() => {});
             const buttonManagerExists = mock(() => true);
             const timers = scheduleButtonInjectionRetries(injectSaveButton, buttonManagerExists, [0]);
@@ -426,6 +432,9 @@ describe('runtime-settings', () => {
         it('should inject when buttonManager does not exist at retry time', async () => {
             if (!(globalThis as any).window) {
                 (globalThis as any).window = globalThis;
+            }
+            if (typeof (globalThis as any).window.setTimeout !== 'function') {
+                (globalThis as any).window.setTimeout = globalThis.setTimeout.bind(globalThis);
             }
             const injectSaveButton = mock(() => {});
             const buttonManagerExists = mock(() => false);
