@@ -96,4 +96,45 @@ describe('protocol/session-token', () => {
         expect(isValidToken(42)).toBeFalse();
         expect(resolveTokenValidationFailureReason(null)).toBe('invalid-payload');
     });
+
+    it('should return undefined from getSessionToken when window access throws', () => {
+        const originalWindow = globalThis.window;
+        // Make window property access throw
+        Object.defineProperty(globalThis, 'window', {
+            get() {
+                throw new Error('window not available');
+            },
+            configurable: true,
+        });
+        try {
+            const result = getSessionToken();
+            expect(result).toBeUndefined();
+        } finally {
+            Object.defineProperty(globalThis, 'window', {
+                value: originalWindow,
+                configurable: true,
+                writable: true,
+            });
+        }
+    });
+
+    it('should generate a token using timestamp fallback when crypto.randomUUID is unavailable', () => {
+        const originalCrypto = globalThis.crypto;
+        Object.defineProperty(globalThis, 'crypto', {
+            value: undefined,
+            configurable: true,
+            writable: true,
+        });
+        try {
+            const token = generateSessionToken();
+            expect(token.startsWith('bk:')).toBeTrue();
+            expect(token.length).toBeGreaterThan(3);
+        } finally {
+            Object.defineProperty(globalThis, 'crypto', {
+                value: originalCrypto,
+                configurable: true,
+                writable: true,
+            });
+        }
+    });
 });
