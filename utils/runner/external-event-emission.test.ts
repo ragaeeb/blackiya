@@ -164,6 +164,7 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-1',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
         };
 
         emitExternalConversationEvent(ctx, {
@@ -250,6 +251,7 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-streaming',
             lifecycleState: 'streaming',
             externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
         };
 
         emitExternalConversationEvent(ctx, {
@@ -304,6 +306,7 @@ describe('runner external event emission', () => {
             currentConversationId: 'gemini-conv-1',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
         };
 
         emitExternalConversationEvent(ctx, {

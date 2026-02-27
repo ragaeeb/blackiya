@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
@@ -14,6 +14,7 @@ mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
 describe('wire-message-handlers', () => {
     let deps: WireMessageHandlerDeps;
+    let originalWindow: unknown;
 
     beforeEach(() => {
         logCalls.debug.length = 0;
@@ -60,13 +61,17 @@ describe('wire-message-handlers', () => {
             shouldRemoveDisposedAttemptBinding: mock(() => true),
         };
 
-        if (!(globalThis as any).window) {
-            (globalThis as any).window = {};
-        }
-        if (!(globalThis as any).window.location) {
-            (globalThis as any).window.location = {};
-        }
-        (globalThis as any).window.location.origin = 'http://localhost';
+        originalWindow = (globalThis as any).window;
+        (globalThis as any).window = {
+            location: {
+                origin: 'http://localhost',
+                href: 'http://localhost/',
+            },
+        };
+    });
+
+    afterEach(() => {
+        (globalThis as any).window = originalWindow;
     });
 
     describe('handleTitleResolvedMessage', () => {

@@ -138,6 +138,158 @@ describe('runner readiness resolver', () => {
         });
     });
 
+    it('returns legacy_ready when SFE is disabled and platform readiness is true', () => {
+        let logged = false;
+        const decision = resolveRunnerReadinessDecision(
+            createInput({
+                sfeEnabled: false,
+                evaluateReadinessForData: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'platform_ready',
+                    contentHash: 'hash',
+                    latestAssistantTextLength: 10,
+                }),
+                loggerDebug: () => {
+                    logged = true;
+                },
+            }),
+        );
+        expect(decision).toEqual({
+            ready: true,
+            mode: 'canonical_ready',
+            reason: 'legacy_ready',
+        });
+        expect(logged).toBeTrue();
+    });
+
+    it('returns awaiting_stabilization when SFE is disabled and platform readiness is false', () => {
+        const decision = resolveRunnerReadinessDecision(
+            createInput({
+                sfeEnabled: false,
+                evaluateReadinessForData: () => ({
+                    ready: false,
+                    terminal: false,
+                    reason: 'awaiting_content',
+                    contentHash: null,
+                    latestAssistantTextLength: 0,
+                }),
+            }),
+        );
+        expect(decision).toEqual({
+            ready: false,
+            mode: 'awaiting_stabilization',
+            reason: 'awaiting_content',
+        });
+    });
+
+    it('returns awaiting_stabilization with snapshot_degraded_capture when fidelity is degraded', () => {
+        const decision = resolveRunnerReadinessDecision(
+            createInput({
+                sfeResolution: {
+                    ready: false,
+                    reason: 'awaiting_second_sample',
+                    blockingConditions: [],
+                },
+                captureMeta: {
+                    captureSource: 'dom_snapshot_degraded',
+                    fidelity: 'degraded',
+                    completeness: 'partial',
+                },
+                evaluateReadinessForData: () => ({
+                    ready: false,
+                    terminal: false,
+                    reason: 'degraded',
+                    contentHash: null,
+                    latestAssistantTextLength: 0,
+                }),
+                hasCanonicalStabilizationTimedOut: () => false,
+                // No attemptId means timeout check is skipped
+                resolveAttemptId: () => null,
+            }),
+        );
+        expect(decision).toEqual({
+            ready: false,
+            mode: 'awaiting_stabilization',
+            reason: 'snapshot_degraded_capture',
+        });
+    });
+
+    it('returns degraded_manual_only when timeout detected via captureMeta.fidelity+hasCanonicalStabilizationTimedOut', () => {
+        let warned = false;
+        const decision = resolveRunnerReadinessDecision(
+            createInput({
+                captureMeta: {
+                    captureSource: 'dom_snapshot_degraded',
+                    fidelity: 'degraded',
+                    completeness: 'partial',
+                },
+                sfeResolution: {
+                    ready: false,
+                    reason: 'awaiting_second_sample',
+                    blockingConditions: [],
+                },
+                evaluateReadinessForData: () => ({
+                    ready: false,
+                    terminal: false,
+                    reason: 'degraded',
+                    contentHash: null,
+                    latestAssistantTextLength: 0,
+                }),
+                hasCanonicalStabilizationTimedOut: () => true,
+                emitTimeoutWarningOnce: () => {
+                    warned = true;
+                },
+            }),
+        );
+        expect(decision.mode).toBe('degraded_manual_only');
+        expect(decision.reason).toBe('stabilization_timeout');
+        expect(warned).toBeTrue();
+    });
+
+    it('logs canonical_ready decision when shouldLogCanonicalReadyDecision returns true', () => {
+        let logged = false;
+        resolveRunnerReadinessDecision(
+            createInput({
+                shouldLogCanonicalReadyDecision: () => true,
+                loggerDebug: () => {
+                    logged = true;
+                },
+            }),
+        );
+        expect(logged).toBeTrue();
+    });
+
+    it('does not log canonical_ready when shouldLogCanonicalReadyDecision returns false', () => {
+        let logged = false;
+        resolveRunnerReadinessDecision(
+            createInput({
+                shouldLogCanonicalReadyDecision: () => false,
+                loggerDebug: () => {
+                    logged = true;
+                },
+            }),
+        );
+        expect(logged).toBeFalse();
+    });
+
+    it('falls back to readiness.reason when sfeResolution is null', () => {
+        const decision = resolveRunnerReadinessDecision(
+            createInput({
+                sfeResolution: null,
+                evaluateReadinessForData: () => ({
+                    ready: false,
+                    terminal: false,
+                    reason: 'no_sfe_resolution',
+                    contentHash: null,
+                    latestAssistantTextLength: 0,
+                }),
+                resolveAttemptId: () => null,
+            }),
+        );
+        expect(decision.reason).toBe('no_sfe_resolution');
+    });
+
     it('resolves attemptId once when evaluating timeout-ready fallback paths', () => {
         let resolveAttemptIdCalls = 0;
         let clearedAttemptId = '';

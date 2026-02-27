@@ -92,4 +92,165 @@ describe('protocol/messages', () => {
         const attemptId = protocol.createAttemptId('test');
         expect(attemptId.startsWith('test:')).toBeTrue();
     });
+
+    it('rejects non-object and null values', () => {
+        expect(protocol.isBlackiyaMessage(null)).toBeFalse();
+        expect(protocol.isBlackiyaMessage(undefined)).toBeFalse();
+        expect(protocol.isBlackiyaMessage(42)).toBeFalse();
+        expect(protocol.isBlackiyaMessage('string')).toBeFalse();
+        expect(protocol.isBlackiyaMessage([])).toBeFalse();
+    });
+
+    it('rejects messages with empty or missing type', () => {
+        expect(protocol.isBlackiyaMessage({ type: '' })).toBeFalse();
+        expect(protocol.isBlackiyaMessage({})).toBeFalse();
+    });
+
+    it('validates STREAM_DELTA accepts empty-string text', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                attemptId: 'a-1',
+                text: '',
+            }),
+        ).toBeTrue();
+    });
+
+    it('rejects STREAM_DELTA when text field is absent', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_STREAM_DELTA',
+                platform: 'ChatGPT',
+                attemptId: 'a-1',
+            }),
+        ).toBeFalse();
+    });
+
+    it('validates CAPTURE_DATA_INTERCEPTED message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://chatgpt.com/api',
+                data: '{}',
+            }),
+        ).toBeTrue();
+    });
+
+    it('rejects CAPTURE_DATA_INTERCEPTED when required fields are missing', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                platform: 'ChatGPT',
+                url: 'https://example.com',
+                // data missing
+            }),
+        ).toBeFalse();
+    });
+
+    it('validates LOG_ENTRY message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'LLM_LOG_ENTRY',
+                payload: {
+                    level: 'info',
+                    message: 'test log',
+                },
+            }),
+        ).toBeTrue();
+    });
+
+    it('rejects LOG_ENTRY when payload is missing or malformed', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'LLM_LOG_ENTRY',
+                payload: { level: 'info' },
+                // message missing
+            }),
+        ).toBeFalse();
+
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'LLM_LOG_ENTRY',
+                // payload missing entirely
+            }),
+        ).toBeFalse();
+    });
+
+    it('returns false for unrecognised message type strings', () => {
+        expect(protocol.isBlackiyaMessage({ type: 'UNKNOWN_TYPE' })).toBeFalse();
+    });
+
+    it('validates CONVERSATION_ID_RESOLVED message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_CONVERSATION_ID_RESOLVED',
+                platform: 'ChatGPT',
+                attemptId: 'a-1',
+                conversationId: 'conv-1',
+            }),
+        ).toBeTrue();
+    });
+
+    it('validates ATTEMPT_DISPOSED message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_ATTEMPT_DISPOSED',
+                attemptId: 'a-1',
+                reason: 'navigation',
+            }),
+        ).toBeTrue();
+    });
+
+    it('validates TITLE_RESOLVED message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_TITLE_RESOLVED',
+                platform: 'ChatGPT',
+                attemptId: 'a-1',
+                conversationId: 'conv-1',
+                title: 'My Title',
+            }),
+        ).toBeTrue();
+    });
+
+    it('validates RESPONSE_FINISHED message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'a-1',
+            }),
+        ).toBeTrue();
+    });
+
+    it('validates SESSION_INIT message', () => {
+        expect(
+            protocol.isBlackiyaMessage({
+                type: 'BLACKIYA_SESSION_INIT',
+                token: 'bk:some-token',
+            }),
+        ).toBeTrue();
+    });
+
+    it('uses timestamp fallback when crypto.randomUUID is unavailable', () => {
+        const originalCrypto = globalThis.crypto;
+        // Remove randomUUID to trigger the fallback path
+        Object.defineProperty(globalThis, 'crypto', {
+            value: undefined,
+            configurable: true,
+            writable: true,
+        });
+        try {
+            const id = protocol.createAttemptId('fallback');
+            expect(id).toMatch(/^fallback:\d+-[0-9a-f]+$/i);
+        } finally {
+            Object.defineProperty(globalThis, 'crypto', {
+                value: originalCrypto,
+                configurable: true,
+                writable: true,
+            });
+        }
+    });
 });

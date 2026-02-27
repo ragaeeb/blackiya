@@ -8,12 +8,12 @@ describe('url-candidates', () => {
 
         beforeEach(() => {
             originalWindow = (globalThis as any).window;
-            if (!(globalThis as any).window) {
-                (globalThis as any).window = {};
-            }
-            if (!(globalThis as any).window.location) {
-                (globalThis as any).window.location = {};
-            }
+            (globalThis as any).window = {
+                location: {
+                    origin: 'http://localhost',
+                    href: 'http://localhost/',
+                },
+            };
         });
 
         afterEach(() => {
@@ -21,7 +21,6 @@ describe('url-candidates', () => {
         });
 
         it('should compile unique ordered urls based on the adapter', () => {
-            const originalOrigin = globalThis.window.location.origin;
             (globalThis.window as any).location.origin = 'https://chatgpt.com';
 
             const adapter: Partial<LLMPlatform> = {
@@ -35,12 +34,9 @@ describe('url-candidates', () => {
             const urls = getFetchUrlCandidates(adapter as LLMPlatform, 'conv-1');
 
             expect(urls).toEqual(['https://chatgpt.com/api/backup/conv-1', 'https://chatgpt.com/api/conv-1']);
-
-            (globalThis.window as any).location.origin = originalOrigin;
         });
 
         it('should filter out cross-origin urls', () => {
-            const originalOrigin = (globalThis.window as any).location.origin;
             (globalThis.window as any).location.origin = 'https://chatgpt.com';
 
             const adapter: Partial<LLMPlatform> = {
@@ -51,7 +47,6 @@ describe('url-candidates', () => {
             const urls = getFetchUrlCandidates(adapter as LLMPlatform, 'conv-1');
 
             expect(urls).toEqual(['https://chatgpt.com/api']);
-            (globalThis.window as any).location.origin = originalOrigin;
         });
     });
 

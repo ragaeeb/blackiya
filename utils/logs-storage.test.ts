@@ -62,10 +62,10 @@ describe('BufferedLogsStorage', () => {
         storage = new BufferedLogsStorage(mockBackend);
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         // cleanup timers
         if (storage) {
-            storage.clearLogs();
+            await storage.clearLogs();
         }
     });
 
@@ -167,6 +167,39 @@ describe('BufferedLogsStorage', () => {
         // Verify buffer is also cleared by checking if getLogs returns empty
         const logs = await storage.getLogs();
         expect(logs.length).toBe(0);
+    });
+
+    it('should exercise in-memory fallback storage when no browser or backend is available', async () => {
+        // Simulate an environment where browser.storage.local is absent so the
+        // constructor-level in-memory fallback is used. We do this by constructing
+        // BufferedLogsStorage with an explicit undefined backend and temporarily
+        // removing the browser.storage.local mock.
+        const { browser } = await import('wxt/browser');
+        const savedLocal = (browser.storage as any).local;
+        (browser.storage as any).local = undefined;
+
+        let fallbackStorage: any;
+        try {
+            fallbackStorage = new BufferedLogsStorage(undefined as any);
+            const entry = {
+                timestamp: 'ts',
+                level: 'info',
+                message: 'in-memory test',
+                context: 'background' as const,
+            };
+            await fallbackStorage.saveLog(entry);
+            const logs = await fallbackStorage.getLogs();
+            expect(logs.length).toBe(1);
+            expect(logs[0].message).toBe('in-memory test');
+            await fallbackStorage.clearLogs();
+            const cleared = await fallbackStorage.getLogs();
+            expect(cleared.length).toBe(0);
+        } finally {
+            (browser.storage as any).local = savedLocal;
+            if (fallbackStorage) {
+                await fallbackStorage.clearLogs();
+            }
+        }
     });
 
     it('should restore failed flush batch to buffer and retry on next flush', async () => {
