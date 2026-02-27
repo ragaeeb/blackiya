@@ -86,18 +86,25 @@ export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDep
             });
             void deps.externalApiHub
                 .ingestEvent(event, sender.tab?.id)
-                .then(() => {
+                .then((delivery) => {
                     deps.logger.debug?.('External event internal message ingested', {
                         conversationId: event.conversation_id,
                         eventType: event.type,
                         eventId: event.event_id,
                         senderTabId: sender.tab?.id ?? null,
+                        subscriberCount: delivery.subscriberCount,
+                        delivered: delivery.delivered,
+                        dropped: delivery.dropped,
                     });
+                    sendResponse({ success: true, delivery });
                 })
                 .catch((error) => {
                     deps.logger.error('Failed to ingest external API event in background', error);
+                    sendResponse({
+                        success: false,
+                        error: 'Failed to ingest external API event',
+                    });
                 });
-            sendResponse({ success: true });
             return true;
         }
 

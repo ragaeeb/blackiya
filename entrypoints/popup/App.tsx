@@ -6,6 +6,11 @@ import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
 import { downloadMinimalDebugReport } from '@/utils/minimal-logs';
+import {
+    TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
+    TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
+    TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
+} from '@/utils/runner/tab-debug-overlay';
 import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import packageJson from '../../package.json';
 
@@ -15,6 +20,42 @@ const App = () => {
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
     const [streamDumpEnabled, setStreamDumpEnabled] = useState<boolean>(false);
     const [streamProbeVisible, setStreamProbeVisible] = useState<boolean>(false);
+    const [tabDebugOverlayEnabled, setTabDebugOverlayEnabled] = useState<boolean | null>(null);
+
+    const getActiveTabId = async (): Promise<number | null> => {
+        try {
+            const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+            return typeof activeTab?.id === 'number' ? activeTab.id : null;
+        } catch {
+            return null;
+        }
+    };
+
+    const sendTabDebugOverlayMessage = async (message: {
+        type: string;
+        enabled?: boolean;
+    }): Promise<{
+        ok: true;
+        enabled: boolean;
+        snapshot?: unknown;
+    } | null> => {
+        const tabId = await getActiveTabId();
+        if (tabId === null) {
+            return null;
+        }
+        try {
+            return (await browser.tabs.sendMessage(tabId, message)) as { ok: true; enabled: boolean };
+        } catch {
+            return null;
+        }
+    };
+
+    const refreshActiveTabDebugOverlayState = async () => {
+        const response = await sendTabDebugOverlayMessage({
+            type: TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
+        });
+        setTabDebugOverlayEnabled(response?.ok === true ? response.enabled : null);
+    };
 
     useEffect(() => {
         // Load settings
@@ -44,6 +85,7 @@ const App = () => {
         logsStorage.getLogs().then((logs) => {
             setLogCount(logs.length);
         });
+        void refreshActiveTabDebugOverlayState();
     }, []);
 
     const handleLevelChange: JSX.GenericEventHandler<HTMLSelectElement> = (e) => {
@@ -78,6 +120,36 @@ const App = () => {
         setStreamProbeVisible(enabled);
         browser.storage.local.set({ [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: enabled });
         logger.info(`In-page stream toast ${enabled ? 'enabled' : 'disabled'}`);
+    };
+
+    const handleTabDebugOverlayChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
+        const target = e.currentTarget as HTMLInputElement | null;
+        const enabled = target?.checked === true;
+        void sendTabDebugOverlayMessage({
+            type: TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
+            enabled,
+        }).then((response) => {
+            if (!response?.ok) {
+                setTabDebugOverlayEnabled(null);
+                alert('Active tab is not running Blackiya content script.');
+                return;
+            }
+            setTabDebugOverlayEnabled(response.enabled);
+            logger.info(`Tab debug overlay ${response.enabled ? 'enabled' : 'disabled'} for active tab`);
+        });
+    };
+
+    const handleExportActiveTabOverlaySnapshot = async () => {
+        const response = await sendTabDebugOverlayMessage({
+            type: TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
+        });
+        if (!response?.ok || !response.snapshot) {
+            alert('Active tab is not running Blackiya content script.');
+            return;
+        }
+        const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+        downloadAsJSON(response.snapshot, `blackiya-tab-overlay-snapshot-${timestamp}`);
+        logger.info('Active tab overlay snapshot exported by user');
     };
 
     const handleExport = async () => {
@@ -188,6 +260,39 @@ const App = () => {
                     />
                     Enable stream toast overlay
                 </label>
+            </div>
+
+            <div className="section">
+                <div className="section-heading">Active Tab Debug Overlay</div>
+                <div className="section-description">
+                    Per-tab overlay with captured payloads and external events sent to subscriber extensions.
+                </div>
+                <label htmlFor="tabDebugOverlayVisible" className="checkbox-row">
+                    <input
+                        id="tabDebugOverlayVisible"
+                        type="checkbox"
+                        checked={tabDebugOverlayEnabled === true}
+                        disabled={tabDebugOverlayEnabled === null}
+                        onChange={handleTabDebugOverlayChange}
+                    />
+                    Enable for active tab only
+                </label>
+                <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                    {tabDebugOverlayEnabled === null
+                        ? 'Open a supported ChatGPT/Gemini/Grok tab to toggle.'
+                        : tabDebugOverlayEnabled
+                          ? 'Enabled for this tab.'
+                          : 'Disabled for this tab.'}
+                </div>
+                <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleExportActiveTabOverlaySnapshot}
+                    disabled={tabDebugOverlayEnabled === null}
+                    style={{ marginTop: '8px' }}
+                >
+                    Export Active Tab Overlay Snapshot (JSON)
+                </button>
             </div>
 
             <button type="button" className="primary" onClick={handleExport}>

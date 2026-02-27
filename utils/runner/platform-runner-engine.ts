@@ -90,6 +90,21 @@ import {
 } from './save-pipeline';
 import { RunnerState } from './state';
 import { createStreamDoneCoordinator } from './stream-done-coordinator';
+import {
+    addTabDebugCaptureEntry,
+    addTabDebugExternalEventEntry,
+    buildTabDebugOverlaySnapshot,
+    createTabDebugOverlayState,
+    persistTabDebugOverlayVisibilityToSession,
+    readTabDebugOverlayVisibilityFromSession,
+    removeTabDebugOverlayPanel,
+    renderTabDebugOverlay,
+    TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
+    TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
+    TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
+    TAB_DEBUG_OVERLAY_TOGGLE_MESSAGE,
+    type TabDebugRuntimeMessage,
+} from './tab-debug-overlay';
 
 const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
 const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
@@ -148,6 +163,7 @@ export const runPlatform = (): void => {
         cleanupWindowBridge: null,
         cleanupCompletionWatcher: null,
         cleanupButtonHealthCheck: null,
+        cleanupTabDebugRuntimeListener: null,
         lastButtonStateLogRef: { value: '' },
         attemptByConversation: runnerState.attemptByConversation,
         attemptAliasForward: runnerState.attemptAliasForward,
@@ -183,6 +199,7 @@ export const runPlatform = (): void => {
         },
         externalEventDispatchState: createExternalEventDispatcherState(),
         streamProbeRuntime: null,
+        tabDebugOverlayState: createTabDebugOverlayState(),
         // Function stubs — populated below during coordinator wiring
         setCurrentConversation: null!,
         setActiveAttempt: null!,
@@ -237,6 +254,11 @@ export const runPlatform = (): void => {
         appendPendingStreamProbeText: null!,
         migratePendingStreamProbeText: null!,
         appendLiveStreamProbeText: null!,
+        setTabDebugOverlayVisible: null!,
+        refreshTabDebugOverlay: null!,
+        recordTabDebugCapture: null!,
+        recordTabDebugExternalEvent: null!,
+        handleTabDebugRuntimeMessage: null!,
         isStaleAttemptMessage: null!,
         buildExportPayloadForFormat: null!,
         getExportFormat: null!,
@@ -284,6 +306,59 @@ export const runPlatform = (): void => {
     ctx.appendPendingStreamProbeText = (aid, text) => ctx.streamProbeRuntime?.appendPendingStreamProbeText(aid, text);
     ctx.migratePendingStreamProbeText = (cid, aid) => ctx.streamProbeRuntime?.migratePendingStreamProbeText(cid, aid);
     ctx.appendLiveStreamProbeText = (cid, text) => ctx.streamProbeRuntime?.appendLiveStreamProbeText(cid, text);
+    ctx.tabDebugOverlayState.visible = readTabDebugOverlayVisibilityFromSession();
+    ctx.refreshTabDebugOverlay = () => renderTabDebugOverlay(ctx.tabDebugOverlayState);
+    ctx.setTabDebugOverlayVisible = (visible) => {
+        ctx.tabDebugOverlayState.visible = visible;
+        persistTabDebugOverlayVisibilityToSession(visible);
+        if (!visible) {
+            removeTabDebugOverlayPanel();
+            return;
+        }
+        ctx.refreshTabDebugOverlay();
+    };
+    ctx.recordTabDebugCapture = ({ conversationId, data, attemptId, source }) => {
+        addTabDebugCaptureEntry(ctx.tabDebugOverlayState, {
+            conversationId,
+            payload: data,
+            attemptId,
+            source: source ?? 'unknown',
+        });
+        if (ctx.tabDebugOverlayState.visible) {
+            ctx.refreshTabDebugOverlay();
+        }
+    };
+    ctx.recordTabDebugExternalEvent = ({ event, status, error, delivery }) => {
+        addTabDebugExternalEventEntry(ctx.tabDebugOverlayState, { event, status, error, delivery });
+        if (ctx.tabDebugOverlayState.visible) {
+            ctx.refreshTabDebugOverlay();
+        }
+    };
+    ctx.handleTabDebugRuntimeMessage = (message) => {
+        const typed = message as TabDebugRuntimeMessage | null;
+        if (!typed || typeof typed !== 'object' || typeof typed.type !== 'string') {
+            return { handled: false };
+        }
+        if (typed.type === TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE) {
+            return { handled: true, enabled: ctx.tabDebugOverlayState.visible };
+        }
+        if (typed.type === TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE) {
+            return {
+                handled: true,
+                enabled: ctx.tabDebugOverlayState.visible,
+                snapshot: buildTabDebugOverlaySnapshot(ctx.tabDebugOverlayState),
+            };
+        }
+        if (typed.type === TAB_DEBUG_OVERLAY_TOGGLE_MESSAGE) {
+            ctx.setTabDebugOverlayVisible(!ctx.tabDebugOverlayState.visible);
+            return { handled: true, enabled: ctx.tabDebugOverlayState.visible };
+        }
+        if (typed.type === TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE) {
+            ctx.setTabDebugOverlayVisible(typed.enabled === true);
+            return { handled: true, enabled: ctx.tabDebugOverlayState.visible };
+        }
+        return { handled: false };
+    };
 
     // ── Attempt coordinator ──
 
@@ -307,6 +382,12 @@ export const runPlatform = (): void => {
         () => ctx.handleCalibrationClick(),
     );
     ctx.interceptionManager = new InterceptionManager((capturedId, data, meta) => {
+        ctx.recordTabDebugCapture({
+            conversationId: capturedId,
+            data,
+            attemptId: meta?.attemptId,
+            source: meta?.source,
+        });
         processInterceptionCaptureCore(capturedId, data, meta, buildInterceptionCaptureDeps(ctx));
     });
     let handleNavigationChange: () => void;
@@ -444,6 +525,28 @@ export const runPlatform = (): void => {
     ctx.cleanupWindowBridge = runtimeWiring.registerWindowBridge();
     ctx.cleanupCompletionWatcher = runtimeWiring.registerCompletionWatcher();
     ctx.cleanupButtonHealthCheck = runtimeWiring.registerButtonHealthCheck();
+    ctx.refreshTabDebugOverlay();
+
+    const tabDebugRuntimeMessageListener: Parameters<typeof browser.runtime.onMessage.addListener>[0] = (
+        message,
+        _sender,
+        sendResponse,
+    ) => {
+        const result = ctx.handleTabDebugRuntimeMessage(message);
+        if (!result.handled) {
+            return;
+        }
+        sendResponse({ ok: true, enabled: result.enabled, snapshot: result.snapshot });
+        return true;
+    };
+    if (browser.runtime?.onMessage?.addListener) {
+        browser.runtime.onMessage.addListener(tabDebugRuntimeMessageListener);
+        ctx.cleanupTabDebugRuntimeListener = () => {
+            browser.runtime.onMessage.removeListener?.(tabDebugRuntimeMessageListener);
+        };
+    } else {
+        ctx.cleanupTabDebugRuntimeListener = null;
+    }
 
     const handleVisibilityChange = createVisibilityChangeHandlerCore(buildVisibilityRecoveryDeps(ctx));
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -466,6 +569,7 @@ export const runPlatform = (): void => {
     cleanupDeps.cleanupWindowBridge = ctx.cleanupWindowBridge;
     cleanupDeps.cleanupCompletionWatcher = ctx.cleanupCompletionWatcher;
     cleanupDeps.cleanupButtonHealthCheck = ctx.cleanupButtonHealthCheck;
+    cleanupDeps.cleanupTabDebugRuntimeListener = ctx.cleanupTabDebugRuntimeListener;
     const cleanupRuntime = createCleanupRuntime(cleanupDeps);
 
     ctx.beforeUnloadHandler = cleanupRuntime;

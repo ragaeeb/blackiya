@@ -51,6 +51,7 @@ flowchart LR
   - `utils/runner/canonical-stabilization.ts` (canonical stabilization retry state helpers)
   - `utils/runner/readiness.ts`
   - `utils/runner/stream-preview.ts` (pending/live stream preview merge and snapshot preservation)
+  - `utils/runner/tab-debug-overlay.ts` (per-tab diagnostics overlay for captured/emitted payload forensics)
 - Calibration profile management:
   - `utils/calibration-profile.ts` (strategy defaults, `CalibrationStep` type, `buildCalibrationProfileFromStep` manual-strict policy)
   - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
@@ -142,6 +143,7 @@ Critical invariant:
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - Cross-world message ingress is token-validated for both live `postMessage` traffic and late-start queue drains (`__BLACKIYA_CAPTURE_QUEUE__`, `__BLACKIYA_LOG_QUEUE__`).
 - External API emissions are canonical-ready only, deduped by content hash, and surfaced via background `blackiya.events.v1`.
+- Tab debug overlay visibility is tab-scoped via `sessionStorage` and runtime tab messaging, so toggling diagnostics in one tab never changes another tab.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
 - Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
 - Interceptor queue trimming increments bounded drop counters and emits throttled warnings (log/capture/history queues) to surface silent drop pressure.

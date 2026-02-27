@@ -11,8 +11,8 @@ import type {
 } from '@/utils/external-api/contracts';
 import {
     EXTERNAL_API_VERSION,
-    EXTERNAL_PUSH_EVENT_TYPES,
     EXTERNAL_EVENTS_PORT_NAME,
+    EXTERNAL_PUSH_EVENT_TYPES,
     isConversationDataLike,
     isExportMeta,
     isExternalRequest,
@@ -48,6 +48,12 @@ export type CachedConversationRecord = {
     tab_id?: number;
 };
 
+export type ExternalEventDeliveryStats = {
+    subscriberCount: number;
+    delivered: number;
+    dropped: number;
+};
+
 type PersistedCacheState = {
     latestConversationId: string | null;
     records: CachedConversationRecord[];
@@ -75,8 +81,7 @@ const isQuotaError = (error: unknown): boolean => {
 };
 
 const isExternalEventType = (value: unknown): value is ExternalConversationEvent['type'] =>
-    typeof value === 'string' &&
-    (EXTERNAL_PUSH_EVENT_TYPES as readonly string[]).includes(value);
+    typeof value === 'string' && (EXTERNAL_PUSH_EVENT_TYPES as readonly string[]).includes(value);
 
 const isCachedConversationRecord = (value: unknown): value is CachedConversationRecord => {
     if (!isRecord(value)) {
@@ -302,14 +307,18 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         };
     };
 
-    const broadcast = (event: ExternalConversationEvent) => {
+    const broadcast = (event: ExternalConversationEvent): ExternalEventDeliveryStats => {
         if (subscribers.size === 0) {
             deps.logger?.debug?.('External hub broadcast skipped: no subscribers', {
                 conversationId: event.conversation_id,
                 eventType: event.type,
                 tabId: event.tab_id ?? null,
             });
-            return;
+            return {
+                subscriberCount: 0,
+                delivered: 0,
+                dropped: 0,
+            };
         }
         let delivered = 0;
         let dropped = 0;
@@ -330,6 +339,11 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             delivered,
             dropped,
         });
+        return {
+            subscriberCount: subscribers.size,
+            delivered,
+            dropped,
+        };
     };
 
     const addSubscriber = (port: ExternalPortLike): boolean => {
@@ -475,7 +489,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             completeness: enrichedEvent.capture_meta.completeness,
         });
         debouncedPersist();
-        broadcast(enrichedEvent);
+        return broadcast(enrichedEvent);
     };
 
     const handleExternalRequest = async (request: unknown): Promise<ExternalResponse> => {

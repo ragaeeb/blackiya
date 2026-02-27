@@ -1,7 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { InMemoryLeaseStore } from '@/tests/helpers/in-memory-lease-store';
 import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
-import type { LogEntry } from '@/utils/logs-storage';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 type MessageHandler = (
@@ -11,19 +10,7 @@ type MessageHandler = (
 ) => boolean | undefined;
 
 describe('background message handler', () => {
-    let handlerFactory: (deps: {
-        saveLog: (payload: LogEntry) => Promise<void>;
-        leaseCoordinator: ProbeLeaseCoordinator;
-        externalApiHub: {
-            ingestEvent: (event: ExternalConversationEvent, senderTabId?: number) => Promise<void>;
-        };
-        logger: {
-            debug?: (...args: unknown[]) => void;
-            info: (...args: unknown[]) => void;
-            warn: (...args: unknown[]) => void;
-            error: (...args: unknown[]) => void;
-        };
-    }) => MessageHandler;
+    let handlerFactory: (deps: any) => MessageHandler;
     let externalMessageHandlerFactory: (deps: {
         externalApiHub: { handleExternalRequest: (request: unknown) => Promise<unknown> };
         logger: {
@@ -85,7 +72,7 @@ describe('background message handler', () => {
             saveLog: async () => {},
             leaseCoordinator: coordinator,
             externalApiHub: {
-                ingestEvent: async () => {},
+                ingestEvent: async () => ({ subscriberCount: 0, delivered: 0, dropped: 0 }),
             },
             logger: {
                 debug: () => {},
@@ -179,12 +166,12 @@ describe('background message handler', () => {
             now: () => now,
         });
         const handler = handlerFactory({
-            saveLog: async (payload) => {
+            saveLog: async (payload: unknown) => {
                 savedLogs.push(payload);
             },
             leaseCoordinator: coordinator,
             externalApiHub: {
-                ingestEvent: async () => {},
+                ingestEvent: async () => ({ subscriberCount: 0, delivered: 0, dropped: 0 }),
             },
             logger: {
                 debug: () => {},
@@ -229,12 +216,12 @@ describe('background message handler', () => {
         });
         let warned = false;
         const handler = handlerFactory({
-            saveLog: async (payload) => {
+            saveLog: async (payload: unknown) => {
                 savedLogs.push(payload);
             },
             leaseCoordinator: coordinator,
             externalApiHub: {
-                ingestEvent: async () => {},
+                ingestEvent: async () => ({ subscriberCount: 0, delivered: 0, dropped: 0 }),
             },
             logger: {
                 debug: () => {},
@@ -272,12 +259,13 @@ describe('background message handler', () => {
             saveLog: async () => {},
             leaseCoordinator: coordinator,
             externalApiHub: {
-                ingestEvent: async (event, senderTabId) => {
+                ingestEvent: async (event: ExternalConversationEvent, senderTabId?: number) => {
                     seen.push({ event, senderTabId });
+                    return { subscriberCount: 2, delivered: 2, dropped: 0 };
                 },
             },
             logger: {
-                debug: (message, data) => {
+                debug: (message: unknown, data: unknown) => {
                     debugCalls.push({ message, data });
                 },
                 info: () => {},

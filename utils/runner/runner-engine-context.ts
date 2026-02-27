@@ -8,6 +8,7 @@
 
 import { browser } from 'wxt/browser';
 import type { LLMPlatform } from '@/platforms/types';
+import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import type { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -77,6 +78,7 @@ import type { RunnerState } from './state';
 import type { StreamDoneCoordinatorDeps } from './stream-done-coordinator';
 import { runStreamDoneProbe as runStreamDoneProbeReal } from './stream-done-probe';
 import type { RunnerStreamPreviewState } from './stream-preview';
+import type { TabDebugOverlaySnapshot, TabDebugOverlayState } from './tab-debug-overlay';
 import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from './url-candidates';
 import type { WarmFetchDeps, WarmFetchReason } from './warm-fetch';
 
@@ -129,6 +131,7 @@ export type EngineCtx = {
     cleanupWindowBridge: (() => void) | null;
     cleanupCompletionWatcher: (() => void) | null;
     cleanupButtonHealthCheck: (() => void) | null;
+    cleanupTabDebugRuntimeListener: (() => void) | null;
     lastButtonStateLogRef: { value: string };
 
     // Collections
@@ -166,6 +169,7 @@ export type EngineCtx = {
     streamPreviewState: RunnerStreamPreviewState;
     externalEventDispatchState: ExternalEventDispatcherState;
     streamProbeRuntime: ReturnType<typeof import('./platform-runtime-stream-probe').createStreamProbeRuntime> | null;
+    tabDebugOverlayState: TabDebugOverlayState;
 
     // Function refs (populated incrementally during init)
     setCurrentConversation: (cid: string | null) => void;
@@ -228,6 +232,26 @@ export type EngineCtx = {
     appendPendingStreamProbeText: (aid: string, text: string) => void;
     migratePendingStreamProbeText: (cid: string, aid: string) => void;
     appendLiveStreamProbeText: (cid: string, text: string) => void;
+    setTabDebugOverlayVisible: (visible: boolean) => void;
+    refreshTabDebugOverlay: () => void;
+    recordTabDebugCapture: (args: {
+        conversationId: string;
+        data: ConversationData;
+        attemptId?: string | null;
+        source?: string;
+    }) => void;
+    recordTabDebugExternalEvent: (args: {
+        event: ExternalConversationEvent;
+        status: 'sent' | 'failed';
+        error?: unknown;
+        delivery?: import('./tab-debug-overlay').TabDebugOverlayDeliveryStats | null;
+    }) => void;
+    handleTabDebugRuntimeMessage: (
+        message: unknown,
+    ) =>
+        | { handled: true; enabled: boolean; snapshot?: undefined }
+        | { handled: true; enabled: boolean; snapshot: TabDebugOverlaySnapshot }
+        | { handled: false; enabled?: undefined; snapshot?: undefined };
     isStaleAttemptMessage: (
         aid: string,
         cid: string | undefined,
@@ -382,7 +406,27 @@ export const emitExternalConversationEvent = (
     });
     void browser.runtime
         .sendMessage(buildExternalInternalEventMessage(event))
-        .then(() => {
+        .then((response) => {
+            const typed = response as
+                | {
+                      success?: unknown;
+                      delivery?: {
+                          subscriberCount?: unknown;
+                          delivered?: unknown;
+                          dropped?: unknown;
+                      };
+                  }
+                | undefined;
+            const delivery =
+                typeof typed?.delivery?.subscriberCount === 'number' &&
+                typeof typed.delivery.delivered === 'number' &&
+                typeof typed.delivery.dropped === 'number'
+                    ? {
+                          listenerCount: typed.delivery.subscriberCount,
+                          delivered: typed.delivery.delivered,
+                          dropped: typed.delivery.dropped,
+                      }
+                    : null;
             markExternalConversationEventDispatched(
                 ctx.externalEventDispatchState,
                 event.conversation_id,
@@ -390,14 +434,27 @@ export const emitExternalConversationEvent = (
                 event.content_hash,
                 event.payload.title,
             );
+            ctx.recordTabDebugExternalEvent({
+                event,
+                status: 'sent',
+                delivery,
+            });
             logger.debug('External event send success', {
                 conversationId: event.conversation_id,
                 eventType: event.type,
                 eventId: event.event_id,
                 contentHash: event.content_hash,
+                subscriberCount: delivery?.listenerCount ?? null,
+                delivered: delivery?.delivered ?? null,
+                dropped: delivery?.dropped ?? null,
             });
         })
         .catch((error) => {
+            ctx.recordTabDebugExternalEvent({
+                event,
+                status: 'failed',
+                error,
+            });
             logger.debug('External event send failed', {
                 conversationId: event.conversation_id,
                 type: event.type,
@@ -957,6 +1014,7 @@ export const buildCleanupRuntimeDeps = (
     cleanupWindowBridge: ctx.cleanupWindowBridge,
     cleanupCompletionWatcher: ctx.cleanupCompletionWatcher,
     cleanupButtonHealthCheck: ctx.cleanupButtonHealthCheck,
+    cleanupTabDebugRuntimeListener: ctx.cleanupTabDebugRuntimeListener,
     removeStorageChangeListener: () => {
         (async () => {
             const { browser } = await import('wxt/browser');

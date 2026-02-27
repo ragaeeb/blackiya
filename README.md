@@ -315,8 +315,9 @@ From the extension popup you can:
 2. Export full logs JSON
 3. Export a token-lean debug report TXT
 4. Enable/disable diagnostics stream dump
-5. Export/clear stream dump data
-6. Clear logs
+5. Toggle the per-tab debug overlay for the active supported tab (captures + emitted external payloads + listener delivery counts)
+6. Export/clear stream dump data
+7. Clear logs
 
 ### Viewing Saved Conversations
 

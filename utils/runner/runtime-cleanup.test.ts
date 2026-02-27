@@ -40,6 +40,7 @@ describe('runtime-cleanup', () => {
             cleanupWindowBridge: mock(() => {}),
             cleanupCompletionWatcher: mock(() => {}),
             cleanupButtonHealthCheck: mock(() => {}),
+            cleanupTabDebugRuntimeListener: mock(() => {}),
             removeStorageChangeListener: mock(() => {}),
             ...maps,
             ...sets,

@@ -151,6 +151,18 @@ In multi-tab runs, one debug TXT may not represent all tabs equally. For cross-t
 2. One full logs JSON from the overall run.
 3. Stream dump JSON if streaming signals are suspect.
 
+## Per-Tab Payload Overlay
+For tab-specific payload forensics (what was captured and what was emitted to external subscribers), use the popup toggle:
+
+1. Open the target ChatGPT/Gemini/Grok tab.
+2. In popup, enable **Active Tab Debug Overlay**.
+3. Reproduce once and capture screenshot/video of the overlay.
+
+Notes:
+- Overlay is tab-scoped (session storage + tab message), so enabling it in one tab does not affect other tabs.
+- Overlay keeps a bounded recent history of capture records and external event emissions (`conversation.ready`/`conversation.updated`) including payload previews.
+- For each emitted external event, the accordion summary/details include listener delivery stats (`listeners`, `delivered`, `dropped`) when available from background ingestion.
+
 ## Recommended Bug Report Bundle
 1. Platform + exact URL(s).
 2. Repro steps and timing (foreground/background tab, number of tabs).
