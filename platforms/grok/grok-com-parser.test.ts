@@ -14,11 +14,13 @@ import type { MessageNode } from '@/utils/types';
 
 let grokAdapter: any;
 let resetGrokAdapterState: (() => void) | null = null;
+let grokState: { conversationTitles: { has: (key: string) => boolean } } | null = null;
 
 beforeAll(async () => {
     const mod = await import('@/platforms/grok');
     grokAdapter = mod.grokAdapter;
     resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
+    grokState = mod.grokState ?? null;
 });
 
 beforeEach(() => {
@@ -295,10 +297,8 @@ describe('Grok Adapter — grok.com REST parsing', () => {
                 ],
             });
             const result = grokAdapter.parseInterceptedData(loadResponsesPayload, loadResponsesUrl);
-            // Title is still 'New conversation' because it was set directly (regardless of cache)
-            // But it was NOT cached in grokState.conversationTitles — verified by the
-            // 'should not overwrite' test above which proves a later generic meta can't clobber
             expect(result?.title).toBe('New conversation');
+            expect(grokState?.conversationTitles.has(conversationId)).toBeFalse();
         });
 
         it('should return null (not throw) for malformed conversations_v2 payload', () => {

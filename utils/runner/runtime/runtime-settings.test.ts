@@ -56,7 +56,23 @@ describe('runtime-settings', () => {
             (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
                 throw new Error('storage failure');
             });
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
             expect(await getExportFormat('common')).toBe('common');
+        });
+
+        it('should continue fallbacks when local primary read throws and return sync value', async () => {
+            const { browser } = await import('wxt/browser');
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+                throw new Error('local primary failure');
+            });
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
+                [STORAGE_KEYS.EXPORT_FORMAT]: 'original',
+            }));
+
+            expect(await getExportFormat('common')).toBe('original');
         });
 
         it('should fall back to legacy local key when primary key is missing', async () => {

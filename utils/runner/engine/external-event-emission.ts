@@ -14,6 +14,29 @@ import {
 } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
+const EXTERNAL_EVENT_RETRY_DELAYS_MS = [20, 100, 300] as const;
+
+type ExternalDeliveryResponse = {
+    success?: unknown;
+    delivery?: {
+        subscriberCount?: unknown;
+        delivered?: unknown;
+        dropped?: unknown;
+    };
+    error?: unknown;
+};
+
+const extractDeliveryStats = (response: ExternalDeliveryResponse | undefined) =>
+    typeof response?.delivery?.subscriberCount === 'number' &&
+    typeof response.delivery.delivered === 'number' &&
+    typeof response.delivery.dropped === 'number'
+        ? {
+              listenerCount: response.delivery.subscriberCount,
+              delivered: response.delivery.delivered,
+              dropped: response.delivery.dropped,
+          }
+        : null;
+
 const applyTitleFallbackForExternalEvent = (ctx: EngineCtx, conversationId: string, data: ConversationData) => {
     const adapter = ctx.currentAdapter;
     if (!adapter?.defaultTitles) {
@@ -99,62 +122,96 @@ export const emitExternalConversationEvent = (
         eventId: event.event_id,
         contentHash: event.content_hash,
     });
-    void browser.runtime
-        .sendMessage(buildExternalInternalEventMessage(event))
-        .then((response) => {
-            const typed = response as
-                | {
-                      success?: unknown;
-                      delivery?: {
-                          subscriberCount?: unknown;
-                          delivered?: unknown;
-                          dropped?: unknown;
-                      };
-                  }
-                | undefined;
-            const delivery =
-                typeof typed?.delivery?.subscriberCount === 'number' &&
-                typeof typed.delivery.delivered === 'number' &&
-                typeof typed.delivery.dropped === 'number'
-                    ? {
-                          listenerCount: typed.delivery.subscriberCount,
-                          delivered: typed.delivery.delivered,
-                          dropped: typed.delivery.dropped,
-                      }
-                    : null;
-            markExternalConversationEventDispatched(
-                ctx.externalEventDispatchState,
-                event.conversation_id,
-                event.attempt_id,
-                event.content_hash,
-                event.payload,
-            );
-            ctx.recordTabDebugExternalEvent({
-                event,
-                status: 'sent',
-                delivery,
-            });
-            logger.debug('External event send success', {
-                conversationId: event.conversation_id,
-                eventType: event.type,
-                eventId: event.event_id,
-                contentHash: event.content_hash,
-                subscriberCount: delivery?.listenerCount ?? null,
-                delivered: delivery?.delivered ?? null,
-                dropped: delivery?.dropped ?? null,
-            });
-        })
-        .catch((error) => {
-            ctx.recordTabDebugExternalEvent({
-                event,
-                status: 'failed',
-                error,
-            });
-            logger.debug('External event send failed', {
-                conversationId: event.conversation_id,
-                type: event.type,
-                eventId: event.event_id,
-                error,
-            });
+    const queueRetry = (attemptIndex: number, error: unknown, delivery: ReturnType<typeof extractDeliveryStats>) => {
+        const delayMs = EXTERNAL_EVENT_RETRY_DELAYS_MS[attemptIndex];
+        if (delayMs === undefined) {
+            return;
+        }
+        logger.debug('External event send retry scheduled', {
+            conversationId: event.conversation_id,
+            type: event.type,
+            eventId: event.event_id,
+            attempt: attemptIndex + 2,
+            delayMs,
+            error,
+            subscriberCount: delivery?.listenerCount ?? null,
+            delivered: delivery?.delivered ?? null,
+            dropped: delivery?.dropped ?? null,
         });
+        const retryTimer = globalThis.setTimeout(() => {
+            void send(attemptIndex + 1);
+        }, delayMs);
+        if (Array.isArray((ctx as Partial<EngineCtx>).retryTimeoutIds)) {
+            ctx.retryTimeoutIds.push(retryTimer as unknown as number);
+        }
+    };
+
+    const send = (attemptIndex: number) => {
+        return browser.runtime
+            .sendMessage(buildExternalInternalEventMessage(event))
+            .then((response) => {
+                const typed = response as ExternalDeliveryResponse | undefined;
+                const delivery = extractDeliveryStats(typed);
+                if (typed?.success !== true) {
+                    const ackError = {
+                        message: 'External event rejected by background hub',
+                        response: typed ?? null,
+                    };
+                    ctx.recordTabDebugExternalEvent({
+                        event,
+                        status: 'failed',
+                        error: ackError,
+                        delivery,
+                    });
+                    logger.debug('External event send negative ACK', {
+                        conversationId: event.conversation_id,
+                        type: event.type,
+                        eventId: event.event_id,
+                        error: ackError,
+                        subscriberCount: delivery?.listenerCount ?? null,
+                        delivered: delivery?.delivered ?? null,
+                        dropped: delivery?.dropped ?? null,
+                    });
+                    queueRetry(attemptIndex, ackError, delivery);
+                    return;
+                }
+                markExternalConversationEventDispatched(
+                    ctx.externalEventDispatchState,
+                    event.conversation_id,
+                    event.attempt_id,
+                    event.content_hash,
+                    event.payload,
+                );
+                ctx.recordTabDebugExternalEvent({
+                    event,
+                    status: 'sent',
+                    delivery,
+                });
+                logger.debug('External event send success', {
+                    conversationId: event.conversation_id,
+                    eventType: event.type,
+                    eventId: event.event_id,
+                    contentHash: event.content_hash,
+                    subscriberCount: delivery?.listenerCount ?? null,
+                    delivered: delivery?.delivered ?? null,
+                    dropped: delivery?.dropped ?? null,
+                });
+            })
+            .catch((error) => {
+                ctx.recordTabDebugExternalEvent({
+                    event,
+                    status: 'failed',
+                    error,
+                });
+                logger.warn('External event send failed', {
+                    conversationId: event.conversation_id,
+                    type: event.type,
+                    eventId: event.event_id,
+                    error,
+                });
+                queueRetry(attemptIndex, error, null);
+            });
+    };
+
+    void send(0);
 };

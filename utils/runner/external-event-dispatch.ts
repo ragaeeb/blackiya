@@ -12,7 +12,7 @@ import type { ConversationData } from '@/utils/types';
 type ExternalDispatchStatus = {
     hasReady: boolean;
     lastContentHash: string | null;
-    lastPayloadHash: string;
+    lastPayloadSignature: string;
 };
 
 export type ExternalEventDispatcherState = {
@@ -129,15 +129,7 @@ const stableStringify = (value: unknown): string => {
     return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
 };
 
-const hashPayloadForDispatch = (payload: ConversationData): string => {
-    const serialized = stableStringify(payload);
-    let hash = 2166136261;
-    for (let index = 0; index < serialized.length; index += 1) {
-        hash ^= serialized.charCodeAt(index);
-        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-    }
-    return `${hash >>> 0}`;
-};
+const payloadSignatureForDispatch = (payload: ConversationData): string => stableStringify(payload);
 
 const shouldEmit = (
     args: MaybeBuildExternalConversationEventArgs,
@@ -170,9 +162,13 @@ export const maybeBuildExternalConversationEvent = (
     const payload = normalizePayloadForDispatch(args.data);
     const readiness = args.evaluateReadinessForData(args.data);
     const contentHash = readiness.contentHash ?? null;
-    const payloadHash = hashPayloadForDispatch(payload);
+    const payloadSignature = payloadSignatureForDispatch(payload);
     const existing = args.state.byConversation.get(args.conversationId);
-    if (existing?.hasReady && existing.lastPayloadHash === payloadHash && existing.lastContentHash === contentHash) {
+    if (
+        existing?.hasReady &&
+        existing.lastPayloadSignature === payloadSignature &&
+        existing.lastContentHash === contentHash
+    ) {
         return null;
     }
 
@@ -207,7 +203,7 @@ export const markExternalConversationEventDispatched = (
         {
             hasReady: true,
             lastContentHash: contentHash,
-            lastPayloadHash: hashPayloadForDispatch(payload),
+            lastPayloadSignature: payloadSignatureForDispatch(payload),
         },
         state.maxEntries,
     );

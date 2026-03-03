@@ -128,6 +128,10 @@ const flushAsyncTasks = async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
+const wait = async (durationMs: number) => {
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+};
+
 const collectEventsSince = async (hub: ReturnType<typeof createExternalApiHub>) => {
     const allEvents: Array<{ seq: number; conversation_id: string }> = [];
     let cursor = 0;
@@ -343,5 +347,126 @@ describe('background external api hub', () => {
             extensionId: 'delivery-ext',
             message: expect.objectContaining({ type: 'BLACKIYA_WAKE', head_seq: 3 }),
         });
+    });
+
+    it('should rate-limit wake bursts under parallel ingests', async () => {
+        const wakeCalls: Array<{ extensionId: string; message: unknown }> = [];
+        const hub = createExternalApiHub({
+            eventStore: createInMemoryExternalEventStore(),
+            now: () => now,
+            wakeThrottleMs: 3_000,
+            sendWakeMessage: async (extensionId, message) => {
+                wakeCalls.push({ extensionId, message });
+            },
+        });
+
+        const port = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(port, { senderExtensionId: 'delivery-ext' });
+        port.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+        port.disconnectNow();
+
+        await Promise.all([
+            hub.ingestEvent(buildInboundEvent('conv-race-1'), 1),
+            hub.ingestEvent(buildInboundEvent('conv-race-2'), 2),
+            hub.ingestEvent(buildInboundEvent('conv-race-3'), 3),
+        ]);
+
+        expect(wakeCalls).toHaveLength(1);
+        expect(wakeCalls[0]).toMatchObject({
+            extensionId: 'delivery-ext',
+            message: expect.objectContaining({ type: 'BLACKIYA_WAKE' }),
+        });
+    });
+
+    it('should retry wake quickly when wake send fails before throttle window', async () => {
+        let sendAttempts = 0;
+        const wakeCalls: Array<{ extensionId: string; message: unknown }> = [];
+        const hub = createExternalApiHub({
+            eventStore: createInMemoryExternalEventStore(),
+            now: () => now,
+            wakeThrottleMs: 3_000,
+            sendWakeMessage: async (extensionId, message) => {
+                sendAttempts += 1;
+                wakeCalls.push({ extensionId, message });
+                if (sendAttempts === 1) {
+                    throw new Error('transient wake failure');
+                }
+            },
+        });
+
+        const port = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(port, { senderExtensionId: 'delivery-ext' });
+        port.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+        port.disconnectNow();
+
+        await hub.ingestEvent(buildInboundEvent('conv-wake-1'), 1);
+        now += 1_000;
+        await hub.ingestEvent(buildInboundEvent('conv-wake-2'), 2);
+
+        expect(wakeCalls).toHaveLength(2);
+        expect(wakeCalls[0]).toMatchObject({
+            extensionId: 'delivery-ext',
+            message: expect.objectContaining({ type: 'BLACKIYA_WAKE', head_seq: 1 }),
+        });
+        expect(wakeCalls[1]).toMatchObject({
+            extensionId: 'delivery-ext',
+            message: expect.objectContaining({ type: 'BLACKIYA_WAKE', head_seq: 2 }),
+        });
+    });
+
+    it('should reject commits that exceed delivered watermark during replay race', async () => {
+        const baseStore = createInMemoryExternalEventStore({
+            keepCommittedDiagnostics: 0,
+        });
+        const delayedStore = {
+            ...baseStore,
+            getSince: async (cursor: number, limit: number) => {
+                await wait(10);
+                return baseStore.getSince(cursor, limit);
+            },
+        };
+        const hub = createExternalApiHub({
+            eventStore: delayedStore,
+            now: () => now,
+        });
+
+        for (let index = 1; index <= 10; index += 1) {
+            await hub.ingestEvent(buildInboundEvent(`conv-watermark-${index}`), index);
+        }
+
+        const port = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(port, { senderExtensionId: 'delivery-ext' });
+        port.emitMessage({ type: 'subscribe', cursor: 5, consumer_role: 'delivery' });
+        port.emitMessage({ type: 'commit', up_to_seq: 10 });
+
+        await wait(40);
+        const events = await collectEventsSince(hub);
+        expect(events[0]?.seq).toBe(1);
+        expect(events[events.length - 1]?.seq).toBe(10);
+    });
+
+    it('should retry initialization after transient init failure', async () => {
+        const baseStore = createInMemoryExternalEventStore();
+        let initCalls = 0;
+        const flakyStore = {
+            ...baseStore,
+            init: async () => {
+                initCalls += 1;
+                if (initCalls === 1) {
+                    throw new Error('transient init failure');
+                }
+            },
+        };
+
+        const hub = createExternalApiHub({
+            eventStore: flakyStore,
+            now: () => now,
+        });
+
+        await expect(hub.ingestEvent(buildInboundEvent('conv-init-1'), 1)).rejects.toThrow('transient init failure');
+        await expect(hub.ingestEvent(buildInboundEvent('conv-init-2'), 1)).resolves.toBeDefined();
+        expect(initCalls).toBe(2);
     });
 });

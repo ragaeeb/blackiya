@@ -204,6 +204,13 @@ const coerceNumber = (value: unknown, fallback = 0) =>
     typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
 const coerceStringOrNull = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+const isConstraintError = (error: unknown): boolean =>
+    error instanceof DOMException
+        ? error.name === 'ConstraintError'
+        : typeof error === 'object' &&
+          error !== null &&
+          'name' in error &&
+          (error as { name?: unknown }).name === 'ConstraintError';
 
 export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): ExternalEventStore => {
     const dbName = deps?.dbName ?? 'blackiya_external_events_v1';
@@ -265,22 +272,18 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
         },
         append: async (event: ExternalInboundConversationEvent) => {
             const db = await getDb();
-
-            {
-                const existingTx = db.transaction(IDB_EVENTS_STORE, 'readonly');
-                const existingIndex = existingTx.objectStore(IDB_EVENTS_STORE).index('by_event_id');
-                const existing = (await requestAsPromise(existingIndex.get(event.event_id))) as
-                    | ExternalConversationEvent
-                    | undefined;
-                await transactionComplete(existingTx);
-                if (existing) {
-                    return existing;
-                }
-            }
-
             const transaction = db.transaction([IDB_EVENTS_STORE, IDB_META_STORE], 'readwrite');
             const eventsStore = transaction.objectStore(IDB_EVENTS_STORE);
             const metaStore = transaction.objectStore(IDB_META_STORE);
+            const eventIdIndex = eventsStore.index('by_event_id');
+
+            const existing = (await requestAsPromise(eventIdIndex.get(event.event_id))) as
+                | ExternalConversationEvent
+                | undefined;
+            if (existing) {
+                await transactionComplete(transaction);
+                return existing;
+            }
 
             const nextSeqRecord = (await requestAsPromise(metaStore.get(META_NEXT_SEQ))) as
                 | ExternalMetaRecord<number>
@@ -292,10 +295,25 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
                 created_at: now(),
             } satisfies ExternalConversationEvent;
 
-            eventsStore.put(created);
-            metaStore.put({ key: META_NEXT_SEQ, value: nextSeq + 1 } satisfies ExternalMetaRecord<number>);
-            await transactionComplete(transaction);
-            return created;
+            try {
+                eventsStore.put(created);
+                metaStore.put({ key: META_NEXT_SEQ, value: nextSeq + 1 } satisfies ExternalMetaRecord<number>);
+                await transactionComplete(transaction);
+                return created;
+            } catch (error) {
+                if (isConstraintError(error)) {
+                    const dedupeTx = db.transaction(IDB_EVENTS_STORE, 'readonly');
+                    const dedupeIndex = dedupeTx.objectStore(IDB_EVENTS_STORE).index('by_event_id');
+                    const dedupeExisting = (await requestAsPromise(dedupeIndex.get(event.event_id))) as
+                        | ExternalConversationEvent
+                        | undefined;
+                    await transactionComplete(dedupeTx);
+                    if (dedupeExisting) {
+                        return dedupeExisting;
+                    }
+                }
+                throw error;
+            }
         },
         getSince: async (cursor, limit) => {
             const boundedLimit = Math.max(1, Math.floor(limit));
@@ -363,17 +381,21 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             return (cursor?.value as ExternalConversationEvent | undefined) ?? null;
         },
         ensureDeliveryConsumer: async (consumerId) => {
-            const designated = coerceStringOrNull(await getMetaValue(META_DELIVERY_CONSUMER_ID, null));
+            const db = await getDb();
+            const transaction = db.transaction(IDB_META_STORE, 'readwrite');
+            const store = transaction.objectStore(IDB_META_STORE);
+            const existing = (await requestAsPromise(store.get(META_DELIVERY_CONSUMER_ID))) as
+                | ExternalMetaRecord<string>
+                | undefined;
+            const designated = coerceStringOrNull(existing?.value);
+            const winner = designated ?? consumerId;
             if (!designated) {
-                await setMetaValue(META_DELIVERY_CONSUMER_ID, consumerId);
-                return {
-                    designatedConsumerId: consumerId,
-                    authorized: true,
-                };
+                store.put({ key: META_DELIVERY_CONSUMER_ID, value: winner } satisfies ExternalMetaRecord<string>);
             }
+            await transactionComplete(transaction);
             return {
-                designatedConsumerId: designated,
-                authorized: designated === consumerId,
+                designatedConsumerId: winner,
+                authorized: winner === consumerId,
             };
         },
         getDeliveryConsumerId: async () => coerceStringOrNull(await getMetaValue(META_DELIVERY_CONSUMER_ID, null)),

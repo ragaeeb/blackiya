@@ -66,6 +66,7 @@ type SubscriberState = {
     cursor: number;
     maxBatch: number;
     replayInFlight: boolean;
+    lastDeliveredSeq: number;
 };
 
 type ReplayBatch = {
@@ -87,6 +88,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
 
     let initialized = false;
     let initializePromise: Promise<void> | null = null;
+    let wakeGate: Promise<void> = Promise.resolve();
 
     const ensureHydrated = async () => {
         if (initialized) {
@@ -95,12 +97,14 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         if (!initializePromise) {
             initializePromise = eventStore
                 .init()
+                .then(() => {
+                    initialized = true;
+                })
                 .catch((error) => {
                     deps.logger?.warn('Failed to initialize external event store', { error });
                     throw error;
                 })
                 .finally(() => {
-                    initialized = true;
                     initializePromise = null;
                 });
         }
@@ -128,33 +132,37 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     };
 
     const maybeSendWake = async (headSeq: number) => {
-        const designatedConsumerId = await eventStore.getDeliveryConsumerId();
-        if (!designatedConsumerId) {
-            return;
-        }
-        if (await hasOnlineDeliverySubscriber()) {
-            return;
-        }
+        const run = async () => {
+            const designatedConsumerId = await eventStore.getDeliveryConsumerId();
+            if (!designatedConsumerId) {
+                return;
+            }
+            if (await hasOnlineDeliverySubscriber()) {
+                return;
+            }
 
-        const nowTs = now();
-        const lastWakeSentAt = await eventStore.getLastWakeSentAt();
-        if (lastWakeSentAt > 0 && nowTs - lastWakeSentAt < wakeThrottleMs) {
-            return;
-        }
+            const nowTs = now();
+            const lastWakeSentAt = await eventStore.getLastWakeSentAt();
+            if (lastWakeSentAt > 0 && nowTs - lastWakeSentAt < wakeThrottleMs) {
+                return;
+            }
 
-        await eventStore.setLastWakeSentAt(nowTs);
-        try {
-            await sendWakeMessage(designatedConsumerId, {
-                type: 'BLACKIYA_WAKE',
-                head_seq: headSeq,
-                ts: nowTs,
-            });
-        } catch (error) {
-            deps.logger?.warn('Failed to send wake signal to delivery consumer', {
-                designatedConsumerId,
-                error,
-            });
-        }
+            try {
+                await sendWakeMessage(designatedConsumerId, {
+                    type: 'BLACKIYA_WAKE',
+                    head_seq: headSeq,
+                    ts: nowTs,
+                });
+                await eventStore.setLastWakeSentAt(nowTs);
+            } catch (error) {
+                deps.logger?.warn('Failed to send wake signal to delivery consumer', {
+                    designatedConsumerId,
+                    error,
+                });
+            }
+        };
+        wakeGate = wakeGate.then(run, run);
+        await wakeGate;
     };
 
     const broadcastLiveEvent = (event: ExternalConversationEvent): ExternalEventDeliveryStats => {
@@ -175,6 +183,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             }
             try {
                 port.postMessage(event satisfies ExternalPortOutboundMessage);
+                state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, event.seq);
                 delivered += 1;
             } catch {
                 subscribers.delete(port);
@@ -213,6 +222,10 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             batch_start: batch.batchStart,
             batch_end: batch.batchEnd,
         } satisfies ExternalPortOutboundMessage);
+        const state = subscribers.get(port);
+        if (state) {
+            state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, batch.batchEnd);
+        }
     };
 
     const streamReplayBatches = async (port: ExternalPortLike, replayCursor: number, replayBatchSize: number) => {
@@ -271,6 +284,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         state.subscribed = true;
         state.cursor = Math.max(0, Math.floor(message.cursor));
         state.maxBatch = clampBatchSize(message.max_batch, defaultBatchSize);
+        state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, state.cursor);
 
         if (message.consumer_role === 'delivery' && state.senderExtensionId) {
             const result = await eventStore.ensureDeliveryConsumer(state.senderExtensionId);
@@ -291,11 +305,21 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             return;
         }
 
-        const result = await eventStore.commit(state.senderExtensionId, message.up_to_seq);
+        const requestedUpToSeq = Math.max(0, Math.floor(message.up_to_seq));
+        if (requestedUpToSeq > state.lastDeliveredSeq) {
+            deps.logger?.warn('External hub commit exceeds delivered watermark', {
+                senderExtensionId: state.senderExtensionId,
+                upToSeq: requestedUpToSeq,
+                lastDeliveredSeq: state.lastDeliveredSeq,
+            });
+            return;
+        }
+
+        const result = await eventStore.commit(state.senderExtensionId, requestedUpToSeq);
         if (!result.authorized) {
             deps.logger?.warn('External hub commit rejected for non-designated consumer', {
                 senderExtensionId: state.senderExtensionId,
-                upToSeq: message.up_to_seq,
+                upToSeq: requestedUpToSeq,
             });
             return;
         }
@@ -309,6 +333,8 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     };
 
     const handlePortInboundMessage = async (port: ExternalPortLike, message: ExternalPortInboundMessage) => {
+        await ensureHydrated();
+
         if (isExternalSubscribeMessage(message)) {
             await handleSubscribe(port, message);
             return;
@@ -333,6 +359,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             cursor: 0,
             maxBatch: defaultBatchSize,
             replayInFlight: false,
+            lastDeliveredSeq: 0,
         };
 
         subscribers.set(port, state);
@@ -349,7 +376,13 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             if (!isExternalPortInboundMessage(message)) {
                 return;
             }
-            void handlePortInboundMessage(port, message);
+            void handlePortInboundMessage(port, message).catch((error) => {
+                deps.logger?.warn('External hub failed to process inbound port message', {
+                    error,
+                    senderExtensionId: state.senderExtensionId,
+                    messageType: message.type,
+                });
+            });
         };
 
         if (port.onMessage) {

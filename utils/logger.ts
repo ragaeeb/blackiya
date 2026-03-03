@@ -7,7 +7,7 @@ import { STORAGE_KEYS } from './settings';
  */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-type LogContext = 'background' | 'content' | 'popup';
+type LogContext = 'background' | 'content' | 'popup' | 'unknown';
 
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
     debug: 2,
@@ -36,7 +36,7 @@ const getContext = (): LogContext => {
         return 'content';
     }
 
-    return 'background';
+    return 'unknown';
 };
 
 class ExtensionLogger {
@@ -51,16 +51,91 @@ class ExtensionLogger {
         this.attachStorageListener();
     }
 
+    private sanitizePrimitiveValue(value: unknown): { handled: true; value: unknown } | { handled: false } {
+        if (value === null || value === undefined) {
+            return { handled: true, value: value ?? null };
+        }
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return { handled: true, value };
+        }
+        if (typeof value === 'bigint') {
+            return { handled: true, value: `${value}n` };
+        }
+        if (typeof value === 'symbol') {
+            return { handled: true, value: value.toString() };
+        }
+        if (typeof value === 'function') {
+            return { handled: true, value: `[Function ${value.name || 'anonymous'}]` };
+        }
+        return { handled: false };
+    }
+
+    private sanitizeSpecialObject(value: unknown): { handled: true; value: unknown } | { handled: false } {
+        if (value instanceof Date) {
+            return { handled: true, value: value.toISOString() };
+        }
+        if (value instanceof Error) {
+            return {
+                handled: true,
+                value: {
+                    name: value.name,
+                    message: value.message,
+                    stack: value.stack ?? null,
+                },
+            };
+        }
+        if (typeof Node !== 'undefined' && value instanceof Node) {
+            return { handled: true, value: `[Node ${value.nodeName}]` };
+        }
+        return { handled: false };
+    }
+
+    private sanitizeRecord(value: Record<string, unknown>, seen: WeakSet<object>): Record<string, unknown> {
+        const result: Record<string, unknown> = {};
+        for (const [key, entry] of Object.entries(value)) {
+            result[key] = this.sanitizeLogValue(entry, seen);
+        }
+        return result;
+    }
+
+    private sanitizeLogValue(value: unknown, seen = new WeakSet<object>()): unknown {
+        const primitive = this.sanitizePrimitiveValue(value);
+        if (primitive.handled) {
+            return primitive.value;
+        }
+
+        const specialObject = this.sanitizeSpecialObject(value);
+        if (specialObject.handled) {
+            return specialObject.value;
+        }
+
+        if (!value || typeof value !== 'object') {
+            return String(value);
+        }
+        if (seen.has(value)) {
+            return '[Circular]';
+        }
+        seen.add(value);
+
+        if (Array.isArray(value)) {
+            return value.map((entry) => this.sanitizeLogValue(entry, seen));
+        }
+
+        return this.sanitizeRecord(value as Record<string, unknown>, seen);
+    }
+
     private emit(level: LogLevel, message: string, args: unknown[]) {
         if (LOG_LEVEL_PRIORITY[level] < this.minLevel) {
             return;
         }
 
+        const sanitizedArgs = args.map((arg) => this.sanitizeLogValue(arg));
+
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
             level,
             message,
-            data: args,
+            data: sanitizedArgs,
             context: this.context,
         };
 
@@ -97,11 +172,15 @@ class ExtensionLogger {
                     type: 'LOG_ENTRY',
                     payload: entry,
                 })
-                .catch(() => {
-                    // Ignore transient runtime messaging failures.
+                .catch((error) => {
+                    logsStorage.saveLog(entry).catch((persistError) => {
+                        console.error('Logger failed to save after runtime send error:', error, persistError);
+                    });
                 });
-        } catch {
-            // Ignore runtime messaging failures during shutdown/unload.
+        } catch (error) {
+            logsStorage.saveLog(entry).catch((persistError) => {
+                console.error('Logger failed to save after runtime throw:', error, persistError);
+            });
         }
     }
 

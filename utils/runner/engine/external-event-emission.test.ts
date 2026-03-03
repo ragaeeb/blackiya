@@ -2,14 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
 
 const sentMessages: unknown[] = [];
+let sendMessageBehavior: (message: unknown) => Promise<unknown> = async (message) => {
+    sentMessages.push(message);
+    return {
+        success: true,
+        delivery: {
+            subscriberCount: 1,
+            delivered: 1,
+            dropped: 0,
+        },
+    };
+};
 
 mock.module('wxt/browser', () => ({
     browser: {
         runtime: {
-            sendMessage: async (message: unknown) => {
-                sentMessages.push(message);
-                return undefined;
-            },
+            sendMessage: (message: unknown) => sendMessageBehavior(message),
         },
     },
 }));
@@ -204,6 +212,17 @@ describe('runner external event emission', () => {
         (globalThis as any).window = win;
         (globalThis as any).document = win.document;
         sentMessages.length = 0;
+        sendMessageBehavior = async (message) => {
+            sentMessages.push(message);
+            return {
+                success: true,
+                delivery: {
+                    subscriberCount: 1,
+                    delivered: 1,
+                    dropped: 0,
+                },
+            };
+        };
     });
 
     afterEach(() => {
@@ -588,5 +607,81 @@ describe('runner external event emission', () => {
                 provider: 'gemini',
             },
         });
+    });
+
+    it('should treat negative ACK as failed delivery and retry before marking sent', async () => {
+        let attempt = 0;
+        sendMessageBehavior = async (message) => {
+            sentMessages.push(message);
+            attempt += 1;
+            if (attempt === 1) {
+                return {
+                    success: false,
+                    error: 'hub_rejected',
+                    delivery: {
+                        subscriberCount: 1,
+                        delivered: 0,
+                        dropped: 1,
+                    },
+                };
+            }
+            return {
+                success: true,
+                delivery: {
+                    subscriberCount: 1,
+                    delivered: 1,
+                    dropped: 0,
+                },
+            };
+        };
+
+        const debugEvents: Array<{ status?: string; delivery?: { listenerCount?: number; delivered?: number } }> = [];
+        const recordTabDebugExternalEvent = mock(
+            (entry: { status?: string; delivery?: { listenerCount?: number; delivered?: number } }) => {
+                debugEvents.push(entry);
+            },
+        );
+        const ctx: any = {
+            currentAdapter: {
+                name: 'ChatGPT',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:ack',
+                    latestAssistantTextLength: 10,
+                }),
+            },
+            currentConversationId: 'conv-ack',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent,
+            retryTimeoutIds: [],
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'conv-ack',
+            data: buildConversation('conv-ack'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'attempt-ack',
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        expect(sentMessages).toHaveLength(2);
+        const statuses = debugEvents.map((entry) => entry.status);
+        expect(statuses).toContain('failed');
+        expect(statuses).toContain('sent');
+        expect(
+            debugEvents.some(
+                (entry) =>
+                    entry.status === 'failed' && entry.delivery?.listenerCount === 1 && entry.delivery?.delivered === 0,
+            ),
+        ).toBeTrue();
     });
 });

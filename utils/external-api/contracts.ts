@@ -156,6 +156,10 @@ export type ExternalPortOutboundMessage =
     | ExternalReplayCompleteMessage;
 
 const isExternalApiVersion = (value: unknown): value is ExternalApiVersion => value === EXTERNAL_API_VERSION;
+const isNonNegativeInteger = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isPositiveInteger = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value > 0;
 
 const isExternalProvider = (value: unknown): value is ExternalProvider =>
     value === 'chatgpt' || value === 'gemini' || value === 'grok' || value === 'unknown';
@@ -210,11 +214,11 @@ export const isExternalConversationEvent = (value: unknown): value is ExternalCo
         isExternalApiVersion(value.api) &&
         isExternalPushEventType(value.type) &&
         hasString(value.event_id) &&
-        isFiniteNumber(value.seq) &&
-        isFiniteNumber(value.created_at) &&
-        isFiniteNumber(value.ts) &&
+        isNonNegativeInteger(value.seq) &&
+        isNonNegativeInteger(value.created_at) &&
+        isNonNegativeInteger(value.ts) &&
         isExternalProvider(value.provider) &&
-        (value.tab_id === undefined || isFiniteNumber(value.tab_id)) &&
+        (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         hasString(value.conversation_id) &&
         isConversationDataLike(value.payload) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
@@ -231,11 +235,11 @@ export const isExternalInboundConversationEvent = (value: unknown): value is Ext
         isExternalApiVersion(value.api) &&
         isExternalPushEventType(value.type) &&
         hasString(value.event_id) &&
-        (value.seq === undefined || isFiniteNumber(value.seq)) &&
-        (value.created_at === undefined || isFiniteNumber(value.created_at)) &&
-        isFiniteNumber(value.ts) &&
+        (value.seq === undefined || isNonNegativeInteger(value.seq)) &&
+        (value.created_at === undefined || isNonNegativeInteger(value.created_at)) &&
+        isNonNegativeInteger(value.ts) &&
         isExternalProvider(value.provider) &&
-        (value.tab_id === undefined || isFiniteNumber(value.tab_id)) &&
+        (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         hasString(value.conversation_id) &&
         isConversationDataLike(value.payload) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
@@ -256,7 +260,7 @@ const isExternalGetLatestRequest = (value: Record<string, unknown>): value is Ex
         return false;
     }
     return (
-        (value.tab_id === undefined || isFiniteNumber(value.tab_id)) &&
+        (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         (value.format === undefined || isExternalPullFormat(value.format))
     );
 };
@@ -272,7 +276,7 @@ const isExternalGetSinceRequest = (value: Record<string, unknown>): value is Ext
     if (value.type !== 'events.getSince') {
         return false;
     }
-    return isFiniteNumber(value.cursor) && (value.limit === undefined || isFiniteNumber(value.limit));
+    return isNonNegativeInteger(value.cursor) && (value.limit === undefined || isPositiveInteger(value.limit));
 };
 
 const isExternalHealthPingRequest = (value: Record<string, unknown>): value is ExternalHealthPingRequest =>
@@ -295,9 +299,9 @@ export const isExternalSubscribeMessage = (value: unknown): value is ExternalSub
         return false;
     }
     return (
-        isFiniteNumber(value.cursor) &&
+        isNonNegativeInteger(value.cursor) &&
         value.consumer_role === 'delivery' &&
-        (value.max_batch === undefined || isFiniteNumber(value.max_batch))
+        (value.max_batch === undefined || isPositiveInteger(value.max_batch))
     );
 };
 
@@ -305,7 +309,7 @@ export const isExternalCommitMessage = (value: unknown): value is ExternalCommit
     if (!isRecord(value) || value.type !== 'commit') {
         return false;
     }
-    return isFiniteNumber(value.up_to_seq);
+    return isNonNegativeInteger(value.up_to_seq);
 };
 
 export const isExternalPortInboundMessage = (value: unknown): value is ExternalPortInboundMessage =>

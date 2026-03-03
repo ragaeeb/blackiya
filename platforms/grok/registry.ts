@@ -36,7 +36,7 @@ export const GROK_SELECTOR_REGISTRY = {
     ],
 } as const;
 
-export const GROK_DEFAULT_TITLES: string[] = ['New conversation', 'Grok Conversation', 'Grok / X'];
+export const GROK_DEFAULT_TITLES = ['New conversation', 'Grok Conversation', 'Grok / X'] as const;
 
 const maybeLogButtonTargetMiss = () => {
     const now = Date.now();

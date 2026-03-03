@@ -14,34 +14,24 @@ const normalizeExportFormat = (value: unknown): ExportFormat | null => {
 };
 
 export const getExportFormat = async (defaultFormat: ExportFormat): Promise<ExportFormat> => {
-    try {
-        const localPrimary = await browser.storage.local.get(STORAGE_KEYS.EXPORT_FORMAT);
-        const primaryFormat = normalizeExportFormat(localPrimary[STORAGE_KEYS.EXPORT_FORMAT]);
-        if (primaryFormat) {
-            return primaryFormat;
+    const readFormat = async (area: 'local' | 'sync', key: string): Promise<ExportFormat | null> => {
+        try {
+            const storageArea = area === 'local' ? browser.storage.local : browser.storage.sync;
+            const result = await storageArea.get(key);
+            return normalizeExportFormat(result[key]);
+        } catch (error) {
+            logger.warn(`Failed to read ${area} export format key "${key}"`, error);
+            return null;
         }
+    };
 
-        const localLegacy = await browser.storage.local.get(LEGACY_EXPORT_FORMAT_KEY);
-        const legacyLocalFormat = normalizeExportFormat(localLegacy[LEGACY_EXPORT_FORMAT_KEY]);
-        if (legacyLocalFormat) {
-            return legacyLocalFormat;
-        }
-
-        const syncPrimary = await browser.storage.sync.get(STORAGE_KEYS.EXPORT_FORMAT);
-        const syncPrimaryFormat = normalizeExportFormat(syncPrimary[STORAGE_KEYS.EXPORT_FORMAT]);
-        if (syncPrimaryFormat) {
-            return syncPrimaryFormat;
-        }
-
-        const syncLegacy = await browser.storage.sync.get(LEGACY_EXPORT_FORMAT_KEY);
-        const legacySyncFormat = normalizeExportFormat(syncLegacy[LEGACY_EXPORT_FORMAT_KEY]);
-        if (legacySyncFormat) {
-            return legacySyncFormat;
-        }
-    } catch (error) {
-        logger.warn('Failed to read export format setting, using default.', error);
-    }
-    return defaultFormat;
+    return (
+        (await readFormat('local', STORAGE_KEYS.EXPORT_FORMAT)) ??
+        (await readFormat('local', LEGACY_EXPORT_FORMAT_KEY)) ??
+        (await readFormat('sync', STORAGE_KEYS.EXPORT_FORMAT)) ??
+        (await readFormat('sync', LEGACY_EXPORT_FORMAT_KEY)) ??
+        defaultFormat
+    );
 };
 
 export type StreamDumpSettingDeps = {

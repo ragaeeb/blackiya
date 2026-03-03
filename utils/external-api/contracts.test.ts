@@ -165,6 +165,57 @@ describe('external-api/contracts', () => {
         ).toBeFalse();
     });
 
+    it('should reject non-integer sequence and timestamp fields', () => {
+        expect(
+            isExternalConversationEvent({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.ready',
+                event_id: 'evt-fractional',
+                seq: 1.5,
+                created_at: 123,
+                ts: Date.now(),
+                provider: 'chatgpt',
+                conversation_id: 'conv-1',
+                payload: buildConversation(),
+                capture_meta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                content_hash: 'hash:1',
+            }),
+        ).toBeFalse();
+
+        expect(
+            isExternalInternalEventMessage({
+                type: 'BLACKIYA_EXTERNAL_EVENT',
+                event: {
+                    api: EXTERNAL_API_VERSION,
+                    type: 'conversation.ready',
+                    event_id: 'evt-bad-ts',
+                    ts: 123.45,
+                    provider: 'chatgpt',
+                    conversation_id: 'conv-1',
+                    payload: buildConversation(),
+                    capture_meta: {
+                        captureSource: 'canonical_api',
+                        fidelity: 'high',
+                        completeness: 'complete',
+                    },
+                    content_hash: 'hash:1',
+                },
+            }),
+        ).toBeFalse();
+
+        expect(
+            isExternalRequest({
+                api: EXTERNAL_API_VERSION,
+                type: 'events.getSince',
+                cursor: 1.5,
+            }),
+        ).toBeFalse();
+    });
+
     it('should validate external internal event wrapper', () => {
         expect(
             isExternalInternalEventMessage({
@@ -215,6 +266,28 @@ describe('external-api/contracts', () => {
         ).toBeTrue();
         expect(isExternalPortInboundMessage({ type: 'commit', up_to_seq: 42 })).toBeTrue();
         expect(isExternalPortInboundMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' })).toBeTrue();
+
+        expect(isExternalSubscribeMessage({ type: 'subscribe', cursor: -1, consumer_role: 'delivery' })).toBeFalse();
+        expect(isExternalSubscribeMessage({ type: 'subscribe', cursor: 1.5, consumer_role: 'delivery' })).toBeFalse();
+        expect(
+            isExternalSubscribeMessage({ type: 'subscribe', cursor: Number.NaN, consumer_role: 'delivery' }),
+        ).toBeFalse();
+        expect(
+            isExternalSubscribeMessage({
+                type: 'subscribe',
+                cursor: Number.POSITIVE_INFINITY,
+                consumer_role: 'delivery',
+            }),
+        ).toBeFalse();
+        expect(isExternalSubscribeMessage({ type: 'subscribe', cursor: 0, consumer_role: '' })).toBeFalse();
+        expect(isExternalSubscribeMessage({ type: 'subscribe', cursor: 0, consumer_role: 'invalid_role' })).toBeFalse();
+
+        expect(isExternalCommitMessage({ type: 'commit', up_to_seq: -1 })).toBeFalse();
+        expect(isExternalCommitMessage({ type: 'commit', up_to_seq: 3.14 })).toBeFalse();
+        expect(isExternalCommitMessage({ type: 'commit', up_to_seq: Number.NaN })).toBeFalse();
+        expect(isExternalCommitMessage({ type: 'commit', up_to_seq: Number.POSITIVE_INFINITY })).toBeFalse();
+        expect(isExternalPortInboundMessage({ type: 'commit', up_to_seq: Number.NaN })).toBeFalse();
+        expect(isExternalPortInboundMessage({ type: 'commit', up_to_seq: 1.5 })).toBeFalse();
     });
 
     it('should normalize adapter/provider names', () => {

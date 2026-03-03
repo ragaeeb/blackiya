@@ -13,10 +13,13 @@ export const MAX_BATCH_SIZE = 200;
 export const DEFAULT_WAKE_THROTTLE_MS = 3_000;
 
 export const clampBatchSize = (value: number | undefined, fallback: number) => {
-    if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
-        return fallback;
-    }
-    return Math.min(MAX_BATCH_SIZE, Math.max(1, Math.floor(value)));
+    const normalizedFallback =
+        typeof fallback === 'number' && Number.isFinite(fallback) && fallback > 0
+            ? Math.floor(fallback)
+            : DEFAULT_BATCH_SIZE;
+    const candidate =
+        typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : normalizedFallback;
+    return Math.min(MAX_BATCH_SIZE, Math.max(1, candidate));
 };
 
 export const toFormat = (format: ExternalPullFormat | undefined): ExternalPullFormat =>
@@ -73,4 +76,5 @@ export const buildSuccessResponse = (
     };
 };
 
-export const asTabId = (value: number | undefined) => (typeof value === 'number' ? value : undefined);
+export const asTabId = (value: number | undefined) =>
+    typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : undefined;

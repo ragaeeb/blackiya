@@ -6,6 +6,7 @@ import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
 import { downloadMinimalDebugReport } from '@/utils/minimal-logs';
+import { getExportFormat } from '@/utils/runner/runtime/runtime-settings';
 import {
     TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
     TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
@@ -61,28 +62,30 @@ const App = () => {
     };
 
     useEffect(() => {
-        // Load settings
-        browser.storage.local
-            .get([
-                STORAGE_KEYS.LOG_LEVEL,
-                STORAGE_KEYS.EXPORT_FORMAT,
-                STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED,
-                STORAGE_KEYS.STREAM_PROBE_VISIBLE,
-            ])
-            .then((result) => {
+        const loadSettings = async () => {
+            try {
+                const result = await browser.storage.local.get([
+                    STORAGE_KEYS.LOG_LEVEL,
+                    STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED,
+                    STORAGE_KEYS.STREAM_PROBE_VISIBLE,
+                ]);
                 const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
                 if (level) {
                     setLogLevel(level);
                     logger.setLevel(level);
                 }
 
-                const savedFormat = result[STORAGE_KEYS.EXPORT_FORMAT] as ExportFormat | undefined;
+                const savedFormat = await getExportFormat(DEFAULT_EXPORT_FORMAT);
                 if (savedFormat === EXPORT_FORMAT.COMMON || savedFormat === EXPORT_FORMAT.ORIGINAL) {
                     setExportFormat(savedFormat);
                 }
                 setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
                 setStreamProbeVisible(result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true);
-            });
+            } catch (error) {
+                logger.warn('Failed to load popup settings from local storage', error);
+            }
+        };
+        void loadSettings();
 
         // Load log stats
         logsStorage.getLogs().then((logs) => {

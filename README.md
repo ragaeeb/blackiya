@@ -262,12 +262,12 @@ For the full legal disclosure, please refer to our [Privacy Policy](./PRIVACY_PO
 
 ### Adding a New Platform
 
-1. Create platform adapter in `platforms/your-platform.ts`
+1. Create a platform folder and adapter entrypoint at `platforms/your-platform/index.ts`
 2. Implement the `LLMPlatform` interface
 3. Register adapter in `platforms/factory.ts`
 4. Add host URL pattern in `platforms/constants.ts`
 5. Update `wxt.config.ts` host permissions if needed
-6. Add parser/readiness tests in `platforms/your-platform.test.ts`
+6. Add parser/readiness tests under `platforms/your-platform/*.test.ts`
 
 ### Code Quality
 

@@ -28,7 +28,7 @@ export const normalizeConversationTitle = (title: string | null | undefined): st
 export const isGenericConversationTitle = (
     title: string | null | undefined,
     options: {
-        platformDefaultTitles?: string[];
+        platformDefaultTitles?: readonly string[];
     } = {},
 ): boolean => {
     const normalized = normalizeTitle(title).toLowerCase();
@@ -81,7 +81,7 @@ export const resolveConversationTitleByPrecedence = (options: {
     domTitle?: string | null;
     firstUserMessageTitle?: string | null;
     fallbackTitle?: string | null;
-    platformDefaultTitles?: string[];
+    platformDefaultTitles?: readonly string[];
 }): { title: string; source: ResolvedConversationTitleSource } => {
     const sourceCandidates: Array<{ source: ResolvedConversationTitleSource; title: string | null | undefined }> = [
         { source: 'stream', title: options.streamTitle },
