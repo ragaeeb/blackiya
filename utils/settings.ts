@@ -16,6 +16,13 @@ export const STORAGE_KEYS = {
     DIAGNOSTICS_STREAM_DUMP_STORE: 'diagnostics.streamDumpStore',
 } as const;
 
-export type ExportFormat = 'original' | 'common';
+export const EXPORT_FORMAT = {
+    ORIGINAL: 'original',
+    COMMON: 'common',
+} as const;
 
-export const DEFAULT_EXPORT_FORMAT: ExportFormat = 'original';
+export const EXPORT_FORMAT_VALUES = [EXPORT_FORMAT.ORIGINAL, EXPORT_FORMAT.COMMON] as const;
+
+export type ExportFormat = (typeof EXPORT_FORMAT_VALUES)[number];
+
+export const DEFAULT_EXPORT_FORMAT: ExportFormat = EXPORT_FORMAT.ORIGINAL;

@@ -10,7 +10,7 @@ import type { ExportMeta } from '@/utils/sfe/types';
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
-import * as streamPreview from '@/utils/runner/stream-preview';
+import * as streamPreview from '@/utils/runner/stream/stream-preview';
 
 describe('lifecycle-phase-handler', () => {
     let deps: LifecyclePhaseHandlerDeps;

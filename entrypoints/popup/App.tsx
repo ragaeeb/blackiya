@@ -11,10 +11,13 @@ import {
     TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
     TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
 } from '@/utils/runner/tab-debug-overlay';
-import { DEFAULT_EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
-import packageJson from '../../package.json';
+import { DEFAULT_EXPORT_FORMAT, EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+
+const ABOUT_AUTHOR_NAME = 'Ragaeeb Haq';
+const ABOUT_REPOSITORY_URL = 'https://github.com/ragaeeb/blackiya';
 
 const App = () => {
+    const manifest = browser.runtime.getManifest();
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
@@ -74,7 +77,7 @@ const App = () => {
                 }
 
                 const savedFormat = result[STORAGE_KEYS.EXPORT_FORMAT] as ExportFormat | undefined;
-                if (savedFormat === 'common' || savedFormat === 'original') {
+                if (savedFormat === EXPORT_FORMAT.COMMON || savedFormat === EXPORT_FORMAT.ORIGINAL) {
                     setExportFormat(savedFormat);
                 }
                 setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
@@ -100,7 +103,7 @@ const App = () => {
     const handleExportFormatChange: JSX.GenericEventHandler<HTMLSelectElement> = (e) => {
         const target = e.currentTarget as HTMLSelectElement | null;
         const newFormat = (target?.value || DEFAULT_EXPORT_FORMAT) as ExportFormat;
-        const normalizedFormat = newFormat === 'common' ? 'common' : 'original';
+        const normalizedFormat = newFormat === EXPORT_FORMAT.COMMON ? EXPORT_FORMAT.COMMON : EXPORT_FORMAT.ORIGINAL;
         setExportFormat(normalizedFormat);
         browser.storage.local.set({ [STORAGE_KEYS.EXPORT_FORMAT]: normalizedFormat });
         logger.info(`Export format changed to ${normalizedFormat}`);
@@ -222,7 +225,7 @@ const App = () => {
     return (
         <div>
             <div className="title">
-                <img src="/icon.svg" width="24" height="24" alt="Icon" />
+                <img src="/icon/32.png" width="24" height="24" alt="Icon" />
                 Blackiya Settings
             </div>
 
@@ -240,8 +243,8 @@ const App = () => {
             <div className="section">
                 <label htmlFor="exportFormat">Export Format</label>
                 <select id="exportFormat" value={exportFormat} onChange={handleExportFormatChange}>
-                    <option value="original">Original (Raw JSON)</option>
-                    <option value="common">Common (Normalized)</option>
+                    <option value={EXPORT_FORMAT.ORIGINAL}>Original (Raw JSON)</option>
+                    <option value={EXPORT_FORMAT.COMMON}>Common (Normalized)</option>
                 </select>
                 <div style={{ fontSize: '12px', color: '#666' }}>
                     Applies to Save actions in supported chat platforms.
@@ -332,15 +335,15 @@ const App = () => {
             </button>
 
             <div className="about">
-                <p>Blackiya v{packageJson.version}</p>
+                <p>Blackiya v{manifest.version}</p>
                 <p>
                     By{' '}
                     <a href="https://github.com/ragaeeb" target="_blank" rel="noreferrer">
-                        {packageJson.author}
+                        {ABOUT_AUTHOR_NAME}
                     </a>
                 </p>
                 <p>
-                    <a href={packageJson.repository.url.replace('git+', '')} target="_blank" rel="noreferrer">
+                    <a href={ABOUT_REPOSITORY_URL} target="_blank" rel="noreferrer">
                         GitHub Repository
                     </a>
                 </p>

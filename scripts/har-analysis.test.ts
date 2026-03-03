@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { analyzeHarContent, renderHarAnalysisMarkdown } from '@/utils/har-analysis';
+import { analyzeHarContent, renderHarAnalysisMarkdown } from './har-analysis';
 
 const SAMPLE_HAR = {
     log: {

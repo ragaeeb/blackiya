@@ -8,7 +8,7 @@ import {
     type RunnerStreamPreviewState,
     removePendingRunnerStreamPreview,
     withPreservedRunnerStreamMirrorSnapshot,
-} from '@/utils/runner/stream-preview';
+} from '@/utils/runner/stream/stream-preview';
 
 describe('stream-preview', () => {
     let state: RunnerStreamPreviewState;

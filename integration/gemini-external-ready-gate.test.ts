@@ -148,7 +148,7 @@ describe('integration: gemini external ready gate', () => {
             'gemini-conv',
             ready?.attempt_id ?? 'gemini:attempt-2',
             'hash-2',
-            ready?.payload.title ?? 'Gemini Conversation',
+            ready?.payload ?? buildPromptedConversation('gemini-conv'),
         );
         const duplicate = maybeBuildExternalConversationEvent({
             conversationId: 'gemini-conv',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
+import type { ExternalInboundConversationEvent } from '@/utils/external-api/contracts';
 import {
     addTabDebugCaptureEntry,
     addTabDebugExternalEventEntry,
@@ -47,7 +47,7 @@ const createConversationData = (id: string): ConversationData => ({
     blocked_urls: [],
 });
 
-const createExternalEvent = (conversationId: string): ExternalConversationEvent => ({
+const createExternalEvent = (conversationId: string): ExternalInboundConversationEvent => ({
     api: 'blackiya.events.v1',
     type: 'conversation.updated',
     event_id: `evt-${conversationId}`,

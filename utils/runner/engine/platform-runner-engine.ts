@@ -2,8 +2,9 @@
  * Platform Runner Engine
  *
  * Thin orchestrator that creates the engine context, wires coordinators,
- * and drives the boot/cleanup lifecycle. All deps building and utility
- * logic lives in runner-engine-context.ts.
+ * and drives the boot/cleanup lifecycle. Deps wiring lives in
+ * runner-engine-context.ts, while shared engine utilities/types are split
+ * into dedicated runner-engine-* modules.
  *
  * @module utils/runner/platform-runner-engine
  */
@@ -16,33 +17,22 @@ import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { generateSessionToken, setSessionToken } from '@/utils/protocol/session-token';
-import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
-import { ReadinessGate } from '@/utils/sfe/readiness-gate';
-import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
-import { ButtonManager } from '@/utils/ui/button-manager';
-import { createAttemptCoordinator } from './attempt-coordinator';
+import { createAttemptCoordinator } from '@/utils/runner/attempt-coordinator';
 import {
     injectSaveButton as injectSaveButtonCore,
     isConversationReadyForActions as isConversationReadyForActionsCore,
     refreshButtonState as refreshButtonStateCore,
     resolveReadinessDecision as resolveReadinessDecisionCore,
     scheduleButtonRefresh as scheduleButtonRefreshCore,
-} from './button-state-manager';
-import { runCalibrationStep as runCalibrationStepPure } from './calibration-capture';
-import { handleCalibrationClick as handleCalibrationClickCore } from './calibration-orchestration';
+} from '@/utils/runner/button-state-manager';
+import { runCalibrationStep as runCalibrationStepPure } from '@/utils/runner/calibration-capture';
+import { handleCalibrationClick as handleCalibrationClickCore } from '@/utils/runner/calibration-orchestration';
 import {
     clearCanonicalStabilizationRetry as clearCanonicalStabilizationRetryCore,
     hasCanonicalStabilizationTimedOut as hasCanonicalStabilizationTimedOutCore,
     maybeRestartCanonicalRecoveryAfterTimeout as maybeRestartCanonicalRecoveryAfterTimeoutCore,
     scheduleCanonicalStabilizationRetry as scheduleCanonicalStabilizationRetryCore,
-} from './canonical-stabilization-tick';
-import { createExternalEventDispatcherState } from './external-event-dispatch';
-import { processInterceptionCapture as processInterceptionCaptureCore } from './interception-capture';
-import { createCalibrationRuntime } from './platform-runtime-calibration';
-import { createStreamProbeRuntime } from './platform-runtime-stream-probe';
-import { createRuntimeWiring } from './platform-runtime-wiring';
-import { processResponseFinished as processResponseFinishedCore } from './response-finished-handler';
-import type { EngineCtx } from './runner-engine-context';
+} from '@/utils/runner/canonical-stabilization-tick';
 import {
     buildAttemptCoordinatorDeps,
     buildButtonStateManagerDeps,
@@ -50,7 +40,6 @@ import {
     buildCalibrationRuntimeDeps,
     buildCanonicalStabilizationTickDeps,
     buildCleanupRuntimeDeps,
-    buildExportPayloadForFormat,
     buildInterceptionCaptureDeps,
     buildResponseFinishedDeps,
     buildRuntimeWiringDeps,
@@ -61,35 +50,47 @@ import {
     buildStreamProbeVisibilitySettingDeps,
     buildVisibilityRecoveryDeps,
     buildWarmFetchDeps,
-    emitAttemptDisposed,
-    emitExternalConversationEvent,
+} from '@/utils/runner/engine/context';
+import {
+    buildExportPayloadForFormat,
     evaluateReadinessForData,
     extractConversationIdFromLocation,
     getCaptureMeta,
     getExportFormat,
+    resolveConversationIdForUserAction,
+    resolveIsolatedSnapshotData,
+    shouldBlockActionsForGeneration,
+} from '@/utils/runner/engine/core-utils';
+import { emitExternalConversationEvent } from '@/utils/runner/engine/external-event-emission';
+import {
+    emitAttemptDisposed,
     ingestSfeCanonicalSample,
     ingestSfeLifecycle,
     ingestSfeLifecycleFromWirePhase,
     isStaleAttemptMessage,
-    MAX_STREAM_PREVIEWS,
-    resolveConversationIdForUserAction,
-    resolveIsolatedSnapshotData,
-    shouldBlockActionsForGeneration,
-} from './runner-engine-context';
-import { createCleanupRuntime } from './runtime-cleanup';
+} from '@/utils/runner/engine/sfe-wrappers';
+import type { EngineCtx } from '@/utils/runner/engine/types';
+import { MAX_STREAM_PREVIEWS } from '@/utils/runner/engine/types';
+import { createExternalEventDispatcherState } from '@/utils/runner/external-event-dispatch';
+import { processInterceptionCapture as processInterceptionCaptureCore } from '@/utils/runner/interception-capture';
+import { processResponseFinished as processResponseFinishedCore } from '@/utils/runner/response-finished-handler';
+import { createCalibrationRuntime } from '@/utils/runner/runtime/platform-runtime-calibration';
+import { createStreamProbeRuntime } from '@/utils/runner/runtime/platform-runtime-stream-probe';
+import { createRuntimeWiring } from '@/utils/runner/runtime/platform-runtime-wiring';
+import { createCleanupRuntime } from '@/utils/runner/runtime/runtime-cleanup';
 import {
     createStorageChangeListener as createStorageChangeListenerCore,
     createVisibilityChangeHandler as createVisibilityChangeHandlerCore,
     loadStreamDumpSetting as loadStreamDumpSettingCore,
     loadStreamProbeVisibilitySetting as loadStreamProbeVisibilitySettingCore,
     scheduleButtonInjectionRetries as scheduleButtonInjectionRetriesCore,
-} from './runtime-settings';
+} from '@/utils/runner/runtime/runtime-settings';
 import {
     getConversationData as getConversationDataCore,
     handleSaveClick as handleSaveClickCore,
-} from './save-pipeline';
-import { RunnerState } from './state';
-import { createStreamDoneCoordinator } from './stream-done-coordinator';
+} from '@/utils/runner/save-pipeline';
+import { RunnerState } from '@/utils/runner/state';
+import { createStreamDoneCoordinator } from '@/utils/runner/stream/stream-done-coordinator';
 import {
     addTabDebugCaptureEntry,
     addTabDebugExternalEventEntry,
@@ -104,7 +105,11 @@ import {
     TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
     TAB_DEBUG_OVERLAY_TOGGLE_MESSAGE,
     type TabDebugRuntimeMessage,
-} from './tab-debug-overlay';
+} from '@/utils/runner/tab-debug-overlay';
+import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
+import { ReadinessGate } from '@/utils/sfe/readiness-gate';
+import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
+import { ButtonManager } from '@/utils/ui/button-manager';
 
 const SFE_STABILIZATION_MAX_WAIT_MS = 3200;
 const RUNNER_CONTROL_KEY = '__BLACKIYA_RUNNER_CONTROL__';
@@ -270,8 +275,6 @@ export const runPlatform = (): void => {
         buildWarmFetchDeps: null!,
     };
 
-    // ── Wire context-free utility functions ──
-
     ctx.extractConversationIdFromLocation = () => extractConversationIdFromLocation(ctx);
     ctx.resolveConversationIdForUserAction = () => resolveConversationIdForUserAction(ctx);
     ctx.getCaptureMeta = (cid) => getCaptureMeta(ctx, cid);
@@ -287,8 +290,6 @@ export const runPlatform = (): void => {
     ctx.buildExportPayloadForFormat = (data, format) => buildExportPayloadForFormat(ctx, data, format);
     ctx.getExportFormat = getExportFormat;
     ctx.emitExternalConversationEvent = (args) => emitExternalConversationEvent(ctx, args);
-
-    // ── Stream probe runtime ──
 
     ctx.streamProbeRuntime = createStreamProbeRuntime({
         streamPreviewState: ctx.streamPreviewState,
@@ -360,8 +361,6 @@ export const runPlatform = (): void => {
         return { handled: false };
     };
 
-    // ── Attempt coordinator ──
-
     const attemptCoord = createAttemptCoordinator(buildAttemptCoordinatorDeps(ctx));
     ctx.setCurrentConversation = attemptCoord.setCurrentConversation;
     ctx.setActiveAttempt = attemptCoord.setActiveAttempt;
@@ -374,8 +373,6 @@ export const runPlatform = (): void => {
     ctx.markSnapshotCaptureMeta = attemptCoord.markSnapshotCaptureMeta;
     ctx.markCanonicalCaptureMeta = attemptCoord.markCanonicalCaptureMeta;
     ctx.cachePendingLifecycleSignal = attemptCoord.cachePendingLifecycleSignal;
-
-    // ── Managers ──
 
     ctx.buttonManager = new ButtonManager(
         () => ctx.handleSaveClick(),
@@ -395,14 +392,10 @@ export const runPlatform = (): void => {
         handleNavigationChange();
     });
 
-    // ── Stream done coordinator ──
-
     const streamDoneCoord = createStreamDoneCoordinator(buildStreamDoneCoordinatorDeps(ctx));
     ctx.cancelStreamDoneProbe = streamDoneCoord.cancelStreamDoneProbe;
     ctx.clearProbeLeaseRetry = streamDoneCoord.clearProbeLeaseRetry;
     ctx.runStreamDoneProbe = streamDoneCoord.runStreamDoneProbe;
-
-    // ── Canonical stabilization ──
 
     ctx.clearCanonicalStabilizationRetry = (aid) =>
         clearCanonicalStabilizationRetryCore(aid, buildCanonicalStabilizationTickDeps(ctx));
@@ -413,12 +406,8 @@ export const runPlatform = (): void => {
     ctx.maybeRestartCanonicalRecoveryAfterTimeout = (cid, aid) =>
         maybeRestartCanonicalRecoveryAfterTimeoutCore(cid, aid, buildCanonicalStabilizationTickDeps(ctx));
 
-    // ── Save pipeline ──
-
     ctx.handleSaveClick = async () => handleSaveClickCore(buildSavePipelineDeps(ctx));
     ctx.getConversationData = (opts = {}) => getConversationDataCore(opts, buildSavePipelineDeps(ctx));
-
-    // ── Calibration runtime ──
 
     ctx.buildWarmFetchDeps = () => buildWarmFetchDeps(ctx);
     ctx.buildCalibrationCaptureDeps = (cid) => buildCalibrationCaptureDeps(ctx, cid);
@@ -435,8 +424,6 @@ export const runPlatform = (): void => {
     ctx.resetCalibrationPreference = calibrationRuntime.resetCalibrationPreference;
     ctx.handleCalibrationProfilesChanged = calibrationRuntime.handleCalibrationProfilesChanged;
     ctx.handleCalibrationClick = async () => handleCalibrationClickCore(ctx.buildCalibrationOrchestrationDeps());
-
-    // ── Button state ──
 
     ctx.injectSaveButton = () => injectSaveButtonCore(buildButtonStateManagerDeps(ctx), ctx.lastButtonStateLogRef);
     ctx.resolveReadinessDecision = (cid) => resolveReadinessDecisionCore(cid, buildButtonStateManagerDeps(ctx));
@@ -473,8 +460,6 @@ export const runPlatform = (): void => {
         }
     };
 
-    // ── Lifecycle state ──
-
     ctx.setLifecycleState = (state, conversationId) => {
         const resolvedCid = conversationId ?? ctx.currentConversationId ?? null;
         if (ctx.lifecycleState !== state) {
@@ -487,17 +472,11 @@ export const runPlatform = (): void => {
         applyLifecycleUiState(state, conversationId);
     };
 
-    // ── Response finished ──
-
     ctx.handleResponseFinished = (source, hintedCid) =>
         processResponseFinishedCore(source, hintedCid, buildResponseFinishedDeps(ctx));
 
-    // ── Runtime wiring ──
-
     const runtimeWiring = createRuntimeWiring(buildRuntimeWiringDeps(ctx));
     handleNavigationChange = runtimeWiring.handleNavigationChange;
-
-    // ── Boot sequence ──
 
     const url = window.location.href;
     ctx.currentAdapter = getPlatformAdapter(url);
@@ -559,8 +538,6 @@ export const runPlatform = (): void => {
     ctx.retryTimeoutIds.push(
         ...scheduleButtonInjectionRetriesCore(ctx.injectSaveButton, () => ctx.buttonManager.exists()),
     );
-
-    // ── Cleanup ──
 
     const cleanupDeps = buildCleanupRuntimeDeps(ctx, runnerControl, storageChangeListener);
     cleanupDeps.removeVisibilityChangeListener = () =>

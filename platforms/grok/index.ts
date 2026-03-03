@@ -16,7 +16,12 @@ import type { ConversationData } from '@/utils/types';
 import { tryParseGrokComRestEndpoint, tryParseJsonIfNeeded } from './grok-com-parser';
 import { tryParseGrokNdjson } from './ndjson-parser';
 import { evaluateGrokReadiness } from './readiness';
-import { GROK_ENDPOINT_REGISTRY, GROK_SELECTOR_REGISTRY, resolveGrokButtonInjectionTarget } from './registry';
+import {
+    GROK_DEFAULT_TITLES,
+    GROK_ENDPOINT_REGISTRY,
+    GROK_SELECTOR_REGISTRY,
+    resolveGrokButtonInjectionTarget,
+} from './registry';
 import { tryHandleGrokTitlesEndpoint } from './titles';
 import {
     extractGrokComConversationIdFromUrl,
@@ -210,7 +215,7 @@ export const grokAdapter: LLMPlatform = {
         return false;
     },
 
-    defaultTitles: ['New conversation', 'Grok Conversation', 'Grok / X'],
+    defaultTitles: GROK_DEFAULT_TITLES,
 
     extractTitleFromDom(): string | null {
         const defaultTitles = this.defaultTitles ?? [];

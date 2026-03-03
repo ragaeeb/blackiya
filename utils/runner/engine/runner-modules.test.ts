@@ -16,8 +16,8 @@ import {
     type RunnerStreamPreviewState,
     removePendingRunnerStreamPreview,
     withPreservedRunnerStreamMirrorSnapshot,
-} from '@/utils/runner/stream-preview';
-import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
+} from '@/utils/runner/stream/stream-preview';
+import { appendStreamProbePreview } from '@/utils/runner/stream/stream-probe';
 import type { ConversationData } from '@/utils/types';
 
 describe('runner helper modules', () => {

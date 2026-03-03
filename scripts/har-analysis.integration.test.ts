@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { analyzeHarContent } from '@/utils/har-analysis';
+import { analyzeHarContent } from './har-analysis';
 
 describe('har-analysis (integration fixture)', () => {
     it('should detect grok streaming endpoints and thinking hints from minimal HAR fixture', () => {

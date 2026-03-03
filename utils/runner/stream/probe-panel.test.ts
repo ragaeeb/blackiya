@@ -3,7 +3,7 @@ import {
     ensureStreamProbePanel,
     resolveStreamProbeDockPosition,
     setStreamProbePanelContent,
-} from '@/utils/runner/probe-panel';
+} from '@/utils/runner/stream/probe-panel';
 
 describe('probe-panel', () => {
     describe('resolveStreamProbeDockPosition', () => {

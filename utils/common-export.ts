@@ -6,10 +6,11 @@
  * @module utils/common-export
  */
 
+import { EXPORT_FORMAT } from '@/utils/settings';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 export type CommonConversationExport = {
-    format: 'common';
+    format: typeof EXPORT_FORMAT.COMMON;
     llm: string;
     model?: string;
     title?: string;
@@ -259,7 +260,7 @@ export const buildCommonExport = (conversation: ConversationData, llmName: strin
     const reasoning = assistantIndex >= 0 ? collectReasoningForRange(chain, userIndex, assistantIndex) : [];
 
     return {
-        format: 'common',
+        format: EXPORT_FORMAT.COMMON,
         llm: llmName,
         model: extractModel(conversation, chain),
         title: conversation.title || undefined,

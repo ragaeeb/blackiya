@@ -15,8 +15,8 @@ mock.module('wxt/browser', () => ({
 }));
 
 import { EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE } from '@/utils/external-api/contracts';
+import { emitExternalConversationEvent } from '@/utils/runner/engine/external-event-emission';
 import { createExternalEventDispatcherState } from '@/utils/runner/external-event-dispatch';
-import { emitExternalConversationEvent } from '@/utils/runner/runner-engine-context';
 import type { ConversationData } from '@/utils/types';
 
 const buildConversation = (conversationId: string): ConversationData => ({
@@ -34,6 +34,69 @@ const buildConversation = (conversationId: string): ConversationData => ({
     gizmo_type: null,
     is_archived: false,
     default_model_slug: 'gpt',
+    safe_urls: [],
+    blocked_urls: [],
+});
+
+const buildConversationWithTitle = (conversationId: string, title: string): ConversationData => ({
+    ...buildConversation(conversationId),
+    title,
+});
+
+const buildConversationWithPrompt = (
+    conversationId: string,
+    options: { title: string; prompt: string; answer: string },
+): ConversationData => ({
+    title: options.title,
+    create_time: 1_700_000_000,
+    update_time: 1_700_000_001,
+    mapping: {
+        root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+        'user-1': {
+            id: 'user-1',
+            parent: 'root',
+            children: ['assistant-1'],
+            message: {
+                id: 'user-1',
+                author: { role: 'user', name: 'User', metadata: {} },
+                create_time: 1_700_000_000,
+                update_time: 1_700_000_000,
+                content: { content_type: 'text', parts: [options.prompt] },
+                status: 'finished_successfully',
+                end_turn: true,
+                weight: 1,
+                metadata: {},
+                recipient: 'all',
+                channel: null,
+            },
+        },
+        'assistant-1': {
+            id: 'assistant-1',
+            parent: 'user-1',
+            children: [],
+            message: {
+                id: 'assistant-1',
+                author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                create_time: 1_700_000_001,
+                update_time: 1_700_000_001,
+                content: { content_type: 'text', parts: [options.answer] },
+                status: 'finished_successfully',
+                end_turn: true,
+                weight: 1,
+                metadata: {},
+                recipient: 'all',
+                channel: null,
+            },
+        },
+    },
+    conversation_id: conversationId,
+    current_node: 'assistant-1',
+    moderation_results: [],
+    plugin_ids: null,
+    gizmo_id: null,
+    gizmo_type: null,
+    is_archived: false,
+    default_model_slug: 'grok-3',
     safe_urls: [],
     blocked_urls: [],
 });
@@ -232,6 +295,178 @@ describe('runner external event emission', () => {
             event: {
                 type: 'conversation.updated',
                 content_hash: 'hash:2',
+            },
+        });
+    });
+
+    it('should emit conversation.updated when only the title changes', async () => {
+        const ctx: any = {
+            currentAdapter: {
+                name: 'Grok',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:grok:1',
+                    latestAssistantTextLength: 10,
+                }),
+            },
+            currentConversationId: 'grok-conv-1',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'grok-conv-1',
+            data: buildConversationWithTitle('grok-conv-1', 'New conversation'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'grok-attempt-1',
+        });
+        await Promise.resolve();
+
+        expect(sentMessages).toHaveLength(1);
+        expect(sentMessages[0]).toMatchObject({
+            type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+            event: {
+                type: 'conversation.ready',
+                conversation_id: 'grok-conv-1',
+                content_hash: 'hash:grok:1',
+                payload: {
+                    title: 'New conversation',
+                },
+            },
+        });
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'grok-conv-1',
+            data: buildConversationWithTitle('grok-conv-1', 'Classical Islamic Texts Translation Guidelines'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'grok-attempt-2',
+        });
+        await Promise.resolve();
+
+        expect(sentMessages).toHaveLength(2);
+        expect(sentMessages[1]).toMatchObject({
+            type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+            event: {
+                type: 'conversation.updated',
+                conversation_id: 'grok-conv-1',
+                content_hash: 'hash:grok:1',
+                payload: {
+                    title: 'Classical Islamic Texts Translation Guidelines',
+                },
+            },
+        });
+    });
+
+    it('should resolve generic title from first user message before external emit', async () => {
+        const ctx: any = {
+            currentAdapter: {
+                name: 'Grok',
+                defaultTitles: ['New conversation'],
+                extractConversationId: () => 'grok-conv-2',
+                extractTitleFromDom: () => null,
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:grok:prompt',
+                    latestAssistantTextLength: 120,
+                }),
+            },
+            currentConversationId: 'grok-conv-2',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
+            streamResolvedTitles: new Map<string, string>(),
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'grok-conv-2',
+            data: buildConversationWithPrompt('grok-conv-2', {
+                title: 'New conversation',
+                prompt: 'Classical Islamic Texts Translation Guidelines',
+                answer: 'Draft translation notes',
+            }),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'grok-attempt-3',
+        });
+        await Promise.resolve();
+
+        expect(sentMessages).toHaveLength(1);
+        expect(sentMessages[0]).toMatchObject({
+            type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+            event: {
+                type: 'conversation.ready',
+                conversation_id: 'grok-conv-2',
+                payload: {
+                    title: 'Classical Islamic Texts Translation Guidelines',
+                },
+            },
+        });
+    });
+
+    it('should resolve generic title from first user message even when adapter default titles are unavailable', async () => {
+        const ctx: any = {
+            currentAdapter: {
+                name: 'Grok',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:grok:no-defaults',
+                    latestAssistantTextLength: 120,
+                }),
+            },
+            currentConversationId: 'grok-conv-3',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
+            streamResolvedTitles: new Map<string, string>(),
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'grok-conv-3',
+            data: buildConversationWithPrompt('grok-conv-3', {
+                title: 'New conversation',
+                prompt: 'Classical Islamic Texts Translation Guidelines',
+                answer: 'Draft translation notes',
+            }),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'grok-attempt-4',
+        });
+        await Promise.resolve();
+
+        expect(sentMessages).toHaveLength(1);
+        expect(sentMessages[0]).toMatchObject({
+            type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+            event: {
+                type: 'conversation.ready',
+                conversation_id: 'grok-conv-3',
+                payload: {
+                    title: 'Classical Islamic Texts Translation Guidelines',
+                },
             },
         });
     });

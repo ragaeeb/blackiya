@@ -1,5 +1,5 @@
-import type { RunnerStreamPreviewState } from '@/utils/runner/stream-preview';
-import type { StreamProbePanelDeps, SyncStreamProbePanelDeps } from '@/utils/runner/stream-probe-runtime';
+import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
+import type { StreamProbePanelDeps, SyncStreamProbePanelDeps } from '@/utils/runner/stream/stream-probe-runtime';
 import {
     appendLiveStreamProbeText as appendLiveStreamProbeTextCore,
     appendPendingStreamProbeText as appendPendingStreamProbeTextCore,
@@ -7,7 +7,7 @@ import {
     setStreamProbePanel as setStreamProbePanelCore,
     syncStreamProbePanelFromCanonical as syncStreamProbePanelFromCanonicalCore,
     withPreservedLiveMirrorSnapshot as withPreservedLiveMirrorSnapshotCore,
-} from '@/utils/runner/stream-probe-runtime';
+} from '@/utils/runner/stream/stream-probe-runtime';
 import type { ConversationData } from '@/utils/types';
 
 export type StreamProbeRuntimeDeps = {

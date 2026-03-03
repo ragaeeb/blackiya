@@ -1,541 +1,62 @@
 /**
- * Shared context type and deps-builder factories for the platform runner engine.
+ * Deps-builder factories for the platform runner engine.
  *
- * The EngineCtx accumulates mutable state, service references, and function
- * references as the engine initialises. Deps builders read current values
- * from the context by reference, so they always see the latest state.
+ * Engine types/constants and standalone utility wrappers live in dedicated
+ * modules to keep this file focused on wiring.
  */
 
-import { browser } from 'wxt/browser';
-import type { LLMPlatform } from '@/platforms/types';
-import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
 import { logger } from '@/utils/logger';
-import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
-import type { InterceptionManager } from '@/utils/managers/interception-manager';
-import type { NavigationManager } from '@/utils/managers/navigation-manager';
-import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import type {
-    AttemptDisposedMessage,
-    ResponseLifecycleMessage,
-    StreamDumpConfigMessage,
-} from '@/utils/protocol/messages';
-import { stampToken } from '@/utils/protocol/session-token';
+import type { AttemptCoordinatorDeps } from '@/utils/runner/attempt-coordinator';
+import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from '@/utils/runner/attempt-state';
+import type { ButtonStateManagerDeps } from '@/utils/runner/button-state-manager';
+import { type CalibrationCaptureDeps, isConversationDataLike } from '@/utils/runner/calibration-capture';
+import type { CanonicalStabilizationTickDeps } from '@/utils/runner/canonical-stabilization-tick';
+import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import {
-    buildExternalInternalEventMessage,
-    type ExternalEventDispatcherState,
-    markExternalConversationEventDispatched,
-    maybeBuildExternalConversationEvent,
-} from '@/utils/runner/external-event-dispatch';
-import { DEFAULT_EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
-import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
-import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
-import type { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
-import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
-import type { ConversationData } from '@/utils/types';
-import type { ButtonManager } from '@/utils/ui/button-manager';
-import type { AttemptCoordinatorDeps } from './attempt-coordinator';
-import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from './attempt-state';
-import type { AutoCaptureReason } from './auto-capture';
-import type { ButtonStateManagerDeps } from './button-state-manager';
-import { type CalibrationCaptureDeps, isConversationDataLike } from './calibration-capture';
-import type { CalibrationOrchestrationDeps } from './calibration-orchestration';
-import type { CalibrationMode } from './calibration-policy';
-import type { CalibrationStep } from './calibration-runner';
-import type { CanonicalStabilizationTickDeps } from './canonical-stabilization-tick';
-import { buildIsolatedDomSnapshot } from './dom-snapshot';
+    emitStreamDumpConfig,
+    evaluateReadinessForData,
+    extractConversationIdFromLocation,
+    getCaptureMeta,
+    ingestStabilizationRetrySnapshot,
+    isPlatformGenerating,
+    resolveConversationIdForUserAction,
+    resolveIsolatedSnapshotData,
+    shouldBlockActionsForGeneration,
+} from '@/utils/runner/engine/core-utils';
+import { ingestSfeCanonicalSample, logSfeMismatchIfNeeded } from '@/utils/runner/engine/sfe-wrappers';
 import {
-    buildExportPayloadForFormat as buildExportPayloadForFormatPure,
-    extractResponseTextFromConversation,
-} from './export-helpers';
-import { detectPlatformGenerating } from './generation-guard';
-import type { InterceptionCaptureDeps } from './interception-capture';
-import { requestPageSnapshot } from './page-snapshot-bridge';
-import type { CalibrationRuntimeDeps } from './platform-runtime-calibration';
-import type { RuntimeWiringDeps } from './platform-runtime-wiring';
-import { removeStreamProbePanel } from './probe-panel';
-import { evaluateReadinessForData as evaluateReadinessForDataPure } from './readiness-evaluation';
-import type { ResponseFinishedDeps } from './response-finished-handler';
-import type { RunnerCleanupDeps } from './runtime-cleanup';
+    CANONICAL_READY_LOG_TTL_MS,
+    CANONICAL_STABILIZATION_MAX_RETRIES,
+    CANONICAL_STABILIZATION_RETRY_DELAY_MS,
+    CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS,
+    type EngineCtx,
+    MAX_AUTOCAPTURE_KEYS,
+    MAX_CONVERSATION_ATTEMPTS,
+    MAX_PENDING_LIFECYCLE_ATTEMPTS,
+    MAX_STREAM_RESOLVED_TITLES,
+    PROBE_LEASE_RETRY_GRACE_MS,
+    PROBE_LEASE_TTL_MS,
+} from '@/utils/runner/engine/types';
+import { extractResponseTextFromConversation } from '@/utils/runner/export-helpers';
+import type { InterceptionCaptureDeps } from '@/utils/runner/interception-capture';
+import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
+import type { ResponseFinishedDeps } from '@/utils/runner/response-finished-handler';
+import type { CalibrationRuntimeDeps } from '@/utils/runner/runtime/platform-runtime-calibration';
+import type { RuntimeWiringDeps } from '@/utils/runner/runtime/platform-runtime-wiring';
+import type { RunnerCleanupDeps } from '@/utils/runner/runtime/runtime-cleanup';
 import type {
     StorageChangeListenerDeps,
     StreamDumpSettingDeps,
     StreamProbeVisibilitySettingDeps,
     VisibilityRecoveryDeps,
-} from './runtime-settings';
-import { getExportFormat as getExportFormatCore } from './runtime-settings';
-import type { SavePipelineDeps } from './save-pipeline';
-import type { SfeIngestionDeps } from './sfe-ingestion';
-import {
-    emitAttemptDisposed as emitAttemptDisposedCore,
-    ingestSfeCanonicalSample as ingestSfeCanonicalSampleCore,
-    ingestSfeLifecycleFromWirePhase as ingestSfeLifecycleFromWirePhaseCore,
-    ingestSfeLifecycleSignal as ingestSfeLifecycleSignalCore,
-    logSfeMismatchIfNeeded as logSfeMismatchIfNeededCore,
-} from './sfe-ingestion';
-import type { StaleAttemptFilterDeps } from './stale-attempt-filter';
-import { isStaleAttemptMessage as isStaleAttemptMessageCore } from './stale-attempt-filter';
-import type { RunnerState } from './state';
-import type { StreamDoneCoordinatorDeps } from './stream-done-coordinator';
-import { runStreamDoneProbe as runStreamDoneProbeReal } from './stream-done-probe';
-import type { RunnerStreamPreviewState } from './stream-preview';
-import type { TabDebugOverlaySnapshot, TabDebugOverlayState } from './tab-debug-overlay';
-import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from './url-candidates';
-import type { WarmFetchDeps, WarmFetchReason } from './warm-fetch';
-
-// ── Local types ──
-
-export type LifecycleUiState = 'idle' | 'prompt-sent' | 'streaming' | 'completed';
-export type CalibrationUiState = 'idle' | 'waiting' | 'capturing' | 'success' | 'error';
-
-// ── Constants ──
-
-export const CANONICAL_STABILIZATION_RETRY_DELAY_MS = 1150;
-export const CANONICAL_STABILIZATION_MAX_RETRIES = 6;
-export const CANONICAL_STABILIZATION_TIMEOUT_GRACE_MS = 400;
-export const PROBE_LEASE_TTL_MS = 5000;
-export const PROBE_LEASE_RETRY_GRACE_MS = 500;
-export const MAX_CONVERSATION_ATTEMPTS = 250;
-export const MAX_PENDING_LIFECYCLE_ATTEMPTS = 320;
-export const MAX_STREAM_PREVIEWS = 150;
-export const MAX_AUTOCAPTURE_KEYS = 400;
-export const MAX_STREAM_RESOLVED_TITLES = MAX_CONVERSATION_ATTEMPTS;
-export const CANONICAL_READY_LOG_TTL_MS = 15_000;
-
-// ── Engine context ──
-
-export type EngineCtx = {
-    // Mutable scalar state
-    currentAdapter: LLMPlatform | null;
-    currentConversationId: string | null;
-    lifecycleState: LifecycleUiState;
-    lifecycleAttemptId: string | null;
-    lifecycleConversationId: string | null;
-    calibrationState: CalibrationUiState;
-    activeAttemptId: string | null;
-    sfeEnabled: boolean;
-    streamDumpEnabled: boolean;
-    streamProbeVisible: boolean;
-    cleanedUp: boolean;
-    lastResponseFinishedAt: number;
-    lastResponseFinishedConversationId: string | null;
-    lastResponseFinishedAttemptId: string | null;
-    rememberedPreferredStep: CalibrationStep | null;
-    rememberedCalibrationUpdatedAt: string | null;
-    calibrationPreferenceLoaded: boolean;
-    calibrationPreferenceLoading: Promise<void> | null;
-    lastStreamProbeKey: string;
-    lastStreamProbeConversationId: string | null;
-    lastInvalidSessionTokenLogAt: number;
-    lastPendingLifecycleCapacityWarnAt: number;
-    beforeUnloadHandler: (() => void) | null;
-    cleanupWindowBridge: (() => void) | null;
-    cleanupCompletionWatcher: (() => void) | null;
-    cleanupButtonHealthCheck: (() => void) | null;
-    cleanupTabDebugRuntimeListener: (() => void) | null;
-    lastButtonStateLogRef: { value: string };
-
-    // Collections
-    attemptByConversation: Map<string, string>;
-    attemptAliasForward: Map<string, string>;
-    pendingLifecycleByAttempt: Map<
-        string,
-        { phase: ResponseLifecycleMessage['phase']; platform: string; receivedAtMs: number }
-    >;
-    captureMetaByConversation: Map<string, ExportMeta>;
-    streamResolvedTitles: Map<string, string>;
-    lastCanonicalReadyLogAtByConversation: Map<string, number>;
-    timeoutWarningByAttempt: Set<string>;
-    canonicalStabilizationRetryTimers: Map<string, number>;
-    canonicalStabilizationRetryCounts: Map<string, number>;
-    canonicalStabilizationStartedAt: Map<string, number>;
-    canonicalStabilizationInProgress: Set<string>;
-    streamProbeControllers: Map<string, AbortController>;
-    probeLeaseRetryTimers: Map<string, number>;
-    warmFetchInFlight: Map<string, Promise<boolean>>;
-    autoCaptureAttempts: Map<string, number>;
-    autoCaptureRetryTimers: Map<string, number>;
-    autoCaptureDeferredLogged: Set<string>;
-    retryTimeoutIds: number[];
-    liveStreamPreviewByConversation: Map<string, string>;
-
-    // Services
-    sfe: SignalFusionEngine;
-    probeLease: CrossTabProbeLease;
-    structuredLogger: StructuredAttemptLogger;
-    runnerState: RunnerState;
-    interceptionManager: InterceptionManager;
-    navigationManager: NavigationManager;
-    buttonManager: ButtonManager;
-    streamPreviewState: RunnerStreamPreviewState;
-    externalEventDispatchState: ExternalEventDispatcherState;
-    streamProbeRuntime: ReturnType<typeof import('./platform-runtime-stream-probe').createStreamProbeRuntime> | null;
-    tabDebugOverlayState: TabDebugOverlayState;
-
-    // Function refs (populated incrementally during init)
-    setCurrentConversation: (cid: string | null) => void;
-    setActiveAttempt: (aid: string | null) => void;
-    bindAttempt: (cid: string | undefined, aid: string) => void;
-    resolveAliasedAttemptId: (aid: string) => string;
-    peekAttemptId: (cid?: string) => string | null;
-    resolveAttemptId: (cid?: string) => string;
-    isAttemptDisposedOrSuperseded: (aid: string) => boolean;
-    forwardAttemptAlias: (from: string, to: string, reason: 'superseded' | 'rebound') => void;
-    markSnapshotCaptureMeta: (cid: string) => void;
-    markCanonicalCaptureMeta: (cid: string) => void;
-    cachePendingLifecycleSignal: (
-        attemptId: string,
-        phase: ResponseLifecycleMessage['phase'],
-        platform: string,
-    ) => void;
-    cancelStreamDoneProbe: (aid: string, reason: 'superseded' | 'disposed' | 'navigation' | 'teardown') => void;
-    clearProbeLeaseRetry: (aid: string) => void;
-    runStreamDoneProbe: (cid: string, aid?: string) => Promise<void>;
-    clearCanonicalStabilizationRetry: (aid: string) => void;
-    hasCanonicalStabilizationTimedOut: (aid: string) => boolean;
-    scheduleCanonicalStabilizationRetry: (cid: string, aid: string) => void;
-    maybeRestartCanonicalRecoveryAfterTimeout: (cid: string, aid: string) => void;
-    ingestSfeLifecycle: (phase: LifecyclePhase, aid: string, cid?: string | null) => void;
-    ingestSfeCanonicalSample: (
-        data: ConversationData,
-        aid?: string,
-    ) => ReturnType<SignalFusionEngine['applyCanonicalSample']> | null;
-    logSfeMismatchIfNeeded: (cid: string, legacyReady: boolean) => void;
-    emitAttemptDisposed: (aid: string, reason: AttemptDisposedMessage['reason']) => void;
-    evaluateReadinessForData: (data: ConversationData) => PlatformReadiness;
-    refreshButtonState: (cid?: string) => void;
-    scheduleButtonRefresh: (cid: string) => void;
-    injectSaveButton: () => void;
-    resolveReadinessDecision: (cid: string) => ReadinessDecision;
-    isConversationReadyForActions: (cid: string, opts?: { includeDegraded?: boolean }) => boolean;
-    shouldBlockActionsForGeneration: (cid: string) => boolean;
-    isLifecycleActiveGeneration: () => boolean;
-    setLifecycleState: (state: LifecycleUiState, cid?: string) => void;
-    handleResponseFinished: (source: 'network' | 'dom', hintedCid?: string) => void;
-    handleSaveClick: () => Promise<void>;
-    handleCalibrationClick: () => Promise<void>;
-    getConversationData: (opts?: { silent?: boolean; allowDegraded?: boolean }) => Promise<ConversationData | null>;
-    warmFetchConversationSnapshot: (cid: string, reason: WarmFetchReason) => Promise<boolean>;
-    maybeRunAutoCapture: (cid: string, reason: AutoCaptureReason) => void;
-    syncCalibrationButtonDisplay: () => void;
-    ensureCalibrationPreferenceLoaded: (platformName: string) => Promise<void>;
-    isCalibrationCaptureSatisfied: (cid: string, mode: CalibrationMode) => boolean;
-    resetCalibrationPreference: () => void;
-    handleCalibrationProfilesChanged: () => void;
-    loadSfeSettings: () => Promise<void>;
-    extractConversationIdFromLocation: () => string | null;
-    resolveConversationIdForUserAction: () => string | null;
-    getCaptureMeta: (cid: string) => ExportMeta;
-    resolveIsolatedSnapshotData: (cid: string) => ConversationData | null;
-    setStreamProbePanel: (status: string, body: string) => void;
-    withPreservedLiveMirrorSnapshot: (cid: string, status: string, body: string) => string;
-    syncStreamProbePanelFromCanonical: (cid: string, data: ConversationData) => void;
-    appendPendingStreamProbeText: (aid: string, text: string) => void;
-    migratePendingStreamProbeText: (cid: string, aid: string) => void;
-    appendLiveStreamProbeText: (cid: string, text: string) => void;
-    setTabDebugOverlayVisible: (visible: boolean) => void;
-    refreshTabDebugOverlay: () => void;
-    recordTabDebugCapture: (args: {
-        conversationId: string;
-        data: ConversationData;
-        attemptId?: string | null;
-        source?: string;
-    }) => void;
-    recordTabDebugExternalEvent: (args: {
-        event: ExternalConversationEvent;
-        status: 'sent' | 'failed';
-        error?: unknown;
-        delivery?: import('./tab-debug-overlay').TabDebugOverlayDeliveryStats | null;
-    }) => void;
-    handleTabDebugRuntimeMessage: (
-        message: unknown,
-    ) =>
-        | { handled: true; enabled: boolean; snapshot?: undefined }
-        | { handled: true; enabled: boolean; snapshot: TabDebugOverlaySnapshot }
-        | { handled: false; enabled?: undefined; snapshot?: undefined };
-    isStaleAttemptMessage: (
-        aid: string,
-        cid: string | undefined,
-        signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
-    ) => boolean;
-    buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
-    getExportFormat: () => Promise<ExportFormat>;
-    emitExternalConversationEvent: (args: {
-        conversationId: string;
-        data: ConversationData;
-        readinessMode: ReadinessDecision['mode'];
-        captureMeta: ExportMeta;
-        attemptId: string | null;
-        allowWhenActionsBlocked?: boolean;
-    }) => void;
-    ingestSfeLifecycleFromWirePhase: (
-        phase: ResponseLifecycleMessage['phase'],
-        aid: string,
-        cid?: string | null,
-    ) => void;
-    buildCalibrationOrchestrationDeps: () => CalibrationOrchestrationDeps;
-    buildCalibrationCaptureDeps: (cid: string) => CalibrationCaptureDeps;
-    runCalibrationStep: (step: CalibrationStep, cid: string, mode: CalibrationMode) => Promise<boolean>;
-    buildWarmFetchDeps: () => WarmFetchDeps;
-};
-
-// ── Utility functions (moved from engine) ──
-
-export const extractConversationIdFromLocation = (ctx: EngineCtx): string | null => {
-    if (!ctx.currentAdapter) {
-        return null;
-    }
-    return ctx.currentAdapter.extractConversationId(window.location.href) || null;
-};
-
-export const resolveConversationIdForUserAction = (ctx: EngineCtx): string | null => {
-    const locationId = extractConversationIdFromLocation(ctx);
-    if (locationId) {
-        return locationId;
-    }
-    if (ctx.currentConversationId && window.location.href.includes(ctx.currentConversationId)) {
-        return ctx.currentConversationId;
-    }
-    return null;
-};
-
-export const getCaptureMeta = (ctx: EngineCtx, conversationId: string): ExportMeta =>
-    ctx.captureMetaByConversation.get(conversationId) ?? {
-        captureSource: 'canonical_api',
-        fidelity: 'high',
-        completeness: 'complete',
-    };
-
-export const resolveIsolatedSnapshotData = (ctx: EngineCtx, conversationId: string): ConversationData | null => {
-    if (!ctx.currentAdapter) {
-        return null;
-    }
-    return buildIsolatedDomSnapshot(ctx.currentAdapter, conversationId);
-};
-
-export const evaluateReadinessForData = (ctx: EngineCtx, data: ConversationData): PlatformReadiness =>
-    evaluateReadinessForDataPure(data, ctx.currentAdapter);
-
-export const ingestStabilizationRetrySnapshot = (ctx: EngineCtx, conversationId: string, data: unknown) => {
-    if (isConversationDataLike(data)) {
-        ctx.interceptionManager.ingestConversationData(data, 'stabilization-retry-snapshot');
-        return;
-    }
-    ctx.interceptionManager.ingestInterceptedData({
-        url: `stabilization-retry-snapshot://${ctx.currentAdapter?.name ?? 'unknown'}/${conversationId}`,
-        data: JSON.stringify(data),
-        platform: ctx.currentAdapter?.name ?? 'unknown',
-    });
-};
-
-export const isPlatformGenerating = (adapter: LLMPlatform | null): boolean => detectPlatformGenerating(adapter);
-
-export const isLifecycleGenerationPhase = (ctx: EngineCtx, conversationId: string): boolean => {
-    if (ctx.lifecycleState !== 'prompt-sent' && ctx.lifecycleState !== 'streaming') {
-        return false;
-    }
-    if (!ctx.currentConversationId) {
-        return true;
-    }
-    return ctx.currentConversationId === conversationId;
-};
-
-export const shouldBlockActionsForGeneration = (ctx: EngineCtx, conversationId: string): boolean => {
-    if (isLifecycleGenerationPhase(ctx, conversationId)) {
-        return true;
-    }
-    if (ctx.currentAdapter?.name !== 'ChatGPT') {
-        return false;
-    }
-    return isPlatformGenerating(ctx.currentAdapter);
-};
-
-export const emitStreamDumpConfig = (ctx: EngineCtx) => {
-    const payload: StreamDumpConfigMessage = { type: MESSAGE_TYPES.STREAM_DUMP_CONFIG, enabled: ctx.streamDumpEnabled };
-    window.postMessage(stampToken(payload), window.location.origin);
-};
-
-export const buildExportPayloadForFormat = (ctx: EngineCtx, data: ConversationData, format: ExportFormat): unknown =>
-    buildExportPayloadForFormatPure(data, format, ctx.currentAdapter?.name ?? 'Unknown');
-
-export const getExportFormat = (): Promise<ExportFormat> => getExportFormatCore(DEFAULT_EXPORT_FORMAT);
-
-export const emitExternalConversationEvent = (
-    ctx: EngineCtx,
-    args: {
-        conversationId: string;
-        data: ConversationData;
-        readinessMode: ReadinessDecision['mode'];
-        captureMeta: ExportMeta;
-        attemptId: string | null;
-        allowWhenActionsBlocked?: boolean;
-    },
-) => {
-    const shouldBlockActions = args.allowWhenActionsBlocked
-        ? false
-        : shouldBlockActionsForGeneration(ctx, args.conversationId);
-
-    const event = maybeBuildExternalConversationEvent({
-        conversationId: args.conversationId,
-        data: args.data,
-        providerName: ctx.currentAdapter?.name,
-        readinessMode: args.readinessMode,
-        captureMeta: args.captureMeta,
-        attemptId: args.attemptId,
-        shouldBlockActions,
-        evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
-        state: ctx.externalEventDispatchState,
-    });
-    if (!event) {
-        return;
-    }
-    logger.debug('External event build attempt', {
-        conversationId: args.conversationId,
-        readinessMode: args.readinessMode,
-        captureSource: args.captureMeta.captureSource,
-        fidelity: args.captureMeta.fidelity,
-        completeness: args.captureMeta.completeness,
-        attemptId: args.attemptId,
-        shouldBlockActions,
-        allowWhenActionsBlocked: !!args.allowWhenActionsBlocked,
-    });
-    logger.debug('External event send start', {
-        conversationId: event.conversation_id,
-        eventType: event.type,
-        eventId: event.event_id,
-        contentHash: event.content_hash,
-    });
-    void browser.runtime
-        .sendMessage(buildExternalInternalEventMessage(event))
-        .then((response) => {
-            const typed = response as
-                | {
-                      success?: unknown;
-                      delivery?: {
-                          subscriberCount?: unknown;
-                          delivered?: unknown;
-                          dropped?: unknown;
-                      };
-                  }
-                | undefined;
-            const delivery =
-                typeof typed?.delivery?.subscriberCount === 'number' &&
-                typeof typed.delivery.delivered === 'number' &&
-                typeof typed.delivery.dropped === 'number'
-                    ? {
-                          listenerCount: typed.delivery.subscriberCount,
-                          delivered: typed.delivery.delivered,
-                          dropped: typed.delivery.dropped,
-                      }
-                    : null;
-            markExternalConversationEventDispatched(
-                ctx.externalEventDispatchState,
-                event.conversation_id,
-                event.attempt_id,
-                event.content_hash,
-                event.payload.title,
-            );
-            ctx.recordTabDebugExternalEvent({
-                event,
-                status: 'sent',
-                delivery,
-            });
-            logger.debug('External event send success', {
-                conversationId: event.conversation_id,
-                eventType: event.type,
-                eventId: event.event_id,
-                contentHash: event.content_hash,
-                subscriberCount: delivery?.listenerCount ?? null,
-                delivered: delivery?.delivered ?? null,
-                dropped: delivery?.dropped ?? null,
-            });
-        })
-        .catch((error) => {
-            ctx.recordTabDebugExternalEvent({
-                event,
-                status: 'failed',
-                error,
-            });
-            logger.debug('External event send failed', {
-                conversationId: event.conversation_id,
-                type: event.type,
-                eventId: event.event_id,
-                error,
-            });
-        });
-};
-
-// ── SFE ingestion wrappers ──
-
-const buildSfeIngestionDeps = (ctx: EngineCtx): SfeIngestionDeps => ({
-    sfeEnabled: ctx.sfeEnabled,
-    sfe: ctx.sfe,
-    platformName: ctx.currentAdapter?.name ?? 'Unknown',
-    resolveAttemptId: (cid) => ctx.resolveAttemptId(cid),
-    bindAttempt: (cid, aid) => ctx.bindAttempt(cid, aid),
-    evaluateReadiness: (data) => evaluateReadinessForData(ctx, data),
-    getLifecycleState: () => ctx.lifecycleState,
-    scheduleCanonicalStabilizationRetry: (cid, aid) => ctx.scheduleCanonicalStabilizationRetry(cid, aid),
-    clearCanonicalStabilizationRetry: (aid) => ctx.clearCanonicalStabilizationRetry(aid),
-    syncStreamProbePanelFromCanonical: (cid, data) => ctx.syncStreamProbePanelFromCanonical(cid, data),
-    refreshButtonState: (cid) => ctx.refreshButtonState(cid),
-    structuredLogger: ctx.structuredLogger,
-});
-
-export const ingestSfeLifecycle = (
-    ctx: EngineCtx,
-    phase: LifecyclePhase,
-    attemptId: string,
-    conversationId?: string | null,
-) => ingestSfeLifecycleSignalCore(phase, attemptId, conversationId, buildSfeIngestionDeps(ctx));
-
-export const ingestSfeCanonicalSample = (ctx: EngineCtx, data: ConversationData, attemptId?: string) =>
-    ingestSfeCanonicalSampleCore(data, attemptId, buildSfeIngestionDeps(ctx));
-
-export const logSfeMismatchIfNeeded = (ctx: EngineCtx, conversationId: string, legacyReady: boolean) =>
-    logSfeMismatchIfNeededCore(conversationId, legacyReady, {
-        sfeEnabled: ctx.sfeEnabled,
-        sfe: ctx.sfe,
-        structuredLogger: ctx.structuredLogger,
-        peekAttemptId: (cid) => ctx.peekAttemptId(cid),
-    });
-
-export const emitAttemptDisposed = (ctx: EngineCtx, attemptId: string, reason: AttemptDisposedMessage['reason']) =>
-    emitAttemptDisposedCore(attemptId, reason, {
-        pendingLifecycleByAttempt: ctx.pendingLifecycleByAttempt,
-        structuredLogger: ctx.structuredLogger,
-        postDisposedMessage: (aid, r) => {
-            const payload: AttemptDisposedMessage = {
-                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
-                attemptId: aid,
-                reason: r as AttemptDisposedMessage['reason'],
-            };
-            window.postMessage(stampToken(payload), window.location.origin);
-        },
-    });
-
-export const ingestSfeLifecycleFromWirePhase = (
-    ctx: EngineCtx,
-    phase: ResponseLifecycleMessage['phase'],
-    attemptId: string,
-    conversationId?: string | null,
-) => ingestSfeLifecycleFromWirePhaseCore(phase, attemptId, conversationId, buildSfeIngestionDeps(ctx));
-
-export const isStaleAttemptMessage = (
-    ctx: EngineCtx,
-    attemptId: string,
-    conversationId: string | undefined,
-    signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
-): boolean => {
-    const deps: StaleAttemptFilterDeps = {
-        resolveAliasedAttemptId: (aid) => ctx.resolveAliasedAttemptId(aid),
-        isAttemptDisposedOrSuperseded: (aid) => ctx.isAttemptDisposedOrSuperseded(aid),
-        attemptByConversation: ctx.attemptByConversation,
-        structuredLogger: ctx.structuredLogger,
-    };
-    return isStaleAttemptMessageCore(attemptId, conversationId, signalType, deps);
-};
-
-// ── Deps builder factories ──
+} from '@/utils/runner/runtime/runtime-settings';
+import type { SavePipelineDeps } from '@/utils/runner/save-pipeline';
+import { removeStreamProbePanel } from '@/utils/runner/stream/probe-panel';
+import type { StreamDoneCoordinatorDeps } from '@/utils/runner/stream/stream-done-coordinator';
+import { runStreamDoneProbe as runStreamDoneProbeReal } from '@/utils/runner/stream/stream-done-probe';
+import { getFetchUrlCandidates, getRawSnapshotReplayUrls } from '@/utils/runner/url-candidates';
+import type { WarmFetchDeps } from '@/utils/runner/warm-fetch';
+import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
 
 export const buildAttemptCoordinatorDeps = (ctx: EngineCtx): AttemptCoordinatorDeps => ({
     maxConversationAttempts: MAX_CONVERSATION_ATTEMPTS,
@@ -669,7 +190,7 @@ export const buildSavePipelineDeps = (ctx: EngineCtx): SavePipelineDeps => ({
     resolveReadinessDecision: (cid) => ctx.resolveReadinessDecision(cid),
     shouldBlockActionsForGeneration: (cid) => shouldBlockActionsForGeneration(ctx, cid),
     getCaptureMeta: (cid) => getCaptureMeta(ctx, cid),
-    getExportFormat,
+    getExportFormat: () => ctx.getExportFormat(),
     getStreamResolvedTitle: (cid) => ctx.streamResolvedTitles.get(cid) ?? null,
     evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
     markCanonicalCaptureMeta: (cid) => ctx.markCanonicalCaptureMeta(cid),
@@ -812,7 +333,7 @@ export const buildResponseFinishedDeps = (ctx: EngineCtx): ResponseFinishedDeps 
     setActiveAttempt: (aid) => ctx.setActiveAttempt(aid),
     setCurrentConversation: (cid) => ctx.setCurrentConversation(cid),
     bindAttempt: (cid, aid) => ctx.bindAttempt(cid, aid),
-    ingestSfeLifecycle: (phase, aid, cid) => ingestSfeLifecycle(ctx, phase, aid, cid),
+    ingestSfeLifecycle: (phase, aid, cid) => ctx.ingestSfeLifecycle(phase, aid, cid),
     getCalibrationState: () => ctx.calibrationState,
     shouldBlockActionsForGeneration: (cid) => shouldBlockActionsForGeneration(ctx, cid),
     adapterName: () => ctx.currentAdapter?.name ?? null,
@@ -1000,7 +521,7 @@ export const buildCleanupRuntimeDeps = (
     markCleanedUp: () => {
         ctx.cleanedUp = true;
     },
-    removeVisibilityChangeListener: () => {}, // set externally after creation
+    removeVisibilityChangeListener: () => {},
     disposeAllAttempts: () => ctx.sfe.disposeAll(),
     handleDisposedAttempt: (attemptId, reason) => {
         ctx.cancelStreamDoneProbe(attemptId, reason);

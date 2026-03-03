@@ -1,15 +1,42 @@
 import { browser } from 'wxt/browser';
 import { logger } from '@/utils/logger';
-import { type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import { EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import type { ReadinessDecision } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 
+const LEGACY_EXPORT_FORMAT_KEY = 'exportFormat';
+
+const normalizeExportFormat = (value: unknown): ExportFormat | null => {
+    if (value === EXPORT_FORMAT.COMMON || value === EXPORT_FORMAT.ORIGINAL) {
+        return value;
+    }
+    return null;
+};
+
 export const getExportFormat = async (defaultFormat: ExportFormat): Promise<ExportFormat> => {
     try {
-        const result = await browser.storage.local.get(STORAGE_KEYS.EXPORT_FORMAT);
-        const value = result[STORAGE_KEYS.EXPORT_FORMAT];
-        if (value === 'common' || value === 'original') {
-            return value;
+        const localPrimary = await browser.storage.local.get(STORAGE_KEYS.EXPORT_FORMAT);
+        const primaryFormat = normalizeExportFormat(localPrimary[STORAGE_KEYS.EXPORT_FORMAT]);
+        if (primaryFormat) {
+            return primaryFormat;
+        }
+
+        const localLegacy = await browser.storage.local.get(LEGACY_EXPORT_FORMAT_KEY);
+        const legacyLocalFormat = normalizeExportFormat(localLegacy[LEGACY_EXPORT_FORMAT_KEY]);
+        if (legacyLocalFormat) {
+            return legacyLocalFormat;
+        }
+
+        const syncPrimary = await browser.storage.sync.get(STORAGE_KEYS.EXPORT_FORMAT);
+        const syncPrimaryFormat = normalizeExportFormat(syncPrimary[STORAGE_KEYS.EXPORT_FORMAT]);
+        if (syncPrimaryFormat) {
+            return syncPrimaryFormat;
+        }
+
+        const syncLegacy = await browser.storage.sync.get(LEGACY_EXPORT_FORMAT_KEY);
+        const legacySyncFormat = normalizeExportFormat(syncLegacy[LEGACY_EXPORT_FORMAT_KEY]);
+        if (legacySyncFormat) {
+            return legacySyncFormat;
         }
     } catch (error) {
         logger.warn('Failed to read export format setting, using default.', error);

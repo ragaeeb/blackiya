@@ -1,6 +1,8 @@
 import { logger } from '@/utils/logger';
+import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
 import { DEFAULT_GROK_MODEL_SLUG } from './constants';
+import { GROK_DEFAULT_TITLES } from './registry';
 import { grokState } from './state';
 import {
     extractGrokComConversationIdFromUrl,
@@ -240,6 +242,26 @@ export const parseGrokComResponses = (data: any, conversationId: string): Conver
     return conversation;
 };
 
+const applyMetaTitleIfBetter = (conversationId: string, title: string, conversationData: ConversationData) => {
+    const titleIsGeneric = isGenericConversationTitle(title, { platformDefaultTitles: GROK_DEFAULT_TITLES });
+    if (!titleIsGeneric) {
+        grokState.conversationTitles.set(conversationId, title);
+    }
+
+    const existingIsGeneric = isGenericConversationTitle(conversationData.title, {
+        platformDefaultTitles: GROK_DEFAULT_TITLES,
+    });
+    if (!titleIsGeneric || existingIsGeneric) {
+        conversationData.title = title;
+    } else {
+        logger.info('[Blackiya/Grok] Preserving specific title over generic meta title', {
+            conversationId,
+            existingTitle: conversationData.title,
+            genericMetaTitle: title,
+        });
+    }
+};
+
 export const parseGrokComConversationMeta = (data: any, conversationId: string): ConversationData | null => {
     const conversation = data?.conversation;
     if (!conversation) {
@@ -250,13 +272,9 @@ export const parseGrokComConversationMeta = (data: any, conversationId: string):
     const createTime = typeof conversation.createTime === 'string' ? Date.parse(conversation.createTime) / 1000 : null;
     const updateTime = typeof conversation.modifyTime === 'string' ? Date.parse(conversation.modifyTime) / 1000 : null;
 
-    if (title) {
-        grokState.conversationTitles.set(conversationId, title);
-    }
-
     const conversationData = getOrCreateGrokComConversation(conversationId);
     if (title) {
-        conversationData.title = title;
+        applyMetaTitleIfBetter(conversationId, title, conversationData);
     }
     if (createTime && !Number.isNaN(createTime)) {
         conversationData.create_time = createTime;

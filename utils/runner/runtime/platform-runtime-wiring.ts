@@ -11,13 +11,13 @@ import type {
     ButtonHealthCheckDeps,
     CompletionWatcherDeps,
     RunnerWindowBridgeDeps,
-} from '@/utils/runner/runtime-observers';
+} from '@/utils/runner/runtime/runtime-observers';
 import {
     registerButtonHealthCheck as registerButtonHealthCheckCore,
     registerCompletionWatcher as registerCompletionWatcherCore,
     registerWindowBridge as registerWindowBridgeCore,
-} from '@/utils/runner/runtime-observers';
-import type { RunnerStreamPreviewState } from '@/utils/runner/stream-preview';
+} from '@/utils/runner/runtime/runtime-observers';
+import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
 import type { WarmFetchReason } from '@/utils/runner/warm-fetch';
 import type { WireMessageHandlerDeps } from '@/utils/runner/wire-message-handlers';
 import {

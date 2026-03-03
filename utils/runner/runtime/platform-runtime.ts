@@ -6,7 +6,7 @@ import {
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
 } from '@/utils/runner/canonical-stabilization';
-import { runPlatform as runPlatformEngine } from '@/utils/runner/platform-runner-engine';
+import { runPlatform as runPlatformEngine } from '@/utils/runner/engine/platform-runner-engine';
 import { resolveExportConversationTitleDecision as resolveExportTitleDecision } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 

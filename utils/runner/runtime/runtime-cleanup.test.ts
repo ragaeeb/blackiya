@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { createCleanupRuntime, type RunnerCleanupDeps } from '@/utils/runner/runtime-cleanup';
+import { createCleanupRuntime, type RunnerCleanupDeps } from '@/utils/runner/runtime/runtime-cleanup';
 
 describe('runtime-cleanup', () => {
     it('should run cleanup routines exactly once', () => {

@@ -20,7 +20,7 @@ import type {
     StreamDumpFrameMessage,
     TitleResolvedMessage,
 } from '@/utils/protocol/messages';
-import { type RunnerStreamPreviewState, removePendingRunnerStreamPreview } from '@/utils/runner/stream-preview';
+import { type RunnerStreamPreviewState, removePendingRunnerStreamPreview } from '@/utils/runner/stream/stream-preview';
 import { resolveConversationTitleByPrecedence } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 

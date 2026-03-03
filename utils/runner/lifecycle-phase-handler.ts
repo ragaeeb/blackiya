@@ -9,8 +9,8 @@
 
 import { logger } from '@/utils/logger';
 import type { ResponseLifecycleMessage } from '@/utils/protocol/messages';
-import type { RunnerStreamPreviewState } from '@/utils/runner/stream-preview';
-import { ensureLiveRunnerStreamPreview } from '@/utils/runner/stream-preview';
+import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
+import { ensureLiveRunnerStreamPreview } from '@/utils/runner/stream/stream-preview';
 import type { ExportMeta } from '@/utils/sfe/types';
 
 export type LifecyclePhaseHandlerDeps = {

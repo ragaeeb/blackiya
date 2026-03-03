@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
+import { appendStreamProbePreview } from '@/utils/runner/stream/stream-probe';
 
 describe('stream-probe', () => {
     describe('appendStreamProbePreview', () => {

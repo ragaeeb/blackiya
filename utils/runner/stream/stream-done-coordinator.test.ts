@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { createStreamDoneCoordinator, type StreamDoneCoordinatorDeps } from '@/utils/runner/stream-done-coordinator';
+import {
+    createStreamDoneCoordinator,
+    type StreamDoneCoordinatorDeps,
+} from '@/utils/runner/stream/stream-done-coordinator';
 
 describe('stream-done-coordinator', () => {
     let deps: StreamDoneCoordinatorDeps;

@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { InMemoryLeaseStore } from '@/tests/helpers/in-memory-lease-store';
-import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
+import type { ExternalInboundConversationEvent } from '@/utils/external-api/contracts';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 type MessageHandler = (
@@ -21,8 +21,8 @@ describe('background message handler', () => {
         };
     }) => (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => true;
     let externalConnectHandlerFactory: (deps: {
-        externalApiHub: { addSubscriber: (port: unknown) => boolean };
-    }) => (port: unknown) => void;
+        externalApiHub: { addSubscriber: (port: unknown, context: { senderExtensionId: string | null }) => boolean };
+    }) => (port: { sender?: { id?: string } }) => void;
     let savedLogs: unknown[];
     let now: number;
 
@@ -253,13 +253,13 @@ describe('background message handler', () => {
             store: new InMemoryLeaseStore(),
             now: () => now,
         });
-        const seen: Array<{ event: ExternalConversationEvent; senderTabId?: number }> = [];
+        const seen: Array<{ event: ExternalInboundConversationEvent; senderTabId?: number }> = [];
         const debugCalls: Array<{ message: unknown; data: unknown }> = [];
         const handler = handlerFactory({
             saveLog: async () => {},
             leaseCoordinator: coordinator,
             externalApiHub: {
-                ingestEvent: async (event: ExternalConversationEvent, senderTabId?: number) => {
+                ingestEvent: async (event: ExternalInboundConversationEvent, senderTabId?: number) => {
                     seen.push({ event, senderTabId });
                     return { subscriberCount: 2, delivered: 2, dropped: 0 };
                 },
@@ -389,18 +389,23 @@ describe('background message handler', () => {
     });
 
     it('attaches external subscribers through the external connect handler', () => {
-        const seenPorts: unknown[] = [];
+        const seenSubscriptions: Array<{ port: unknown; context: { senderExtensionId: string | null } }> = [];
         const handler = externalConnectHandlerFactory({
             externalApiHub: {
-                addSubscriber: (port) => {
-                    seenPorts.push(port);
+                addSubscriber: (port, context) => {
+                    seenSubscriptions.push({ port, context });
                     return true;
                 },
             },
         });
 
-        const fakePort = { name: 'blackiya.events.v1' };
+        const fakePort = { name: 'blackiya.events.v1', sender: { id: 'extendo-id' } };
         handler(fakePort);
-        expect(seenPorts).toEqual([fakePort]);
+        expect(seenSubscriptions).toEqual([
+            {
+                port: fakePort,
+                context: { senderExtensionId: 'extendo-id' },
+            },
+        ]);
     });
 });

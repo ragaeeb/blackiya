@@ -18,7 +18,7 @@ The architecture is split across two runtime worlds:
 flowchart LR
     A["User prompt"] --> B["MAIN world interceptor\n/entrypoints/interceptor.content.ts -> /entrypoints/interceptor/bootstrap.ts"]
     B --> C["postMessage protocol\nBLACKIYA_* events"]
-    C --> D["ISOLATED runner\n/utils/runner/platform-runtime.ts -> /utils/runner/platform-runner-engine.ts"]
+    C --> D["ISOLATED runner\n/utils/runner/runtime/platform-runtime.ts -> /utils/runner/engine/platform-runner-engine.ts"]
     D --> E["InterceptionManager cache\n/utils/managers/interception-manager.ts"]
     D --> F["Signal Fusion Engine (SFE)\n/utils/sfe/*"]
     D --> G["ButtonManager UI\n/utils/ui/button-manager.ts"]
@@ -40,17 +40,17 @@ flowchart LR
   - `entrypoints/interceptor/signal-emitter.ts`
   - `entrypoints/interceptor/discovery.ts`
 - Platform orchestrator:
-  - `utils/runner/platform-runtime.ts`
-  - `utils/runner/platform-runner-engine.ts`
-  - `utils/runner/platform-runtime-wiring.ts`
-  - `utils/runner/platform-runtime-calibration.ts`
-  - `utils/runner/platform-runtime-stream-probe.ts`
+  - `utils/runner/runtime/platform-runtime.ts`
+  - `utils/runner/engine/platform-runner-engine.ts`
+  - `utils/runner/runtime/platform-runtime-wiring.ts`
+  - `utils/runner/runtime/platform-runtime-calibration.ts`
+  - `utils/runner/runtime/platform-runtime-stream-probe.ts`
   - `utils/runner/*` (state/lifecycle/export/probe/calibration/bridge + attempt/readiness modules)
   - `utils/runner/attempt-registry.ts` (attempt-id resolution: `resolveRunnerAttemptId` for writes, `peekRunnerAttemptId` for reads)
   - `utils/runner/calibration-policy.ts` (calibration ordering + persistence policy helpers)
   - `utils/runner/canonical-stabilization.ts` (canonical stabilization retry state helpers)
   - `utils/runner/readiness.ts`
-  - `utils/runner/stream-preview.ts` (pending/live stream preview merge and snapshot preservation)
+  - `utils/runner/stream/stream-preview.ts` (pending/live stream preview merge and snapshot preservation)
   - `utils/runner/tab-debug-overlay.ts` (per-tab diagnostics overlay for captured/emitted payload forensics)
 - Calibration profile management:
   - `utils/calibration-profile.ts` (strategy defaults, `CalibrationStep` type, `buildCalibrationProfileFromStep` manual-strict policy)
@@ -104,14 +104,21 @@ Runner emits canonical-ready conversation events to background via:
 Background owns the public API surface and provides:
 1. Push stream (`runtime.onConnectExternal`) on port `blackiya.events.v1`
    - Event types: `conversation.ready`, `conversation.updated`
+   - Event envelope includes durable fields: `event_id`, `seq`, `created_at`
+   - Control messages from consumer: `subscribe`, `commit`
+   - Control messages from producer: `events.batch`, `replay.complete`
 2. Pull API (`runtime.onMessageExternal`)
    - `health.ping`
    - `conversation.getLatest` (`format: "original" | "common"`)
    - `conversation.getById` (`format: "original" | "common"`)
+   - `events.getSince` (`cursor`, `limit`) for cursor replay fallback
 
 Notes:
-- Background caches recent canonical payloads and rebroadcasts to subscribers.
-- Runner emits a follow-up `conversation.updated` when a previously generic title upgrades to a specific title, even if canonical `content_hash` is unchanged. This upgrade emission is bounded to once per `conversationId + attemptId`.
+- Background is a durable append-first producer backed by IndexedDB (`externalEvents`, `externalMeta`).
+- On `subscribe(cursor)`, background replays `seq > cursor` in ordered batches, then emits `replay.complete`.
+- Commit authority is restricted to the designated delivery consumer (first `consumer_role='delivery'` subscriber); non-designated consumers can read but cannot mutate commit cursor.
+- Pruning only removes committed ranges per retention policy; uncommitted backlog is never pruned.
+- When new events append with no online delivery subscriber, background emits rate-limited wake messages (`BLACKIYA_WAKE`) to the designated consumer extension id.
 - Legacy page-global API (`window.__blackiya`) and `BLACKIYA_GET_JSON_*` bridge are removed.
 
 ## 4) Lifecycle and Readiness Model
@@ -142,7 +149,7 @@ Critical invariant:
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - Cross-world message ingress is token-validated for both live `postMessage` traffic and late-start queue drains (`__BLACKIYA_CAPTURE_QUEUE__`, `__BLACKIYA_LOG_QUEUE__`).
-- External API emissions are canonical-ready only, deduped by content hash, and surfaced via background `blackiya.events.v1`.
+- External API emissions are canonical-ready only, apply the shared title precedence policy (stream/cache/dom/first-user) before dispatch, are deduped by canonical payload/hash change (not title heuristics), and are surfaced via background `blackiya.events.v1`.
 - Tab debug overlay visibility is tab-scoped via `sessionStorage` and runtime tab messaging, so toggling diagnostics in one tab never changes another tab.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
 - Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
@@ -198,7 +205,7 @@ Flow:
 
 Primary code:
 - `entrypoints/interceptor/bootstrap.ts`
-- `platforms/chatgpt.ts`
+- `platforms/chatgpt/index.ts`
 
 ### 6.2 Gemini
 
@@ -225,7 +232,7 @@ Title strategy:
    - checks heading and active sidebar conversation title nodes
 
 Primary code:
-- `platforms/gemini.ts`
+- `platforms/gemini/index.ts`
 - `utils/gemini-stream-parser.ts`
 
 State management:
@@ -272,7 +279,7 @@ Known limitation (x.com):
 - This is currently a known gap; capture correctness is unaffected, but export title fidelity can lag until history metadata is fetched.
 
 Primary code:
-- `platforms/grok.ts`
+- `platforms/grok/index.ts`
 - `utils/grok-stream-parser.ts`
 - `utils/grok-request-classifier.ts`
 
@@ -302,7 +309,7 @@ On route changes, in-flight attempts bound to the destination conversation are p
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
 
 Key methods:
-- `utils/runner/platform-runner-engine.ts`:
+- `utils/runner/engine/platform-runner-engine.ts`:
   - `handleLifecycleMessage`
   - `handleResponseFinishedMessage`
   - `resolveReadinessDecision`
@@ -325,7 +332,7 @@ Save pipeline:
 6. Downloads JSON via `downloadAsJSON`.
 
 Primary code:
-- `utils/runner/platform-runner-engine.ts`
+- `utils/runner/engine/platform-runner-engine.ts`
 - `utils/common-export.ts`
 - `utils/download.ts`
 

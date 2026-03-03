@@ -1,4 +1,4 @@
-import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
+import type { ExternalInboundConversationEvent } from '@/utils/external-api/contracts';
 import type { ConversationData } from '@/utils/types';
 
 export const TAB_DEBUG_OVERLAY_SESSION_KEY = 'blackiya.tabDebugOverlay.visible';
@@ -26,7 +26,7 @@ type TabDebugExternalEntry = {
     kind: 'external';
     atMs: number;
     conversationId: string;
-    eventType: ExternalConversationEvent['type'];
+    eventType: ExternalInboundConversationEvent['type'];
     eventId: string;
     contentHash: string | null;
     status: 'sent' | 'failed';
@@ -146,7 +146,7 @@ export const addTabDebugCaptureEntry = (
 export const addTabDebugExternalEventEntry = (
     state: TabDebugOverlayState,
     input: {
-        event: ExternalConversationEvent;
+        event: ExternalInboundConversationEvent;
         status: 'sent' | 'failed';
         error?: unknown;
         delivery?: TabDebugOverlayDeliveryStats | null;

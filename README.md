@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/icon.png" width="128" alt="Blackiya Logo" />
+  <img src="public/icon/128.png" width="128" alt="Blackiya Logo" />
 </p>
 
 # Blackiya
@@ -94,29 +94,23 @@ blackiya/
 │       ├── index.html        # Extension popup UI (optional)
 │       └── App.tsx           # Popup logic (optional)
 ├── platforms/
-│   ├── chatgpt.ts            # ChatGPT platform adapter
-│   ├── gemini.ts             # Gemini platform adapter
-│   ├── grok.ts               # Grok platform adapter
+│   ├── chatgpt/              # ChatGPT adapter + parsing/readiness modules
+│   ├── gemini/               # Gemini adapter + RPC/title/conversation modules
+│   ├── grok/                 # Grok adapter + NDJSON/GraphQL/title modules
+│   ├── constants.ts
+│   ├── factory.ts            # Adapter factory
 │   └── types.ts              # Platform interface definitions
 ├── utils/
 │   ├── runner/
-│   │   ├── platform-runtime.ts         # Runner entrypoint
-│   │   ├── platform-runner-engine.ts   # Main orchestration + readiness gating
-│   │   ├── platform-runtime-wiring.ts  # Wire handlers + observer/navigation wiring
-│   │   ├── platform-runtime-calibration.ts # Calibration runtime orchestration
-│   │   ├── platform-runtime-stream-probe.ts # Stream-probe runtime wiring
-│   │   ├── state.ts
-│   │   ├── lifecycle-manager.ts
-│   │   ├── message-bridge.ts
-│   │   ├── stream-probe.ts
-│   │   ├── calibration-runner.ts
+│   │   ├── engine/                    # Core runner engine, context, SFE wrappers, emission
+│   │   ├── runtime/                   # Runtime bootstrapping, wiring, cleanup, settings
+│   │   ├── stream/                    # Stream probe UI/runtime/coordinator helpers
+│   │   ├── attempt-registry.ts
 │   │   ├── calibration-policy.ts
 │   │   ├── canonical-stabilization.ts
-│   │   ├── dom-snapshot.ts
 │   │   ├── export-pipeline.ts
-│   │   ├── attempt-registry.ts
 │   │   ├── readiness.ts
-│   │   └── stream-preview.ts
+│   │   └── state.ts
 │   ├── external-api/          # Extension-to-extension API contracts + hub
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine

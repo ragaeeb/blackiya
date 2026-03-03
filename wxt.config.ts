@@ -20,7 +20,10 @@ export default defineConfig({
         permissions: ['storage'],
         host_permissions: [...SUPPORTED_PLATFORM_URLS],
         action: {
-            default_icon: 'icon.png',
+            default_icon: {
+                '16': 'icon/16.png',
+                '32': 'icon/32.png',
+            },
         },
         icons: {
             '16': 'icon/16.png',

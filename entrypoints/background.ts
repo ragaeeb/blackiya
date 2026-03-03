@@ -6,11 +6,7 @@
  * @module entrypoints/background
  */
 
-import {
-    createExternalApiHub,
-    type ExternalPortLike,
-    type ExternalStorageLike,
-} from '@/utils/external-api/background-hub';
+import { createExternalApiHub, type ExternalPortLike } from '@/utils/external-api/background-hub';
 import { EXTERNAL_API_VERSION, isExternalInternalEventMessage } from '@/utils/external-api/contracts';
 import { logger } from '@/utils/logger';
 import { type LogEntry, logsStorage } from '@/utils/logs-storage';
@@ -206,8 +202,10 @@ type ExternalConnectHandlerDeps = {
 };
 
 export const createExternalConnectHandler = (deps: ExternalConnectHandlerDeps) => {
-    return (port: ExternalPortLike) => {
-        deps.externalApiHub.addSubscriber(port);
+    return (port: ExternalPortLike & { sender?: { id?: string } }) => {
+        deps.externalApiHub.addSubscriber(port, {
+            senderExtensionId: port.sender?.id ?? null,
+        });
     };
 };
 
@@ -215,10 +213,7 @@ export default defineBackground(() => {
     const leaseCoordinator = new ProbeLeaseCoordinator({
         store: createProbeLeaseStore(),
     });
-    const externalApiHub = createExternalApiHub({
-        storage: browser.storage.local as ExternalStorageLike,
-        logger,
-    });
+    const externalApiHub = createExternalApiHub({ logger });
     void externalApiHub.ensureHydrated();
 
     logger.info('Background service worker started', {

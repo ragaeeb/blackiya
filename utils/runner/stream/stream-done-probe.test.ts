@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import { runStreamDoneProbe, type StreamDoneProbeDeps } from '@/utils/runner/stream-done-probe';
+import { runStreamDoneProbe, type StreamDoneProbeDeps } from '@/utils/runner/stream/stream-done-probe';
 
 describe('stream-done-probe', () => {
     let deps: StreamDoneProbeDeps;

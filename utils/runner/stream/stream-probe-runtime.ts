@@ -3,14 +3,14 @@ import {
     ensureStreamProbePanel,
     resolveStreamProbeDockPosition,
     setStreamProbePanelContent,
-} from '@/utils/runner/probe-panel';
+} from '@/utils/runner/stream/probe-panel';
 import {
     appendLiveRunnerStreamPreview,
     appendPendingRunnerStreamPreview,
     migratePendingRunnerStreamPreview,
     type RunnerStreamPreviewState,
     withPreservedRunnerStreamMirrorSnapshot,
-} from '@/utils/runner/stream-preview';
+} from '@/utils/runner/stream/stream-preview';
 import type { ConversationData } from '@/utils/types';
 
 export type StreamProbePanelDeps = {

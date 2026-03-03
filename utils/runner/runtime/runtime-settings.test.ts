@@ -6,13 +6,16 @@ import {
     loadStreamDumpSetting,
     loadStreamProbeVisibilitySetting,
     scheduleButtonInjectionRetries,
-} from '@/utils/runner/runtime-settings';
+} from '@/utils/runner/runtime/runtime-settings';
 import { STORAGE_KEYS } from '@/utils/settings';
 
 mock.module('wxt/browser', () => ({
     browser: {
         storage: {
             local: {
+                get: mock(async () => ({})),
+            },
+            sync: {
                 get: mock(async () => ({})),
             },
             onChanged: {
@@ -54,6 +57,39 @@ describe('runtime-settings', () => {
                 throw new Error('storage failure');
             });
             expect(await getExportFormat('common')).toBe('common');
+        });
+
+        it('should fall back to legacy local key when primary key is missing', async () => {
+            const { browser } = await import('wxt/browser');
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
+                exportFormat: 'common',
+            }));
+
+            expect(await getExportFormat('original')).toBe('common');
+        });
+
+        it('should fall back to sync storage when local is missing', async () => {
+            const { browser } = await import('wxt/browser');
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
+                [STORAGE_KEYS.EXPORT_FORMAT]: 'common',
+            }));
+
+            expect(await getExportFormat('original')).toBe('common');
+        });
+
+        it('should fall back to legacy sync key when primary sync key is missing', async () => {
+            const { browser } = await import('wxt/browser');
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
+            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
+                exportFormat: 'common',
+            }));
+
+            expect(await getExportFormat('original')).toBe('common');
         });
     });
 

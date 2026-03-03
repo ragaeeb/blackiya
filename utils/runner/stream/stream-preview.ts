@@ -1,5 +1,5 @@
 import { setBoundedMapValue } from '@/utils/bounded-collections';
-import { appendStreamProbePreview } from '@/utils/runner/stream-probe';
+import { appendStreamProbePreview } from '@/utils/runner/stream/stream-probe';
 
 // Tuned to retain enough live context for diagnostics while staying bounded for popup rendering.
 const DEFAULT_MAX_PREVIEW_LENGTH = 15_503;

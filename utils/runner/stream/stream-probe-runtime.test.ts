@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import type { RunnerStreamPreviewState } from '@/utils/runner/stream-preview';
+import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
 import {
     appendLiveStreamProbeText,
     appendPendingStreamProbeText,
@@ -9,7 +9,7 @@ import {
     setStreamProbePanel,
     syncStreamProbePanelFromCanonical,
     withPreservedLiveMirrorSnapshot,
-} from '@/utils/runner/stream-probe-runtime';
+} from '@/utils/runner/stream/stream-probe-runtime';
 
 describe('stream-probe-runtime', () => {
     describe('setStreamProbePanel', () => {

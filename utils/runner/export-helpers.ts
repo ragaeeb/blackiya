@@ -5,7 +5,7 @@
 
 import { buildCommonExport } from '@/utils/common-export';
 import { logger } from '@/utils/logger';
-import type { ExportFormat } from '@/utils/settings';
+import { EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 
@@ -18,7 +18,7 @@ export const buildExportPayloadForFormat = (
     format: ExportFormat,
     platformName: string,
 ): unknown => {
-    if (format !== 'common') {
+    if (format !== EXPORT_FORMAT.COMMON) {
         return data;
     }
     try {

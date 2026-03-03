@@ -44,7 +44,7 @@ import {
     clearCanonicalStabilizationAttemptState,
     resolveShouldSkipCanonicalRetryAfterAwait,
     shouldRemoveDisposedAttemptBinding,
-} from '@/utils/runner/platform-runtime';
+} from '@/utils/runner/runtime/platform-runtime';
 
 describe('shouldRemoveDisposedAttemptBinding', () => {
     const resolveFromMap = (aliases: Record<string, string>) => (attemptId: string) => {

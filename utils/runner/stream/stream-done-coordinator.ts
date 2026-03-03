@@ -1,7 +1,7 @@
 import type { LLMPlatform } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
-import type { StreamDoneProbeDeps } from '@/utils/runner/stream-done-probe';
+import type { StreamDoneProbeDeps } from '@/utils/runner/stream/stream-done-probe';
 import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import type { PlatformReadiness } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';

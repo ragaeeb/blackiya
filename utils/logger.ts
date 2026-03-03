@@ -1,4 +1,3 @@
-import { type ILogObj, Logger } from 'tslog';
 import { browser } from 'wxt/browser';
 import { type LogEntry, logsStorage } from './logs-storage';
 import { STORAGE_KEYS } from './settings';
@@ -8,10 +7,19 @@ import { STORAGE_KEYS } from './settings';
  */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+type LogContext = 'background' | 'content' | 'popup';
+
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+    debug: 2,
+    info: 3,
+    warn: 4,
+    error: 5,
+};
+
 /**
- * Determine the current execution context
+ * Determine the current execution context.
  */
-const getContext = (): 'background' | 'content' | 'popup' => {
+const getContext = (): LogContext => {
     if (typeof window === 'undefined') {
         return 'background';
     }
@@ -24,83 +32,76 @@ const getContext = (): 'background' | 'content' | 'popup' => {
     if (locationObj.protocol === 'chrome-extension:' && locationObj.pathname.includes('popup')) {
         return 'popup';
     }
-    // Content scripts run in a tab
     if (locationObj.protocol.startsWith('http')) {
         return 'content';
     }
 
-    return 'background'; // Default to background if unsure
+    return 'background';
 };
 
-/**
- * Extension Logger
- *
- * A singleton logger instance that routes logs to both the console (for dev)
- * and persistent storage (for user export).
- */
 class ExtensionLogger {
-    private logger: Logger<ILogObj>;
     private static instance: ExtensionLogger;
-    private context: 'background' | 'content' | 'popup';
+    private context: LogContext;
+    private minLevel = LOG_LEVEL_PRIORITY.info;
     private storageListenerAttached = false;
 
     private constructor() {
         this.context = getContext();
-
-        this.logger = new Logger({
-            name: 'Blackiya',
-            minLevel: 3, // Default to INFO
-            hideLogPositionForProduction: true,
-            type: 'json',
-        });
-
-        // Attach Transport for Persistence
-        this.logger.attachTransport((logObj) => {
-            this.handleTransport(logObj);
-        });
-
         this.hydrateLogLevelFromStorage();
         this.attachStorageListener();
     }
 
-    private handleTransport(logObj: ILogObj) {
-        // Convert tslog level ID to string
-        // 0: silly, 1: trace, 2: debug, 3: info, 4: warn, 5: error, 6: fatal
-        const meta = (logObj as any)._meta;
-        const levelId = meta ? meta.logLevelId : 3;
+    private emit(level: LogLevel, message: string, args: unknown[]) {
+        if (LOG_LEVEL_PRIORITY[level] < this.minLevel) {
+            return;
+        }
 
-        const levelMap: Record<number, string> = { 2: 'debug', 3: 'info', 4: 'warn' };
-        const level = levelId >= 5 ? 'error' : (levelMap[levelId] ?? 'info');
-
-        // Construct standardized entry
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
-            level: level,
-            message: logObj[0] as string, // tslog puts the first arg as message usually
-            data: Object.keys(logObj)
-                .filter((k) => !Number.isNaN(Number(k)) && k !== '0')
-                .map((k) => logObj[k]), // Extract other args
+            level,
+            message,
+            data: args,
             context: this.context,
         };
 
-        // If in Background context, save directly
+        this.emitToConsole(level, message, args);
+        this.persistEntry(entry);
+    }
+
+    private emitToConsole(level: LogLevel, message: string, args: unknown[]) {
+        const prefix = '[Blackiya]';
+        if (level === 'debug') {
+            console.debug(prefix, message, ...args);
+            return;
+        }
+        if (level === 'info') {
+            console.info(prefix, message, ...args);
+            return;
+        }
+        if (level === 'warn') {
+            console.warn(prefix, message, ...args);
+            return;
+        }
+        console.error(prefix, message, ...args);
+    }
+
+    private persistEntry(entry: LogEntry) {
         if (this.context === 'background') {
             logsStorage.saveLog(entry).catch((err) => console.error('Logger failed to save:', err));
-        } else {
-            // In Content Script or Popup, assume we can send message
-            // We use a try-catch because sending messages might fail during unload
-            try {
-                browser.runtime
-                    .sendMessage({
-                        type: 'LOG_ENTRY',
-                        payload: entry,
-                    })
-                    .catch(() => {
-                        // Ignore errors if background is unreachable (e.g. extension updating)
-                    });
-            } catch (_e) {
-                // Squelch
-            }
+            return;
+        }
+
+        try {
+            browser.runtime
+                .sendMessage({
+                    type: 'LOG_ENTRY',
+                    payload: entry,
+                })
+                .catch(() => {
+                    // Ignore transient runtime messaging failures.
+                });
+        } catch {
+            // Ignore runtime messaging failures during shutdown/unload.
         }
     }
 
@@ -112,38 +113,23 @@ class ExtensionLogger {
     }
 
     public debug(message: string, ...args: unknown[]) {
-        this.logger.debug(message, ...args);
+        this.emit('debug', message, args);
     }
 
     public info(message: string, ...args: unknown[]) {
-        this.logger.info(message, ...args);
+        this.emit('info', message, args);
     }
 
     public warn(message: string, ...args: unknown[]) {
-        this.logger.warn(message, ...args);
+        this.emit('warn', message, args);
     }
 
     public error(message: string, ...args: unknown[]) {
-        this.logger.error(message, ...args);
+        this.emit('error', message, args);
     }
 
     public setLevel(level: LogLevel) {
-        let minLevel = 3;
-        switch (level) {
-            case 'debug':
-                minLevel = 2;
-                break;
-            case 'info':
-                minLevel = 3;
-                break;
-            case 'warn':
-                minLevel = 4;
-                break;
-            case 'error':
-                minLevel = 5;
-                break;
-        }
-        this.logger.settings.minLevel = minLevel;
+        this.minLevel = LOG_LEVEL_PRIORITY[level];
     }
 
     private async hydrateLogLevelFromStorage() {
@@ -162,7 +148,7 @@ class ExtensionLogger {
                 this.setLevel(storedLevel);
             }
         } catch {
-            // Ignore; logger should continue with default level.
+            // Ignore storage failures and keep default level.
         }
     }
 
