@@ -174,8 +174,18 @@ export const createVisibilityChangeHandler = (deps: VisibilityRecoveryDeps) => {
         if (document.hidden) {
             return;
         }
-        const conversationId = deps.resolveConversationId() ?? deps.getCurrentConversationId();
+        const routeConversationId = deps.resolveConversationId();
+        const fallbackConversationId = deps.getCurrentConversationId();
+        const conversationId = routeConversationId ?? fallbackConversationId;
         if (!conversationId) {
+            return;
+        }
+        if (
+            !routeConversationId &&
+            fallbackConversationId &&
+            typeof window?.location?.href === 'string' &&
+            !window.location.href.includes(fallbackConversationId)
+        ) {
             return;
         }
         if (deps.resolveReadinessDecision(conversationId).mode === 'canonical_ready') {

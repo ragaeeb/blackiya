@@ -390,6 +390,21 @@ describe('runtime-settings', () => {
             expect(deps.maybeRestartCanonicalRecoveryAfterTimeout).not.toHaveBeenCalled();
         });
 
+        it('should ignore fallback conversation id when location does not include it', () => {
+            setDocumentHidden(false);
+            const deps = buildDeps();
+            deps.resolveConversationId = mock(() => null);
+            deps.getCurrentConversationId = mock(() => 'stale-conv-id');
+            const originalWindow = (globalThis as any).window;
+            try {
+                (globalThis as any).window = { location: { href: 'https://gemini.google.com/app' } };
+                createVisibilityChangeHandler(deps)();
+                expect(deps.maybeRestartCanonicalRecoveryAfterTimeout).not.toHaveBeenCalled();
+            } finally {
+                (globalThis as any).window = originalWindow;
+            }
+        });
+
         it('should ignore if already canonical_ready', () => {
             setDocumentHidden(false);
             const deps = buildDeps();

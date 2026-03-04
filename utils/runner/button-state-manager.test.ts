@@ -322,6 +322,19 @@ describe('button-state-manager', () => {
 
             expect(deps.setCurrentConversation).not.toHaveBeenCalledWith(null);
             expect(deps.setLifecycleState).not.toHaveBeenCalledWith('idle');
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(true);
+        });
+
+        it('should reset lifecycle/conversation binding when URL no longer contains current conversation id', () => {
+            deps.getLifecycleState = () => 'completed';
+            deps.getCurrentConversationId = () => '123';
+            mockAdapter.extractConversationId = () => null;
+            (globalThis as any).window.location.href = 'https://gemini.google.com/app';
+
+            refreshButtonState(undefined, deps, lastButtonStateLog);
+
+            expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
+            expect(deps.setLifecycleState).toHaveBeenCalledWith('idle');
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
         });
     });

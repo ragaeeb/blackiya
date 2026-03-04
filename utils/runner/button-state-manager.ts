@@ -289,6 +289,14 @@ const resolveRefreshConversationId = (
     }
     const conversationId = forConversationId || adapter.extractConversationId(window.location.href);
     if (!conversationId) {
+        const fallbackConversationId = deps.getCurrentConversationId();
+        if (
+            fallbackConversationId &&
+            typeof window?.location?.href === 'string' &&
+            window.location.href.includes(fallbackConversationId)
+        ) {
+            return fallbackConversationId;
+        }
         resetButtonStateForNoConversation(deps);
         return null;
     }
@@ -344,11 +352,11 @@ export const scheduleButtonRefresh = (
 };
 
 const resetButtonStateForNoConversation = (deps: ButtonStateManagerDeps) => {
-    const hasActiveConversationBinding = !!deps.getCurrentConversationId();
-    if (!hasActiveConversationBinding) {
+    const preserveActiveGeneration = deps.isLifecycleActiveGeneration();
+    if (!preserveActiveGeneration) {
         deps.setCurrentConversation(null);
     }
-    if (!hasActiveConversationBinding && !deps.isLifecycleActiveGeneration() && deps.getLifecycleState() !== 'idle') {
+    if (!preserveActiveGeneration && deps.getLifecycleState() !== 'idle') {
         deps.setLifecycleState('idle');
     }
     deps.buttonManager.setSaveButtonMode('default');
@@ -382,15 +390,16 @@ export const injectSaveButton = (deps: ButtonStateManagerDeps, lastButtonStateLo
 
     if (!conversationId) {
         logger.info('No conversation ID yet; showing calibration only');
-        const hasActiveConversationBinding = !!deps.getCurrentConversationId();
-        if (!hasActiveConversationBinding) {
+        const existingConversationId = deps.getCurrentConversationId();
+        const preserveMissingIdBinding =
+            !!existingConversationId &&
+            typeof window?.location?.href === 'string' &&
+            window.location.href.includes(existingConversationId);
+        const preserveActiveGeneration = deps.isLifecycleActiveGeneration() || preserveMissingIdBinding;
+        if (!preserveActiveGeneration) {
             deps.setCurrentConversation(null);
         }
-        if (
-            !hasActiveConversationBinding &&
-            !deps.isLifecycleActiveGeneration() &&
-            deps.getLifecycleState() !== 'idle'
-        ) {
+        if (!preserveActiveGeneration && deps.getLifecycleState() !== 'idle') {
             deps.setLifecycleState('idle');
         }
         deps.buttonManager.setSaveButtonMode('default');
