@@ -223,7 +223,10 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
 
     const getDb = async () => {
         if (!dbPromise) {
-            dbPromise = openDatabase(dbName);
+            dbPromise = openDatabase(dbName).catch((error) => {
+                dbPromise = null;
+                throw error;
+            });
         }
         return dbPromise;
     };

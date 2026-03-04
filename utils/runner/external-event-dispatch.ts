@@ -93,19 +93,40 @@ const hasNonEmptyUserMessage = (data: ConversationData): boolean =>
 const shouldRequirePromptForProvider = (providerName: string | null | undefined): boolean =>
     normalizeExternalProvider(providerName) === 'gemini';
 
+const clonePayloadForDispatch = (payload: ConversationData): ConversationData => {
+    if (typeof globalThis.structuredClone === 'function') {
+        return globalThis.structuredClone(payload) as ConversationData;
+    }
+    return JSON.parse(JSON.stringify(payload)) as ConversationData;
+};
+
+const deepFreezePayload = <T>(value: T): T => {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) {
+        return value;
+    }
+    Object.freeze(value);
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+        deepFreezePayload(nested);
+    }
+    return value;
+};
+
+const snapshotPayloadForDispatch = (payload: ConversationData): ConversationData =>
+    deepFreezePayload(clonePayloadForDispatch(payload));
+
 const normalizePayloadForDispatch = (payload: ConversationData): ConversationData => {
     if (!isGenericConversationTitle(payload.title)) {
-        return payload;
+        return snapshotPayloadForDispatch(payload);
     }
     const decision = resolveExportConversationTitleDecision(payload);
     const currentTitle = typeof payload.title === 'string' ? payload.title.trim() : '';
     if (decision.title === currentTitle) {
-        return payload;
+        return snapshotPayloadForDispatch(payload);
     }
-    return {
+    return snapshotPayloadForDispatch({
         ...payload,
         title: decision.title,
-    };
+    });
 };
 
 const stableStringify = (value: unknown): string => {

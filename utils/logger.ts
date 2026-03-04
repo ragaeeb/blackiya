@@ -72,7 +72,11 @@ class ExtensionLogger {
 
     private sanitizeSpecialObject(value: unknown): { handled: true; value: unknown } | { handled: false } {
         if (value instanceof Date) {
-            return { handled: true, value: value.toISOString() };
+            const time = value.getTime();
+            return {
+                handled: true,
+                value: Number.isFinite(time) ? value.toISOString() : '[Invalid Date]',
+            };
         }
         if (value instanceof Error) {
             return {

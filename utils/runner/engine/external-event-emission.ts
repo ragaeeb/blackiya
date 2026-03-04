@@ -67,7 +67,7 @@ const sendMessageWithTimeout = (event: ReturnType<typeof buildExternalInternalEv
 
 const applyTitleFallbackForExternalEvent = (ctx: EngineCtx, conversationId: string, data: ConversationData) => {
     const adapter = ctx.currentAdapter;
-    if (!adapter?.defaultTitles) {
+    if (!adapter) {
         return;
     }
     const streamTitle = ctx.streamResolvedTitles?.get(conversationId) ?? null;
@@ -86,7 +86,7 @@ const applyTitleFallbackForExternalEvent = (ctx: EngineCtx, conversationId: stri
         domTitle,
         firstUserMessageTitle: promptDerivedTitle,
         fallbackTitle: data.title ?? 'Conversation',
-        platformDefaultTitles: adapter.defaultTitles,
+        platformDefaultTitles: Array.isArray(adapter.defaultTitles) ? adapter.defaultTitles : [],
     });
     const currentTitle = (data.title ?? '').trim();
     if (titleDecision.title === currentTitle) {

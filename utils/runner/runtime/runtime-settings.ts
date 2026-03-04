@@ -14,24 +14,21 @@ const normalizeExportFormat = (value: unknown): ExportFormat | null => {
 };
 
 export const getExportFormat = async (defaultFormat: ExportFormat): Promise<ExportFormat> => {
-    const readFormat = async (area: 'local' | 'sync', key: string): Promise<ExportFormat | null> => {
+    const readAreaFormats = async (area: 'local' | 'sync'): Promise<ExportFormat | null> => {
         try {
             const storageArea = area === 'local' ? browser.storage.local : browser.storage.sync;
-            const result = await storageArea.get(key);
-            return normalizeExportFormat(result[key]);
+            const result = await storageArea.get([STORAGE_KEYS.EXPORT_FORMAT, LEGACY_EXPORT_FORMAT_KEY]);
+            return (
+                normalizeExportFormat(result[STORAGE_KEYS.EXPORT_FORMAT]) ??
+                normalizeExportFormat(result[LEGACY_EXPORT_FORMAT_KEY])
+            );
         } catch (error) {
-            logger.warn(`Failed to read ${area} export format key "${key}"`, error);
+            logger.warn(`Failed to read ${area} export format keys`, error);
             return null;
         }
     };
 
-    return (
-        (await readFormat('local', STORAGE_KEYS.EXPORT_FORMAT)) ??
-        (await readFormat('local', LEGACY_EXPORT_FORMAT_KEY)) ??
-        (await readFormat('sync', STORAGE_KEYS.EXPORT_FORMAT)) ??
-        (await readFormat('sync', LEGACY_EXPORT_FORMAT_KEY)) ??
-        defaultFormat
-    );
+    return (await readAreaFormats('local')) ?? (await readAreaFormats('sync')) ?? defaultFormat;
 };
 
 export type StreamDumpSettingDeps = {

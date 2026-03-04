@@ -165,17 +165,20 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         await wakeGate;
     };
 
-    const broadcastLiveEvent = (event: ExternalConversationEvent): ExternalEventDeliveryStats => {
+    const broadcastLiveEvent = async (event: ExternalConversationEvent): Promise<ExternalEventDeliveryStats> => {
         if (subscribers.size === 0) {
             return {
                 subscriberCount: 0,
                 delivered: 0,
                 dropped: 0,
+                designatedDelivered: false,
             };
         }
 
+        const designatedConsumerId = await eventStore.getDeliveryConsumerId();
         let delivered = 0;
         let dropped = 0;
+        let designatedDelivered = false;
 
         for (const [port, state] of [...subscribers.entries()]) {
             if (!state.subscribed) {
@@ -185,6 +188,9 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
                 port.postMessage(event satisfies ExternalPortOutboundMessage);
                 state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, event.seq);
                 delivered += 1;
+                if (designatedConsumerId && state.senderExtensionId === designatedConsumerId) {
+                    designatedDelivered = true;
+                }
             } catch {
                 subscribers.delete(port);
                 dropped += 1;
@@ -195,6 +201,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             subscriberCount: subscribers.size,
             delivered,
             dropped,
+            designatedDelivered,
         };
     };
 
@@ -286,13 +293,29 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         state.maxBatch = clampBatchSize(message.max_batch, defaultBatchSize);
         state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, state.cursor);
 
-        if (message.consumer_role === 'delivery' && state.senderExtensionId) {
+        if (message.consumer_role === 'delivery') {
+            if (!state.senderExtensionId) {
+                deps.logger?.warn('External hub subscribe rejected: missing senderExtensionId', {
+                    consumerRole: message.consumer_role,
+                });
+                removeSubscriber(port);
+                try {
+                    port.disconnect?.();
+                } catch {}
+                return;
+            }
+
             const result = await eventStore.ensureDeliveryConsumer(state.senderExtensionId);
             if (!result.authorized) {
                 deps.logger?.warn('External hub subscribe from non-designated delivery consumer', {
                     senderExtensionId: state.senderExtensionId,
                     designatedConsumerId: result.designatedConsumerId,
                 });
+                removeSubscriber(port);
+                try {
+                    port.disconnect?.();
+                } catch {}
+                return;
             }
         }
 
@@ -406,8 +429,8 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
                   };
 
         const appendedEvent = await eventStore.append(normalizedEvent);
-        const deliveryStats = broadcastLiveEvent(appendedEvent);
-        if (deliveryStats.delivered === 0) {
+        const deliveryStats = await broadcastLiveEvent(appendedEvent);
+        if (!deliveryStats.designatedDelivered) {
             await maybeSendWake(appendedEvent.seq);
         }
 

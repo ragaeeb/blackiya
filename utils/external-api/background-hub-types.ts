@@ -31,6 +31,7 @@ export type ExternalEventDeliveryStats = {
     subscriberCount: number;
     delivered: number;
     dropped: number;
+    designatedDelivered?: boolean;
 };
 
 export type ExternalEventStore = {

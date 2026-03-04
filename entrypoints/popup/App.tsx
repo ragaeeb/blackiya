@@ -76,15 +76,19 @@ const App = () => {
                     setLogLevel(level);
                     logger.setLevel(level);
                 }
-
-                const savedFormat = await getExportFormat(DEFAULT_EXPORT_FORMAT);
-                if (savedFormat === EXPORT_FORMAT.COMMON || savedFormat === EXPORT_FORMAT.ORIGINAL) {
-                    setExportFormat(savedFormat);
-                }
                 setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
                 setStreamProbeVisible(result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true);
             } catch (error) {
                 logger.warn('Failed to load popup settings from local storage', error);
+            }
+
+            try {
+                const savedFormat = await getExportFormat(DEFAULT_EXPORT_FORMAT);
+                if (savedFormat === EXPORT_FORMAT.COMMON || savedFormat === EXPORT_FORMAT.ORIGINAL) {
+                    setExportFormat(savedFormat);
+                }
+            } catch (error) {
+                logger.warn('Failed to resolve popup export format setting', error);
             }
         };
         void loadSettings();

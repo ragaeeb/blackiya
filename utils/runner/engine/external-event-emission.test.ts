@@ -490,6 +490,57 @@ describe('runner external event emission', () => {
         });
     });
 
+    it('should still apply stream-title precedence when adapter default titles are unavailable', async () => {
+        const ctx: any = {
+            currentAdapter: {
+                name: 'Grok',
+                extractConversationId: () => 'grok-conv-4',
+                extractTitleFromDom: () => null,
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:grok:no-defaults-stream',
+                    latestAssistantTextLength: 120,
+                }),
+            },
+            currentConversationId: 'grok-conv-4',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
+            streamResolvedTitles: new Map<string, string>([['grok-conv-4', 'Stream Selected Title']]),
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'grok-conv-4',
+            data: buildConversationWithPrompt('grok-conv-4', {
+                title: 'New conversation',
+                prompt: 'Prompt-derived fallback title',
+                answer: 'Draft translation notes',
+            }),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'grok-attempt-5',
+        });
+        await Promise.resolve();
+
+        expect(sentMessages).toHaveLength(1);
+        expect(sentMessages[0]).toMatchObject({
+            type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+            event: {
+                type: 'conversation.ready',
+                conversation_id: 'grok-conv-4',
+                payload: {
+                    title: 'Stream Selected Title',
+                },
+            },
+        });
+    });
+
     it('should allow canonical external event emission while lifecycle is still streaming when explicitly allowed', async () => {
         const ctx: any = {
             currentAdapter: {
@@ -683,6 +734,60 @@ describe('runner external event emission', () => {
                     entry.status === 'failed' && entry.delivery?.listenerCount === 1 && entry.delivery?.delivered === 0,
             ),
         ).toBeTrue();
+    });
+
+    it('should not mark dispatch state as sent when negative ACK persists across retries', async () => {
+        sendMessageBehavior = async (message) => {
+            sentMessages.push(message);
+            return {
+                success: false,
+                error: 'hub_rejected',
+                delivery: {
+                    subscriberCount: 1,
+                    delivered: 0,
+                    dropped: 1,
+                },
+            };
+        };
+
+        const debugEvents: Array<{ status?: string }> = [];
+        const ctx: any = {
+            currentAdapter: {
+                name: 'ChatGPT',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:ack-persistent',
+                    latestAssistantTextLength: 10,
+                }),
+            },
+            currentConversationId: 'conv-ack-persistent',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock((entry: { status?: string }) => {
+                debugEvents.push(entry);
+            }),
+            retryTimeoutIds: [],
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'conv-ack-persistent',
+            data: buildConversation('conv-ack-persistent'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'attempt-ack-persistent',
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        expect(sentMessages).toHaveLength(4);
+        expect(debugEvents.every((entry) => entry.status !== 'sent')).toBeTrue();
+        expect(ctx.externalEventDispatchState.byConversation.has('conv-ack-persistent')).toBeFalse();
     });
 
     it('should suppress duplicate conversation.ready emits while first send is still in flight', async () => {

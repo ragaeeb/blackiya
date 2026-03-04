@@ -29,11 +29,17 @@ const sanitizeFilenamePart = (value: string): string =>
 
 export const getBuildFingerprint = (): BuildFingerprint => {
     const runtime = globalThis as Record<string, unknown>;
-    const label = asOptionalString(__BLACKIYA_BUILD_LABEL__) ?? asOptionalString(runtime.__BLACKIYA_BUILD_LABEL__);
-    const buildId = asOptionalString(__BLACKIYA_BUILD_ID__) ?? asOptionalString(runtime.__BLACKIYA_BUILD_ID__);
-    const commit = asOptionalString(__BLACKIYA_BUILD_COMMIT__) ?? asOptionalString(runtime.__BLACKIYA_BUILD_COMMIT__);
+    const compileLabel = typeof __BLACKIYA_BUILD_LABEL__ !== 'undefined' ? __BLACKIYA_BUILD_LABEL__ : undefined;
+    const compileBuildId = typeof __BLACKIYA_BUILD_ID__ !== 'undefined' ? __BLACKIYA_BUILD_ID__ : undefined;
+    const compileCommit = typeof __BLACKIYA_BUILD_COMMIT__ !== 'undefined' ? __BLACKIYA_BUILD_COMMIT__ : undefined;
+    const compileCreatedAt =
+        typeof __BLACKIYA_BUILD_CREATED_AT__ !== 'undefined' ? __BLACKIYA_BUILD_CREATED_AT__ : undefined;
+
+    const label = asOptionalString(compileLabel) ?? asOptionalString(runtime.__BLACKIYA_BUILD_LABEL__);
+    const buildId = asOptionalString(compileBuildId) ?? asOptionalString(runtime.__BLACKIYA_BUILD_ID__);
+    const commit = asOptionalString(compileCommit) ?? asOptionalString(runtime.__BLACKIYA_BUILD_COMMIT__);
     const createdAt =
-        asOptionalString(__BLACKIYA_BUILD_CREATED_AT__) ?? asOptionalString(runtime.__BLACKIYA_BUILD_CREATED_AT__);
+        asOptionalString(compileCreatedAt) ?? asOptionalString(runtime.__BLACKIYA_BUILD_CREATED_AT__);
 
     if (!label || !buildId || !commit || !createdAt) {
         return FALLBACK_FINGERPRINT;

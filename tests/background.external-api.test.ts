@@ -312,6 +312,29 @@ describe('background external api hub', () => {
         expect(afterAuthorizedCommit[0]?.seq).toBe(51);
     });
 
+    it('should disconnect non-designated delivery subscribers before replay', async () => {
+        const hub = createExternalApiHub({
+            eventStore: createInMemoryExternalEventStore(),
+            now: () => now,
+        });
+
+        await hub.ingestEvent(buildInboundEvent('conv-1'), 1);
+        await hub.ingestEvent(buildInboundEvent('conv-2'), 2);
+
+        const designatedPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(designatedPort, { senderExtensionId: 'designated-ext' });
+        designatedPort.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+
+        const nonDesignatedPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(nonDesignatedPort, { senderExtensionId: 'other-ext' });
+        nonDesignatedPort.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+
+        expect(nonDesignatedPort.disconnect).toHaveBeenCalledTimes(1);
+        expect(nonDesignatedPort.postMessage).not.toHaveBeenCalled();
+    });
+
     it('should send wake signal when delivery consumer is offline and rate limit wake bursts', async () => {
         const wakeCalls: Array<{ extensionId: string; message: unknown }> = [];
         const hub = createExternalApiHub({
@@ -346,6 +369,38 @@ describe('background external api hub', () => {
         expect(wakeCalls[1]).toMatchObject({
             extensionId: 'delivery-ext',
             message: expect.objectContaining({ type: 'BLACKIYA_WAKE', head_seq: 3 }),
+        });
+    });
+
+    it('should still wake designated consumer when non-designated subscriber is connected', async () => {
+        const wakeCalls: Array<{ extensionId: string; message: unknown }> = [];
+        const hub = createExternalApiHub({
+            eventStore: createInMemoryExternalEventStore(),
+            now: () => now,
+            wakeThrottleMs: 3_000,
+            sendWakeMessage: async (extensionId, message) => {
+                wakeCalls.push({ extensionId, message });
+            },
+        });
+
+        const designatedPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(designatedPort, { senderExtensionId: 'delivery-ext' });
+        designatedPort.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+        designatedPort.disconnectNow();
+
+        const nonDesignatedPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(nonDesignatedPort, { senderExtensionId: 'other-ext' });
+        nonDesignatedPort.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+
+        await hub.ingestEvent(buildInboundEvent('conv-wake-designated'), 1);
+
+        expect(nonDesignatedPort.disconnect).toHaveBeenCalledTimes(1);
+        expect(wakeCalls).toHaveLength(1);
+        expect(wakeCalls[0]).toMatchObject({
+            extensionId: 'delivery-ext',
+            message: expect.objectContaining({ type: 'BLACKIYA_WAKE', head_seq: 1 }),
         });
     });
 

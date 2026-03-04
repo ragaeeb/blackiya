@@ -23,7 +23,7 @@ mock.module('wxt/browser', () => ({
     },
 }));
 
-mock.module('@/utils/logs-storage', () => ({
+mock.module('./logs-storage', () => ({
     logsStorage: {
         saveLog: async (entry: unknown) => {
             savedLogs.push(entry);
@@ -34,7 +34,7 @@ mock.module('@/utils/logs-storage', () => ({
 const importFreshLogger = async () =>
     import(`./logger.ts?logger-test=${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
 
-describe('utils/logger', () => {
+describe('logger', () => {
     beforeEach(() => {
         sentMessages.length = 0;
         savedLogs.length = 0;
@@ -86,5 +86,21 @@ describe('utils/logger', () => {
             self: '[Circular]',
         });
         expect(savedEntry.data?.[2]).toBe('7n');
+    });
+
+    it('should sanitize invalid Date values without throwing', async () => {
+        const { logger } = await importFreshLogger();
+        (logger as any).setLevel('debug');
+        (logger as any).context = 'background';
+
+        logger.info('invalid date test', new Date('invalid'));
+        await Promise.resolve();
+
+        expect(savedLogs).toHaveLength(1);
+        const savedEntry = (savedLogs[0] ?? null) as { data?: unknown[] } | null;
+        if (!savedEntry) {
+            throw new Error('expected saved log entry');
+        }
+        expect(savedEntry.data?.[0]).toBe('[Invalid Date]');
     });
 });

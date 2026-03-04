@@ -127,6 +127,64 @@ describe('runner/external-event-dispatch', () => {
         expect(event?.provider).toBe('chatgpt');
     });
 
+    it('should deep-clone payload snapshot so later mutations do not affect dispatched event', () => {
+        const state = createExternalEventDispatcherState();
+        const source = buildConversation('conv-deep-clone');
+        source.mapping.root.children = ['u-1'];
+        source.mapping['u-1'] = {
+            id: 'u-1',
+            parent: 'root',
+            children: [],
+            message: {
+                id: 'u-1',
+                author: { role: 'user', name: null, metadata: {} },
+                create_time: 1_700_000_010,
+                update_time: 1_700_000_010,
+                content: { content_type: 'text', parts: ['first prompt'] },
+                status: 'finished_successfully',
+                end_turn: true,
+                weight: 1,
+                metadata: {},
+                recipient: 'all',
+                channel: null,
+            },
+        };
+
+        const event = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-deep-clone',
+            data: source,
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: CANONICAL_META,
+            attemptId: 'attempt-1',
+            shouldBlockActions: false,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:clone',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-clone',
+        });
+
+        expect(event).not.toBeNull();
+        if (!event) {
+            throw new Error('Expected event');
+        }
+        expect(event.payload).not.toBe(source);
+        expect(event.payload.mapping).not.toBe(source.mapping);
+
+        source.title = 'Mutated title';
+        source.mapping['u-1']!.message!.content.parts = ['mutated prompt'];
+
+        expect(event.payload.title).toBe('Test');
+        expect(event.payload.mapping['u-1']!.message!.content.parts).toEqual(['first prompt']);
+    });
+
     it('should keep dispatch state unchanged until send is acknowledged', () => {
         const state = createExternalEventDispatcherState();
         const event = maybeBuildExternalConversationEvent({
