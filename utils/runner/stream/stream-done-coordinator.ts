@@ -132,7 +132,11 @@ export const createStreamDoneCoordinator = (deps: StreamDoneCoordinatorDeps) => 
         onProbeActive: deps.setLastProbeKey,
         isProbeKeyActive: deps.isProbeKeyActive,
         emitLog: (level, message, payload) =>
-            level === 'info' ? logger.info(message, payload) : logger.warn(message, payload),
+            level === 'debug'
+                ? logger.debug(message, payload)
+                : level === 'info'
+                  ? logger.info(message, payload)
+                  : logger.warn(message, payload),
     });
 
     const runStreamDoneProbe = (conversationId: string, hintedAttemptId?: string): Promise<void> => {

@@ -6,6 +6,7 @@
  * @module entrypoints/background
  */
 
+import { getBuildFingerprint } from '@/utils/build-fingerprint';
 import { createExternalApiHub, type ExternalPortLike } from '@/utils/external-api/background-hub';
 import { EXTERNAL_API_VERSION, isExternalInternalEventMessage } from '@/utils/external-api/contracts';
 import { logger } from '@/utils/logger';
@@ -210,6 +211,7 @@ export const createExternalConnectHandler = (deps: ExternalConnectHandlerDeps) =
 };
 
 export default defineBackground(() => {
+    const buildFingerprint = getBuildFingerprint();
     const leaseCoordinator = new ProbeLeaseCoordinator({
         store: createProbeLeaseStore(),
     });
@@ -218,6 +220,7 @@ export default defineBackground(() => {
 
     logger.info('Background service worker started', {
         id: browser.runtime.id,
+        build: buildFingerprint,
     });
 
     browser.runtime.onInstalled.addListener((details) => {

@@ -15,6 +15,7 @@ import {
 import type { ConversationData } from '@/utils/types';
 
 const EXTERNAL_EVENT_RETRY_DELAYS_MS = [20, 100, 300] as const;
+const EXTERNAL_EVENT_SEND_TIMEOUT_MS = 3_000;
 
 type ExternalDeliveryResponse = {
     success?: unknown;
@@ -36,6 +37,33 @@ const extractDeliveryStats = (response: ExternalDeliveryResponse | undefined) =>
               dropped: response.delivery.dropped,
           }
         : null;
+
+const resolveSendTimeoutMs = (ctx: EngineCtx): number => {
+    const candidate = (ctx as { externalEventSendTimeoutMs?: unknown }).externalEventSendTimeoutMs;
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+        return Math.floor(candidate);
+    }
+    return EXTERNAL_EVENT_SEND_TIMEOUT_MS;
+};
+
+const sendMessageWithTimeout = (event: ReturnType<typeof buildExternalInternalEventMessage>, timeoutMs: number) => {
+    return new Promise<unknown>((resolve, reject) => {
+        const timeoutId = globalThis.setTimeout(() => {
+            reject(new Error(`External event send timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+
+        browser.runtime
+            .sendMessage(event)
+            .then((response) => {
+                clearTimeout(timeoutId);
+                resolve(response);
+            })
+            .catch((error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            });
+    });
+};
 
 const applyTitleFallbackForExternalEvent = (ctx: EngineCtx, conversationId: string, data: ConversationData) => {
     const adapter = ctx.currentAdapter;
@@ -122,10 +150,27 @@ export const emitExternalConversationEvent = (
         eventId: event.event_id,
         contentHash: event.content_hash,
     });
+    const previousDispatchState = ctx.externalEventDispatchState.byConversation.get(event.conversation_id);
+    const sendTimeoutMs = resolveSendTimeoutMs(ctx);
+    markExternalConversationEventDispatched(
+        ctx.externalEventDispatchState,
+        event.conversation_id,
+        event.attempt_id,
+        event.content_hash,
+        event.payload,
+    );
+    const restoreDispatchState = () => {
+        if (previousDispatchState) {
+            ctx.externalEventDispatchState.byConversation.set(event.conversation_id, previousDispatchState);
+            return;
+        }
+        ctx.externalEventDispatchState.byConversation.delete(event.conversation_id);
+    };
+
     const queueRetry = (attemptIndex: number, error: unknown, delivery: ReturnType<typeof extractDeliveryStats>) => {
         const delayMs = EXTERNAL_EVENT_RETRY_DELAYS_MS[attemptIndex];
         if (delayMs === undefined) {
-            return;
+            return false;
         }
         logger.debug('External event send retry scheduled', {
             conversationId: event.conversation_id,
@@ -144,11 +189,11 @@ export const emitExternalConversationEvent = (
         if (Array.isArray((ctx as Partial<EngineCtx>).retryTimeoutIds)) {
             ctx.retryTimeoutIds.push(retryTimer as unknown as number);
         }
+        return true;
     };
 
     const send = (attemptIndex: number) => {
-        return browser.runtime
-            .sendMessage(buildExternalInternalEventMessage(event))
+        return sendMessageWithTimeout(buildExternalInternalEventMessage(event), sendTimeoutMs)
             .then((response) => {
                 const typed = response as ExternalDeliveryResponse | undefined;
                 const delivery = extractDeliveryStats(typed);
@@ -172,16 +217,12 @@ export const emitExternalConversationEvent = (
                         delivered: delivery?.delivered ?? null,
                         dropped: delivery?.dropped ?? null,
                     });
-                    queueRetry(attemptIndex, ackError, delivery);
+                    const scheduled = queueRetry(attemptIndex, ackError, delivery);
+                    if (!scheduled) {
+                        restoreDispatchState();
+                    }
                     return;
                 }
-                markExternalConversationEventDispatched(
-                    ctx.externalEventDispatchState,
-                    event.conversation_id,
-                    event.attempt_id,
-                    event.content_hash,
-                    event.payload,
-                );
                 ctx.recordTabDebugExternalEvent({
                     event,
                     status: 'sent',
@@ -209,7 +250,10 @@ export const emitExternalConversationEvent = (
                     eventId: event.event_id,
                     error,
                 });
-                queueRetry(attemptIndex, error, null);
+                const scheduled = queueRetry(attemptIndex, error, null);
+                if (!scheduled) {
+                    restoreDispatchState();
+                }
             });
     };
 

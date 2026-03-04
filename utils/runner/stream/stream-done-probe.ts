@@ -65,7 +65,7 @@ export type StreamDoneProbeDeps = {
     /** Returns `true` when the given probe key is still the active probe. */
     isProbeKeyActive: (probeKey: string) => boolean;
     /** General-purpose logger for info and warn messages. */
-    emitLog: (level: 'info' | 'warn', message: string, payload?: Record<string, unknown>) => void;
+    emitLog: (level: 'debug' | 'info' | 'warn', message: string, payload?: Record<string, unknown>) => void;
 };
 
 type ProbeContext = {
@@ -190,7 +190,7 @@ const handleNoCandidates = async (context: ProbeContext, deps: StreamDoneProbeDe
         'stream-done: no api url candidates',
         `conversationId=${context.conversationId}`,
     );
-    deps.emitLog('warn', 'Stream done probe has no URL candidates', {
+    deps.emitLog('debug', 'Stream done probe has no URL candidates', {
         platform: deps.platformName,
         conversationId: context.conversationId,
     });
@@ -313,7 +313,7 @@ export const runStreamDoneProbe = async (
         const succeeded = await tryFetchCandidates(context, apiUrls, deps);
         if (!succeeded) {
             await showFallbackPanel(context, deps);
-            deps.emitLog('warn', 'Stream done probe failed', {
+            deps.emitLog('debug', 'Stream done probe failed', {
                 platform: deps.platformName,
                 conversationId: context.conversationId,
             });

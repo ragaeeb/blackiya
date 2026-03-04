@@ -684,4 +684,145 @@ describe('runner external event emission', () => {
             ),
         ).toBeTrue();
     });
+
+    it('should suppress duplicate conversation.ready emits while first send is still in flight', async () => {
+        let resolveFirstSend: ((value: unknown) => void) | null = null;
+        let callCount = 0;
+        sendMessageBehavior = async (message) => {
+            sentMessages.push(message);
+            callCount += 1;
+            if (callCount === 1) {
+                return await new Promise((resolve) => {
+                    resolveFirstSend = resolve;
+                });
+            }
+            return {
+                success: true,
+                delivery: {
+                    subscriberCount: 1,
+                    delivered: 1,
+                    dropped: 0,
+                },
+            };
+        };
+
+        const ctx: any = {
+            currentAdapter: {
+                name: 'ChatGPT',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:pending-dedupe',
+                    latestAssistantTextLength: 10,
+                }),
+            },
+            currentConversationId: 'conv-pending-dedupe',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
+            retryTimeoutIds: [],
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'conv-pending-dedupe',
+            data: buildConversation('conv-pending-dedupe'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'attempt-pending-dedupe-1',
+        });
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'conv-pending-dedupe',
+            data: buildConversation('conv-pending-dedupe'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'attempt-pending-dedupe-2',
+        });
+
+        await Promise.resolve();
+        expect(sentMessages).toHaveLength(1);
+        expect(resolveFirstSend).not.toBeNull();
+
+        if (!resolveFirstSend) {
+            throw new Error('expected pending first send resolver');
+        }
+        const firstSendResolver = resolveFirstSend as (value: unknown) => void;
+        firstSendResolver({
+            success: true,
+            delivery: {
+                subscriberCount: 1,
+                delivered: 1,
+                dropped: 0,
+            },
+        });
+        await Promise.resolve();
+
+        expect(sentMessages).toHaveLength(1);
+    });
+
+    it('should retry when runtime sendMessage hangs beyond timeout', async () => {
+        let callCount = 0;
+        sendMessageBehavior = async (message) => {
+            sentMessages.push(message);
+            callCount += 1;
+            if (callCount === 1) {
+                return await new Promise(() => {});
+            }
+            return {
+                success: true,
+                delivery: {
+                    subscriberCount: 1,
+                    delivered: 1,
+                    dropped: 0,
+                },
+            };
+        };
+
+        const debugEvents: Array<{ status?: string }> = [];
+        const ctx: any = {
+            currentAdapter: {
+                name: 'ChatGPT',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:timeout-retry',
+                    latestAssistantTextLength: 10,
+                }),
+            },
+            currentConversationId: 'conv-timeout-retry',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock((entry: { status?: string }) => {
+                debugEvents.push(entry);
+            }),
+            retryTimeoutIds: [],
+            externalEventSendTimeoutMs: 20,
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'conv-timeout-retry',
+            data: buildConversation('conv-timeout-retry'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'attempt-timeout-retry',
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        expect(sentMessages).toHaveLength(2);
+        expect(debugEvents.some((entry) => entry.status === 'failed')).toBeTrue();
+        expect(debugEvents.some((entry) => entry.status === 'sent')).toBeTrue();
+    });
 });

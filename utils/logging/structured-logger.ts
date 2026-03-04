@@ -88,7 +88,7 @@ export class StructuredAttemptLogger {
         if (exceeds) {
             if (!state.budgetWarningEmitted) {
                 state.budgetWarningEmitted = true;
-                logger.warn('log_budget_exceeded', {
+                logger.debug('log_budget_exceeded', {
                     attemptId,
                     debugCount: state.debug,
                     infoCount: state.info,

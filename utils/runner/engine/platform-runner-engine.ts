@@ -11,6 +11,7 @@
 
 import { browser } from 'wxt/browser';
 import { getPlatformAdapter } from '@/platforms/factory';
+import { getBuildFingerprint } from '@/utils/build-fingerprint';
 import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
@@ -488,7 +489,11 @@ export const runPlatform = (): void => {
     }
 
     logger.info(`Content script running for ${ctx.currentAdapter.name}`);
-    logger.info('Runner init', { platform: ctx.currentAdapter.name, url });
+    logger.info('Runner init', {
+        platform: ctx.currentAdapter.name,
+        url,
+        build: getBuildFingerprint(),
+    });
 
     ctx.interceptionManager.updateAdapter(ctx.currentAdapter);
     void ctx.ensureCalibrationPreferenceLoaded(ctx.currentAdapter.name);

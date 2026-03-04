@@ -102,7 +102,7 @@ const emitTimeoutWarningOnce = (
     addBoundedSetValue(timeoutWarningByAttempt, attemptId, maxAutocaptureKeys);
     structuredLogger.emit(
         attemptId,
-        'warn',
+        'debug',
         'readiness_timeout_manual_only',
         'Stabilization timed out; manual force save required',
         { conversationId },

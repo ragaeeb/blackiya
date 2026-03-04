@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
+import { getBuildFilenameTag } from '@/utils/build-fingerprint';
 import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
@@ -19,6 +20,7 @@ const ABOUT_REPOSITORY_URL = 'https://github.com/ragaeeb/blackiya';
 
 const App = () => {
     const manifest = browser.runtime.getManifest();
+    const buildFilenameTag = getBuildFilenameTag();
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
@@ -154,7 +156,7 @@ const App = () => {
             return;
         }
         const timestamp = new Date().toISOString().replace(/[:]/g, '-');
-        downloadAsJSON(response.snapshot, `blackiya-tab-overlay-snapshot-${timestamp}`);
+        downloadAsJSON(response.snapshot, `blackiya-tab-overlay-snapshot-${buildFilenameTag}-${timestamp}`);
         logger.info('Active tab overlay snapshot exported by user');
     };
 
@@ -167,7 +169,7 @@ const App = () => {
             }
 
             const timestamp = new Date().toISOString().replace(/[:]/g, '-');
-            const filename = `blackiya-logs-${timestamp}`;
+            const filename = `blackiya-logs-${buildFilenameTag}-${timestamp}`;
             downloadAsJSON(logs, filename);
 
             logger.info('Logs exported by user');
@@ -185,7 +187,8 @@ const App = () => {
                 return;
             }
 
-            downloadMinimalDebugReport(logs);
+            const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+            downloadMinimalDebugReport(logs, `blackiya-debug-${buildFilenameTag}-${timestamp}`);
             logger.info('Debug report exported by user');
         } catch (error) {
             console.error('Failed to export debug report', error);
@@ -209,7 +212,7 @@ const App = () => {
                 return;
             }
             const timestamp = new Date().toISOString().replace(/[:]/g, '-');
-            downloadAsJSON(dump, `blackiya-stream-dump-${timestamp}`);
+            downloadAsJSON(dump, `blackiya-stream-dump-${buildFilenameTag}-${timestamp}`);
             logger.info('Stream dump exported by user');
         } catch (error) {
             console.error('Failed to export stream dump', error);

@@ -179,6 +179,8 @@ export const buildCanonicalStabilizationTickDeps = (ctx: EngineCtx): CanonicalSt
     refreshButtonState: (cid) => ctx.refreshButtonState(cid),
     emitWarn: (attemptId, event, message, payload, key) =>
         ctx.structuredLogger.emit(attemptId, 'warn', event, message, payload, key),
+    emitDebug: (attemptId, event, message, payload, key) =>
+        ctx.structuredLogger.emit(attemptId, 'debug', event, message, payload, key),
     emitInfo: (attemptId, event, message, payload, key) =>
         ctx.structuredLogger.emit(attemptId, 'info', event, message, payload, key),
 });

@@ -29,6 +29,67 @@ const extractConvIdFromData = (data: unknown): string | null => {
     return extractConvId(serialized);
 };
 
+type BuildFingerprint = {
+    label: string;
+    buildId: string;
+    commit: string;
+    createdAt: string;
+};
+
+const hasStringField = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+
+const coerceBuildFingerprint = (value: unknown): BuildFingerprint | null => {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    const candidate = value as Partial<BuildFingerprint>;
+    if (
+        !hasStringField(candidate.label) ||
+        !hasStringField(candidate.buildId) ||
+        !hasStringField(candidate.commit) ||
+        !hasStringField(candidate.createdAt)
+    ) {
+        return null;
+    }
+    return {
+        label: candidate.label,
+        buildId: candidate.buildId,
+        commit: candidate.commit,
+        createdAt: candidate.createdAt,
+    };
+};
+
+const resolveBuildFingerprintFromEntry = (entry: LogEntry): BuildFingerprint | null => {
+    if (!Array.isArray(entry.data) || entry.data.length === 0) {
+        return null;
+    }
+
+    for (const dataItem of entry.data) {
+        const nestedBuild =
+            dataItem && typeof dataItem === 'object'
+                ? coerceBuildFingerprint((dataItem as Record<string, unknown>).build)
+                : null;
+        if (nestedBuild) {
+            return nestedBuild;
+        }
+        const directBuild = coerceBuildFingerprint(dataItem);
+        if (directBuild) {
+            return directBuild;
+        }
+    }
+    return null;
+};
+
+const resolveBuildFingerprint = (logs: LogEntry[]): BuildFingerprint | null => {
+    for (let index = logs.length - 1; index >= 0; index -= 1) {
+        const resolved = resolveBuildFingerprintFromEntry(logs[index]);
+        if (resolved) {
+            return resolved;
+        }
+    }
+    return null;
+};
+
 const PREFIX_RE = /^\[\w+\]\s*/;
 
 const extractPlatform = (msg: string): string | null => {
@@ -506,19 +567,30 @@ export const generateMinimalDebugReport = (logs: LogEntry[]): string => {
     }
 
     const lines = buildSessionSection(groups);
+    const buildFingerprint = resolveBuildFingerprint(logs);
+    if (buildFingerprint) {
+        lines.splice(
+            2,
+            0,
+            `Build: ${buildFingerprint.label}`,
+            `Commit: ${buildFingerprint.commit}`,
+            `Built: ${buildFingerprint.createdAt}`,
+            '',
+        );
+    }
     appendErrorSection(lines, logs);
 
     return lines.join('\n');
 };
 
-export const downloadMinimalDebugReport = (logs: LogEntry[]) => {
+export const downloadMinimalDebugReport = (logs: LogEntry[], filenameBase?: string) => {
     const report = generateMinimalDebugReport(logs);
     const blob = new Blob([report], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const timestamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     const link = document.createElement('a');
     link.href = url;
-    link.download = `blackiya-debug-${timestamp}.txt`;
+    link.download = `${filenameBase ?? `blackiya-debug-${timestamp}`}.txt`;
     link.click();
     URL.revokeObjectURL(url);
 };

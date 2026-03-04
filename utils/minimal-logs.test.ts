@@ -48,6 +48,40 @@ describe('Minimal Debug Report', () => {
         expect(report).not.toContain('[interceptor]');
     });
 
+    it('should include build fingerprint details when present in logs', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                message: 'Runner init',
+                context: 'content',
+                data: [
+                    {
+                        platform: 'ChatGPT',
+                        build: {
+                            label: 'Rapid Raccoon (abc123)',
+                            buildId: 'abc123',
+                            commit: 'abc123',
+                            createdAt: '2026-03-04T00:10:00.000Z',
+                        },
+                    },
+                ],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                message: '[i] trigger ChatGPT 696bc3d5-fa84-8328-b209-4d65cb229e59',
+                context: 'content',
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+
+        expect(report).toContain('Build: Rapid Raccoon (abc123)');
+        expect(report).toContain('Commit: abc123');
+        expect(report).toContain('Built: 2026-03-04T00:10:00.000Z');
+    });
+
     it('should dedupe sessions by platform and convId', () => {
         const logs: LogEntry[] = [];
         for (let i = 0; i < 3; i++) {
