@@ -83,12 +83,10 @@ const App = () => {
             }
 
             try {
-                const savedFormat = await getExportFormat(DEFAULT_EXPORT_FORMAT);
-                if (savedFormat === EXPORT_FORMAT.COMMON || savedFormat === EXPORT_FORMAT.ORIGINAL) {
-                    setExportFormat(savedFormat);
-                }
+                setExportFormat(await getExportFormat(DEFAULT_EXPORT_FORMAT));
             } catch (error) {
                 logger.warn('Failed to resolve popup export format setting', error);
+                setExportFormat(DEFAULT_EXPORT_FORMAT);
             }
         };
         void loadSettings();

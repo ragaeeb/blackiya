@@ -103,4 +103,45 @@ describe('logger', () => {
         }
         expect(savedEntry.data?.[0]).toBe('[Invalid Date]');
     });
+
+    it('should not throw when argument sanitization hits throwing getters or proxies', async () => {
+        const { logger } = await importFreshLogger();
+        (logger as any).setLevel('debug');
+        (logger as any).context = 'background';
+
+        const getterThrows = Object.defineProperty({}, 'boom', {
+            enumerable: true,
+            get() {
+                throw new Error('getter failed');
+            },
+        });
+        const proxyThrows = new Proxy(
+            {},
+            {
+                ownKeys() {
+                    return ['boom'];
+                },
+                getOwnPropertyDescriptor() {
+                    return {
+                        configurable: true,
+                        enumerable: true,
+                    };
+                },
+                get() {
+                    throw new Error('proxy get failed');
+                },
+            },
+        );
+
+        expect(() => logger.info('sanitization throw test', getterThrows, proxyThrows)).not.toThrow();
+        await Promise.resolve();
+
+        expect(savedLogs).toHaveLength(1);
+        const savedEntry = (savedLogs[0] ?? null) as { data?: unknown[] } | null;
+        if (!savedEntry) {
+            throw new Error('expected saved log entry');
+        }
+        expect(JSON.stringify(savedEntry.data?.[0] ?? null)).toContain('Unserializable');
+        expect(JSON.stringify(savedEntry.data?.[1] ?? null)).toContain('Unserializable');
+    });
 });

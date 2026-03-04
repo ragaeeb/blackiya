@@ -159,6 +159,9 @@ export const emitExternalConversationEvent = (
         event.content_hash,
         event.payload,
     );
+    const optimisticDispatchState = ctx.externalEventDispatchState.byConversation.get(event.conversation_id);
+    const isSuperseded = () =>
+        ctx.externalEventDispatchState.byConversation.get(event.conversation_id) !== optimisticDispatchState;
     const restoreDispatchState = () => {
         if (previousDispatchState) {
             ctx.externalEventDispatchState.byConversation.set(event.conversation_id, previousDispatchState);
@@ -167,10 +170,23 @@ export const emitExternalConversationEvent = (
         ctx.externalEventDispatchState.byConversation.delete(event.conversation_id);
     };
 
-    const queueRetry = (attemptIndex: number, error: unknown, delivery: ReturnType<typeof extractDeliveryStats>) => {
+    const queueRetry = (
+        attemptIndex: number,
+        error: unknown,
+        delivery: ReturnType<typeof extractDeliveryStats>,
+    ): 'scheduled' | 'exhausted' | 'superseded' => {
+        if (isSuperseded()) {
+            logger.debug('External event retry canceled because dispatch state was superseded', {
+                conversationId: event.conversation_id,
+                type: event.type,
+                eventId: event.event_id,
+                attempt: attemptIndex + 2,
+            });
+            return 'superseded';
+        }
         const delayMs = EXTERNAL_EVENT_RETRY_DELAYS_MS[attemptIndex];
         if (delayMs === undefined) {
-            return false;
+            return 'exhausted';
         }
         logger.debug('External event send retry scheduled', {
             conversationId: event.conversation_id,
@@ -184,15 +200,33 @@ export const emitExternalConversationEvent = (
             dropped: delivery?.dropped ?? null,
         });
         const retryTimer = globalThis.setTimeout(() => {
+            if (isSuperseded()) {
+                logger.debug('External event retry skipped after supersession', {
+                    conversationId: event.conversation_id,
+                    type: event.type,
+                    eventId: event.event_id,
+                    attempt: attemptIndex + 2,
+                });
+                return;
+            }
             void send(attemptIndex + 1);
         }, delayMs);
         if (Array.isArray((ctx as Partial<EngineCtx>).retryTimeoutIds)) {
             ctx.retryTimeoutIds.push(retryTimer as unknown as number);
         }
-        return true;
+        return 'scheduled';
     };
 
     const send = (attemptIndex: number) => {
+        if (isSuperseded()) {
+            logger.debug('External event send skipped because dispatch state was superseded', {
+                conversationId: event.conversation_id,
+                type: event.type,
+                eventId: event.event_id,
+                attempt: attemptIndex + 1,
+            });
+            return Promise.resolve();
+        }
         return sendMessageWithTimeout(buildExternalInternalEventMessage(event), sendTimeoutMs)
             .then((response) => {
                 const typed = response as ExternalDeliveryResponse | undefined;
@@ -217,8 +251,8 @@ export const emitExternalConversationEvent = (
                         delivered: delivery?.delivered ?? null,
                         dropped: delivery?.dropped ?? null,
                     });
-                    const scheduled = queueRetry(attemptIndex, ackError, delivery);
-                    if (!scheduled) {
+                    const retryState = queueRetry(attemptIndex, ackError, delivery);
+                    if (retryState === 'exhausted') {
                         restoreDispatchState();
                     }
                     return;
@@ -250,8 +284,8 @@ export const emitExternalConversationEvent = (
                     eventId: event.event_id,
                     error,
                 });
-                const scheduled = queueRetry(attemptIndex, error, null);
-                if (!scheduled) {
+                const retryState = queueRetry(attemptIndex, error, null);
+                if (retryState === 'exhausted') {
                     restoreDispatchState();
                 }
             });

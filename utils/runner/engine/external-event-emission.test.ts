@@ -790,6 +790,66 @@ describe('runner external event emission', () => {
         expect(ctx.externalEventDispatchState.byConversation.has('conv-ack-persistent')).toBeFalse();
     });
 
+    it('should cancel queued retries when dispatch state is superseded', async () => {
+        let attempts = 0;
+        sendMessageBehavior = async (message) => {
+            sentMessages.push(message);
+            attempts += 1;
+            return {
+                success: false,
+                error: `hub_rejected_${attempts}`,
+                delivery: {
+                    subscriberCount: 1,
+                    delivered: 0,
+                    dropped: 1,
+                },
+            };
+        };
+
+        const ctx: any = {
+            currentAdapter: {
+                name: 'ChatGPT',
+                evaluateReadiness: () => ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:ack-superseded',
+                    latestAssistantTextLength: 10,
+                }),
+            },
+            currentConversationId: 'conv-ack-superseded',
+            lifecycleState: 'completed',
+            externalEventDispatchState: createExternalEventDispatcherState(),
+            recordTabDebugExternalEvent: mock(() => {}),
+            retryTimeoutIds: [],
+        };
+
+        emitExternalConversationEvent(ctx, {
+            conversationId: 'conv-ack-superseded',
+            data: buildConversation('conv-ack-superseded'),
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            },
+            attemptId: 'attempt-ack-superseded',
+        });
+
+        const activeState = ctx.externalEventDispatchState.byConversation.get('conv-ack-superseded');
+        if (!activeState) {
+            throw new Error('expected active dispatch state');
+        }
+        ctx.externalEventDispatchState.byConversation.set('conv-ack-superseded', {
+            ...activeState,
+            lastPayloadSignature: `${activeState.lastPayloadSignature}:superseded`,
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        expect(sentMessages).toHaveLength(1);
+    });
+
     it('should suppress duplicate conversation.ready emits while first send is still in flight', async () => {
         let resolveFirstSend: ((value: unknown) => void) | null = null;
         let callCount = 0;

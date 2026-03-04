@@ -312,6 +312,46 @@ describe('background external api hub', () => {
         expect(afterAuthorizedCommit[0]?.seq).toBe(51);
     });
 
+    it('should not deliver live events while delivery subscribe authorization is pending', async () => {
+        let releaseUnauthorizedAuth = () => {};
+        const unauthorizedAuthGate = new Promise<void>((resolve) => {
+            releaseUnauthorizedAuth = () => {
+                resolve();
+            };
+        });
+
+        const baseStore = createInMemoryExternalEventStore();
+        const gatedStore = {
+            ...baseStore,
+            ensureDeliveryConsumer: async (consumerId: string) => {
+                if (consumerId === 'other-ext') {
+                    await unauthorizedAuthGate;
+                }
+                return baseStore.ensureDeliveryConsumer(consumerId);
+            },
+        };
+        const hub = createExternalApiHub({
+            eventStore: gatedStore,
+            now: () => now,
+        });
+
+        const designatedPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(designatedPort, { senderExtensionId: 'designated-ext' });
+        designatedPort.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+        await flushAsyncTasks();
+
+        const unauthorizedPort = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(unauthorizedPort, { senderExtensionId: 'other-ext' });
+        unauthorizedPort.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
+
+        await hub.ingestEvent(buildInboundEvent('conv-pending-auth'), 1);
+
+        expect(unauthorizedPort.postMessage).not.toHaveBeenCalled();
+        releaseUnauthorizedAuth();
+        await flushAsyncTasks();
+        expect(unauthorizedPort.disconnect).toHaveBeenCalledTimes(1);
+    });
+
     it('should disconnect non-designated delivery subscribers before replay', async () => {
         const hub = createExternalApiHub({
             eventStore: createInMemoryExternalEventStore(),

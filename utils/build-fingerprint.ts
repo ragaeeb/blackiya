@@ -38,8 +38,7 @@ export const getBuildFingerprint = (): BuildFingerprint => {
     const label = asOptionalString(compileLabel) ?? asOptionalString(runtime.__BLACKIYA_BUILD_LABEL__);
     const buildId = asOptionalString(compileBuildId) ?? asOptionalString(runtime.__BLACKIYA_BUILD_ID__);
     const commit = asOptionalString(compileCommit) ?? asOptionalString(runtime.__BLACKIYA_BUILD_COMMIT__);
-    const createdAt =
-        asOptionalString(compileCreatedAt) ?? asOptionalString(runtime.__BLACKIYA_BUILD_CREATED_AT__);
+    const createdAt = asOptionalString(compileCreatedAt) ?? asOptionalString(runtime.__BLACKIYA_BUILD_CREATED_AT__);
 
     if (!label || !buildId || !commit || !createdAt) {
         return FALLBACK_FINGERPRINT;

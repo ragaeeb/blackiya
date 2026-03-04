@@ -96,10 +96,31 @@ class ExtensionLogger {
 
     private sanitizeRecord(value: Record<string, unknown>, seen: WeakSet<object>): Record<string, unknown> {
         const result: Record<string, unknown> = {};
-        for (const [key, entry] of Object.entries(value)) {
-            result[key] = this.sanitizeLogValue(entry, seen);
+        try {
+            for (const [key, entry] of Object.entries(value)) {
+                try {
+                    result[key] = this.sanitizeLogValue(entry, seen);
+                } catch (error) {
+                    result[key] = this.buildSanitizationFallback(error);
+                }
+            }
+        } catch (error) {
+            result['[SanitizationError]'] = this.buildSanitizationFallback(error);
         }
         return result;
+    }
+
+    private buildSanitizationFallback(error: unknown): string {
+        const reason = error instanceof Error ? error.message : String(error);
+        return `[Unserializable: ${reason}]`;
+    }
+
+    private safeSanitizeLogValue(value: unknown): unknown {
+        try {
+            return this.sanitizeLogValue(value);
+        } catch (error) {
+            return this.buildSanitizationFallback(error);
+        }
     }
 
     private sanitizeLogValue(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -122,7 +143,13 @@ class ExtensionLogger {
         seen.add(value);
 
         if (Array.isArray(value)) {
-            return value.map((entry) => this.sanitizeLogValue(entry, seen));
+            return value.map((entry) => {
+                try {
+                    return this.sanitizeLogValue(entry, seen);
+                } catch (error) {
+                    return this.buildSanitizationFallback(error);
+                }
+            });
         }
 
         return this.sanitizeRecord(value as Record<string, unknown>, seen);
@@ -133,7 +160,7 @@ class ExtensionLogger {
             return;
         }
 
-        const sanitizedArgs = args.map((arg) => this.sanitizeLogValue(arg));
+        const sanitizedArgs = args.map((arg) => this.safeSanitizeLogValue(arg));
 
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),

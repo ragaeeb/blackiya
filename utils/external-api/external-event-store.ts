@@ -403,21 +403,39 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
         },
         getDeliveryConsumerId: async () => coerceStringOrNull(await getMetaValue(META_DELIVERY_CONSUMER_ID, null)),
         commit: async (consumerId, upToSeq) => {
-            const designated = coerceStringOrNull(await getMetaValue(META_DELIVERY_CONSUMER_ID, null));
+            const db = await getDb();
+            const transaction = db.transaction([IDB_META_STORE, IDB_EVENTS_STORE], 'readwrite');
+            const metaStore = transaction.objectStore(IDB_META_STORE);
+            const eventsStore = transaction.objectStore(IDB_EVENTS_STORE);
+
+            const designatedRecord = (await requestAsPromise(metaStore.get(META_DELIVERY_CONSUMER_ID))) as
+                | ExternalMetaRecord<string>
+                | undefined;
+            const designated = coerceStringOrNull(designatedRecord?.value);
+            const committedRecord = (await requestAsPromise(metaStore.get(META_COMMITTED_MAP))) as
+                | ExternalMetaRecord<Record<string, number>>
+                | undefined;
+            const committedMap = coerceCommittedMap(committedRecord?.value ?? {});
+            const currentCommittedSeq = designated ? (committedMap[designated] ?? 0) : 0;
+
             if (!designated || designated !== consumerId) {
+                await transactionComplete(transaction);
                 return {
-                    committedSeq: await getCommittedCursor(),
+                    committedSeq: currentCommittedSeq,
                     authorized: false,
                 };
             }
 
-            const committedMap = coerceCommittedMap(await getMetaValue(META_COMMITTED_MAP, {}));
-            const headSeq = await getHeadSeq();
+            const headCursor = await requestAsPromise(eventsStore.openCursor(null, 'prev'));
+            const headSeq = (headCursor?.value as ExternalConversationEvent | undefined)?.seq ?? 0;
             const bounded = Math.max(0, Math.min(Math.floor(upToSeq), headSeq));
             const existing = committedMap[consumerId] ?? 0;
             const committedSeq = Math.max(existing, bounded);
             committedMap[consumerId] = committedSeq;
-            await setMetaValue(META_COMMITTED_MAP, committedMap);
+            metaStore.put({ key: META_COMMITTED_MAP, value: committedMap } satisfies ExternalMetaRecord<
+                Record<string, number>
+            >);
+            await transactionComplete(transaction);
             return {
                 committedSeq,
                 authorized: true,

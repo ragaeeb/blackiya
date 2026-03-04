@@ -282,42 +282,60 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
     };
 
+    const disconnectSubscriber = (port: ExternalPortLike) => {
+        removeSubscriber(port);
+        try {
+            port.disconnect?.();
+        } catch {}
+    };
+
+    const authorizeDeliverySubscription = async (
+        port: ExternalPortLike,
+        state: SubscriberState,
+        message: ExternalSubscribeMessage,
+    ): Promise<boolean> => {
+        if (message.consumer_role !== 'delivery') {
+            return true;
+        }
+        if (!state.senderExtensionId) {
+            deps.logger?.warn('External hub subscribe rejected: missing senderExtensionId', {
+                consumerRole: message.consumer_role,
+            });
+            disconnectSubscriber(port);
+            return false;
+        }
+
+        const result = await eventStore.ensureDeliveryConsumer(state.senderExtensionId);
+        if (!result.authorized) {
+            deps.logger?.warn('External hub subscribe from non-designated delivery consumer', {
+                senderExtensionId: state.senderExtensionId,
+                designatedConsumerId: result.designatedConsumerId,
+            });
+            disconnectSubscriber(port);
+            return false;
+        }
+
+        return true;
+    };
+
     const handleSubscribe = async (port: ExternalPortLike, message: ExternalSubscribeMessage) => {
         const state = subscribers.get(port);
         if (!state) {
             return;
         }
 
-        state.subscribed = true;
-        state.cursor = Math.max(0, Math.floor(message.cursor));
-        state.maxBatch = clampBatchSize(message.max_batch, defaultBatchSize);
-        state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, state.cursor);
+        const nextCursor = Math.max(0, Math.floor(message.cursor));
+        const nextMaxBatch = clampBatchSize(message.max_batch, defaultBatchSize);
 
-        if (message.consumer_role === 'delivery') {
-            if (!state.senderExtensionId) {
-                deps.logger?.warn('External hub subscribe rejected: missing senderExtensionId', {
-                    consumerRole: message.consumer_role,
-                });
-                removeSubscriber(port);
-                try {
-                    port.disconnect?.();
-                } catch {}
-                return;
-            }
-
-            const result = await eventStore.ensureDeliveryConsumer(state.senderExtensionId);
-            if (!result.authorized) {
-                deps.logger?.warn('External hub subscribe from non-designated delivery consumer', {
-                    senderExtensionId: state.senderExtensionId,
-                    designatedConsumerId: result.designatedConsumerId,
-                });
-                removeSubscriber(port);
-                try {
-                    port.disconnect?.();
-                } catch {}
-                return;
-            }
+        const authorized = await authorizeDeliverySubscription(port, state, message);
+        if (!authorized) {
+            return;
         }
+
+        state.subscribed = true;
+        state.cursor = nextCursor;
+        state.maxBatch = nextMaxBatch;
+        state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, nextCursor);
 
         await replaySinceCursor(port, message);
     };
