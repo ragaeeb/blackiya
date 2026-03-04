@@ -596,7 +596,7 @@ describe('runner external event emission', () => {
         });
     });
 
-    it('should suppress Gemini external ready events until a non-empty user prompt exists', async () => {
+    it('should emit Gemini external ready events even without a user prompt', async () => {
         const ctx: any = {
             currentAdapter: {
                 name: 'Gemini',
@@ -626,7 +626,18 @@ describe('runner external event emission', () => {
             attemptId: 'gemini-attempt-1',
         });
         await Promise.resolve();
-        expect(sentMessages).toHaveLength(0);
+
+        // Gemini events should emit even without a user prompt — the prompt
+        // comes from the POST body which the interceptor cannot capture
+        expect(sentMessages).toHaveLength(1);
+        expect(sentMessages[0]).toMatchObject({
+            type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
+            event: {
+                type: 'conversation.ready',
+                conversation_id: 'gemini-conv-1',
+                provider: 'gemini',
+            },
+        });
 
         ctx.currentAdapter.evaluateReadiness = () => ({
             ready: true,
@@ -649,11 +660,12 @@ describe('runner external event emission', () => {
         });
         await Promise.resolve();
 
-        expect(sentMessages).toHaveLength(1);
-        expect(sentMessages[0]).toMatchObject({
+        // Second emit with richer data should be conversation.updated
+        expect(sentMessages).toHaveLength(2);
+        expect(sentMessages[1]).toMatchObject({
             type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
             event: {
-                type: 'conversation.ready',
+                type: 'conversation.updated',
                 conversation_id: 'gemini-conv-1',
                 provider: 'gemini',
             },

@@ -147,9 +147,59 @@ export class InterceptionManager {
             if (InterceptionManager.BLOCKED_KEYS.has(key)) {
                 continue;
             }
+            if (key === 'default_model_slug' && this.shouldPreserveExistingModelSlug(existing, incoming)) {
+                continue;
+            }
+            if (key === 'mapping') {
+                (existing as unknown as Record<string, unknown>)[key] = this.mergeMapping(
+                    existing.mapping,
+                    incoming.mapping,
+                );
+                continue;
+            }
             (existing as unknown as Record<string, unknown>)[key] = this.cloneSnapshotValue(value);
         }
         return existing;
+    }
+
+    /**
+     * Returns true when existing has a non-placeholder model slug and incoming
+     * carries a placeholder value that would degrade the data quality.
+     */
+    private shouldPreserveExistingModelSlug(existing: ConversationData, incoming: ConversationData): boolean {
+        const placeholders = new Set(['auto', 'unknown', 'snapshot', '']);
+        const existingSlug = (existing.default_model_slug ?? '').toLowerCase();
+        const incomingSlug = (incoming.default_model_slug ?? '').toLowerCase();
+        if (placeholders.has(incomingSlug) && !placeholders.has(existingSlug)) {
+            logger.info('Preserved existing default_model_slug over snapshot placeholder', {
+                conversationId: existing.conversation_id,
+                preserved: existing.default_model_slug,
+                incoming: incoming.default_model_slug,
+            });
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Union-merges mapping nodes: incoming snapshot nodes overwrite existing ones
+     * by key, but existing-only nodes (e.g. thoughts, system-model with metadata)
+     * are preserved so that richer data from earlier API captures is not lost.
+     */
+    private mergeMapping(
+        existing: Record<string, MessageNode>,
+        incoming: Record<string, MessageNode>,
+    ): Record<string, MessageNode> {
+        const merged: Record<string, MessageNode> = {};
+        // Start with clones of all existing nodes
+        for (const [nodeId, node] of Object.entries(existing)) {
+            merged[nodeId] = this.cloneSnapshotValue(node) as MessageNode;
+        }
+        // Overlay incoming snapshot nodes
+        for (const [nodeId, node] of Object.entries(incoming)) {
+            merged[nodeId] = this.cloneSnapshotValue(node) as MessageNode;
+        }
+        return merged;
     }
 
     private cloneSnapshotValue(value: unknown): unknown {
@@ -395,7 +445,7 @@ export class InterceptionManager {
 
         try {
             const data = this.currentAdapter.parseInterceptedData(message.data, message.url);
-            this.applyGrokPromptHintIfNeeded(data, message);
+            this.applyPromptHintIfNeeded(data, message);
 
             if (data?.conversation_id) {
                 const conversationId = data.conversation_id;
@@ -430,12 +480,12 @@ export class InterceptionManager {
         }
     }
 
-    private applyGrokPromptHintIfNeeded(data: ConversationData | null, message: any) {
+    private applyPromptHintIfNeeded(data: ConversationData | null, message: any) {
         if (!data) {
             return;
         }
         const platform = typeof message?.platform === 'string' ? message.platform : (this.currentAdapter?.name ?? '');
-        if (platform !== 'Grok') {
+        if (platform !== 'Grok' && platform !== 'Gemini') {
             return;
         }
         const promptHint = typeof message?.promptHint === 'string' ? message.promptHint.trim() : '';

@@ -19,6 +19,7 @@ import {
 } from '@/entrypoints/interceptor/xhr-interception';
 import type { XhrLifecycleContext } from '@/entrypoints/interceptor/xhr-pipeline';
 import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { extractGeminiPromptFromXhrBody } from '@/platforms/gemini/prompt-extractor';
 import type { LLMPlatform } from '@/platforms/types';
 import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { isGrokStreamingEndpoint } from '@/utils/grok-request-classifier';
@@ -384,4 +385,28 @@ export const registerXhrLoadHandler = (xhr: XMLHttpRequest, methodUpper: string,
         maybeRunXhrPostLoadSideEffects(self, methodUpper, xhrUrl, deps);
         handleXhrInterceptionLoad(self, methodUpper, deps);
     });
+};
+
+/**
+ * Extracts the user prompt from a Gemini StreamGenerate XHR POST body and
+ * caches it for later injection into the conversation payload.
+ *
+ * The prompt is sent in the `f.req` URL-encoded field of the POST body;
+ * the Gemini streaming response never echoes it back.
+ */
+export const cacheGeminiPromptHintFromXhrBody = (
+    context: XhrLifecycleContext,
+    body: unknown,
+    deps: Pick<BootstrapRequestLifecycleDeps, 'emitter' | 'resolveAttemptIdForConversation'>,
+) => {
+    if (context.requestAdapter?.name !== 'Gemini' || !context.shouldEmitNonChatLifecycle) {
+        return;
+    }
+    const bodyText = typeof body === 'string' ? body : null;
+    const promptHint = extractGeminiPromptFromXhrBody(bodyText);
+    if (!promptHint) {
+        return;
+    }
+    const attemptId = context.attemptId ?? deps.resolveAttemptIdForConversation(context.conversationId, 'Gemini');
+    deps.emitter.cachePromptHintForAttempt(attemptId, promptHint);
 };

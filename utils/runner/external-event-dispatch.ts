@@ -68,31 +68,6 @@ export const createExternalEventDispatcherState = (
     maxEntries,
 });
 
-const extractMessageText = (message: ConversationData['mapping'][string]['message']): string => {
-    if (!message) {
-        return '';
-    }
-    const partsText = Array.isArray(message.content?.parts)
-        ? message.content.parts.filter((part): part is string => typeof part === 'string').join('\n')
-        : '';
-    if (partsText.trim().length > 0) {
-        return partsText;
-    }
-    return typeof message.content?.content === 'string' ? message.content.content : '';
-};
-
-const hasNonEmptyUserMessage = (data: ConversationData): boolean =>
-    Object.values(data.mapping).some((node) => {
-        const message = node.message;
-        if (!message || message.author.role !== 'user') {
-            return false;
-        }
-        return extractMessageText(message).trim().length > 0;
-    });
-
-const shouldRequirePromptForProvider = (providerName: string | null | undefined): boolean =>
-    normalizeExternalProvider(providerName) === 'gemini';
-
 const clonePayloadForDispatch = (payload: ConversationData): ConversationData => {
     if (typeof globalThis.structuredClone === 'function') {
         return globalThis.structuredClone(payload) as ConversationData;
@@ -165,9 +140,6 @@ const shouldEmit = (
         return false;
     }
     if (args.captureMeta.captureSource !== 'canonical_api') {
-        return false;
-    }
-    if (shouldRequirePromptForProvider(args.providerName) && !hasNonEmptyUserMessage(args.data)) {
         return false;
     }
     return true;

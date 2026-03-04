@@ -138,4 +138,79 @@ describe('ProactiveFetchRunner', () => {
         expect(emitter.emitCapturePayload).toHaveBeenCalledTimes(0);
         expect(runnerInternal.headersByKey.has(key)).toBeFalse();
     });
+
+    it('should abort the entire backoff loop when all URL candidates return 404', async () => {
+        const adapter = createAdapter();
+        const emitter = createEmitterDeps();
+        const originalFetch = mock(async () => new Response('Not Found', { status: 404 }));
+        const resolveAttemptIdForConversation = mock(() => 'attempt-1');
+        const runner = new ProactiveFetchRunner(
+            originalFetch as unknown as typeof fetch,
+            resolveAttemptIdForConversation,
+            emitter,
+            100,
+        );
+
+        await runner.trigger(adapter, 'https://example.com/complete/conv-1');
+
+        // Adapter has one candidate — one 404 means all candidates returned 404, abort backoff
+        expect(originalFetch).toHaveBeenCalledTimes(1);
+        expect(emitter.emitCapturePayload).not.toHaveBeenCalled();
+    });
+
+    it('should succeed if a later URL candidate succeeds after first returns 404', async () => {
+        // Simulates stream_handoff models: /backend-api/conversation/{id} returns 404
+        // but /backend-api/f/conversation/{id} works
+        const adapter: LLMPlatform = {
+            ...createAdapter(),
+            buildApiUrl: (id: string) => `https://example.com/api/${id}`,
+            buildApiUrls: (id: string) => [`https://example.com/api/${id}`, `https://example.com/api-f/${id}`],
+        };
+        const originalFetch = mock(async (url: unknown) => {
+            if ((url as string).includes('/api-f/')) {
+                return new Response('{"conversation_id":"conv-1"}', { status: 200 });
+            }
+            return new Response('Not Found', { status: 404 });
+        });
+        const emitter = createEmitterDeps();
+        const resolveAttemptIdForConversation = mock(() => 'attempt-1');
+        const runner = new ProactiveFetchRunner(
+            originalFetch as unknown as typeof fetch,
+            resolveAttemptIdForConversation,
+            emitter,
+            100,
+        );
+
+        await runner.trigger(adapter, 'https://example.com/complete/conv-1');
+
+        // Both URLs tried — 404 on primary shouldn't abort before trying /f/ variant
+        expect(originalFetch).toHaveBeenCalledTimes(2);
+        expect(emitter.emitCapturePayload).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry on non-404 errors (e.g. 500)', async () => {
+        const adapter = createAdapter();
+        const emitter = createEmitterDeps();
+        let callCount = 0;
+        const originalFetch = mock(async () => {
+            callCount++;
+            if (callCount <= 2) {
+                return new Response('Server Error', { status: 500 });
+            }
+            return new Response('{"conversation_id":"conv-1"}', { status: 200 });
+        });
+        const resolveAttemptIdForConversation = mock(() => 'attempt-1');
+        const runner = new ProactiveFetchRunner(
+            originalFetch as unknown as typeof fetch,
+            resolveAttemptIdForConversation,
+            emitter,
+            100,
+        );
+
+        await runner.trigger(adapter, 'https://example.com/complete/conv-1');
+
+        // Should have retried past 500 errors and eventually succeeded
+        expect(originalFetch).toHaveBeenCalledTimes(3);
+        expect(emitter.emitCapturePayload).toHaveBeenCalledTimes(1);
+    });
 });

@@ -70,7 +70,8 @@ describe('warm-fetch', () => {
             deps.getConversation.mockImplementationOnce(() => ({ data: 'mock' }));
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
 
-            expect(result).toBeTrue();
+            expect(result.success).toBeTrue();
+            expect(result.notFound).toBeFalse();
             expect(deps.ingestInterceptedData).toHaveBeenCalledWith({
                 url: 'http://test',
                 data: '{"data": "mock"}',
@@ -80,19 +81,29 @@ describe('warm-fetch', () => {
 
         it('should return false if fetch succeeds but caching fails', async () => {
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
-            expect(result).toBeFalse();
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeFalse();
         });
 
         it('should return false if fetch fails', async () => {
             globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500 })) as any;
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
-            expect(result).toBeFalse();
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeFalse();
+        });
+
+        it('should flag notFound on 404', async () => {
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+            const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeTrue();
         });
 
         it('should return false on network error', async () => {
             globalThis.fetch = mock(() => Promise.reject(new Error('Network error'))) as any;
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
-            expect(result).toBeFalse();
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeFalse();
             expect(logCalls.debug.length).toBeGreaterThan(0);
         });
     });
@@ -126,7 +137,8 @@ describe('warm-fetch', () => {
 
         it('should include tried candidate paths in all-failed diagnostics', async () => {
             deps.getFetchUrlCandidates = () => ['url-1', 'url-2', 'url-3'];
-            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+            // Use 500 (not 404) so it tries all candidates before logging 'all failed'
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500 })) as any;
 
             const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
             expect(result).toBeFalse();
@@ -139,6 +151,26 @@ describe('warm-fetch', () => {
                 candidateCount: 3,
                 triedPaths: ['/url-1', '/url-2'],
             });
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('should abort only after ALL candidates return 404', async () => {
+            deps.getFetchUrlCandidates = () => ['url-1', 'url-2'];
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+
+            const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
+            expect(result).toBeFalse();
+            // Should try BOTH candidates — 404 on one doesn't mean the other will 404
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('should still try second candidate on non-404 errors (e.g. 500)', async () => {
+            deps.getFetchUrlCandidates = () => ['url-1', 'url-2'];
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500 })) as any;
+
+            const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
+            expect(result).toBeFalse();
+            // Should try both candidates for transient errors
             expect(globalThis.fetch).toHaveBeenCalledTimes(2);
         });
     });

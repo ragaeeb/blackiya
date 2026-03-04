@@ -1,5 +1,7 @@
 import { browser } from 'wxt/browser';
 import { logger } from '@/utils/logger';
+import { runPayloadQualityGate } from '@/utils/payload-quality-gate';
+import { cancelQualityToast, dismissPayloadQualityToast, scheduleQualityToast } from '@/utils/payload-quality-toast';
 import { evaluateReadinessForData, shouldBlockActionsForGeneration } from '@/utils/runner/engine/core-utils';
 import type { EngineCtx } from '@/utils/runner/engine/types';
 import {
@@ -134,6 +136,25 @@ export const emitExternalConversationEvent = (
     if (!event) {
         return;
     }
+
+    // Run payload quality gate — non-blocking, logs diagnostics on failure
+    const qualityResult = runPayloadQualityGate(
+        args.conversationId,
+        ctx.currentAdapter?.name ?? 'Unknown',
+        event.type,
+        args.captureMeta,
+        args.data,
+    );
+
+    // Show dismissible toast only after a delay — gives conversation.updated time to arrive
+    // with richer data. Cancel the pending toast if quality passes on a subsequent event.
+    if (!qualityResult.passed && qualityResult.issues.includes('missing_model')) {
+        scheduleQualityToast(args.conversationId, ctx.currentAdapter?.name ?? 'Unknown', qualityResult);
+    } else if (qualityResult.passed) {
+        cancelQualityToast(args.conversationId);
+        dismissPayloadQualityToast();
+    }
+
     logger.debug('External event build attempt', {
         conversationId: args.conversationId,
         readinessMode: args.readinessMode,
@@ -143,6 +164,8 @@ export const emitExternalConversationEvent = (
         attemptId: args.attemptId,
         shouldBlockActions,
         allowWhenActionsBlocked: !!args.allowWhenActionsBlocked,
+        qualityPassed: qualityResult.passed,
+        qualityIssues: qualityResult.issues.length > 0 ? qualityResult.issues : undefined,
     });
     logger.debug('External event send start', {
         conversationId: event.conversation_id,

@@ -38,16 +38,22 @@ const toPathname = (url: string): string => {
     }
 };
 
+export type WarmFetchCandidateResult = {
+    success: boolean;
+    /** True when the server returned 404 — the resource does not exist and retrying is pointless. */
+    notFound: boolean;
+};
+
 /**
  * Fetches a single API URL and ingests the response.
- * Returns `true` when the fetch succeeded and a conversation was cached.
+ * Returns a result indicating success and whether the resource was not found (404).
  */
 export const tryWarmFetchCandidate = async (
     conversationId: string,
     reason: WarmFetchReason,
     apiUrl: string,
     deps: WarmFetchDeps,
-): Promise<boolean> => {
+): Promise<WarmFetchCandidateResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), WARM_FETCH_TIMEOUT_MS);
     try {
@@ -59,12 +65,12 @@ export const tryWarmFetchCandidate = async (
                 status: response.status,
                 path: new URL(apiUrl, window.location.origin).pathname,
             });
-            return false;
+            return { success: false, notFound: response.status === 404 };
         }
         const text = await response.text();
         deps.ingestInterceptedData({ url: apiUrl, data: text, platform: deps.platformName });
         if (!deps.getConversation(conversationId)) {
-            return false;
+            return { success: false, notFound: false };
         }
         logger.debug('Warm fetch captured conversation', {
             conversationId,
@@ -72,14 +78,14 @@ export const tryWarmFetchCandidate = async (
             reason,
             path: new URL(apiUrl, window.location.origin).pathname,
         });
-        return true;
+        return { success: true, notFound: false };
     } catch (err) {
         logger.debug('Warm fetch network error', {
             conversationId,
             reason,
             error: err instanceof Error ? err.message : String(err),
         });
-        return false;
+        return { success: false, notFound: false };
     } finally {
         clearTimeout(timeoutId);
     }
@@ -99,10 +105,23 @@ export const executeWarmFetchCandidates = async (
         return false;
     }
     const triedCandidates = candidates.slice(0, 2);
+    let allNotFound = true;
     for (const apiUrl of triedCandidates) {
-        if (await tryWarmFetchCandidate(conversationId, reason, apiUrl, deps)) {
+        const result = await tryWarmFetchCandidate(conversationId, reason, apiUrl, deps);
+        if (result.success) {
             return true;
         }
+        if (!result.notFound) {
+            allNotFound = false;
+        }
+    }
+    if (allNotFound && triedCandidates.length > 0) {
+        logger.debug('Warm fetch all candidates returned 404 — aborting', {
+            conversationId,
+            reason,
+            triedPaths: triedCandidates.map((candidate) => toPathname(candidate)),
+        });
+        return false;
     }
     logger.debug('Warm fetch all candidates failed', {
         conversationId,

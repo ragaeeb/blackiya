@@ -1,6 +1,7 @@
 import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/attempt-registry';
 import {
     type BootstrapRequestLifecycleDeps,
+    cacheGeminiPromptHintFromXhrBody as cacheGeminiPromptHintFromXhrBodyCore,
     cachePromptHintFromGrokCreateConversationRequest as cachePromptHintFromGrokCreateConversationRequestCore,
     emitFetchPromptLifecycle as emitFetchPromptLifecycleCore,
     emitXhrRequestLifecycle as emitXhrRequestLifecycleCore,
@@ -143,6 +144,9 @@ const cachePromptHintFromGrokCreateConversationRequest = (context: FetchIntercep
 const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response, emit: StreamMonitorEmitter) =>
     maybeMonitorFetchStreamsCore(context, response, emit, buildRequestLifecycleDeps());
 
+const cacheGeminiPromptHintFromXhrBody = (context: XhrLifecycleContext, body: unknown) =>
+    cacheGeminiPromptHintFromXhrBodyCore(context, body, buildRequestLifecycleDeps());
+
 const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext, emit: StreamMonitorEmitter) =>
     emitXhrRequestLifecycleCore(xhr, context, emit, buildRequestLifecycleDeps());
 
@@ -253,6 +257,7 @@ export default defineContentScript({
                 resolveRequestConversationId,
                 peekAttemptIdForConversation,
             });
+            cacheGeminiPromptHintFromXhrBody(context, body);
             emitXhrRequestLifecycle(xhr, context, streamMonitorEmitter);
             registerXhrLoadHandler(xhr, context.methodUpper, xhrInterceptionDeps);
             return originalSend.call(this, body);
