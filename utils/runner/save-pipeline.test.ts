@@ -43,6 +43,10 @@ describe('save-pipeline', () => {
             warmFetchConversationSnapshot: mock(() => Promise.resolve(true)),
             ingestConversationData: mock(() => {}),
             isConversationDataLike: mock(() => true),
+            isRawCaptureSnapshot: mock(() => false),
+            ingestInterceptedData: mock(() => {}),
+            getRawSnapshotReplayUrls: mock((_conversationId: string, snapshot: { url: string }) => [snapshot.url]),
+            getPlatformName: mock(() => 'ChatGPT'),
             buttonManagerExists: mock(() => true),
             buttonManagerSetLoading: mock(() => {}),
             buttonManagerSetSuccess: mock(() => {}),
@@ -84,6 +88,7 @@ describe('save-pipeline', () => {
 
         it('should fetch warm snapshot and check decision if not recovered immediately', async () => {
             deps.isConversationDataLike.mockImplementationOnce(() => false);
+            deps.isRawCaptureSnapshot.mockImplementationOnce(() => false);
             deps.resolveReadinessDecision.mockImplementationOnce(() => ({ mode: 'canonical_ready' }));
 
             const recovered = await recoverCanonicalBeforeForceSave('conv-1', deps);
@@ -91,6 +96,34 @@ describe('save-pipeline', () => {
             expect(recovered).toBeTrue();
             expect(deps.warmFetchConversationSnapshot).toHaveBeenCalledWith('conv-1', 'force-save');
             expect(deps.refreshButtonState).toHaveBeenCalledWith('conv-1');
+        });
+
+        it('should replay raw snapshot and recover when replayed data is ready', async () => {
+            const rawSnapshot = {
+                __blackiyaSnapshotType: 'raw-capture',
+                url: 'https://chatgpt.com/backend-api/f/conversation/conv-1',
+                data: '{"conversation":{"id":"conv-1"}}',
+                platform: 'ChatGPT',
+            };
+            deps.requestPageSnapshot.mockImplementationOnce(() => Promise.resolve(rawSnapshot));
+            deps.isConversationDataLike.mockImplementationOnce(() => false);
+            deps.isRawCaptureSnapshot.mockImplementationOnce(() => true);
+            deps.getRawSnapshotReplayUrls.mockImplementationOnce(() => [
+                'https://chatgpt.com/backend-api/conversation/conv-1',
+                'https://chatgpt.com/backend-api/f/conversation/conv-1',
+            ]);
+            deps.getConversation.mockImplementation(() => ({ title: 'test', conversation_id: 'conv-1' }) as any);
+            deps.evaluateReadinessForData.mockImplementation(() => ({ ready: true }) as any);
+
+            const recovered = await recoverCanonicalBeforeForceSave('conv-1', deps);
+
+            expect(recovered).toBeTrue();
+            expect(deps.ingestInterceptedData).toHaveBeenCalledWith({
+                url: 'https://chatgpt.com/backend-api/conversation/conv-1',
+                data: '{"conversation":{"id":"conv-1"}}',
+                platform: 'ChatGPT',
+            });
+            expect(deps.markCanonicalCaptureMeta).toHaveBeenCalledWith('conv-1');
         });
     });
 

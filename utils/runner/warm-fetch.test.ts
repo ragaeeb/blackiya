@@ -123,6 +123,24 @@ describe('warm-fetch', () => {
             result = await executeWarmFetchCandidates('c-1', 'initial-load', deps); // mock returns ok=true, but getConversation returns null
             expect(result).toBeFalse();
         });
+
+        it('should include tried candidate paths in all-failed diagnostics', async () => {
+            deps.getFetchUrlCandidates = () => ['url-1', 'url-2', 'url-3'];
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+
+            const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
+            expect(result).toBeFalse();
+
+            const failureLog = logCalls.debug.find((entry) => entry.message === 'Warm fetch all candidates failed');
+            expect(failureLog).toBeDefined();
+            expect(failureLog?.args[0]).toMatchObject({
+                conversationId: 'c-1',
+                reason: 'stabilization-retry',
+                candidateCount: 3,
+                triedPaths: ['/url-1', '/url-2'],
+            });
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe('warmFetchConversationSnapshot', () => {

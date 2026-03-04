@@ -29,6 +29,8 @@ const toIsoTimestamp = (seconds?: number | null): string | undefined => {
     return new Date(seconds * 1000).toISOString();
 };
 
+const MODEL_PLACEHOLDERS = new Set(['auto', 'unknown', 'snapshot']);
+
 const extractMessageText = (message: Message): string => {
     const parts = message.content?.parts;
     if (Array.isArray(parts) && parts.length > 0) {
@@ -110,6 +112,28 @@ const dedupeStrings = (values: string[]): string[] => {
     return deduped;
 };
 
+const getMessageTimestamp = (message: Message): number => {
+    if (typeof message.update_time === 'number' && Number.isFinite(message.update_time)) {
+        return message.update_time;
+    }
+    if (typeof message.create_time === 'number' && Number.isFinite(message.create_time)) {
+        return message.create_time;
+    }
+    return 0;
+};
+
+const getAssistantMessagesByRecency = (conversation: ConversationData): Message[] =>
+    Object.values(conversation.mapping)
+        .map((node) => node.message)
+        .filter((message): message is Message => !!message && message.author?.role === 'assistant')
+        .sort((left, right) => getMessageTimestamp(right) - getMessageTimestamp(left));
+
+const getAllMessagesByRecency = (conversation: ConversationData): Message[] =>
+    Object.values(conversation.mapping)
+        .map((node) => node.message)
+        .filter((message): message is Message => !!message)
+        .sort((left, right) => getMessageTimestamp(right) - getMessageTimestamp(left));
+
 const findCurrentNodeId = (conversation: ConversationData): string | null => {
     const mapping = conversation.mapping;
     if (conversation.current_node && mapping[conversation.current_node]?.message) {
@@ -162,10 +186,38 @@ const normalizeModel = (value: unknown): string | undefined => {
         return undefined;
     }
     const normalized = value.trim();
-    if (!normalized || normalized.toLowerCase() === 'auto') {
+    if (!normalized || MODEL_PLACEHOLDERS.has(normalized.toLowerCase())) {
         return undefined;
     }
     return normalized;
+};
+
+const extractModelFromMessage = (message: Message): string | undefined =>
+    normalizeModel(message.metadata?.resolved_model_slug) ||
+    normalizeModel(message.metadata?.model_slug) ||
+    normalizeModel(message.metadata?.default_model_slug) ||
+    normalizeModel(message.metadata?.model);
+
+const extractModelFromMapping = (conversation: ConversationData): string | undefined => {
+    const assistants = getAssistantMessagesByRecency(conversation);
+    for (const assistant of assistants) {
+        const candidate = extractModelFromMessage(assistant);
+        if (candidate) {
+            return candidate;
+        }
+    }
+    return undefined;
+};
+
+const extractModelFromAnyMessageInMapping = (conversation: ConversationData): string | undefined => {
+    const messages = getAllMessagesByRecency(conversation);
+    for (const message of messages) {
+        const candidate = extractModelFromMessage(message);
+        if (candidate) {
+            return candidate;
+        }
+    }
+    return undefined;
 };
 
 const extractModel = (conversation: ConversationData, chain: Message[]): string | undefined => {
@@ -175,13 +227,20 @@ const extractModel = (conversation: ConversationData, chain: Message[]): string 
             continue;
         }
 
-        const metadataModel =
-            normalizeModel(message.metadata?.resolved_model_slug) ||
-            normalizeModel(message.metadata?.model_slug) ||
-            normalizeModel(message.metadata?.model);
+        const metadataModel = extractModelFromMessage(message);
         if (metadataModel) {
             return metadataModel;
         }
+    }
+
+    const mappingModel = extractModelFromMapping(conversation);
+    if (mappingModel) {
+        return mappingModel;
+    }
+
+    const globalMappingModel = extractModelFromAnyMessageInMapping(conversation);
+    if (globalMappingModel) {
+        return globalMappingModel;
     }
 
     return normalizeModel(conversation.default_model_slug);
@@ -235,6 +294,23 @@ const collectReasoningForRange = (chain: Message[], startIndex: number, endIndex
     return dedupeStrings(collected.filter((value) => value.length > 0));
 };
 
+const collectLatestAssistantReasoningFromMapping = (
+    conversation: ConversationData,
+    minTimestampInclusive: number | null,
+): string[] => {
+    const assistants = getAssistantMessagesByRecency(conversation);
+    for (const assistant of assistants) {
+        if (typeof minTimestampInclusive === 'number' && getMessageTimestamp(assistant) < minTimestampInclusive) {
+            continue;
+        }
+        const fragments = extractReasoningFragments(assistant);
+        if (fragments.length > 0) {
+            return dedupeStrings(fragments);
+        }
+    }
+    return [];
+};
+
 const extractLatestPrompt = (chain: Message[]): string => {
     for (let i = chain.length - 1; i >= 0; i -= 1) {
         const message = chain[i];
@@ -257,7 +333,13 @@ export const buildCommonExport = (conversation: ConversationData, llmName: strin
 
     const prompt = userIndex >= 0 ? extractMessageText(chain[userIndex]) : extractLatestPrompt(chain);
     const response = assistantIndex >= 0 ? findLatestResponseText(chain, userIndex, assistantIndex) : '';
-    const reasoning = assistantIndex >= 0 ? collectReasoningForRange(chain, userIndex, assistantIndex) : [];
+    const reasoningFromChain = assistantIndex >= 0 ? collectReasoningForRange(chain, userIndex, assistantIndex) : [];
+    const minReasoningTimestamp: number | null =
+        userIndex >= 0 && chain[userIndex] ? getMessageTimestamp(chain[userIndex]) : null;
+    const reasoning =
+        reasoningFromChain.length > 0
+            ? reasoningFromChain
+            : collectLatestAssistantReasoningFromMapping(conversation, minReasoningTimestamp);
 
     return {
         format: EXPORT_FORMAT.COMMON,

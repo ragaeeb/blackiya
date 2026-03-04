@@ -9,7 +9,11 @@ import { logger } from '@/utils/logger';
 import type { AttemptCoordinatorDeps } from '@/utils/runner/attempt-coordinator';
 import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from '@/utils/runner/attempt-state';
 import type { ButtonStateManagerDeps } from '@/utils/runner/button-state-manager';
-import { type CalibrationCaptureDeps, isConversationDataLike } from '@/utils/runner/calibration-capture';
+import {
+    type CalibrationCaptureDeps,
+    isConversationDataLike,
+    isRawCaptureSnapshot,
+} from '@/utils/runner/calibration-capture';
 import type { CanonicalStabilizationTickDeps } from '@/utils/runner/canonical-stabilization-tick';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import {
@@ -204,6 +208,11 @@ export const buildSavePipelineDeps = (ctx: EngineCtx): SavePipelineDeps => ({
     warmFetchConversationSnapshot: (cid, reason) => ctx.warmFetchConversationSnapshot(cid, reason),
     ingestConversationData: (data, source) => ctx.interceptionManager.ingestConversationData(data, source),
     isConversationDataLike,
+    isRawCaptureSnapshot,
+    ingestInterceptedData: (args) => ctx.interceptionManager.ingestInterceptedData(args),
+    getRawSnapshotReplayUrls: (cid, snap) =>
+        ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url],
+    getPlatformName: () => ctx.currentAdapter?.name ?? 'unknown',
     buttonManagerExists: () => ctx.buttonManager.exists(),
     buttonManagerSetLoading: (loading, button) => ctx.buttonManager.setLoading(loading, button),
     buttonManagerSetSuccess: (button) => ctx.buttonManager.setSuccess(button),
@@ -503,9 +512,16 @@ export const buildVisibilityRecoveryDeps = (ctx: EngineCtx): VisibilityRecoveryD
     maybeRestartCanonicalRecoveryAfterTimeout: (cid, aid) => ctx.maybeRestartCanonicalRecoveryAfterTimeout(cid, aid),
     requestPageSnapshot,
     isConversationDataLike,
+    isRawCaptureSnapshot,
     ingestConversationData: (data, source) => {
         ctx.interceptionManager.ingestConversationData(data, source);
     },
+    ingestInterceptedData: (args) => {
+        ctx.interceptionManager.ingestInterceptedData(args);
+    },
+    getRawSnapshotReplayUrls: (cid, snap) =>
+        ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url],
+    getPlatformName: () => ctx.currentAdapter?.name ?? 'unknown',
     getConversation: (cid) => ctx.interceptionManager.getConversation(cid),
     evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
     markCanonicalCaptureMeta: (cid) => ctx.markCanonicalCaptureMeta(cid),

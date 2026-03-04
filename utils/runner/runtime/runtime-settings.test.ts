@@ -344,7 +344,7 @@ describe('runtime-settings', () => {
     });
 
     describe('createVisibilityChangeHandler', () => {
-        const buildDeps = () => ({
+        const buildDeps = (): any => ({
             resolveConversationId: mock(() => null as string | null),
             getCurrentConversationId: mock(() => null as string | null),
             resolveReadinessDecision: mock(() => ({ mode: 'awaiting_stabilization' }) as any),
@@ -352,7 +352,11 @@ describe('runtime-settings', () => {
             maybeRestartCanonicalRecoveryAfterTimeout: mock(() => {}),
             requestPageSnapshot: mock(() => Promise.resolve(null)),
             isConversationDataLike: mock(() => false) as any,
+            isRawCaptureSnapshot: mock(() => false) as any,
             ingestConversationData: mock(() => {}),
+            ingestInterceptedData: mock(() => {}),
+            getRawSnapshotReplayUrls: mock((_cid: string, snapshot: { url: string }) => [snapshot.url]),
+            getPlatformName: mock(() => 'ChatGPT'),
             getConversation: mock(() => undefined as any),
             evaluateReadinessForData: mock(() => ({ ready: false })),
             markCanonicalCaptureMeta: mock(() => {}),
@@ -432,11 +436,46 @@ describe('runtime-settings', () => {
             deps.resolveConversationId = mock(() => 'conv-1');
             deps.requestPageSnapshot = mock(() => Promise.resolve({ notConversation: true } as unknown as null));
             deps.isConversationDataLike = mock(() => false) as any;
+            deps.isRawCaptureSnapshot = mock(() => false) as any;
 
             createVisibilityChangeHandler(deps)();
             await new Promise((r) => setTimeout(r, 0));
 
             expect(deps.ingestConversationData).not.toHaveBeenCalled();
+            expect(deps.ingestInterceptedData).not.toHaveBeenCalled();
+        });
+
+        it('should replay raw-capture snapshots and mark canonical when replay yields ready data', async () => {
+            setDocumentHidden(false);
+            const deps = buildDeps();
+            const rawSnapshot = {
+                __blackiyaSnapshotType: 'raw-capture',
+                url: 'https://chatgpt.com/backend-api/f/conversation/conv-1',
+                data: '{"conversation":{"id":"conv-1"}}',
+                platform: 'ChatGPT',
+            };
+            deps.resolveConversationId = mock(() => 'conv-1');
+            deps.requestPageSnapshot = mock(() => Promise.resolve(rawSnapshot));
+            deps.isConversationDataLike = mock(() => false) as any;
+            deps.isRawCaptureSnapshot = mock(() => true) as any;
+            deps.getRawSnapshotReplayUrls = mock(() => [
+                'https://chatgpt.com/backend-api/conversation/conv-1',
+                'https://chatgpt.com/backend-api/f/conversation/conv-1',
+            ]);
+            deps.getConversation = mock(() => ({ conversation_id: 'conv-1', title: 'Recovered', mapping: {} }) as any);
+            deps.evaluateReadinessForData = mock(() => ({ ready: true }));
+
+            createVisibilityChangeHandler(deps)();
+            await new Promise((r) => setTimeout(r, 0));
+
+            expect(deps.ingestInterceptedData).toHaveBeenCalledWith({
+                url: 'https://chatgpt.com/backend-api/conversation/conv-1',
+                data: '{"conversation":{"id":"conv-1"}}',
+                platform: 'ChatGPT',
+            });
+            expect(deps.markCanonicalCaptureMeta).toHaveBeenCalledWith('conv-1');
+            expect(deps.ingestSfeCanonicalSample).toHaveBeenCalled();
+            expect(deps.refreshButtonState).toHaveBeenCalled();
         });
 
         it('should skip markCanonical if cached conversation is absent', async () => {

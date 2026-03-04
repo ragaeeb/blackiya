@@ -104,7 +104,7 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
     buildApiUrl: (conversationId: string) => `https://chatgpt.com/backend-api/conversation/${conversationId}`,
 
     buildApiUrls: (conversationId: string) => {
-        const paths = [`/backend-api/conversation/${conversationId}`];
+        const paths = [`/backend-api/conversation/${conversationId}`, `/backend-api/f/conversation/${conversationId}`];
         return HOST_CANDIDATES.flatMap((host) => paths.map((path) => `${host}${path}`));
     },
 

@@ -10,6 +10,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
+import type { RawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import { attachExportMeta, buildExportPayloadForFormat } from '@/utils/runner/export-helpers';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { buildExportMetaForSave, confirmDegradedForceSave } from '@/utils/runner/save-export';
@@ -40,6 +41,10 @@ export type SavePipelineDeps = {
     warmFetchConversationSnapshot: (conversationId: string, reason: 'force-save') => Promise<boolean>;
     ingestConversationData: (data: ConversationData, source: string) => void;
     isConversationDataLike: (data: unknown) => data is ConversationData;
+    isRawCaptureSnapshot: (data: unknown) => data is RawCaptureSnapshot;
+    ingestInterceptedData: (args: { url: string; data: string; platform: string }) => void;
+    getRawSnapshotReplayUrls: (conversationId: string, snapshot: { url: string }) => string[];
+    getPlatformName: () => string;
     buttonManagerExists: () => boolean;
     buttonManagerSetLoading: (loading: boolean, button: 'save') => void;
     buttonManagerSetSuccess: (button: 'save') => void;
@@ -242,10 +247,27 @@ export const maybeIngestFreshSnapshotForForceSave = (
     freshSnapshot: unknown,
     deps: SavePipelineDeps,
 ): boolean => {
-    if (!freshSnapshot || !deps.isConversationDataLike(freshSnapshot)) {
+    if (!freshSnapshot) {
         return false;
     }
-    deps.ingestConversationData(freshSnapshot, 'force-save-snapshot-recovery');
+    if (deps.isConversationDataLike(freshSnapshot)) {
+        deps.ingestConversationData(freshSnapshot, 'force-save-snapshot-recovery');
+    } else if (deps.isRawCaptureSnapshot(freshSnapshot)) {
+        for (const replayUrl of deps.getRawSnapshotReplayUrls(conversationId, freshSnapshot)) {
+            deps.ingestInterceptedData({
+                url: replayUrl,
+                data: freshSnapshot.data,
+                platform: freshSnapshot.platform ?? deps.getPlatformName(),
+            });
+            const replayCached = deps.getConversation(conversationId);
+            if (replayCached && deps.evaluateReadinessForData(replayCached).ready) {
+                break;
+            }
+        }
+    } else {
+        return false;
+    }
+
     const cached = deps.getConversation(conversationId);
     if (!cached) {
         return false;

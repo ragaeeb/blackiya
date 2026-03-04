@@ -194,7 +194,7 @@ sequenceDiagram
 Key endpoints/signals:
 - Prompt stream: `/backend-api/f/conversation` (SSE)
 - Completion hint endpoint: `/backend-api/conversation/{id}/stream_status`
-- Canonical fetch: `/backend-api/conversation/{id}`
+- Canonical fetch candidates: `/backend-api/conversation/{id}` then `/backend-api/f/conversation/{id}` fallback
 
 Flow:
 1. Interceptor detects POST to `/backend-api/f/conversation`.
@@ -327,6 +327,7 @@ Save pipeline:
 4. Builds export payload:
    - Original conversation JSON, or
    - Common-export format (`buildCommonExport`) if selected.
+   - Common export resolves `model` and `reasoning` from the latest turn chain first, then falls back to recent mapping metadata/reasoning when branch/current-node topology is incomplete (for example snapshot-derived chains). Model fallback checks assistant metadata first, then broader message metadata (`resolved_model_slug`, `model_slug`, `default_model_slug`, `model`).
 5. Attaches `capture_meta`:
    - `captureSource`
    - `fidelity`
@@ -366,6 +367,23 @@ Invariants:
 - Non-owner release cannot clear an active lease.
 - Expired leases are pruned and can be deterministically taken over.
 - Coordinator hydration is single-flight (concurrent claims share one hydration pass), and failed hydration attempts are retried on subsequent operations.
+
+### 8.3 Snapshot Fallback Fidelity
+
+Snapshot fallback now prioritizes raw intercepted replay payloads over synthesized snapshots.
+
+Priority order for `getPageConversationSnapshot`:
+1. Raw capture ring-buffer match (`__blackiyaSnapshotType: 'raw-capture'`)
+2. Known globals (`__NEXT_DATA__`, `__remixContext`, etc.)
+3. DOM snapshot
+4. Broad `window` BFS fallback
+
+Raw capture match accepts explicit `conversationId`/`conversation_id` fields and conversation-object `id` matches when the object also resembles a conversation payload (`title`/`mapping`/`current_node`).
+
+Ingestion invariants:
+- Stabilization retry snapshots replay raw payloads using original captured URL/data (not wrapper JSON).
+- Visibility recovery and force-save snapshot recovery also replay raw snapshots (including replay URL candidates), then evaluate readiness from cache.
+- This preserves richer fields (`model`, reasoning metadata/chunks) when direct canonical fetch candidates (`/backend-api/conversation/{id}`, `/backend-api/f/conversation/{id}`) are unavailable.
 
 ## 9) Diagnostics and Debugging
 

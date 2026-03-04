@@ -2,7 +2,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import type { StreamDumpConfigMessage } from '@/utils/protocol/messages';
 import { stampToken } from '@/utils/protocol/session-token';
-import { isConversationDataLike } from '@/utils/runner/calibration-capture';
+import { isConversationDataLike, isRawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import type { EngineCtx } from '@/utils/runner/engine/types';
 import { buildExportPayloadForFormat as buildExportPayloadForFormatPure } from '@/utils/runner/export-helpers';
@@ -51,6 +51,14 @@ export const evaluateReadinessForData = (ctx: EngineCtx, data: ConversationData)
 export const ingestStabilizationRetrySnapshot = (ctx: EngineCtx, conversationId: string, data: unknown) => {
     if (isConversationDataLike(data)) {
         ctx.interceptionManager.ingestConversationData(data, 'stabilization-retry-snapshot');
+        return;
+    }
+    if (isRawCaptureSnapshot(data)) {
+        ctx.interceptionManager.ingestInterceptedData({
+            url: data.url,
+            data: data.data,
+            platform: data.platform ?? ctx.currentAdapter?.name ?? 'unknown',
+        });
         return;
     }
     ctx.interceptionManager.ingestInterceptedData({

@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { logger } from '@/utils/logger';
+import type { RawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import { EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
 import type { ReadinessDecision } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
@@ -113,13 +114,59 @@ export type VisibilityRecoveryDeps = {
     maybeRestartCanonicalRecoveryAfterTimeout: (conversationId: string, attemptId: string) => void;
     requestPageSnapshot: (conversationId: string) => Promise<unknown | null>;
     isConversationDataLike: (value: unknown) => value is ConversationData;
+    isRawCaptureSnapshot: (value: unknown) => value is RawCaptureSnapshot;
     ingestConversationData: (data: ConversationData, source: string) => void;
+    ingestInterceptedData: (args: { url: string; data: string; platform: string }) => void;
+    getRawSnapshotReplayUrls: (conversationId: string, snapshot: { url: string }) => string[];
+    getPlatformName: () => string;
     getConversation: (conversationId: string) => ConversationData | undefined;
     evaluateReadinessForData: (data: ConversationData) => { ready: boolean };
     markCanonicalCaptureMeta: (conversationId: string) => void;
     ingestSfeCanonicalSample: (data: ConversationData, attemptId?: string) => unknown;
     refreshButtonState: (conversationId?: string) => void;
     warmFetchConversationSnapshot: (conversationId: string, reason: 'force-save') => Promise<boolean>;
+};
+
+const replayRawVisibilitySnapshot = (
+    conversationId: string,
+    snapshot: RawCaptureSnapshot,
+    deps: VisibilityRecoveryDeps,
+) => {
+    for (const replayUrl of deps.getRawSnapshotReplayUrls(conversationId, snapshot)) {
+        deps.ingestInterceptedData({
+            url: replayUrl,
+            data: snapshot.data,
+            platform: snapshot.platform ?? deps.getPlatformName(),
+        });
+        const cachedAfterReplay = deps.getConversation(conversationId);
+        if (cachedAfterReplay && deps.evaluateReadinessForData(cachedAfterReplay).ready) {
+            break;
+        }
+    }
+};
+
+const ingestVisibilitySnapshot = (conversationId: string, snapshot: unknown, deps: VisibilityRecoveryDeps): boolean => {
+    if (deps.isConversationDataLike(snapshot)) {
+        deps.ingestConversationData(snapshot, 'visibility-recovery-snapshot');
+        return true;
+    }
+    if (!deps.isRawCaptureSnapshot(snapshot)) {
+        return false;
+    }
+    replayRawVisibilitySnapshot(conversationId, snapshot, deps);
+    return true;
+};
+
+const finalizeVisibilityRecovery = (conversationId: string, attemptId: string, deps: VisibilityRecoveryDeps) => {
+    const cached = deps.getConversation(conversationId);
+    if (!cached) {
+        return;
+    }
+    if (deps.evaluateReadinessForData(cached).ready) {
+        deps.markCanonicalCaptureMeta(conversationId);
+        deps.ingestSfeCanonicalSample(cached, attemptId);
+    }
+    deps.refreshButtonState(conversationId);
 };
 
 export const createVisibilityChangeHandler = (deps: VisibilityRecoveryDeps) => {
@@ -138,19 +185,10 @@ export const createVisibilityChangeHandler = (deps: VisibilityRecoveryDeps) => {
         const attemptId = deps.resolveAttemptId(conversationId);
         deps.maybeRestartCanonicalRecoveryAfterTimeout(conversationId, attemptId);
         void deps.requestPageSnapshot(conversationId).then((snapshot) => {
-            if (!snapshot || !deps.isConversationDataLike(snapshot)) {
+            if (!snapshot || !ingestVisibilitySnapshot(conversationId, snapshot, deps)) {
                 return;
             }
-            deps.ingestConversationData(snapshot, 'visibility-recovery-snapshot');
-            const cached = deps.getConversation(conversationId);
-            if (!cached) {
-                return;
-            }
-            if (deps.evaluateReadinessForData(cached).ready) {
-                deps.markCanonicalCaptureMeta(conversationId);
-                deps.ingestSfeCanonicalSample(cached, attemptId);
-            }
-            deps.refreshButtonState(conversationId);
+            finalizeVisibilityRecovery(conversationId, attemptId, deps);
         });
         void deps.warmFetchConversationSnapshot(conversationId, 'force-save').then(() => {
             deps.refreshButtonState(conversationId);

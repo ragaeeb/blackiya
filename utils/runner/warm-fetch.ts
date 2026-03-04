@@ -30,6 +30,14 @@ export type WarmFetchDeps = {
 
 const WARM_FETCH_TIMEOUT_MS = 15_000;
 
+const toPathname = (url: string): string => {
+    try {
+        return new URL(url, window.location.origin).pathname;
+    } catch {
+        return url;
+    }
+};
+
 /**
  * Fetches a single API URL and ingests the response.
  * Returns `true` when the fetch succeeded and a conversation was cached.
@@ -90,12 +98,18 @@ export const executeWarmFetchCandidates = async (
     if (candidates.length === 0) {
         return false;
     }
-    for (const apiUrl of candidates.slice(0, 2)) {
+    const triedCandidates = candidates.slice(0, 2);
+    for (const apiUrl of triedCandidates) {
         if (await tryWarmFetchCandidate(conversationId, reason, apiUrl, deps)) {
             return true;
         }
     }
-    logger.debug('Warm fetch all candidates failed', { conversationId, reason });
+    logger.debug('Warm fetch all candidates failed', {
+        conversationId,
+        reason,
+        candidateCount: candidates.length,
+        triedPaths: triedCandidates.map((candidate) => toPathname(candidate)),
+    });
     return false;
 };
 
