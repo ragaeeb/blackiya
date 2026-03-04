@@ -43,6 +43,7 @@ describe('lifecycle-phase-handler', () => {
             shouldIngestAsCanonicalSample: mock(() => false),
             scheduleCanonicalStabilizationRetry: mock(() => {}),
             runStreamDoneProbe: mock(() => {}),
+            isPlatformGenerating: mock(() => false),
         };
     });
 
@@ -102,6 +103,16 @@ describe('lifecycle-phase-handler', () => {
 
             expect(deps.setLifecycleState).toHaveBeenCalledWith('completed', 'conv-1');
             expect(deps.runStreamDoneProbe).toHaveBeenCalledWith('conv-1', 'attempt-1');
+            expect(deps.scheduleCanonicalStabilizationRetry).not.toHaveBeenCalled();
+        });
+
+        it('should ignore ChatGPT completed phase while platform is still generating', () => {
+            deps.isPlatformGenerating = () => true;
+
+            applyLifecyclePhaseForConversation('completed', 'ChatGPT', 'attempt-1', 'conv-1', 'direct', deps);
+
+            expect(deps.setLifecycleState).not.toHaveBeenCalled();
+            expect(deps.runStreamDoneProbe).not.toHaveBeenCalled();
             expect(deps.scheduleCanonicalStabilizationRetry).not.toHaveBeenCalled();
         });
 

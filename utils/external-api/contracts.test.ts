@@ -49,6 +49,7 @@ describe('external-api/contracts', () => {
                 type: 'events.getSince',
                 cursor: 10,
                 limit: 50,
+                format: 'common',
             }),
         ).toBeTrue();
     });
@@ -107,6 +108,7 @@ describe('external-api/contracts', () => {
                 seq: 1,
                 created_at: 123,
                 ts: Date.now(),
+                format: 'original',
                 provider: 'chatgpt',
                 conversation_id: 'conv-1',
                 payload: buildConversation(),
@@ -129,6 +131,7 @@ describe('external-api/contracts', () => {
                 seq: 2,
                 created_at: 456,
                 ts: Date.now(),
+                format: 'original',
                 provider: 'chatgpt',
                 conversation_id: 'conv-1',
                 payload: buildConversation(),
@@ -152,6 +155,7 @@ describe('external-api/contracts', () => {
                 seq: 1,
                 created_at: 123,
                 ts: Date.now(),
+                format: 'original',
                 provider: 'chatgpt',
                 conversation_id: 'conv-1',
                 payload: { nope: true },
@@ -174,6 +178,7 @@ describe('external-api/contracts', () => {
                 seq: 1.5,
                 created_at: 123,
                 ts: Date.now(),
+                format: 'original',
                 provider: 'chatgpt',
                 conversation_id: 'conv-1',
                 payload: buildConversation(),
@@ -194,6 +199,7 @@ describe('external-api/contracts', () => {
                     type: 'conversation.ready',
                     event_id: 'evt-bad-ts',
                     ts: 123.45,
+                    format: 'original',
                     provider: 'chatgpt',
                     conversation_id: 'conv-1',
                     payload: buildConversation(),
@@ -225,6 +231,7 @@ describe('external-api/contracts', () => {
                     type: 'conversation.ready',
                     event_id: 'evt-1',
                     ts: Date.now(),
+                    format: 'original',
                     provider: 'chatgpt',
                     conversation_id: 'conv-1',
                     payload: buildConversation(),
@@ -249,6 +256,58 @@ describe('external-api/contracts', () => {
         ).toBeFalse();
     });
 
+    it('should accept common-formatted conversation event envelope', () => {
+        expect(
+            isExternalConversationEvent({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.ready',
+                event_id: 'evt-common-1',
+                seq: 3,
+                created_at: 789,
+                ts: Date.now(),
+                format: 'common',
+                provider: 'chatgpt',
+                conversation_id: 'conv-1',
+                payload: {
+                    format: 'common',
+                    llm: 'ChatGPT',
+                    prompt: 'User prompt',
+                    response: 'Assistant response',
+                    reasoning: [],
+                },
+                capture_meta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                content_hash: 'hash:common',
+            }),
+        ).toBeTrue();
+    });
+
+    it('should reject common-formatted event with original payload shape', () => {
+        expect(
+            isExternalConversationEvent({
+                api: EXTERNAL_API_VERSION,
+                type: 'conversation.ready',
+                event_id: 'evt-common-invalid',
+                seq: 4,
+                created_at: 790,
+                ts: Date.now(),
+                format: 'common',
+                provider: 'chatgpt',
+                conversation_id: 'conv-1',
+                payload: buildConversation(),
+                capture_meta: {
+                    captureSource: 'canonical_api',
+                    fidelity: 'high',
+                    completeness: 'complete',
+                },
+                content_hash: 'hash:common-invalid',
+            }),
+        ).toBeFalse();
+    });
+
     it('should validate subscribe and commit control messages', () => {
         expect(
             isExternalSubscribeMessage({
@@ -256,6 +315,7 @@ describe('external-api/contracts', () => {
                 cursor: 0,
                 consumer_role: 'delivery',
                 max_batch: 100,
+                payload_format: 'common',
             }),
         ).toBeTrue();
         expect(
@@ -281,6 +341,14 @@ describe('external-api/contracts', () => {
         ).toBeFalse();
         expect(isExternalSubscribeMessage({ type: 'subscribe', cursor: 0, consumer_role: '' })).toBeFalse();
         expect(isExternalSubscribeMessage({ type: 'subscribe', cursor: 0, consumer_role: 'invalid_role' })).toBeFalse();
+        expect(
+            isExternalSubscribeMessage({
+                type: 'subscribe',
+                cursor: 0,
+                consumer_role: 'delivery',
+                payload_format: 'both',
+            }),
+        ).toBeFalse();
 
         expect(isExternalCommitMessage({ type: 'commit', up_to_seq: -1 })).toBeFalse();
         expect(isExternalCommitMessage({ type: 'commit', up_to_seq: 3.14 })).toBeFalse();

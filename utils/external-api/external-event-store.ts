@@ -1,5 +1,6 @@
 import type { ExternalEventStore } from '@/utils/external-api/background-hub-types';
-import type { ExternalConversationEvent, ExternalInboundConversationEvent } from '@/utils/external-api/contracts';
+import type { ExternalInboundConversationEvent, ExternalStoredConversationEvent } from '@/utils/external-api/contracts';
+import { EXPORT_FORMAT } from '@/utils/settings';
 
 type ExternalMetaRecord<T = unknown> = {
     key: string;
@@ -21,7 +22,7 @@ export const createInMemoryExternalEventStore = (deps?: {
     const keepCommittedDiagnostics = deps?.keepCommittedDiagnostics ?? DEFAULT_KEEP_COMMITTED_DIAGNOSTIC_EVENTS;
     const committedTtlMs = deps?.committedTtlMs ?? DEFAULT_COMMITTED_TTL_MS;
 
-    const events: ExternalConversationEvent[] = [];
+    const events: ExternalStoredConversationEvent[] = [];
     let nextSeq = 1;
     let deliveryConsumerId: string | null = null;
     const committedByConsumer = new Map<string, number>();
@@ -45,9 +46,10 @@ export const createInMemoryExternalEventStore = (deps?: {
             }
             const created = {
                 ...event,
+                format: EXPORT_FORMAT.ORIGINAL,
                 seq: nextSeq,
                 created_at: now(),
-            } satisfies ExternalConversationEvent;
+            } satisfies ExternalStoredConversationEvent;
             nextSeq += 1;
             events.push(created);
             return created;
@@ -257,7 +259,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
         const store = transaction.objectStore(IDB_EVENTS_STORE);
         const cursor = await requestAsPromise(store.openCursor(null, 'prev'));
         await transactionComplete(transaction);
-        return (cursor?.value as ExternalConversationEvent | undefined)?.seq ?? 0;
+        return (cursor?.value as ExternalStoredConversationEvent | undefined)?.seq ?? 0;
     };
 
     const getCommittedCursor = async () => {
@@ -281,7 +283,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             const eventIdIndex = eventsStore.index('by_event_id');
 
             const existing = (await requestAsPromise(eventIdIndex.get(event.event_id))) as
-                | ExternalConversationEvent
+                | ExternalStoredConversationEvent
                 | undefined;
             if (existing) {
                 await transactionComplete(transaction);
@@ -294,9 +296,10 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             const nextSeq = coerceNumber(nextSeqRecord?.value, 1);
             const created = {
                 ...event,
+                format: EXPORT_FORMAT.ORIGINAL,
                 seq: nextSeq,
                 created_at: now(),
-            } satisfies ExternalConversationEvent;
+            } satisfies ExternalStoredConversationEvent;
 
             try {
                 eventsStore.put(created);
@@ -308,7 +311,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
                     const dedupeTx = db.transaction(IDB_EVENTS_STORE, 'readonly');
                     const dedupeIndex = dedupeTx.objectStore(IDB_EVENTS_STORE).index('by_event_id');
                     const dedupeExisting = (await requestAsPromise(dedupeIndex.get(event.event_id))) as
-                        | ExternalConversationEvent
+                        | ExternalStoredConversationEvent
                         | undefined;
                     await transactionComplete(dedupeTx);
                     if (dedupeExisting) {
@@ -324,7 +327,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             const transaction = db.transaction(IDB_EVENTS_STORE, 'readonly');
             const store = transaction.objectStore(IDB_EVENTS_STORE);
             const range = IDBKeyRange.lowerBound(Math.max(0, Math.floor(cursor)) + 1);
-            const events: ExternalConversationEvent[] = [];
+            const events: ExternalStoredConversationEvent[] = [];
 
             await new Promise<void>((resolve, reject) => {
                 const request = store.openCursor(range, 'next');
@@ -335,7 +338,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
                         resolve();
                         return;
                     }
-                    events.push(cursorResult.value as ExternalConversationEvent);
+                    events.push(cursorResult.value as ExternalStoredConversationEvent);
                     cursorResult.continue();
                 };
             });
@@ -350,10 +353,10 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             if (typeof tabId !== 'number') {
                 const cursor = await requestAsPromise(store.openCursor(null, 'prev'));
                 await transactionComplete(transaction);
-                return (cursor?.value as ExternalConversationEvent | undefined) ?? null;
+                return (cursor?.value as ExternalStoredConversationEvent | undefined) ?? null;
             }
 
-            let latest: ExternalConversationEvent | null = null;
+            let latest: ExternalStoredConversationEvent | null = null;
             await new Promise<void>((resolve, reject) => {
                 const request = store.openCursor(null, 'prev');
                 request.onerror = () => reject(request.error ?? new Error('failed to iterate latest by tab'));
@@ -363,7 +366,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
                         resolve();
                         return;
                     }
-                    const value = cursor.value as ExternalConversationEvent;
+                    const value = cursor.value as ExternalStoredConversationEvent;
                     if (value.tab_id === tabId) {
                         latest = value;
                         resolve();
@@ -381,7 +384,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             const index = transaction.objectStore(IDB_EVENTS_STORE).index('by_conversation_id');
             const cursor = await requestAsPromise(index.openCursor(IDBKeyRange.only(conversationId), 'prev'));
             await transactionComplete(transaction);
-            return (cursor?.value as ExternalConversationEvent | undefined) ?? null;
+            return (cursor?.value as ExternalStoredConversationEvent | undefined) ?? null;
         },
         ensureDeliveryConsumer: async (consumerId) => {
             const db = await getDb();
@@ -427,7 +430,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             }
 
             const headCursor = await requestAsPromise(eventsStore.openCursor(null, 'prev'));
-            const headSeq = (headCursor?.value as ExternalConversationEvent | undefined)?.seq ?? 0;
+            const headSeq = (headCursor?.value as ExternalStoredConversationEvent | undefined)?.seq ?? 0;
             const bounded = Math.max(0, Math.min(Math.floor(upToSeq), headSeq));
             const existing = committedMap[consumerId] ?? 0;
             const committedSeq = Math.max(existing, bounded);
@@ -461,7 +464,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
                         resolve();
                         return;
                     }
-                    const event = cursor.value as ExternalConversationEvent;
+                    const event = cursor.value as ExternalStoredConversationEvent;
                     if (event.seq > committedUpToSeq) {
                         cursor.continue();
                         return;

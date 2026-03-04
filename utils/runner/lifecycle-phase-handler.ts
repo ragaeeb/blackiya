@@ -34,6 +34,7 @@ export type LifecyclePhaseHandlerDeps = {
     shouldIngestAsCanonicalSample: (meta: ExportMeta) => boolean;
     scheduleCanonicalStabilizationRetry: (conversationId: string, attemptId: string) => void;
     runStreamDoneProbe: (conversationId: string, attemptId: string) => void;
+    isPlatformGenerating: () => boolean;
 };
 
 export const applyActiveLifecyclePhase = (
@@ -81,6 +82,15 @@ export const applyLifecyclePhaseForConversation = (
         return;
     }
     if (phase === 'completed') {
+        if (platform === 'ChatGPT' && deps.isPlatformGenerating()) {
+            logger.info('Lifecycle completed ignored while platform still generating', {
+                platform,
+                attemptId,
+                conversationId,
+                source,
+            });
+            return;
+        }
         deps.setLifecycleAttemptId(attemptId);
         deps.setLifecycleConversationId(conversationId);
         deps.setLifecycleState('completed', conversationId);

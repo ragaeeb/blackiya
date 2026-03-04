@@ -133,6 +133,7 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
         runStreamDoneProbe: (cid, aid) => {
             void deps.runStreamDoneProbe(cid, aid);
         },
+        isPlatformGenerating: deps.isPlatformGenerating,
     });
 
     const applyLifecyclePhaseForConversation = (

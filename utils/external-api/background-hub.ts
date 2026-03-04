@@ -5,6 +5,7 @@ import {
     clampBatchSize,
     DEFAULT_BATCH_SIZE,
     DEFAULT_WAKE_THROTTLE_MS,
+    formatStoredEventForDelivery,
     MAX_BATCH_SIZE,
     toFormat,
 } from '@/utils/external-api/background-hub-helpers';
@@ -15,13 +16,14 @@ import type {
 } from '@/utils/external-api/background-hub-types';
 import type {
     ExternalCommitMessage,
-    ExternalConversationEvent,
     ExternalHealthSuccessResponse,
     ExternalInboundConversationEvent,
     ExternalPortInboundMessage,
     ExternalPortOutboundMessage,
+    ExternalPullFormat,
     ExternalReplayCompleteMessage,
     ExternalResponse,
+    ExternalStoredConversationEvent,
     ExternalSubscribeMessage,
     ExternalWakeMessage,
 } from '@/utils/external-api/contracts';
@@ -65,6 +67,7 @@ type SubscriberState = {
     subscribed: boolean;
     cursor: number;
     maxBatch: number;
+    payloadFormat: ExternalPullFormat;
     replayInFlight: boolean;
     lastDeliveredSeq: number;
 };
@@ -165,7 +168,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         await wakeGate;
     };
 
-    const broadcastLiveEvent = async (event: ExternalConversationEvent): Promise<ExternalEventDeliveryStats> => {
+    const broadcastLiveEvent = async (event: ExternalStoredConversationEvent): Promise<ExternalEventDeliveryStats> => {
         if (subscribers.size === 0) {
             return {
                 subscriberCount: 0,
@@ -184,8 +187,9 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             if (!state.subscribed) {
                 continue;
             }
+            const eventForSubscriber = formatStoredEventForDelivery(event, state.payloadFormat);
             try {
-                port.postMessage(event satisfies ExternalPortOutboundMessage);
+                port.postMessage(eventForSubscriber satisfies ExternalPortOutboundMessage);
                 state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, event.seq);
                 delivered += 1;
                 if (designatedConsumerId && state.senderExtensionId === designatedConsumerId) {
@@ -221,10 +225,11 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         };
     };
 
-    const postReplayBatch = (port: ExternalPortLike, batch: ReplayBatch) => {
+    const postReplayBatch = (port: ExternalPortLike, batch: ReplayBatch, payloadFormat: ExternalPullFormat) => {
+        const events = batch.events.map((event) => formatStoredEventForDelivery(event, payloadFormat));
         port.postMessage({
             type: 'events.batch',
-            events: batch.events,
+            events,
             head_seq: batch.headSeq,
             batch_start: batch.batchStart,
             batch_end: batch.batchEnd,
@@ -235,14 +240,19 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
     };
 
-    const streamReplayBatches = async (port: ExternalPortLike, replayCursor: number, replayBatchSize: number) => {
+    const streamReplayBatches = async (
+        port: ExternalPortLike,
+        replayCursor: number,
+        replayBatchSize: number,
+        payloadFormat: ExternalPullFormat,
+    ) => {
         let cursor = replayCursor;
         while (subscribers.has(port)) {
             const batch = await readReplayBatch(cursor, replayBatchSize);
             if (!batch) {
                 break;
             }
-            postReplayBatch(port, batch);
+            postReplayBatch(port, batch, payloadFormat);
             cursor = batch.batchEnd;
         }
     };
@@ -270,7 +280,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         const replayBatchSize = Math.min(state.maxBatch, maxReplayBatchSize);
 
         try {
-            await streamReplayBatches(port, replayCursor, replayBatchSize);
+            await streamReplayBatches(port, replayCursor, replayBatchSize, state.payloadFormat);
             await postReplayCompleteIfConnected(port, replayCursor);
         } catch {
             removeSubscriber(port);
@@ -335,6 +345,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         state.subscribed = true;
         state.cursor = nextCursor;
         state.maxBatch = nextMaxBatch;
+        state.payloadFormat = toFormat(message.payload_format);
         state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, nextCursor);
 
         await replaySinceCursor(port, message);
@@ -399,6 +410,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             subscribed: false,
             cursor: 0,
             maxBatch: defaultBatchSize,
+            payloadFormat: EXPORT_FORMAT.ORIGINAL,
             replayInFlight: false,
             lastDeliveredSeq: 0,
         };
@@ -455,6 +467,36 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         return deliveryStats;
     };
 
+    const buildGetSinceResponse = async (
+        cursor: number,
+        limitCandidate: number | undefined,
+        formatCandidate: ExternalPullFormat | undefined,
+    ): Promise<ExternalResponse> => {
+        const limit = clampBatchSize(limitCandidate, defaultBatchSize);
+        const format = toFormat(formatCandidate);
+        const storedEvents = await eventStore.getSince(Math.max(0, Math.floor(cursor)), limit);
+        if (format === EXPORT_FORMAT.COMMON) {
+            const events = storedEvents.map((event) => formatStoredEventForDelivery(event, EXPORT_FORMAT.COMMON));
+            return {
+                ok: true,
+                api: EXTERNAL_API_VERSION,
+                ts: now(),
+                format: EXPORT_FORMAT.COMMON,
+                head_seq: await eventStore.getHeadSeq(),
+                events,
+            };
+        }
+        const events = storedEvents.map((event) => formatStoredEventForDelivery(event, EXPORT_FORMAT.ORIGINAL));
+        return {
+            ok: true,
+            api: EXTERNAL_API_VERSION,
+            ts: now(),
+            format: EXPORT_FORMAT.ORIGINAL,
+            head_seq: await eventStore.getHeadSeq(),
+            events,
+        };
+    };
+
     const handleExternalRequest = async (request: unknown): Promise<ExternalResponse> => {
         await ensureHydrated();
         if (!isExternalRequest(request)) {
@@ -471,16 +513,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
 
         if (request.type === 'events.getSince') {
-            const limit = clampBatchSize(request.limit, defaultBatchSize);
-            const events = await eventStore.getSince(Math.max(0, Math.floor(request.cursor)), limit);
-            return {
-                ok: true,
-                api: EXTERNAL_API_VERSION,
-                ts: now(),
-                format: EXPORT_FORMAT.ORIGINAL,
-                head_seq: await eventStore.getHeadSeq(),
-                events,
-            };
+            return buildGetSinceResponse(request.cursor, request.limit, request.format);
         }
 
         if (request.type === 'conversation.getLatest') {

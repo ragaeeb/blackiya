@@ -187,9 +187,17 @@ const port = chrome.runtime.connect(BLACKIYA_EXTENSION_ID, {
     name: 'blackiya.events.v1',
 });
 
+port.postMessage({
+    type: 'subscribe',
+    cursor: 0,
+    consumer_role: 'delivery',
+    payload_format: 'common', // 'original' | 'common'
+});
+
 port.onMessage.addListener((event) => {
     // event.type: 'conversation.ready' | 'conversation.updated'
-    // event.payload: canonical ConversationData
+    // event.format: 'original' | 'common'
+    // event.payload: ConversationData ('original') or CommonConversationExport ('common')
     console.log(event.type, event.conversation_id, event.provider);
 });
 ```
@@ -208,6 +216,14 @@ const byId = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
     type: 'conversation.getById',
     conversation_id: '...',
     format: 'original',
+});
+
+const since = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {
+    api: 'blackiya.events.v1',
+    type: 'events.getSince',
+    cursor: 42,
+    limit: 100,
+    format: 'common', // 'original' | 'common'
 });
 
 const health = await chrome.runtime.sendMessage(BLACKIYA_EXTENSION_ID, {

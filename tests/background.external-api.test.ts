@@ -255,6 +255,75 @@ describe('background external api hub', () => {
         }
     });
 
+    it('should return common-formatted events for events.getSince when requested', async () => {
+        const hub = createExternalApiHub({
+            eventStore: createInMemoryExternalEventStore(),
+            now: () => now,
+        });
+
+        await hub.ingestEvent(buildInboundEvent('conv-1'), 1);
+
+        const response = await hub.handleExternalRequest({
+            api: EXTERNAL_API_VERSION,
+            type: 'events.getSince',
+            cursor: 0,
+            limit: 1,
+            format: 'common',
+        });
+
+        expect(response).toMatchObject({ ok: true, head_seq: 1, format: 'common' });
+        if (response.ok && 'events' in response) {
+            expect(response.events).toHaveLength(1);
+            expect(response.events[0]).toMatchObject({
+                seq: 1,
+                conversation_id: 'conv-1',
+                format: 'common',
+                payload: expect.objectContaining({ format: 'common' }),
+            });
+        }
+    });
+
+    it('should honor subscriber payload_format for replay and live push delivery', async () => {
+        const hub = createExternalApiHub({
+            eventStore: createInMemoryExternalEventStore(),
+            now: () => now,
+        });
+
+        await hub.ingestEvent(buildInboundEvent('conv-1'), 1);
+
+        const port = createFakePort(EXTERNAL_API_VERSION);
+        hub.addSubscriber(port, { senderExtensionId: 'extendo-id' });
+        port.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery', payload_format: 'common' });
+        await flushAsyncTasks();
+
+        expect(port.postMessage).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                type: 'events.batch',
+                events: [
+                    expect.objectContaining({
+                        seq: 1,
+                        conversation_id: 'conv-1',
+                        format: 'common',
+                        payload: expect.objectContaining({ format: 'common' }),
+                    }),
+                ],
+            }),
+        );
+
+        await hub.ingestEvent(buildInboundEvent('conv-2'), 2);
+
+        expect(port.postMessage).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                type: 'conversation.ready',
+                seq: 2,
+                conversation_id: 'conv-2',
+                format: 'common',
+                payload: expect.objectContaining({ format: 'common' }),
+            }),
+        );
+    });
+
     it('should prune committed ranges while retaining uncommitted events', async () => {
         const hub = createExternalApiHub({
             eventStore: createInMemoryExternalEventStore(),

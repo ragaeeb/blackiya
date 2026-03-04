@@ -104,18 +104,19 @@ Runner emits canonical-ready conversation events to background via:
 Background owns the public API surface and provides:
 1. Push stream (`runtime.onConnectExternal`) on port `blackiya.events.v1`
    - Event types: `conversation.ready`, `conversation.updated`
-   - Event envelope includes durable fields: `event_id`, `seq`, `created_at`
+   - Event envelope includes durable fields: `event_id`, `seq`, `created_at`, `format`
    - Control messages from consumer: `subscribe`, `commit`
+   - `subscribe` supports `payload_format: "original" | "common"` (no multi-format mode)
    - Control messages from producer: `events.batch`, `replay.complete`
 2. Pull API (`runtime.onMessageExternal`)
    - `health.ping`
    - `conversation.getLatest` (`format: "original" | "common"`)
    - `conversation.getById` (`format: "original" | "common"`)
-   - `events.getSince` (`cursor`, `limit`) for cursor replay fallback
+   - `events.getSince` (`cursor`, `limit`, `format`) for cursor replay fallback
 
 Notes:
 - Background is a durable append-first producer backed by IndexedDB (`externalEvents`, `externalMeta`).
-- On `subscribe(cursor)`, background replays `seq > cursor` in ordered batches, then emits `replay.complete`.
+- On `subscribe(cursor)`, background replays `seq > cursor` in ordered batches with the subscriber's requested payload format, then emits `replay.complete`.
 - Commit authority is restricted to the designated delivery consumer (first `consumer_role='delivery'` subscriber); non-designated consumers can read but cannot mutate commit cursor.
 - Pruning only removes committed ranges per retention policy; uncommitted backlog is never pruned.
 - When new events append with no online delivery subscriber, background emits rate-limited wake messages (`BLACKIYA_WAKE`) to the designated consumer extension id.
@@ -297,6 +298,7 @@ Source of truth priority:
 
 The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
 For the same attempt/conversation, regressive lifecycle transitions are rejected (`completed` remains terminal).
+For ChatGPT, `BLACKIYA_RESPONSE_LIFECYCLE phase=completed` is ignored while `adapter.isPlatformGenerating()` is still true; terminal transition waits for a non-generating signal path (typically `BLACKIYA_RESPONSE_FINISHED`) to avoid premature `Completed` UI state during reasoning.
 When lifecycle signals arrive before conversation ID resolution (common for Gemini XHR and Grok `/conversations/new`), the runner caches them as pending by attempt and replays once `BLACKIYA_CONVERSATION_ID_RESOLVED` is received. **The UI badge is updated immediately** for pending `prompt-sent` and `streaming` signals — callers see the lifecycle phase even before the conversation ID resolves.
 For Grok specifically, the original lifecycle attempt may be disposed by SPA navigation before the conversation ID resolves. When canonical capture data arrives on a new attempt with ready data, `shouldPromoteGrokFromCanonicalCapture` promotes the lifecycle to `completed` — this promotion accepts `idle`, `prompt-sent`, and `streaming` states.
 When Grok SPA navigates from a null conversation ID to the new conversation URL (e.g., `/` → `/c/<id>`), the runner **preserves the active lifecycle state** (`prompt-sent`/`streaming`) via `isLifecycleActiveGeneration()` guard. This guard protects three code paths that would otherwise reset lifecycle to `idle`:

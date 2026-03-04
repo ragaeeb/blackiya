@@ -1,4 +1,8 @@
-import type { ExternalConversationEvent, ExternalInboundConversationEvent } from '@/utils/external-api/contracts';
+import type {
+    ExternalConversationEvent,
+    ExternalInboundConversationEvent,
+    ExternalStoredConversationEvent,
+} from '@/utils/external-api/contracts';
 
 export type ExternalPortLike = {
     name: string;
@@ -36,11 +40,11 @@ export type ExternalEventDeliveryStats = {
 
 export type ExternalEventStore = {
     init: () => Promise<void>;
-    append: (event: ExternalInboundConversationEvent) => Promise<ExternalConversationEvent>;
-    getSince: (cursor: number, limit: number) => Promise<ExternalConversationEvent[]>;
+    append: (event: ExternalInboundConversationEvent) => Promise<ExternalStoredConversationEvent>;
+    getSince: (cursor: number, limit: number) => Promise<ExternalStoredConversationEvent[]>;
     getHeadSeq: () => Promise<number>;
-    getLatest: (tabId?: number) => Promise<ExternalConversationEvent | null>;
-    getByConversationId: (conversationId: string) => Promise<ExternalConversationEvent | null>;
+    getLatest: (tabId?: number) => Promise<ExternalStoredConversationEvent | null>;
+    getByConversationId: (conversationId: string) => Promise<ExternalStoredConversationEvent | null>;
     ensureDeliveryConsumer: (consumerId: string) => Promise<{ designatedConsumerId: string; authorized: boolean }>;
     getDeliveryConsumerId: () => Promise<string | null>;
     commit: (consumerId: string, upToSeq: number) => Promise<{ committedSeq: number; authorized: boolean }>;

@@ -344,8 +344,11 @@ export const scheduleButtonRefresh = (
 };
 
 const resetButtonStateForNoConversation = (deps: ButtonStateManagerDeps) => {
-    deps.setCurrentConversation(null);
-    if (!deps.isLifecycleActiveGeneration() && deps.getLifecycleState() !== 'idle') {
+    const hasActiveConversationBinding = !!deps.getCurrentConversationId();
+    if (!hasActiveConversationBinding) {
+        deps.setCurrentConversation(null);
+    }
+    if (!hasActiveConversationBinding && !deps.isLifecycleActiveGeneration() && deps.getLifecycleState() !== 'idle') {
         deps.setLifecycleState('idle');
     }
     deps.buttonManager.setSaveButtonMode('default');
@@ -379,8 +382,15 @@ export const injectSaveButton = (deps: ButtonStateManagerDeps, lastButtonStateLo
 
     if (!conversationId) {
         logger.info('No conversation ID yet; showing calibration only');
-        deps.setCurrentConversation(null);
-        if (!deps.isLifecycleActiveGeneration() && deps.getLifecycleState() !== 'idle') {
+        const hasActiveConversationBinding = !!deps.getCurrentConversationId();
+        if (!hasActiveConversationBinding) {
+            deps.setCurrentConversation(null);
+        }
+        if (
+            !hasActiveConversationBinding &&
+            !deps.isLifecycleActiveGeneration() &&
+            deps.getLifecycleState() !== 'idle'
+        ) {
             deps.setLifecycleState('idle');
         }
         deps.buttonManager.setSaveButtonMode('default');

@@ -228,6 +228,7 @@ describe('button-state-manager', () => {
         });
 
         it('should clear UI if no conversation is found in URL and no arg provided', () => {
+            deps.getCurrentConversationId = () => null;
             mockAdapter.extractConversationId = () => null;
             refreshButtonState(undefined, deps, lastButtonStateLog);
             expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
@@ -311,6 +312,18 @@ describe('button-state-manager', () => {
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.ingestSfeCanonicalSample).toHaveBeenCalledWith({ conversation_id: '123' }, 'attempt-1');
         });
+
+        it('should keep existing lifecycle/conversation binding when URL conversation ID is temporarily missing', () => {
+            deps.getLifecycleState = () => 'completed';
+            deps.getCurrentConversationId = () => '123';
+            mockAdapter.extractConversationId = () => null;
+
+            refreshButtonState(undefined, deps, lastButtonStateLog);
+
+            expect(deps.setCurrentConversation).not.toHaveBeenCalledWith(null);
+            expect(deps.setLifecycleState).not.toHaveBeenCalledWith('idle');
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
+        });
     });
 
     describe('scheduleButtonRefresh', () => {
@@ -359,13 +372,26 @@ describe('button-state-manager', () => {
             expect(logCalls.info[0].message).toContain('target missing');
         });
 
-        it('should handle no conversation ID correctly', () => {
+        it('should handle no conversation ID correctly when no active conversation is bound', () => {
+            deps.getCurrentConversationId = () => null;
             mockAdapter.extractConversationId = () => null;
             injectSaveButton(deps, lastButtonStateLog);
             expect(deps.buttonManager.inject).toHaveBeenCalled();
             expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
             expect(logCalls.info).toHaveLength(1);
+        });
+
+        it('should not reset lifecycle to idle when conversation ID is temporarily missing but binding exists', () => {
+            deps.getLifecycleState = () => 'completed';
+            deps.getCurrentConversationId = () => '123';
+            mockAdapter.extractConversationId = () => null;
+
+            injectSaveButton(deps, lastButtonStateLog);
+
+            expect(deps.setCurrentConversation).not.toHaveBeenCalledWith(null);
+            expect(deps.setLifecycleState).not.toHaveBeenCalledWith('idle');
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
         });
 
         it('should handle injection successfully if conversation present', () => {

@@ -14,25 +14,42 @@ export type ExternalProvider = 'chatgpt' | 'gemini' | 'grok' | 'unknown';
 export type ExternalPushEventType = (typeof EXTERNAL_PUSH_EVENT_TYPES)[number];
 export type ExternalPullFormat = ExportFormat;
 
-export type ExternalConversationEvent = {
+type ExternalConversationEventBase = {
     api: ExternalApiVersion;
     type: ExternalPushEventType;
     event_id: string;
     seq: number;
     created_at: number;
     ts: number;
+    format: ExternalPullFormat;
     provider: ExternalProvider;
     tab_id?: number;
     conversation_id: string;
-    payload: ConversationData;
     attempt_id?: string | null;
     capture_meta: ExportMeta;
     content_hash: string | null;
 };
 
-export type ExternalInboundConversationEvent = Omit<ExternalConversationEvent, 'seq' | 'created_at'> & {
+export type ExternalOriginalConversationEvent = ExternalConversationEventBase & {
+    format: typeof EXPORT_FORMAT.ORIGINAL;
+    payload: ConversationData;
+};
+
+export type ExternalCommonConversationEvent = ExternalConversationEventBase & {
+    format: typeof EXPORT_FORMAT.COMMON;
+    payload: CommonConversationExport;
+};
+
+export type ExternalConversationEvent = ExternalOriginalConversationEvent | ExternalCommonConversationEvent;
+export type ExternalStoredConversationEvent = ExternalOriginalConversationEvent;
+
+export type ExternalInboundConversationEvent = Omit<
+    ExternalOriginalConversationEvent,
+    'seq' | 'created_at' | 'format'
+> & {
     seq?: number;
     created_at?: number;
+    format?: typeof EXPORT_FORMAT.ORIGINAL;
 };
 
 export type ExternalGetLatestRequest = {
@@ -54,6 +71,7 @@ export type ExternalGetSinceRequest = {
     type: 'events.getSince';
     cursor: number;
     limit?: number;
+    format?: ExternalPullFormat;
 };
 
 export type ExternalHealthPingRequest = {
@@ -96,7 +114,15 @@ export type ExternalConversationSuccessResponse =
           ts: number;
           format: typeof EXPORT_FORMAT.ORIGINAL;
           head_seq: number;
-          events: ExternalConversationEvent[];
+          events: ExternalOriginalConversationEvent[];
+      }
+    | {
+          ok: true;
+          api: ExternalApiVersion;
+          ts: number;
+          format: typeof EXPORT_FORMAT.COMMON;
+          head_seq: number;
+          events: ExternalCommonConversationEvent[];
       };
 
 export type ExternalSuccessResponse = ExternalHealthSuccessResponse | ExternalConversationSuccessResponse;
@@ -121,6 +147,7 @@ export type ExternalSubscribeMessage = {
     cursor: number;
     consumer_role: 'delivery';
     max_batch?: number;
+    payload_format?: ExternalPullFormat;
 };
 
 export type ExternalCommitMessage = {
@@ -206,6 +233,24 @@ export const isConversationDataLike = (value: unknown): value is ConversationDat
     );
 };
 
+const isCommonConversationExportLike = (value: unknown): value is CommonConversationExport => {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return (
+        value.format === EXPORT_FORMAT.COMMON &&
+        hasString(value.llm) &&
+        (value.model === undefined || hasString(value.model)) &&
+        (value.title === undefined || hasString(value.title)) &&
+        (value.conversation_id === undefined || hasString(value.conversation_id)) &&
+        (value.created_at === undefined || hasString(value.created_at)) &&
+        (value.updated_at === undefined || hasString(value.updated_at)) &&
+        typeof value.prompt === 'string' &&
+        typeof value.response === 'string' &&
+        isStringArray(value.reasoning)
+    );
+};
+
 export const isExternalConversationEvent = (value: unknown): value is ExternalConversationEvent => {
     if (!isRecord(value)) {
         return false;
@@ -217,10 +262,12 @@ export const isExternalConversationEvent = (value: unknown): value is ExternalCo
         isNonNegativeInteger(value.seq) &&
         isNonNegativeInteger(value.created_at) &&
         isNonNegativeInteger(value.ts) &&
+        isExternalPullFormat(value.format) &&
         isExternalProvider(value.provider) &&
         (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         hasString(value.conversation_id) &&
-        isConversationDataLike(value.payload) &&
+        ((value.format === EXPORT_FORMAT.ORIGINAL && isConversationDataLike(value.payload)) ||
+            (value.format === EXPORT_FORMAT.COMMON && isCommonConversationExportLike(value.payload))) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
         isExportMeta(value.capture_meta) &&
         isNullableString(value.content_hash)
@@ -238,6 +285,7 @@ export const isExternalInboundConversationEvent = (value: unknown): value is Ext
         (value.seq === undefined || isNonNegativeInteger(value.seq)) &&
         (value.created_at === undefined || isNonNegativeInteger(value.created_at)) &&
         isNonNegativeInteger(value.ts) &&
+        (value.format === undefined || value.format === EXPORT_FORMAT.ORIGINAL) &&
         isExternalProvider(value.provider) &&
         (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         hasString(value.conversation_id) &&
@@ -276,7 +324,11 @@ const isExternalGetSinceRequest = (value: Record<string, unknown>): value is Ext
     if (value.type !== 'events.getSince') {
         return false;
     }
-    return isNonNegativeInteger(value.cursor) && (value.limit === undefined || isPositiveInteger(value.limit));
+    return (
+        isNonNegativeInteger(value.cursor) &&
+        (value.limit === undefined || isPositiveInteger(value.limit)) &&
+        (value.format === undefined || isExternalPullFormat(value.format))
+    );
 };
 
 const isExternalHealthPingRequest = (value: Record<string, unknown>): value is ExternalHealthPingRequest =>
@@ -301,7 +353,8 @@ export const isExternalSubscribeMessage = (value: unknown): value is ExternalSub
     return (
         isNonNegativeInteger(value.cursor) &&
         value.consumer_role === 'delivery' &&
-        (value.max_batch === undefined || isPositiveInteger(value.max_batch))
+        (value.max_batch === undefined || isPositiveInteger(value.max_batch)) &&
+        (value.payload_format === undefined || isExternalPullFormat(value.payload_format))
     );
 };
 

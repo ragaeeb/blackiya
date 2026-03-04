@@ -611,6 +611,68 @@ describe('Platform Runner', () => {
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 
+    it('should ignore ChatGPT completed lifecycle signals while the platform is still generating', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            extractConversationId: () => '123',
+            isPlatformGenerating: () => true,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                phase: 'prompt-sent',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        currentAdapterMock.isPlatformGenerating = () => false;
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
     it('should update lifecycle badge but keep save disabled for lifecycle messages without conversation context', async () => {
         runPlatform();
         await new Promise((resolve) => setTimeout(resolve, 80));
