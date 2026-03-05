@@ -1,3 +1,10 @@
+# [2.6.0](https://github.com/ragaeeb/blackiya/compare/v2.5.0...v2.6.0) (2026-03-05)
+
+
+### Features
+
+* **v2.6:** Add Bulk Chat Export, descope public API ([#42](https://github.com/ragaeeb/blackiya/issues/42)) ([bea7227](https://github.com/ragaeeb/blackiya/commit/bea7227bff50ddcffd50983aa9c7b9da013c8210))
+
 # [2.5.0](https://github.com/ragaeeb/blackiya/compare/v2.4.2...v2.5.0) (2026-02-27)
 
 
