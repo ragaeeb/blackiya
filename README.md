@@ -42,7 +42,7 @@ See related docs:
 
 ```bash
 # Development
-bun run dev              # Start dev server with HMR
+bun run dev              # Start dev server with HMR (animal build names enabled)
 
 # Code Quality
 bun run check            # Lint and format code (auto-fix)
@@ -50,7 +50,7 @@ bun run lint             # Run Biome linter
 bun run format           # Format code with Biome
 
 # Building
-bun run build            # Build for production
+bun run build            # Build for production (stable extension name: "Blackiya")
 bun run zip              # Create distributable ZIP file
 
 # Testing
@@ -246,6 +246,10 @@ bun run zip
 ```
 
 The ZIP file will be in `dist/` directory.
+
+Build naming behavior:
+- `bun run dev` uses a per-build animal codename in the extension display name (for easy stale-build detection).
+- `bun run build` uses the stable production display name (`Blackiya`) without animal codenames.
 
 ## 📝 Usage
 

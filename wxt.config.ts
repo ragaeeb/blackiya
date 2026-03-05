@@ -46,11 +46,13 @@ const resolveCommitShortSha = () => {
 
 const BUILD_COMMIT_SHA = resolveCommitShortSha();
 const BUILD_ID = `${BUILD_COMMIT_SHA}-${Date.now().toString(36)}`;
+const BUILD_PROFILE = process.env.BLACKIYA_BUILD_PROFILE === 'dev' ? 'dev' : 'prod';
+const IS_DEV_BUILD = BUILD_PROFILE === 'dev';
 const codenameIndex =
     BUILD_ID.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % ALLITERATION_CODENAMES.length;
 const BUILD_CODENAME = ALLITERATION_CODENAMES[codenameIndex] ?? 'Mellow Marmot';
-const BUILD_LABEL = `${BUILD_CODENAME} (${BUILD_ID})`;
-const MANIFEST_NAME = `Blackiya [${BUILD_CODENAME} ${BUILD_COMMIT_SHA}]`;
+const BUILD_LABEL = IS_DEV_BUILD ? `${BUILD_CODENAME} (${BUILD_ID})` : `Production (${BUILD_COMMIT_SHA})`;
+const MANIFEST_NAME = IS_DEV_BUILD ? `Blackiya [${BUILD_CODENAME} ${BUILD_COMMIT_SHA}]` : 'Blackiya';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
