@@ -70,7 +70,8 @@ describe('warm-fetch', () => {
             deps.getConversation.mockImplementationOnce(() => ({ data: 'mock' }));
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
 
-            expect(result).toBeTrue();
+            expect(result.success).toBeTrue();
+            expect(result.notFound).toBeFalse();
             expect(deps.ingestInterceptedData).toHaveBeenCalledWith({
                 url: 'http://test',
                 data: '{"data": "mock"}',
@@ -80,19 +81,29 @@ describe('warm-fetch', () => {
 
         it('should return false if fetch succeeds but caching fails', async () => {
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
-            expect(result).toBeFalse();
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeFalse();
         });
 
         it('should return false if fetch fails', async () => {
             globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500 })) as any;
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
-            expect(result).toBeFalse();
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeFalse();
+        });
+
+        it('should flag notFound on 404', async () => {
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+            const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeTrue();
         });
 
         it('should return false on network error', async () => {
             globalThis.fetch = mock(() => Promise.reject(new Error('Network error'))) as any;
             const result = await tryWarmFetchCandidate('c-1', 'initial-load', 'http://test', deps);
-            expect(result).toBeFalse();
+            expect(result.success).toBeFalse();
+            expect(result.notFound).toBeFalse();
             expect(logCalls.debug.length).toBeGreaterThan(0);
         });
     });
@@ -123,6 +134,45 @@ describe('warm-fetch', () => {
             result = await executeWarmFetchCandidates('c-1', 'initial-load', deps); // mock returns ok=true, but getConversation returns null
             expect(result).toBeFalse();
         });
+
+        it('should include tried candidate paths in all-failed diagnostics', async () => {
+            deps.getFetchUrlCandidates = () => ['url-1', 'url-2', 'url-3'];
+            // Use 500 (not 404) so it tries all candidates before logging 'all failed'
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500 })) as any;
+
+            const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
+            expect(result).toBeFalse();
+
+            const failureLog = logCalls.debug.find((entry) => entry.message === 'Warm fetch all candidates failed');
+            expect(failureLog).toBeDefined();
+            expect(failureLog?.args[0]).toMatchObject({
+                conversationId: 'c-1',
+                reason: 'stabilization-retry',
+                candidateCount: 3,
+                triedPaths: ['/url-1', '/url-2'],
+            });
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('should abort only after ALL candidates return 404', async () => {
+            deps.getFetchUrlCandidates = () => ['url-1', 'url-2'];
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+
+            const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
+            expect(result).toBeFalse();
+            // Should try BOTH candidates — 404 on one doesn't mean the other will 404
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('should still try second candidate on non-404 errors (e.g. 500)', async () => {
+            deps.getFetchUrlCandidates = () => ['url-1', 'url-2'];
+            globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500 })) as any;
+
+            const result = await executeWarmFetchCandidates('c-1', 'stabilization-retry', deps);
+            expect(result).toBeFalse();
+            // Should try both candidates for transient errors
+            expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe('warmFetchConversationSnapshot', () => {
@@ -144,6 +194,60 @@ describe('warm-fetch', () => {
             const result = await warmFetchConversationSnapshot('c-1', 'force-save', deps, inFlight);
             expect(result).toBeTrue();
             expect(globalThis.fetch).not.toHaveBeenCalled();
+        });
+
+        it('should skip ChatGPT stabilization-retry fetch when cached canonical data is already ready', async () => {
+            deps.platformName = 'ChatGPT';
+            deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
+            deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: true, terminal: true }));
+            deps.getCaptureMeta.mockImplementationOnce(() => ({
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            }));
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'stabilization-retry', deps, inFlight);
+
+            expect(result).toBeTrue();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should not return success for ChatGPT stabilization-retry when ready data is degraded', async () => {
+            deps.platformName = 'ChatGPT';
+            deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
+            deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: true, terminal: true }));
+            deps.getCaptureMeta.mockImplementationOnce(() => ({
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            }));
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'stabilization-retry', deps, inFlight);
+
+            expect(result).toBeFalse();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should skip ChatGPT stabilization-retry network fetch for degraded captures even when not ready', async () => {
+            deps.platformName = 'ChatGPT';
+            deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
+            deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: false, terminal: false }));
+            deps.getCaptureMeta.mockImplementationOnce(() => ({
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            }));
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'stabilization-retry', deps, inFlight);
+
+            expect(result).toBeFalse();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
         });
 
         it('should execute candidates and set/clear inFlight', async () => {

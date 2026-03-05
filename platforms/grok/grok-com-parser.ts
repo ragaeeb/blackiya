@@ -1,11 +1,14 @@
 import { logger } from '@/utils/logger';
+import { isGenericConversationTitle } from '@/utils/title-resolver';
 import type { Author, ConversationData, Message, MessageContent, MessageNode } from '@/utils/types';
 import { DEFAULT_GROK_MODEL_SLUG } from './constants';
+import { GROK_DEFAULT_TITLES } from './registry';
 import { grokState } from './state';
 import {
     extractGrokComConversationIdFromUrl,
     isGrokComLoadResponsesEndpoint,
     isGrokComMetaEndpoint,
+    isGrokComReconnectResponseEndpoint,
     isGrokComResponseNodesEndpoint,
 } from './url-utils';
 
@@ -240,8 +243,28 @@ export const parseGrokComResponses = (data: any, conversationId: string): Conver
     return conversation;
 };
 
+const applyMetaTitleIfBetter = (conversationId: string, title: string, conversationData: ConversationData) => {
+    const titleIsGeneric = isGenericConversationTitle(title, { platformDefaultTitles: GROK_DEFAULT_TITLES });
+    if (!titleIsGeneric) {
+        grokState.conversationTitles.set(conversationId, title);
+    }
+
+    const existingIsGeneric = isGenericConversationTitle(conversationData.title, {
+        platformDefaultTitles: GROK_DEFAULT_TITLES,
+    });
+    if (!titleIsGeneric || existingIsGeneric) {
+        conversationData.title = title;
+    } else {
+        logger.info('[Blackiya/Grok] Preserving specific title over generic meta title', {
+            conversationId,
+            existingTitle: conversationData.title,
+            genericMetaTitle: title,
+        });
+    }
+};
+
 export const parseGrokComConversationMeta = (data: any, conversationId: string): ConversationData | null => {
-    const conversation = data?.conversation;
+    const conversation = data?.conversation ?? data?.result?.conversation;
     if (!conversation) {
         return null;
     }
@@ -250,13 +273,9 @@ export const parseGrokComConversationMeta = (data: any, conversationId: string):
     const createTime = typeof conversation.createTime === 'string' ? Date.parse(conversation.createTime) / 1000 : null;
     const updateTime = typeof conversation.modifyTime === 'string' ? Date.parse(conversation.modifyTime) / 1000 : null;
 
-    if (title) {
-        grokState.conversationTitles.set(conversationId, title);
-    }
-
     const conversationData = getOrCreateGrokComConversation(conversationId);
     if (title) {
-        conversationData.title = title;
+        applyMetaTitleIfBetter(conversationId, title, conversationData);
     }
     if (createTime && !Number.isNaN(createTime)) {
         conversationData.create_time = createTime;
@@ -266,6 +285,72 @@ export const parseGrokComConversationMeta = (data: any, conversationId: string):
     }
 
     return hasGrokComMessages(conversationData) ? conversationData : null;
+};
+
+const toRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+const parseGrokComConversationV2Chunk = (data: unknown, conversationId: string): ConversationData | null => {
+    const candidates = [data, toRecord(data)?.result].filter((candidate): candidate is unknown => candidate != null);
+    let result: ConversationData | null = null;
+
+    for (const candidate of candidates) {
+        const metaResult = parseGrokComConversationMeta(candidate, conversationId);
+        const responsesResult = parseGrokComResponses(candidate, conversationId);
+        const responseNodesResult = parseGrokComResponseNodes(candidate, conversationId);
+        result = responsesResult ?? responseNodesResult ?? metaResult ?? result;
+    }
+
+    return result;
+};
+
+const parseGrokComConversationV2Ndjson = (dataStr: string, conversationId: string): ConversationData | null => {
+    const lines = dataStr
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim().length > 0);
+    if (lines.length <= 1) {
+        return null;
+    }
+
+    let result: ConversationData | null = null;
+    for (const line of lines) {
+        try {
+            const parsedLine = JSON.parse(line);
+            const lineResult = parseGrokComConversationV2Chunk(parsedLine, conversationId);
+            if (lineResult) {
+                result = lineResult;
+            }
+        } catch {
+            logger.warn(`[Blackiya/Grok] Failed to parse conversations_v2 NDJSON line: ${line.slice(0, 100)}`);
+        }
+    }
+
+    return result;
+};
+
+const parseGrokComConversationV2SinglePayload = (dataStr: string, conversationId: string): ConversationData | null => {
+    const parsed = tryParseJsonIfNeeded(dataStr);
+    if (!parsed) {
+        return null;
+    }
+    return parseGrokComConversationV2Chunk(parsed, conversationId);
+};
+
+export const parseGrokComConversationV2Payload = (data: unknown, conversationId: string): ConversationData | null => {
+    if (typeof data === 'string') {
+        const dataStr = data.trim();
+        if (!dataStr) {
+            return null;
+        }
+
+        return (
+            parseGrokComConversationV2Ndjson(dataStr, conversationId) ??
+            parseGrokComConversationV2SinglePayload(dataStr, conversationId)
+        );
+    }
+
+    return parseGrokComConversationV2Chunk(data, conversationId);
 };
 
 export const parseGrokComResponseNodes = (data: any, conversationId: string): ConversationData | null => {
@@ -355,8 +440,8 @@ const resolveGrokComEndpointContext = (
  */
 export const tryParseGrokComRestEndpoint = (data: unknown, url: string): ConversationData | null | undefined => {
     if (isGrokComMetaEndpoint(url)) {
-        const context = resolveGrokComEndpointContext(data, url, { parsePayload: true });
-        return context ? parseGrokComConversationMeta(context.parsed, context.conversationId) : null;
+        const context = resolveGrokComEndpointContext(data, url, { parsePayload: false });
+        return context ? parseGrokComConversationV2Payload(context.parsed, context.conversationId) : null;
     }
 
     if (isGrokComResponseNodesEndpoint(url)) {
@@ -367,6 +452,14 @@ export const tryParseGrokComRestEndpoint = (data: unknown, url: string): Convers
     if (isGrokComLoadResponsesEndpoint(url)) {
         const context = resolveGrokComEndpointContext(data, url, { parsePayload: false });
         return context ? parseGrokComLoadResponsesPayload(context.parsed, context.conversationId) : null;
+    }
+
+    if (isGrokComReconnectResponseEndpoint(url)) {
+        const conversationId = extractGrokComConversationIdFromUrl(url) ?? grokState.lastActiveConversationId;
+        if (!conversationId) {
+            return null;
+        }
+        return parseGrokComLoadResponsesPayload(data, conversationId);
     }
 
     return undefined;

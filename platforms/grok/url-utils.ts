@@ -16,6 +16,9 @@ export const isGrokComResponseNodesEndpoint = (url: string) =>
 export const isGrokComLoadResponsesEndpoint = (url: string) =>
     url.includes('/rest/app-chat/conversations/') && url.includes('/load-responses');
 
+export const isGrokComReconnectResponseEndpoint = (url: string) =>
+    url.includes('/rest/app-chat/conversations/reconnect-response-v2/');
+
 export const isXGraphqlEndpoint = (url: string) => url.includes('/i/api/graphql/');
 
 /** Extract a grok.com UUID conversation ID from a REST URL path. */

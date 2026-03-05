@@ -44,29 +44,12 @@ export type AttemptDisposedMessage = {
     reason: 'navigation' | 'superseded' | 'timeout' | 'teardown';
 } & TokenStampedWireMessage;
 
-export type StreamDumpConfigMessage = {
-    type: typeof MESSAGE_TYPES.STREAM_DUMP_CONFIG;
-    enabled: boolean;
-} & TokenStampedWireMessage;
-
 export type TitleResolvedMessage = {
     type: typeof MESSAGE_TYPES.TITLE_RESOLVED;
     platform: string;
     attemptId: string;
     conversationId: string;
     title: string;
-} & TokenStampedWireMessage;
-
-export type StreamDumpFrameMessage = {
-    type: typeof MESSAGE_TYPES.STREAM_DUMP_FRAME;
-    platform: string;
-    attemptId: string;
-    conversationId?: string;
-    kind: 'snapshot' | 'heuristic' | 'delta' | 'lifecycle';
-    text: string;
-    chunkBytes?: number;
-    frameIndex?: number;
-    timestampMs?: number;
 } & TokenStampedWireMessage;
 
 export type CaptureInterceptedMessage = {
@@ -100,8 +83,6 @@ export type BlackiyaMessage =
     | ConversationIdResolvedMessage
     | AttemptDisposedMessage
     | TitleResolvedMessage
-    | StreamDumpConfigMessage
-    | StreamDumpFrameMessage
     | CaptureInterceptedMessage
     | LogEntryMessage
     | SessionInitMessage;
@@ -136,15 +117,6 @@ export const isBlackiyaMessage = (value: unknown): value is BlackiyaMessage => {
                 hasString(value.attemptId) &&
                 hasString(value.conversationId) &&
                 hasString(value.title)
-            );
-        case MESSAGE_TYPES.STREAM_DUMP_CONFIG:
-            return typeof value.enabled === 'boolean';
-        case MESSAGE_TYPES.STREAM_DUMP_FRAME:
-            return (
-                hasString(value.platform) &&
-                hasString(value.attemptId) &&
-                hasString(value.kind) &&
-                typeof value.text === 'string'
             );
         case MESSAGE_TYPES.CAPTURE_DATA_INTERCEPTED:
             return hasString(value.platform) && hasString(value.url) && typeof value.data === 'string';

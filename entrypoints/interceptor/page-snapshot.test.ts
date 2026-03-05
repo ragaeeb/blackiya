@@ -73,4 +73,74 @@ describe('page-snapshot global scanning', () => {
         expect((snapshot as any)?.__blackiyaSnapshotType).toBe('raw-capture');
         expect((snapshot as any)?.conversationId).toBe('conv-123');
     });
+
+    it('should prefer matching raw-capture over DOM snapshot fallback when both are available', () => {
+        document.body.innerHTML = `
+            <div data-testid="conversation-turn-1">
+                <div data-message-author-role="user">Prompt text</div>
+            </div>
+            <div data-testid="conversation-turn-2">
+                <div data-message-author-role="assistant">Assistant text</div>
+            </div>
+        `;
+
+        const snapshot = getPageConversationSnapshot('conv-123', () => [
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/f/conversation',
+                data: JSON.stringify({ conversation_id: 'conv-123', note: 'exact match' }),
+                platform: 'ChatGPT',
+            } as any,
+        ]);
+
+        expect(snapshot).not.toBeNull();
+        expect((snapshot as any)?.__blackiyaSnapshotType).toBe('raw-capture');
+        expect((snapshot as any)?.url).toBe('https://chatgpt.com/backend-api/f/conversation');
+    });
+
+    it('should prefer matching raw-capture over known globals when both are available', () => {
+        (windowInstance as any).__NEXT_DATA__ = {
+            props: {
+                pageProps: {
+                    conversation: {
+                        id: 'conv-123',
+                        title: 'Global snapshot',
+                        mapping: {
+                            root: {
+                                id: 'root',
+                                message: null,
+                                parent: null,
+                                children: [],
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        const snapshot = getPageConversationSnapshot('conv-123', () => [
+            {
+                type: 'LLM_CAPTURE_DATA_INTERCEPTED',
+                url: 'https://chatgpt.com/backend-api/f/conversation',
+                data: JSON.stringify({
+                    conversation: {
+                        id: 'conv-123',
+                        title: 'Raw capture snapshot',
+                        mapping: {
+                            root: {
+                                id: 'root',
+                                message: null,
+                                parent: null,
+                                children: [],
+                            },
+                        },
+                    },
+                }),
+                platform: 'ChatGPT',
+            } as any,
+        ]);
+
+        expect(snapshot).not.toBeNull();
+        expect((snapshot as any)?.__blackiyaSnapshotType).toBe('raw-capture');
+    });
 });

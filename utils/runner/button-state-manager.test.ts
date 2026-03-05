@@ -78,7 +78,6 @@ describe('button-state-manager', () => {
             setLifecycleState: mock(() => {}),
             syncCalibrationButtonDisplay: mock(() => {}),
             syncRunnerStateCalibration: mock(() => {}),
-            emitExternalConversationEvent: mock(() => {}),
 
             buttonManager: {
                 exists: mock(() => true),
@@ -210,24 +209,14 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setSaveButtonMode).not.toHaveBeenCalled();
         });
 
-        it('should still emit external canonical-ready event when button is not injected', () => {
+        it('should still resolve readiness when button is not injected', () => {
             deps.buttonManager.exists = () => false;
             refreshButtonState('123', deps, lastButtonStateLog);
-            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
-                conversationId: '123',
-                data: { conversation_id: '123' },
-                readinessMode: 'canonical_ready',
-                captureMeta: {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                attemptId: 'attempt-1',
-                allowWhenActionsBlocked: true,
-            });
+            expect(deps.buttonManager.setSaveButtonMode).toHaveBeenCalledWith('default');
         });
 
         it('should clear UI if no conversation is found in URL and no arg provided', () => {
+            deps.getCurrentConversationId = () => null;
             mockAdapter.extractConversationId = () => null;
             refreshButtonState(undefined, deps, lastButtonStateLog);
             expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
@@ -239,18 +228,6 @@ describe('button-state-manager', () => {
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('0.6');
-            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
-                conversationId: '123',
-                data: { conversation_id: '123' },
-                readinessMode: 'canonical_ready',
-                captureMeta: {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                attemptId: 'attempt-1',
-                allowWhenActionsBlocked: true,
-            });
         });
 
         it('should enable save button in degraded mode', () => {
@@ -279,18 +256,6 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(true);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('1');
             expect(deps.setCalibrationState).toHaveBeenCalledWith('success');
-            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
-                conversationId: '123',
-                data: { conversation_id: '123' },
-                readinessMode: 'canonical_ready',
-                captureMeta: {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                attemptId: 'attempt-1',
-                allowWhenActionsBlocked: true,
-            });
         });
 
         it('should clear calibration success state if no longer ready', () => {
@@ -304,12 +269,36 @@ describe('button-state-manager', () => {
             );
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.setCalibrationState).toHaveBeenCalledWith('idle');
-            expect(deps.emitExternalConversationEvent).not.toHaveBeenCalled();
         });
 
         it('should extract canonical sample if fully completed', () => {
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.ingestSfeCanonicalSample).toHaveBeenCalledWith({ conversation_id: '123' }, 'attempt-1');
+        });
+
+        it('should keep existing lifecycle/conversation binding when URL conversation ID is temporarily missing', () => {
+            deps.getLifecycleState = () => 'completed';
+            deps.getCurrentConversationId = () => '123';
+            mockAdapter.extractConversationId = () => null;
+
+            refreshButtonState(undefined, deps, lastButtonStateLog);
+
+            expect(deps.setCurrentConversation).not.toHaveBeenCalledWith(null);
+            expect(deps.setLifecycleState).not.toHaveBeenCalledWith('idle');
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(true);
+        });
+
+        it('should reset lifecycle/conversation binding when URL no longer contains current conversation id', () => {
+            deps.getLifecycleState = () => 'completed';
+            deps.getCurrentConversationId = () => '123';
+            mockAdapter.extractConversationId = () => null;
+            (globalThis as any).window.location.href = 'https://gemini.google.com/app';
+
+            refreshButtonState(undefined, deps, lastButtonStateLog);
+
+            expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
+            expect(deps.setLifecycleState).toHaveBeenCalledWith('idle');
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
         });
     });
 
@@ -359,13 +348,26 @@ describe('button-state-manager', () => {
             expect(logCalls.info[0].message).toContain('target missing');
         });
 
-        it('should handle no conversation ID correctly', () => {
+        it('should handle no conversation ID correctly when no active conversation is bound', () => {
+            deps.getCurrentConversationId = () => null;
             mockAdapter.extractConversationId = () => null;
             injectSaveButton(deps, lastButtonStateLog);
             expect(deps.buttonManager.inject).toHaveBeenCalled();
             expect(deps.setCurrentConversation).toHaveBeenCalledWith(null);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
             expect(logCalls.info).toHaveLength(1);
+        });
+
+        it('should not reset lifecycle to idle when conversation ID is temporarily missing but binding exists', () => {
+            deps.getLifecycleState = () => 'completed';
+            deps.getCurrentConversationId = () => '123';
+            mockAdapter.extractConversationId = () => null;
+
+            injectSaveButton(deps, lastButtonStateLog);
+
+            expect(deps.setCurrentConversation).not.toHaveBeenCalledWith(null);
+            expect(deps.setLifecycleState).not.toHaveBeenCalledWith('idle');
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
         });
 
         it('should handle injection successfully if conversation present', () => {

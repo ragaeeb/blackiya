@@ -13,7 +13,7 @@ Core goals:
 1. Detect response lifecycle (`idle -> prompt-sent -> streaming -> completed`)
 2. Capture canonical conversation JSON
 3. Gate export readiness correctly (`Save JSON` vs `Force Save`)
-4. Provide high-signal diagnostics (debug report + optional stream dump)
+4. Provide high-signal diagnostics (debug report + full logs)
 
 ## 2) Source of Truth Docs
 
@@ -34,8 +34,8 @@ Two-world design:
 
 2. ISOLATED world runner:
 - `entrypoints/main.content.ts`
-- Core implementation entry: `utils/runner/platform-runtime.ts`
-- Main orchestration engine: `utils/runner/platform-runner-engine.ts`
+- Core implementation entry: `utils/runner/runtime/platform-runtime.ts`
+- Main orchestration engine: `utils/runner/engine/platform-runner-engine.ts`
 - Handles lifecycle state, SFE readiness, UI gating, export
 
 Supporting modules:
@@ -54,7 +54,7 @@ Supporting modules:
   - `utils/runner/attempt-registry.ts`
   - `utils/runner/calibration-policy.ts`
   - `utils/runner/canonical-stabilization.ts`
-  - `utils/runner/stream-preview.ts`
+  - `utils/runner/stream/stream-preview.ts`
   - `utils/runner/sfe-ingestion.ts`
   - `utils/runner/response-finished-handler.ts`
   - `utils/runner/navigation-handler.ts`
@@ -137,7 +137,6 @@ Test isolation rules (avoid cross-module pollution):
 Debug artifacts:
 - Debug report TXT (token-lean summary)
 - Full logs JSON
-- Stream dump JSON (optional, bounded)
 - HAR analysis JSON/MD (`bun run har:analyze --input <file.har> ...`)
 
 Guidance:
@@ -169,9 +168,9 @@ When changing title handling:
 ## 9) Files Most Likely to Need Careful Review
 
 - `entrypoints/interceptor/bootstrap.ts`
-- `utils/runner/platform-runner-engine.ts`
-- `platforms/gemini.ts`
-- `platforms/grok.ts`
+- `utils/runner/engine/platform-runner-engine.ts`
+- `platforms/gemini/index.ts`
+- `platforms/grok/index.ts`
 
 ## 10) Documentation Hygiene
 

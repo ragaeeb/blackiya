@@ -60,6 +60,13 @@ export type CanonicalStabilizationTickDeps = {
         payload: Record<string, unknown>,
         dedupeKey: string,
     ) => void;
+    emitDebug: (
+        attemptId: string,
+        event: string,
+        message: string,
+        payload: Record<string, unknown>,
+        dedupeKey: string,
+    ) => void;
     emitInfo: (
         attemptId: string,
         event: string,
@@ -371,7 +378,7 @@ export const scheduleCanonicalStabilizationRetry = (
     }
     const retries = deps.retryCounts.get(attemptId) ?? 0;
     if (retries >= deps.maxRetries) {
-        deps.emitWarn(
+        deps.emitDebug(
             attemptId,
             'canonical_stabilization_retry_exhausted',
             'Canonical stabilization retries exhausted',

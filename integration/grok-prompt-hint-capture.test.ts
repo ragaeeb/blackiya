@@ -101,16 +101,12 @@ describe('integration: grok prompt hint backfill across interceptor and manager'
             lifecycleSignalCache: new Map<string, number>(),
             conversationResolvedSignalCache: new Map<string, number>(),
             promptHintByAttempt: new Map<string, string>(),
-            streamDumpFrameCountByAttempt: new Map<string, number>(),
-            streamDumpLastTextByAttempt: new Map<string, string>(),
             lastCachePruneAtMs: 0,
-            streamDumpEnabled: false,
         };
 
         const emitter = createInterceptorEmitter({
             state,
             maxDedupeEntries: 200,
-            maxStreamDumpAttempts: 50,
             cacheTtlMs: 60_000,
             cachePruneIntervalMs: 15_000,
             defaultPlatformName: 'Grok',

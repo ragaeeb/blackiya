@@ -1,4 +1,3 @@
-import { type ILogObj, Logger } from 'tslog';
 import { browser } from 'wxt/browser';
 import { type LogEntry, logsStorage } from './logs-storage';
 import { STORAGE_KEYS } from './settings';
@@ -8,10 +7,19 @@ import { STORAGE_KEYS } from './settings';
  */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+type LogContext = 'background' | 'content' | 'popup' | 'unknown';
+
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+    debug: 2,
+    info: 3,
+    warn: 4,
+    error: 5,
+};
+
 /**
- * Determine the current execution context
+ * Determine the current execution context.
  */
-const getContext = (): 'background' | 'content' | 'popup' => {
+const getContext = (): LogContext => {
     if (typeof window === 'undefined') {
         return 'background';
     }
@@ -24,83 +32,186 @@ const getContext = (): 'background' | 'content' | 'popup' => {
     if (locationObj.protocol === 'chrome-extension:' && locationObj.pathname.includes('popup')) {
         return 'popup';
     }
-    // Content scripts run in a tab
     if (locationObj.protocol.startsWith('http')) {
         return 'content';
     }
 
-    return 'background'; // Default to background if unsure
+    return 'unknown';
 };
 
-/**
- * Extension Logger
- *
- * A singleton logger instance that routes logs to both the console (for dev)
- * and persistent storage (for user export).
- */
 class ExtensionLogger {
-    private logger: Logger<ILogObj>;
     private static instance: ExtensionLogger;
-    private context: 'background' | 'content' | 'popup';
+    private context: LogContext;
+    private minLevel = LOG_LEVEL_PRIORITY.info;
     private storageListenerAttached = false;
 
     private constructor() {
         this.context = getContext();
-
-        this.logger = new Logger({
-            name: 'Blackiya',
-            minLevel: 3, // Default to INFO
-            hideLogPositionForProduction: true,
-            type: 'json',
-        });
-
-        // Attach Transport for Persistence
-        this.logger.attachTransport((logObj) => {
-            this.handleTransport(logObj);
-        });
-
         this.hydrateLogLevelFromStorage();
         this.attachStorageListener();
     }
 
-    private handleTransport(logObj: ILogObj) {
-        // Convert tslog level ID to string
-        // 0: silly, 1: trace, 2: debug, 3: info, 4: warn, 5: error, 6: fatal
-        const meta = (logObj as any)._meta;
-        const levelId = meta ? meta.logLevelId : 3;
+    private sanitizePrimitiveValue(value: unknown): { handled: true; value: unknown } | { handled: false } {
+        if (value === null || value === undefined) {
+            return { handled: true, value: value ?? null };
+        }
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return { handled: true, value };
+        }
+        if (typeof value === 'bigint') {
+            return { handled: true, value: `${value}n` };
+        }
+        if (typeof value === 'symbol') {
+            return { handled: true, value: value.toString() };
+        }
+        if (typeof value === 'function') {
+            return { handled: true, value: `[Function ${value.name || 'anonymous'}]` };
+        }
+        return { handled: false };
+    }
 
-        const levelMap: Record<number, string> = { 2: 'debug', 3: 'info', 4: 'warn' };
-        const level = levelId >= 5 ? 'error' : (levelMap[levelId] ?? 'info');
+    private sanitizeSpecialObject(value: unknown): { handled: true; value: unknown } | { handled: false } {
+        if (value instanceof Date) {
+            const time = value.getTime();
+            return {
+                handled: true,
+                value: Number.isFinite(time) ? value.toISOString() : '[Invalid Date]',
+            };
+        }
+        if (value instanceof Error) {
+            return {
+                handled: true,
+                value: {
+                    name: value.name,
+                    message: value.message,
+                    stack: value.stack ?? null,
+                },
+            };
+        }
+        if (typeof Node !== 'undefined' && value instanceof Node) {
+            return { handled: true, value: `[Node ${value.nodeName}]` };
+        }
+        return { handled: false };
+    }
 
-        // Construct standardized entry
+    private sanitizeRecord(value: Record<string, unknown>, seen: WeakSet<object>): Record<string, unknown> {
+        const result: Record<string, unknown> = {};
+        try {
+            for (const [key, entry] of Object.entries(value)) {
+                try {
+                    result[key] = this.sanitizeLogValue(entry, seen);
+                } catch (error) {
+                    result[key] = this.buildSanitizationFallback(error);
+                }
+            }
+        } catch (error) {
+            result['[SanitizationError]'] = this.buildSanitizationFallback(error);
+        }
+        return result;
+    }
+
+    private buildSanitizationFallback(error: unknown): string {
+        const reason = error instanceof Error ? error.message : String(error);
+        return `[Unserializable: ${reason}]`;
+    }
+
+    private safeSanitizeLogValue(value: unknown): unknown {
+        try {
+            return this.sanitizeLogValue(value);
+        } catch (error) {
+            return this.buildSanitizationFallback(error);
+        }
+    }
+
+    private sanitizeLogValue(value: unknown, seen = new WeakSet<object>()): unknown {
+        const primitive = this.sanitizePrimitiveValue(value);
+        if (primitive.handled) {
+            return primitive.value;
+        }
+
+        const specialObject = this.sanitizeSpecialObject(value);
+        if (specialObject.handled) {
+            return specialObject.value;
+        }
+
+        if (!value || typeof value !== 'object') {
+            return String(value);
+        }
+        if (seen.has(value)) {
+            return '[Circular]';
+        }
+        seen.add(value);
+
+        if (Array.isArray(value)) {
+            return value.map((entry) => {
+                try {
+                    return this.sanitizeLogValue(entry, seen);
+                } catch (error) {
+                    return this.buildSanitizationFallback(error);
+                }
+            });
+        }
+
+        return this.sanitizeRecord(value as Record<string, unknown>, seen);
+    }
+
+    private emit(level: LogLevel, message: string, args: unknown[]) {
+        if (LOG_LEVEL_PRIORITY[level] < this.minLevel) {
+            return;
+        }
+
+        const sanitizedArgs = args.map((arg) => this.safeSanitizeLogValue(arg));
+
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
-            level: level,
-            message: logObj[0] as string, // tslog puts the first arg as message usually
-            data: Object.keys(logObj)
-                .filter((k) => !Number.isNaN(Number(k)) && k !== '0')
-                .map((k) => logObj[k]), // Extract other args
+            level,
+            message,
+            data: sanitizedArgs,
             context: this.context,
         };
 
-        // If in Background context, save directly
+        this.emitToConsole(level, message, args);
+        this.persistEntry(entry);
+    }
+
+    private emitToConsole(level: LogLevel, message: string, args: unknown[]) {
+        const prefix = '[Blackiya]';
+        if (level === 'debug') {
+            console.debug(prefix, message, ...args);
+            return;
+        }
+        if (level === 'info') {
+            console.info(prefix, message, ...args);
+            return;
+        }
+        if (level === 'warn') {
+            console.warn(prefix, message, ...args);
+            return;
+        }
+        console.error(prefix, message, ...args);
+    }
+
+    private persistEntry(entry: LogEntry) {
         if (this.context === 'background') {
             logsStorage.saveLog(entry).catch((err) => console.error('Logger failed to save:', err));
-        } else {
-            // In Content Script or Popup, assume we can send message
-            // We use a try-catch because sending messages might fail during unload
-            try {
-                browser.runtime
-                    .sendMessage({
-                        type: 'LOG_ENTRY',
-                        payload: entry,
-                    })
-                    .catch(() => {
-                        // Ignore errors if background is unreachable (e.g. extension updating)
+            return;
+        }
+
+        try {
+            browser.runtime
+                .sendMessage({
+                    type: 'LOG_ENTRY',
+                    payload: entry,
+                })
+                .catch((error) => {
+                    logsStorage.saveLog(entry).catch((persistError) => {
+                        console.error('Logger failed to save after runtime send error:', error, persistError);
                     });
-            } catch (_e) {
-                // Squelch
-            }
+                });
+        } catch (error) {
+            logsStorage.saveLog(entry).catch((persistError) => {
+                console.error('Logger failed to save after runtime throw:', error, persistError);
+            });
         }
     }
 
@@ -112,38 +223,23 @@ class ExtensionLogger {
     }
 
     public debug(message: string, ...args: unknown[]) {
-        this.logger.debug(message, ...args);
+        this.emit('debug', message, args);
     }
 
     public info(message: string, ...args: unknown[]) {
-        this.logger.info(message, ...args);
+        this.emit('info', message, args);
     }
 
     public warn(message: string, ...args: unknown[]) {
-        this.logger.warn(message, ...args);
+        this.emit('warn', message, args);
     }
 
     public error(message: string, ...args: unknown[]) {
-        this.logger.error(message, ...args);
+        this.emit('error', message, args);
     }
 
     public setLevel(level: LogLevel) {
-        let minLevel = 3;
-        switch (level) {
-            case 'debug':
-                minLevel = 2;
-                break;
-            case 'info':
-                minLevel = 3;
-                break;
-            case 'warn':
-                minLevel = 4;
-                break;
-            case 'error':
-                minLevel = 5;
-                break;
-        }
-        this.logger.settings.minLevel = minLevel;
+        this.minLevel = LOG_LEVEL_PRIORITY[level];
     }
 
     private async hydrateLogLevelFromStorage() {
@@ -162,7 +258,7 @@ class ExtensionLogger {
                 this.setLevel(storedLevel);
             }
         } catch {
-            // Ignore; logger should continue with default level.
+            // Ignore storage failures and keep default level.
         }
     }
 

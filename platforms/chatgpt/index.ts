@@ -103,10 +103,8 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
 
     buildApiUrl: (conversationId: string) => `https://chatgpt.com/backend-api/conversation/${conversationId}`,
 
-    buildApiUrls: (conversationId: string) => {
-        const paths = [`/backend-api/conversation/${conversationId}`];
-        return HOST_CANDIDATES.flatMap((host) => paths.map((path) => `${host}${path}`));
-    },
+    buildApiUrls: (conversationId: string) =>
+        HOST_CANDIDATES.map((host) => `${host}/backend-api/conversation/${conversationId}`),
 
     /**
      * Parses intercepted ChatGPT API response (JSON object or raw SSE text).

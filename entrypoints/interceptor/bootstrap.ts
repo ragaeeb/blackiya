@@ -1,6 +1,7 @@
 import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/attempt-registry';
 import {
     type BootstrapRequestLifecycleDeps,
+    cacheGeminiPromptHintFromXhrBody as cacheGeminiPromptHintFromXhrBodyCore,
     cachePromptHintFromGrokCreateConversationRequest as cachePromptHintFromGrokCreateConversationRequestCore,
     emitFetchPromptLifecycle as emitFetchPromptLifecycleCore,
     emitXhrRequestLifecycle as emitXhrRequestLifecycleCore,
@@ -21,10 +22,13 @@ import { safePathname } from '@/entrypoints/interceptor/discovery';
 import { type FetchInterceptionDeps, handleFetchInterception } from '@/entrypoints/interceptor/fetch-interception';
 import { createFetchInterceptorContext, type FetchInterceptorContext } from '@/entrypoints/interceptor/fetch-pipeline';
 import { createFetchInterceptor } from '@/entrypoints/interceptor/fetch-wrapper';
+import { maybeCaptureGeminiBatchexecuteContext } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
+import { resolveHeaderCaptureAdapter } from '@/entrypoints/interceptor/header-capture';
 import { createInterceptorEmitter, type InterceptorEmitterState } from '@/entrypoints/interceptor/interceptor-emitter';
 import { ProactiveFetchRunner } from '@/entrypoints/interceptor/proactive-fetch-runner';
 import { cleanupDisposedAttemptState } from '@/entrypoints/interceptor/state';
 import type { StreamMonitorEmitter } from '@/entrypoints/interceptor/stream-monitors/stream-emitter';
+import { maybeCaptureXGrokGraphqlContext } from '@/entrypoints/interceptor/x-grok-graphql-context-store';
 import type { XhrInterceptionDeps } from '@/entrypoints/interceptor/xhr-interception';
 import { buildXhrLifecycleContext, type XhrLifecycleContext } from '@/entrypoints/interceptor/xhr-pipeline';
 import { notifyXhrOpen } from '@/entrypoints/interceptor/xhr-wrapper';
@@ -33,7 +37,8 @@ import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapterByApiUrl, getPlatformAdapterByCompletionUrl } from '@/platforms/factory';
 import type { LLMPlatform } from '@/platforms/types';
 import { setBoundedMapValue } from '@/utils/bounded-collections';
-import { extractForwardableHeadersFromFetchArgs } from '@/utils/proactive-fetch-headers';
+import { platformHeaderStore } from '@/utils/platform-header-store';
+import { extractForwardableHeadersFromFetchArgs, toForwardableHeaderRecord } from '@/utils/proactive-fetch-headers';
 
 export { shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 export {
@@ -49,15 +54,12 @@ const capturePayloadCache = new Map<string, number>();
 const lifecycleSignalCache = new Map<string, number>();
 const conversationResolvedSignalCache = new Map<string, number>();
 const promptHintByAttempt = new Map<string, string>();
-const streamDumpFrameCountByAttempt = new Map<string, number>();
-const streamDumpLastTextByAttempt = new Map<string, string>();
 const attemptByConversationId = new Map<string, string>();
 const latestAttemptIdByPlatform = new Map<string, string>();
 const disposedAttemptIds = new Set<string>();
 
 const MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES = 300;
 const MAX_INTERCEPTOR_ATTEMPT_BINDINGS = 400;
-const MAX_INTERCEPTOR_STREAM_DUMP_ATTEMPTS = 250;
 const INTERCEPTOR_CACHE_ENTRY_TTL_MS = 60_000;
 const INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS = 15_000;
 const INTERCEPTOR_RUNTIME_TAG = 'v2.1.1-grok-stream';
@@ -78,16 +80,12 @@ const emitterState: InterceptorEmitterState = {
     lifecycleSignalCache,
     conversationResolvedSignalCache,
     promptHintByAttempt,
-    streamDumpFrameCountByAttempt,
-    streamDumpLastTextByAttempt,
     lastCachePruneAtMs: 0,
-    streamDumpEnabled: false,
 };
 
 const emitter = createInterceptorEmitter({
     state: emitterState,
     maxDedupeEntries: MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES,
-    maxStreamDumpAttempts: MAX_INTERCEPTOR_STREAM_DUMP_ATTEMPTS,
     cacheTtlMs: INTERCEPTOR_CACHE_ENTRY_TTL_MS,
     cachePruneIntervalMs: INTERCEPTOR_CACHE_PRUNE_INTERVAL_MS,
     defaultPlatformName: chatGPTAdapter.name,
@@ -101,8 +99,6 @@ const emitter = createInterceptorEmitter({
 const cleanupDisposedAttempt = (attemptId: string) => {
     cleanupDisposedAttemptState(attemptId, {
         disposedAttemptIds,
-        streamDumpFrameCountByAttempt,
-        streamDumpLastTextByAttempt,
         promptHintByAttempt,
         latestAttemptIdByPlatform,
         attemptByConversationId,
@@ -112,13 +108,6 @@ const cleanupDisposedAttempt = (attemptId: string) => {
 const buildMainWorldBridgeDeps = (): MainWorldBridgeDeps => ({
     getRawCaptureHistory,
     cleanupDisposedAttempt,
-    setStreamDumpEnabled: (enabled) => {
-        emitterState.streamDumpEnabled = enabled;
-    },
-    clearStreamDumpCaches: () => {
-        streamDumpFrameCountByAttempt.clear();
-        streamDumpLastTextByAttempt.clear();
-    },
 });
 
 const buildRequestLifecycleDeps = (): BootstrapRequestLifecycleDeps => ({
@@ -143,11 +132,33 @@ const cachePromptHintFromGrokCreateConversationRequest = (context: FetchIntercep
 const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response, emit: StreamMonitorEmitter) =>
     maybeMonitorFetchStreamsCore(context, response, emit, buildRequestLifecycleDeps());
 
+const cacheGeminiPromptHintFromXhrBody = (context: XhrLifecycleContext, body: unknown) =>
+    cacheGeminiPromptHintFromXhrBodyCore(context, body, buildRequestLifecycleDeps());
+
 const emitXhrRequestLifecycle = (xhr: XMLHttpRequest, context: XhrLifecycleContext, emit: StreamMonitorEmitter) =>
     emitXhrRequestLifecycleCore(xhr, context, emit, buildRequestLifecycleDeps());
 
 const registerXhrLoadHandler = (xhr: XMLHttpRequest, methodUpper: string, deps: XhrInterceptionDeps) =>
     registerXhrLoadHandlerCore(xhr, methodUpper, deps);
+
+const maybeCaptureGeminiContextFromFetchArgs = async (
+    args: Parameters<typeof fetch>,
+    outgoingMethod: string,
+    outgoingUrl: string,
+) => {
+    if (outgoingMethod !== 'POST') {
+        return;
+    }
+    let requestBody: unknown = args[1]?.body;
+    if (requestBody === undefined && args[0] instanceof Request) {
+        try {
+            requestBody = await args[0].clone().text();
+        } catch {
+            requestBody = undefined;
+        }
+    }
+    maybeCaptureGeminiBatchexecuteContext(outgoingUrl, requestBody);
+};
 
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
@@ -199,14 +210,22 @@ export default defineContentScript({
             });
             await cachePromptHintFromGrokCreateConversationRequest(context);
             emitFetchPromptLifecycle(context);
+            await maybeCaptureGeminiContextFromFetchArgs(args, context.outgoingMethod, context.outgoingUrl);
+            maybeCaptureXGrokGraphqlContext(context.outgoingUrl);
 
             const response = await originalFetch(...args);
             maybeMonitorFetchStreams(context, response, streamMonitorEmitter);
 
             const url = args[0] instanceof Request ? args[0].url : String(args[0]);
+            const apiAdapter = getPlatformAdapterByApiUrl(url);
             const completionAdapter = getPlatformAdapterByCompletionUrl(url);
+            const matchedAdapter = resolveHeaderCaptureAdapter(context.fetchApiAdapter, apiAdapter, completionAdapter);
+            const forwardableHeaders = extractForwardableHeadersFromFetchArgs(args);
+            if (matchedAdapter && forwardableHeaders) {
+                platformHeaderStore.update(matchedAdapter.name, forwardableHeaders);
+            }
             if (completionAdapter) {
-                void proactiveFetchRunner.trigger(completionAdapter, url, extractForwardableHeadersFromFetchArgs(args));
+                void proactiveFetchRunner.trigger(completionAdapter, url, forwardableHeaders);
             }
 
             handleFetchInterception(args, response, fetchInterceptionDeps);
@@ -253,6 +272,22 @@ export default defineContentScript({
                 resolveRequestConversationId,
                 peekAttemptIdForConversation,
             });
+            const xhrHeaderAdapter = resolveHeaderCaptureAdapter(
+                context.requestAdapter,
+                getPlatformAdapterByApiUrl(context.requestUrl),
+                getPlatformAdapterByCompletionUrl(context.requestUrl),
+            );
+            if (xhrHeaderAdapter) {
+                const xhrHeaders = toForwardableHeaderRecord((xhr as any)._headers);
+                if (xhrHeaders) {
+                    platformHeaderStore.update(xhrHeaderAdapter.name, xhrHeaders);
+                }
+            }
+            cacheGeminiPromptHintFromXhrBody(context, body);
+            if (context.methodUpper === 'POST') {
+                maybeCaptureGeminiBatchexecuteContext(context.requestUrl, body);
+            }
+            maybeCaptureXGrokGraphqlContext(context.requestUrl);
             emitXhrRequestLifecycle(xhr, context, streamMonitorEmitter);
             registerXhrLoadHandler(xhr, context.methodUpper, xhrInterceptionDeps);
             return originalSend.call(this, body);
@@ -260,11 +295,6 @@ export default defineContentScript({
 
         emitter.log('info', 'init', { host: window.location.hostname, runtimeTag: INTERCEPTOR_RUNTIME_TAG });
         setupMainWorldBridgeCore(buildMainWorldBridgeDeps());
-
-        if (!emitterState.streamDumpEnabled) {
-            streamDumpFrameCountByAttempt.clear();
-            streamDumpLastTextByAttempt.clear();
-        }
     },
 });
 

@@ -14,7 +14,7 @@ const getNormalizedPath = (url: string) => {
 export const CHATGPT_ENDPOINT_REGISTRY = {
     promptRequestPathPattern: /\/backend-api\/(?:f\/)?conversation(?:\?.*)?$/i,
     apiEndpointPattern:
-        /(?:backend-api\/conversation\/[a-f0-9-]+(?:\/)?(?:\?.*)?$|backend-api\/f\/conversation(?:\/[a-f0-9-]+)?(?:\/)?(?:\?.*)?$)/i,
+        /(?:backend-api\/conversations(?:\?.*)?$|backend-api\/conversation\/[a-f0-9-]+(?:\/)?(?:\?.*)?$|backend-api\/f\/conversation(?:\/[a-f0-9-]+)?(?:\/)?(?:\?.*)?$)/i,
     completionTriggerPattern: /backend-api\/(?:f\/)?conversation\/[a-f0-9-]+\/stream_status(?:\?.*)?$/i,
 } as const;
 
@@ -69,4 +69,7 @@ export const isChatGptGeneratingFromDom = (
     return CHATGPT_SELECTOR_REGISTRY.generationIndicators.some((selector) => !!doc.querySelector(selector));
 };
 
-export const isLikelyChatGptApiPath = (url: string) => getNormalizedPath(url).includes('/backend-api/');
+export const isLikelyChatGptApiPath = (url: string) => {
+    const path = getNormalizedPath(url);
+    return path.includes('/backend-api/');
+};

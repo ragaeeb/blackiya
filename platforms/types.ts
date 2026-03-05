@@ -140,5 +140,5 @@ export type LLMPlatform = {
      * Optional list of known default/placeholder titles for this platform.
      * Used to decide whether `extractTitleFromDom` should be attempted.
      */
-    defaultTitles?: string[];
+    defaultTitles?: readonly string[];
 };

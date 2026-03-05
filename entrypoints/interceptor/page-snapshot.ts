@@ -137,6 +137,41 @@ const hasConversationIdInMessages = (messages: unknown, conversationId: string):
     });
 };
 
+const hasConversationObjectIdMatch = (obj: Record<string, unknown>, conversationId: string) =>
+    obj.id === conversationId &&
+    (typeof obj.title === 'string' ||
+        (typeof obj.mapping === 'object' && obj.mapping !== null) ||
+        typeof obj.current_node === 'string');
+
+const hasExplicitConversationIdKeyMatch = (obj: Record<string, unknown>, conversationId: string) => {
+    for (const key of CONVERSATION_ID_KEYS) {
+        if (obj[key] === conversationId) {
+            return true;
+        }
+    }
+    return false;
+};
+
+const hasConversationIdInArrayNode = (node: unknown[], conversationId: string, depth: number, visited: Set<unknown>) =>
+    node.some((child) => hasConversationIdInParsedPayload(child, conversationId, depth + 1, visited));
+
+const hasConversationIdInObjectNode = (
+    obj: Record<string, unknown>,
+    conversationId: string,
+    depth: number,
+    visited: Set<unknown>,
+): boolean => {
+    if (hasConversationObjectIdMatch(obj, conversationId) || hasExplicitConversationIdKeyMatch(obj, conversationId)) {
+        return true;
+    }
+    if (hasConversationIdInMessages(obj.messages, conversationId)) {
+        return true;
+    }
+    return Object.values(obj).some((value) =>
+        hasConversationIdInParsedPayload(value, conversationId, depth + 1, visited),
+    );
+};
+
 const hasConversationIdInParsedPayload = (
     node: unknown,
     conversationId: string,
@@ -148,28 +183,9 @@ const hasConversationIdInParsedPayload = (
     }
     visited.add(node);
     if (Array.isArray(node)) {
-        for (const child of node) {
-            if (hasConversationIdInParsedPayload(child, conversationId, depth + 1, visited)) {
-                return true;
-            }
-        }
-        return false;
+        return hasConversationIdInArrayNode(node, conversationId, depth, visited);
     }
-    const obj = node as Record<string, unknown>;
-    for (const key of CONVERSATION_ID_KEYS) {
-        if (obj[key] === conversationId) {
-            return true;
-        }
-    }
-    if (hasConversationIdInMessages(obj.messages, conversationId)) {
-        return true;
-    }
-    for (const value of Object.values(obj)) {
-        if (hasConversationIdInParsedPayload(value, conversationId, depth + 1, visited)) {
-            return true;
-        }
-    }
-    return false;
+    return hasConversationIdInObjectNode(node as Record<string, unknown>, conversationId, depth, visited);
 };
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -180,7 +196,8 @@ const hasConversationIdInRawString = (raw: string, conversationId: string): bool
         `"(?:conversationId|conversation_id)"\\s*:\\s*"${escapedConversationId}"`,
         'i',
     );
-    return conversationKeyRegex.test(raw);
+    const conversationObjectIdRegex = new RegExp(`"id"\\s*:\\s*"${escapedConversationId}"`, 'i');
+    return conversationKeyRegex.test(raw) || conversationObjectIdRegex.test(raw);
 };
 
 const rawCaptureMatchesConversation = (item: CapturePayload, conversationId: string): boolean => {
@@ -199,9 +216,10 @@ const rawCaptureMatchesConversation = (item: CapturePayload, conversationId: str
 
 /**
  * Attempts to resolve a conversation snapshot in priority order:
- * 1. Known JS globals (__NEXT_DATA__, __remixContext, etc.)
- * 2. Live DOM traversal
- * 3. Raw intercepted capture history (last resort)
+ * 1. Raw intercepted capture history (highest fidelity)
+ * 2. Known JS globals (__NEXT_DATA__, __remixContext, etc.)
+ * 3. Live DOM traversal
+ * 4. Broad `window` BFS fallback
  *
  * `getRawCaptureHistory` is injected to avoid circular imports with the
  * capture-queue module.
@@ -210,6 +228,27 @@ export const getPageConversationSnapshot = (
     conversationId: string,
     getRawCaptureHistory: () => CapturePayload[],
 ): unknown | null => {
+    // Prefer raw capture replay first so downstream parsing can recover
+    // canonical fields (model/reasoning/etc.) even when DOM/global snapshots
+    // are partial and backend fetch endpoints are unavailable.
+    const history = getRawCaptureHistory();
+    for (let i = history.length - 1; i >= 0; i--) {
+        const item = history[i];
+        if (!item || typeof item.url !== 'string' || typeof item.data !== 'string') {
+            continue;
+        }
+        if (!rawCaptureMatchesConversation(item, conversationId)) {
+            continue;
+        }
+        return {
+            __blackiyaSnapshotType: 'raw-capture' as const,
+            url: item.url,
+            data: item.data,
+            platform: item.platform,
+            conversationId,
+        };
+    }
+
     const knownGlobals: unknown[] = [
         (window as any).__NEXT_DATA__,
         (window as any).__remixContext,
@@ -231,25 +270,6 @@ export const getPageConversationSnapshot = (
     const windowFallback = findConversationInGlobals(window, conversationId);
     if (windowFallback) {
         return windowFallback;
-    }
-
-    // Fall back to the raw capture ring-buffer
-    const history = getRawCaptureHistory();
-    for (let i = history.length - 1; i >= 0; i--) {
-        const item = history[i];
-        if (!item || typeof item.url !== 'string' || typeof item.data !== 'string') {
-            continue;
-        }
-        if (!rawCaptureMatchesConversation(item, conversationId)) {
-            continue;
-        }
-        return {
-            __blackiyaSnapshotType: 'raw-capture' as const,
-            url: item.url,
-            data: item.data,
-            platform: item.platform,
-            conversationId,
-        };
     }
     return null;
 };

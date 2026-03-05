@@ -10,7 +10,7 @@ import type { ExportMeta } from '@/utils/sfe/types';
 const logCalls = createLoggerCalls();
 mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 
-import * as streamPreview from '@/utils/runner/stream-preview';
+import * as streamPreview from '@/utils/runner/stream/stream-preview';
 
 describe('lifecycle-phase-handler', () => {
     let deps: LifecyclePhaseHandlerDeps;
@@ -43,6 +43,7 @@ describe('lifecycle-phase-handler', () => {
             shouldIngestAsCanonicalSample: mock(() => false),
             scheduleCanonicalStabilizationRetry: mock(() => {}),
             runStreamDoneProbe: mock(() => {}),
+            isPlatformGenerating: mock(() => false),
         };
     });
 
@@ -105,6 +106,16 @@ describe('lifecycle-phase-handler', () => {
             expect(deps.scheduleCanonicalStabilizationRetry).not.toHaveBeenCalled();
         });
 
+        it('should not trigger probe when ChatGPT completed phase is ignored while platform is still generating', () => {
+            deps.isPlatformGenerating = () => true;
+
+            applyLifecyclePhaseForConversation('completed', 'ChatGPT', 'attempt-1', 'conv-1', 'direct', deps);
+
+            expect(deps.setLifecycleState).not.toHaveBeenCalled();
+            expect(deps.runStreamDoneProbe).not.toHaveBeenCalled();
+            expect(deps.scheduleCanonicalStabilizationRetry).not.toHaveBeenCalled();
+        });
+
         it('should run probe but skip retry schedule if already stabilized', () => {
             deps.sfeEnabled = () => true;
             deps.sfeResolve = () => ({ ready: true, phase: 'completed', blockingConditions: [] });
@@ -123,6 +134,7 @@ describe('lifecycle-phase-handler', () => {
 
             expect(deps.scheduleCanonicalStabilizationRetry).toHaveBeenCalledWith('conv-1', 'attempt-1');
             expect(deps.runStreamDoneProbe).toHaveBeenCalledWith('conv-1', 'attempt-1');
+            expect(deps.runStreamDoneProbe).toHaveBeenCalledTimes(1);
         });
 
         it('should not schedule stabilization retry if timed out in conditions', () => {

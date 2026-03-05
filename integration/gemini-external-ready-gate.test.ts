@@ -99,7 +99,7 @@ const buildPromptedConversation = (conversationId: string): ConversationData => 
 });
 
 describe('integration: gemini external ready gate', () => {
-    it('should emit ready only after Gemini payload includes a non-empty user prompt', () => {
+    it('should emit ready even when Gemini payload lacks a user prompt', () => {
         const state = createExternalEventDispatcherState();
         const evaluateReadinessForData = () => ({
             ready: true,
@@ -109,7 +109,8 @@ describe('integration: gemini external ready gate', () => {
             latestAssistantTextLength: 10,
         });
 
-        const blocked = maybeBuildExternalConversationEvent({
+        // Assistant-only payload should now emit — Gemini can't capture prompts from XHR
+        const ready = maybeBuildExternalConversationEvent({
             conversationId: 'gemini-conv',
             data: buildAssistantOnlyConversation('gemini-conv'),
             providerName: 'Gemini',
@@ -120,9 +121,21 @@ describe('integration: gemini external ready gate', () => {
             evaluateReadinessForData,
             state,
         });
-        expect(blocked).toBeNull();
+        expect(ready).not.toBeNull();
+        expect(ready?.type).toBe('conversation.ready');
+        expect(ready?.provider).toBe('gemini');
+        expect(ready?.content_hash).toBe('hash-1');
 
-        const ready = maybeBuildExternalConversationEvent({
+        markExternalConversationEventDispatched(
+            state,
+            'gemini-conv',
+            ready?.attempt_id ?? 'gemini:attempt-1',
+            'hash-1',
+            ready?.payload ?? buildAssistantOnlyConversation('gemini-conv'),
+        );
+
+        // Second call with richer data should emit conversation.updated
+        const updated = maybeBuildExternalConversationEvent({
             conversationId: 'gemini-conv',
             data: buildPromptedConversation('gemini-conv'),
             providerName: 'Gemini',
@@ -139,17 +152,19 @@ describe('integration: gemini external ready gate', () => {
             }),
             state,
         });
-        expect(ready?.type).toBe('conversation.ready');
-        expect(ready?.provider).toBe('gemini');
-        expect(ready?.content_hash).toBe('hash-2');
+        expect(updated?.type).toBe('conversation.updated');
+        expect(updated?.provider).toBe('gemini');
+        expect(updated?.content_hash).toBe('hash-2');
 
         markExternalConversationEventDispatched(
             state,
             'gemini-conv',
-            ready?.attempt_id ?? 'gemini:attempt-2',
+            updated?.attempt_id ?? 'gemini:attempt-2',
             'hash-2',
-            ready?.payload.title ?? 'Gemini Conversation',
+            updated?.payload ?? buildPromptedConversation('gemini-conv'),
         );
+
+        // Duplicate should still be suppressed
         const duplicate = maybeBuildExternalConversationEvent({
             conversationId: 'gemini-conv',
             data: buildPromptedConversation('gemini-conv'),

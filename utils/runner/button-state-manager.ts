@@ -50,14 +50,6 @@ export type ButtonStateManagerDeps = {
     setLifecycleState: (state: LifecycleUiState, conversationId?: string) => void;
     syncCalibrationButtonDisplay: () => void;
     syncRunnerStateCalibration: (state: CalibrationUiState) => void;
-    emitExternalConversationEvent: (args: {
-        conversationId: string;
-        data: ConversationData;
-        readinessMode: ReadinessDecision['mode'];
-        captureMeta: ExportMeta;
-        attemptId: string | null;
-        allowWhenActionsBlocked?: boolean;
-    }) => void;
 
     buttonManager: {
         exists: () => boolean;
@@ -102,7 +94,7 @@ const emitTimeoutWarningOnce = (
     addBoundedSetValue(timeoutWarningByAttempt, attemptId, maxAutocaptureKeys);
     structuredLogger.emit(
         attemptId,
-        'warn',
+        'debug',
         'readiness_timeout_manual_only',
         'Stabilization timed out; manual force save required',
         { conversationId },
@@ -218,20 +210,6 @@ export const refreshButtonState = (
     const isCanonicalReady = decision.mode === 'canonical_ready';
     const isDegraded = decision.mode === 'degraded_manual_only';
     const hasData = isCanonicalReady || isDegraded;
-    const attemptId = deps.peekAttemptId(conversationId);
-
-    // External subscribers should receive canonical-ready events even when
-    // UI actions remain disabled due an in-flight lifecycle state.
-    if (isCanonicalReady && cached) {
-        deps.emitExternalConversationEvent({
-            conversationId,
-            data: cached,
-            readinessMode: decision.mode,
-            captureMeta,
-            attemptId,
-            allowWhenActionsBlocked: true,
-        });
-    }
 
     if (shouldDisableButtonActions(conversationId, deps)) {
         applyDisabledButtonState(conversationId, deps, lastButtonStateLog);
@@ -289,6 +267,14 @@ const resolveRefreshConversationId = (
     }
     const conversationId = forConversationId || adapter.extractConversationId(window.location.href);
     if (!conversationId) {
+        const fallbackConversationId = deps.getCurrentConversationId();
+        if (
+            fallbackConversationId &&
+            typeof window?.location?.href === 'string' &&
+            window.location.href.includes(fallbackConversationId)
+        ) {
+            return fallbackConversationId;
+        }
         resetButtonStateForNoConversation(deps);
         return null;
     }
@@ -344,8 +330,11 @@ export const scheduleButtonRefresh = (
 };
 
 const resetButtonStateForNoConversation = (deps: ButtonStateManagerDeps) => {
-    deps.setCurrentConversation(null);
-    if (!deps.isLifecycleActiveGeneration() && deps.getLifecycleState() !== 'idle') {
+    const preserveActiveGeneration = deps.isLifecycleActiveGeneration();
+    if (!preserveActiveGeneration) {
+        deps.setCurrentConversation(null);
+    }
+    if (!preserveActiveGeneration && deps.getLifecycleState() !== 'idle') {
         deps.setLifecycleState('idle');
     }
     deps.buttonManager.setSaveButtonMode('default');
@@ -379,8 +368,16 @@ export const injectSaveButton = (deps: ButtonStateManagerDeps, lastButtonStateLo
 
     if (!conversationId) {
         logger.info('No conversation ID yet; showing calibration only');
-        deps.setCurrentConversation(null);
-        if (!deps.isLifecycleActiveGeneration() && deps.getLifecycleState() !== 'idle') {
+        const existingConversationId = deps.getCurrentConversationId();
+        const preserveMissingIdBinding =
+            !!existingConversationId &&
+            typeof window?.location?.href === 'string' &&
+            window.location.href.includes(existingConversationId);
+        const preserveActiveGeneration = deps.isLifecycleActiveGeneration() || preserveMissingIdBinding;
+        if (!preserveActiveGeneration) {
+            deps.setCurrentConversation(null);
+        }
+        if (!preserveActiveGeneration && deps.getLifecycleState() !== 'idle') {
             deps.setLifecycleState('idle');
         }
         deps.buttonManager.setSaveButtonMode('default');

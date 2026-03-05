@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { analyzeHarContent, renderHarAnalysisMarkdown } from '../utils/har-analysis';
+import { analyzeHarContent, renderHarAnalysisMarkdown } from './har-analysis';
 
 type CliOptions = {
     input: string;

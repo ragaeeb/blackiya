@@ -1,5 +1,5 @@
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
-import { runPlatform } from '@/utils/runner/platform-runtime';
+import { runPlatform } from '@/utils/runner/runtime/platform-runtime';
 
 /**
  * Unified Content Script for all LLM Platforms

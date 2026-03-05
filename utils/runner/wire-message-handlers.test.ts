@@ -48,8 +48,6 @@ describe('wire-message-handlers', () => {
             handleResponseFinished: mock(() => {}),
             appendPendingStreamProbeText: mock(() => {}),
             appendLiveStreamProbeText: mock(() => {}),
-            isStreamDumpEnabled: mock(() => true),
-            saveStreamDumpFrame: mock(() => {}),
             pendingLifecycleByAttempt: new Map(),
             sfeUpdateConversationId: mock(() => {}),
             refreshButtonState: mock(() => {}),

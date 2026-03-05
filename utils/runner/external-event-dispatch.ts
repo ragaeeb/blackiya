@@ -1,23 +1,22 @@
 import { setBoundedMapValue } from '@/utils/bounded-collections';
-import type { ExternalConversationEvent, ExternalInternalEventMessage } from '@/utils/external-api/contracts';
+import type { ExternalInboundConversationEvent, ExternalInternalEventMessage } from '@/utils/external-api/contracts';
 import {
     EXTERNAL_API_VERSION,
     EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
     normalizeExternalProvider,
 } from '@/utils/external-api/contracts';
 import type { ExportMeta, PlatformReadiness } from '@/utils/sfe/types';
-import { isGenericConversationTitle } from '@/utils/title-resolver';
+import { isGenericConversationTitle, resolveExportConversationTitleDecision } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
 type ExternalDispatchStatus = {
     hasReady: boolean;
     lastContentHash: string | null;
-    lastTitleGeneric: boolean;
+    lastPayloadSignature: string;
 };
 
 export type ExternalEventDispatcherState = {
     byConversation: Map<string, ExternalDispatchStatus>;
-    titleUpgradeByAttempt: Map<string, true>;
     maxEntries: number;
 };
 
@@ -31,6 +30,7 @@ type MaybeBuildExternalConversationEventArgs = {
     shouldBlockActions: boolean;
     evaluateReadinessForData: (data: ConversationData) => PlatformReadiness;
     state: ExternalEventDispatcherState;
+    forceEmit?: boolean;
     now?: () => number;
     createEventId?: () => string;
 };
@@ -66,36 +66,67 @@ export const createExternalEventDispatcherState = (
     maxEntries = DEFAULT_MAX_EXTERNAL_DISPATCH_ENTRIES,
 ): ExternalEventDispatcherState => ({
     byConversation: new Map(),
-    titleUpgradeByAttempt: new Map(),
     maxEntries,
 });
-const buildTitleUpgradeAttemptKey = (conversationId: string, attemptId: string | null | undefined) =>
-    `${conversationId}::${attemptId?.trim() || 'unknown'}`;
 
-const extractMessageText = (message: ConversationData['mapping'][string]['message']): string => {
-    if (!message) {
-        return '';
+const clonePayloadForDispatch = (payload: ConversationData): ConversationData => {
+    if (typeof globalThis.structuredClone === 'function') {
+        return globalThis.structuredClone(payload) as ConversationData;
     }
-    const partsText = Array.isArray(message.content?.parts)
-        ? message.content.parts.filter((part): part is string => typeof part === 'string').join('\n')
-        : '';
-    if (partsText.trim().length > 0) {
-        return partsText;
-    }
-    return typeof message.content?.content === 'string' ? message.content.content : '';
+    return JSON.parse(JSON.stringify(payload)) as ConversationData;
 };
 
-const hasNonEmptyUserMessage = (data: ConversationData): boolean =>
-    Object.values(data.mapping).some((node) => {
-        const message = node.message;
-        if (!message || message.author.role !== 'user') {
-            return false;
-        }
-        return extractMessageText(message).trim().length > 0;
-    });
+const deepFreezePayload = <T>(value: T): T => {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) {
+        return value;
+    }
+    Object.freeze(value);
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+        deepFreezePayload(nested);
+    }
+    return value;
+};
 
-const shouldRequirePromptForProvider = (providerName: string | null | undefined): boolean =>
-    normalizeExternalProvider(providerName) === 'gemini';
+const snapshotPayloadForDispatch = (payload: ConversationData): ConversationData =>
+    deepFreezePayload(clonePayloadForDispatch(payload));
+
+const normalizePayloadForDispatch = (payload: ConversationData): ConversationData => {
+    if (!isGenericConversationTitle(payload.title)) {
+        return snapshotPayloadForDispatch(payload);
+    }
+    const decision = resolveExportConversationTitleDecision(payload);
+    const currentTitle = typeof payload.title === 'string' ? payload.title.trim() : '';
+    if (decision.title === currentTitle) {
+        return snapshotPayloadForDispatch(payload);
+    }
+    return snapshotPayloadForDispatch({
+        ...payload,
+        title: decision.title,
+    });
+};
+
+const stableStringify = (value: unknown): string => {
+    if (value === undefined) {
+        return 'null';
+    }
+    if (value === null) {
+        return 'null';
+    }
+    if (typeof value !== 'object') {
+        const serialized = JSON.stringify(value);
+        return serialized ?? 'null';
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+    }
+
+    const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, entryValue]) => entryValue !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
+};
+
+const payloadSignatureForDispatch = (payload: ConversationData): string => stableStringify(payload);
 
 const shouldEmit = (
     args: MaybeBuildExternalConversationEventArgs,
@@ -106,13 +137,10 @@ const shouldEmit = (
     if (args.readinessMode !== 'canonical_ready') {
         return false;
     }
-    if (args.shouldBlockActions) {
+    if (!args.forceEmit && args.shouldBlockActions) {
         return false;
     }
-    if (args.captureMeta.captureSource !== 'canonical_api') {
-        return false;
-    }
-    if (shouldRequirePromptForProvider(args.providerName) && !hasNonEmptyUserMessage(args.data)) {
+    if (!args.forceEmit && args.captureMeta.captureSource !== 'canonical_api') {
         return false;
     }
     return true;
@@ -120,24 +148,25 @@ const shouldEmit = (
 
 export const maybeBuildExternalConversationEvent = (
     args: MaybeBuildExternalConversationEventArgs,
-): ExternalConversationEvent | null => {
+): ExternalInboundConversationEvent | null => {
     if (!shouldEmit(args)) {
         return null;
     }
 
+    const payload = normalizePayloadForDispatch(args.data);
     const readiness = args.evaluateReadinessForData(args.data);
     const contentHash = readiness.contentHash ?? null;
+    const payloadSignature = payloadSignatureForDispatch(payload);
     const existing = args.state.byConversation.get(args.conversationId);
-    const titleGeneric = isGenericConversationTitle(args.data.title);
-    const titleUpgraded = Boolean(existing?.hasReady && existing.lastTitleGeneric && !titleGeneric);
-    const titleUpgradeAttemptKey = buildTitleUpgradeAttemptKey(args.conversationId, args.attemptId);
-    const alreadySentTitleUpgrade = args.state.titleUpgradeByAttempt.has(titleUpgradeAttemptKey);
-
-    if (existing?.hasReady && existing.lastContentHash === contentHash && (!titleUpgraded || alreadySentTitleUpgrade)) {
+    if (
+        existing?.hasReady &&
+        existing.lastPayloadSignature === payloadSignature &&
+        existing.lastContentHash === contentHash
+    ) {
         return null;
     }
 
-    const eventType: ExternalConversationEvent['type'] = existing?.hasReady
+    const eventType: ExternalInboundConversationEvent['type'] = existing?.hasReady
         ? 'conversation.updated'
         : 'conversation.ready';
 
@@ -148,7 +177,7 @@ export const maybeBuildExternalConversationEvent = (
         ts: (args.now ?? defaultNow)(),
         provider: normalizeExternalProvider(args.providerName),
         conversation_id: args.conversationId,
-        payload: args.data,
+        payload,
         attempt_id: args.attemptId ?? null,
         capture_meta: args.captureMeta,
         content_hash: contentHash,
@@ -158,30 +187,25 @@ export const maybeBuildExternalConversationEvent = (
 export const markExternalConversationEventDispatched = (
     state: ExternalEventDispatcherState,
     conversationId: string,
-    attemptId: string | null | undefined,
+    _attemptId: string | null | undefined,
     contentHash: string | null,
-    title: string | null | undefined,
+    payload: ConversationData,
 ) => {
-    const existing = state.byConversation.get(conversationId);
-    const titleUpgradeKey = buildTitleUpgradeAttemptKey(conversationId, attemptId);
-    const titleGeneric = isGenericConversationTitle(title);
-    const titleUpgraded = Boolean(existing?.hasReady && existing.lastTitleGeneric && !titleGeneric);
-    if (titleUpgraded) {
-        setBoundedMapValue(state.titleUpgradeByAttempt, titleUpgradeKey, true, state.maxEntries * 3);
-    }
     setBoundedMapValue(
         state.byConversation,
         conversationId,
         {
             hasReady: true,
             lastContentHash: contentHash,
-            lastTitleGeneric: titleGeneric,
+            lastPayloadSignature: payloadSignatureForDispatch(payload),
         },
         state.maxEntries,
     );
 };
 
-export const buildExternalInternalEventMessage = (event: ExternalConversationEvent): ExternalInternalEventMessage => ({
+export const buildExternalInternalEventMessage = (
+    event: ExternalInboundConversationEvent,
+): ExternalInternalEventMessage => ({
     type: EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE,
     event,
 });

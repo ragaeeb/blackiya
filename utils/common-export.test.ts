@@ -396,4 +396,289 @@ describe('buildCommonExport', () => {
         expect(result.prompt).toBe('');
         expect(result.response).toBe('');
     });
+
+    it('should resolve model from assistant metadata outside current chain when default model is placeholder', () => {
+        const conversation: ConversationData = {
+            title: 'Branched Model',
+            create_time: 1_700_040_000,
+            update_time: 1_700_040_100,
+            conversation_id: 'conversation-branch-model',
+            current_node: 'assistant-visible',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['user'] },
+                user: {
+                    id: 'user',
+                    message: {
+                        id: 'user',
+                        author: { role: 'user', name: 'User', metadata: {} },
+                        create_time: 1_700_040_010,
+                        update_time: 1_700_040_010,
+                        content: { content_type: 'text', parts: ['What model is this?'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'root',
+                    children: ['assistant-visible', 'assistant-metadata'],
+                },
+                'assistant-visible': {
+                    id: 'assistant-visible',
+                    message: {
+                        id: 'assistant-visible',
+                        author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                        create_time: 1_700_040_020,
+                        update_time: 1_700_040_020,
+                        content: { content_type: 'text', parts: ['Visible answer branch'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: [],
+                },
+                'assistant-metadata': {
+                    id: 'assistant-metadata',
+                    message: {
+                        id: 'assistant-metadata',
+                        author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                        create_time: 1_700_040_021,
+                        update_time: 1_700_040_021,
+                        content: { content_type: 'text', parts: ['Metadata branch'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {
+                            resolved_model_slug: 'gpt-5-2-thinking',
+                            model_slug: 'gpt-5-2-thinking',
+                        },
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: [],
+                },
+            },
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'unknown',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+
+        const result = buildCommonExport(conversation, 'ChatGPT');
+        expect(result.model).toBe('gpt-5-2-thinking');
+    });
+
+    it('should fall back to latest assistant reasoning in mapping when current chain has none', () => {
+        const conversation: ConversationData = {
+            title: 'Branched Reasoning',
+            create_time: 1_700_050_000,
+            update_time: 1_700_050_100,
+            conversation_id: 'conversation-branch-reasoning',
+            current_node: 'assistant-visible',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['user'] },
+                user: {
+                    id: 'user',
+                    message: {
+                        id: 'user',
+                        author: { role: 'user', name: 'User', metadata: {} },
+                        create_time: 1_700_050_010,
+                        update_time: 1_700_050_010,
+                        content: { content_type: 'text', parts: ['Explain the translation choice'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'root',
+                    children: ['assistant-visible', 'assistant-reasoning'],
+                },
+                'assistant-visible': {
+                    id: 'assistant-visible',
+                    message: {
+                        id: 'assistant-visible',
+                        author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                        create_time: 1_700_050_020,
+                        update_time: 1_700_050_020,
+                        content: { content_type: 'text', parts: ['Visible answer branch'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: [],
+                },
+                'assistant-reasoning': {
+                    id: 'assistant-reasoning',
+                    message: {
+                        id: 'assistant-reasoning',
+                        author: { role: 'assistant', name: 'Assistant', metadata: {} },
+                        create_time: 1_700_050_021,
+                        update_time: 1_700_050_021,
+                        content: {
+                            content_type: 'thoughts',
+                            thoughts: [
+                                {
+                                    summary: 'I compared equivalent terms',
+                                    content: 'I compared equivalent terms',
+                                    chunks: [],
+                                    finished: true,
+                                },
+                            ],
+                        },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: [],
+                },
+            },
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'unknown',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+
+        const result = buildCommonExport(conversation, 'ChatGPT');
+        expect(result.response).toBe('Visible answer branch');
+        expect(result.reasoning).toEqual(['I compared equivalent terms']);
+    });
+
+    it('should resolve model from user/system metadata when assistant metadata is missing', () => {
+        const conversation: ConversationData = {
+            title: 'ChatGPT Real Shape',
+            create_time: 1_772_599_896.404812,
+            update_time: 1_772_600_110.740647,
+            conversation_id: '69a7ba55-b040-8328-86d3-83eba2024303',
+            current_node: 'assistant-final',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['user'] },
+                user: {
+                    id: 'user',
+                    message: {
+                        id: 'user',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1_772_599_895.343,
+                        update_time: null,
+                        content: { content_type: 'text', parts: ['REDACTED PROMPT'] },
+                        status: 'finished_successfully',
+                        end_turn: null,
+                        weight: 1,
+                        metadata: {
+                            resolved_model_slug: 'gpt-5-2-thinking',
+                        },
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'root',
+                    children: ['system-model', 'assistant-thinking'],
+                },
+                'system-model': {
+                    id: 'system-model',
+                    message: {
+                        id: 'system-model',
+                        author: { role: 'system', name: null, metadata: {} },
+                        create_time: 1_772_599_896.2535634,
+                        update_time: null,
+                        content: { content_type: 'text', parts: [''] },
+                        status: 'finished_successfully',
+                        end_turn: null,
+                        weight: 1,
+                        metadata: {
+                            model_slug: 'gpt-5-2-thinking',
+                            default_model_slug: 'gpt-5-2-thinking',
+                        },
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: ['assistant-final'],
+                },
+                'assistant-thinking': {
+                    id: 'assistant-thinking',
+                    message: {
+                        id: 'assistant-thinking',
+                        author: { role: 'assistant', name: null, metadata: {} },
+                        create_time: 1_772_599_897.588998,
+                        update_time: null,
+                        content: {
+                            content_type: 'thoughts',
+                            thoughts: [
+                                {
+                                    summary: 'Translating and defining key terms',
+                                    content:
+                                        'I need to be careful with terminology and translation. For example, I must include Allah exactly.',
+                                    chunks: ['I need to be careful with terminology and translation.'],
+                                    finished: true,
+                                },
+                            ],
+                        },
+                        status: 'finished_successfully',
+                        end_turn: null,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'user',
+                    children: [],
+                },
+                'assistant-final': {
+                    id: 'assistant-final',
+                    message: {
+                        id: 'assistant-final',
+                        author: { role: 'assistant', name: null, metadata: {} },
+                        create_time: 1_772_600_110.740647,
+                        update_time: null,
+                        content: { content_type: 'text', parts: ['REDACTED RESPONSE'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                    parent: 'system-model',
+                    children: [],
+                },
+            },
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'unknown',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+
+        const result = buildCommonExport(conversation, 'ChatGPT');
+        expect(result.model).toBe('gpt-5-2-thinking');
+        expect(result.reasoning).toEqual([
+            'I need to be careful with terminology and translation. For example, I must include Allah exactly.',
+        ]);
+    });
 });

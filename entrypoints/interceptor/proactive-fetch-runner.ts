@@ -88,8 +88,9 @@ export class ProactiveFetchRunner {
             await delay(BACKOFF_SCHEDULE_MS[attempt]);
             const apiUrls = getApiUrlCandidates(adapter, conversationId);
             const requestHeaders = this.headersByKey.get(key);
+            let allNotFound = true;
             for (const apiUrl of apiUrls) {
-                const success = await this.tryFetch(
+                const result = await this.tryFetch(
                     adapter,
                     conversationId,
                     attemptId,
@@ -97,10 +98,17 @@ export class ProactiveFetchRunner {
                     apiUrl,
                     requestHeaders,
                 );
-                if (success) {
+                if (result === 'success') {
                     setBoundedMapValue(this.successAtByKey, key, Date.now(), this.maxDedupeEntries);
                     return true;
                 }
+                if (result !== 'not_found') {
+                    allNotFound = false;
+                }
+            }
+            if (allNotFound && apiUrls.length > 0) {
+                // Every URL candidate returned 404 — resource doesn't exist, abort backoff
+                return false;
             }
         }
         return false;
@@ -113,22 +121,24 @@ export class ProactiveFetchRunner {
         attempt: number,
         apiUrl: string,
         requestHeaders?: HeaderRecord,
-    ) => {
+    ): Promise<'success' | 'not_found' | 'failed'> => {
         if (this.emitter.isAttemptDisposed(attemptId)) {
-            return false;
+            return 'failed';
         }
         try {
             const response = await this.originalFetch(apiUrl, { credentials: 'include', headers: requestHeaders });
             if (!response.ok) {
                 this.logFetchStatus(conversationId, apiUrl, response.status, attempt);
-                return false;
+                return response.status === 404 ? 'not_found' : 'failed';
             }
             const text = await response.text();
             const parsed = this.parseConversation(adapter, apiUrl, text);
             if (!parsed) {
-                return false;
+                return 'failed';
             }
-            return this.emitIfReady(adapter, parsed, apiUrl, conversationId, attemptId, text.length);
+            return this.emitIfReady(adapter, parsed, apiUrl, conversationId, attemptId, text.length)
+                ? 'success'
+                : 'failed';
         } catch (error) {
             if (this.emitter.shouldLogTransient(`fetch:error:${conversationId}`, 5000)) {
                 this.emitter.log('warn', `fetch err ${conversationId}`, {
@@ -136,7 +146,7 @@ export class ProactiveFetchRunner {
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
-            return false;
+            return 'failed';
         }
     };
 

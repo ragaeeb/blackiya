@@ -1,352 +1,402 @@
-import { setBoundedMapValue } from '@/utils/bounded-collections';
-import { buildCommonExport } from '@/utils/common-export';
-import { EXTERNAL_CACHE_STORAGE_KEY } from '@/utils/external-api/constants';
+import {
+    asTabId,
+    buildFailureResponse,
+    buildSuccessResponse,
+    clampBatchSize,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_WAKE_THROTTLE_MS,
+    formatStoredEventForDelivery,
+    MAX_BATCH_SIZE,
+    toFormat,
+} from '@/utils/external-api/background-hub-helpers';
 import type {
-    ExternalConversationEvent,
-    ExternalConversationSuccessResponse,
-    ExternalFailureResponse,
+    ExternalEventDeliveryStats,
+    ExternalEventStore,
+    ExternalPortLike,
+} from '@/utils/external-api/background-hub-types';
+import type {
+    ExternalCommitMessage,
     ExternalHealthSuccessResponse,
+    ExternalInboundConversationEvent,
+    ExternalPortInboundMessage,
+    ExternalPortOutboundMessage,
     ExternalPullFormat,
+    ExternalReplayCompleteMessage,
     ExternalResponse,
+    ExternalStoredConversationEvent,
+    ExternalSubscribeMessage,
+    ExternalWakeMessage,
 } from '@/utils/external-api/contracts';
 import {
     EXTERNAL_API_VERSION,
     EXTERNAL_EVENTS_PORT_NAME,
-    EXTERNAL_PUSH_EVENT_TYPES,
-    isConversationDataLike,
-    isExportMeta,
+    isExternalCommitMessage,
+    isExternalPortInboundMessage,
     isExternalRequest,
+    isExternalSubscribeMessage,
 } from '@/utils/external-api/contracts';
-import { hasString, isFiniteNumber, isNullableString, isRecord } from '@/utils/type-guards';
-import type { ConversationData } from '@/utils/types';
+import {
+    createIndexedDbExternalEventStore,
+    createInMemoryExternalEventStore,
+} from '@/utils/external-api/external-event-store';
+import { EXPORT_FORMAT } from '@/utils/settings';
 
-export type ExternalStorageLike = {
-    get: (key: string) => Promise<Record<string, unknown>>;
-    set: (items: Record<string, unknown>) => Promise<void>;
-};
-
-export type ExternalPortLike = {
-    name: string;
-    postMessage: (message: unknown) => void;
-    disconnect?: () => void;
-    onDisconnect: {
-        addListener: (listener: (port: ExternalPortLike) => void) => void;
-        removeListener?: (listener: (port: ExternalPortLike) => void) => void;
-    };
-};
-
-export type CachedConversationRecord = {
-    conversation_id: string;
-    provider: ExternalConversationEvent['provider'];
-    event_id?: string;
-    event_type?: ExternalConversationEvent['type'];
-    payload: ConversationData;
-    attempt_id?: string | null;
-    capture_meta: ExternalConversationEvent['capture_meta'];
-    content_hash: string | null;
-    ts: number;
-    tab_id?: number;
-};
-
-export type ExternalEventDeliveryStats = {
-    subscriberCount: number;
-    delivered: number;
-    dropped: number;
-};
-
-type PersistedCacheState = {
-    latestConversationId: string | null;
-    records: CachedConversationRecord[];
-};
+export type {
+    CachedConversationRecord,
+    ExternalEventDeliveryStats,
+    ExternalEventStore,
+    ExternalPortLike,
+} from '@/utils/external-api/background-hub-types';
+export { createIndexedDbExternalEventStore, createInMemoryExternalEventStore };
 
 type ExternalApiHubDeps = {
-    storage: ExternalStorageLike;
+    eventStore?: ExternalEventStore;
     now?: () => number;
-    maxCachedConversations?: number;
-    storageKey?: string;
-    persistDebounceMs?: number;
+    defaultBatchSize?: number;
+    maxReplayBatchSize?: number;
+    wakeThrottleMs?: number;
+    sendWakeMessage?: (extensionId: string, message: ExternalWakeMessage) => Promise<void>;
     logger?: {
         debug?: (message: string, data?: unknown) => void;
         warn: (message: string, data?: unknown) => void;
     };
 };
 
-const DEFAULT_MAX_CACHED_CONVERSATIONS = 50;
-const DEFAULT_PERSIST_DEBOUNCE_MS = 500;
-
-const isQuotaError = (error: unknown): boolean => {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    const normalized = message.toLowerCase();
-    return normalized.includes('quota') || normalized.includes('quota_bytes');
+type SubscriberState = {
+    senderExtensionId: string | null;
+    subscribed: boolean;
+    cursor: number;
+    maxBatch: number;
+    payloadFormat: ExternalPullFormat;
+    replayInFlight: boolean;
+    lastDeliveredSeq: number;
 };
 
-const isExternalEventType = (value: unknown): value is ExternalConversationEvent['type'] =>
-    typeof value === 'string' && (EXTERNAL_PUSH_EVENT_TYPES as readonly string[]).includes(value);
-
-const isCachedConversationRecord = (value: unknown): value is CachedConversationRecord => {
-    if (!isRecord(value)) {
-        return false;
-    }
-    return (
-        hasString(value.conversation_id) &&
-        (value.provider === 'chatgpt' ||
-            value.provider === 'gemini' ||
-            value.provider === 'grok' ||
-            value.provider === 'unknown') &&
-        (value.event_id === undefined || hasString(value.event_id)) &&
-        (value.event_type === undefined || isExternalEventType(value.event_type)) &&
-        isConversationDataLike(value.payload) &&
-        (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
-        isExportMeta(value.capture_meta) &&
-        isNullableString(value.content_hash) &&
-        isFiniteNumber(value.ts) &&
-        (value.tab_id === undefined || isFiniteNumber(value.tab_id))
-    );
+type ReplayBatch = {
+    events: Awaited<ReturnType<ExternalEventStore['getSince']>>;
+    headSeq: number;
+    batchStart: number;
+    batchEnd: number;
 };
-
-const parsePersistedState = (value: unknown): PersistedCacheState | null => {
-    if (!isRecord(value)) {
-        return null;
-    }
-    const latestConversationId =
-        value.latestConversationId === null || typeof value.latestConversationId === 'string'
-            ? value.latestConversationId
-            : null;
-    if (!Array.isArray(value.records)) {
-        return null;
-    }
-    const records = value.records.filter((candidate): candidate is CachedConversationRecord =>
-        isCachedConversationRecord(candidate),
-    );
-    return { latestConversationId, records };
-};
-
-const buildFailureResponse = (
-    now: () => number,
-    code: ExternalFailureResponse['code'],
-    message: string,
-): ExternalFailureResponse => ({
-    ok: false,
-    api: EXTERNAL_API_VERSION,
-    code,
-    message,
-    ts: now(),
-});
-
-const providerToPlatformName = (provider: ExternalConversationEvent['provider']): string => {
-    if (provider === 'chatgpt') {
-        return 'ChatGPT';
-    }
-    if (provider === 'gemini') {
-        return 'Gemini';
-    }
-    if (provider === 'grok') {
-        return 'Grok';
-    }
-    return 'Unknown';
-};
-
-const toFormat = (format: ExternalPullFormat | undefined): ExternalPullFormat =>
-    format === 'common' ? 'common' : 'original';
 
 export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     const now = deps.now ?? (() => Date.now());
-    const maxCachedConversations = deps.maxCachedConversations ?? DEFAULT_MAX_CACHED_CONVERSATIONS;
-    const storageKey = deps.storageKey ?? EXTERNAL_CACHE_STORAGE_KEY;
-    const persistDebounceMs = deps.persistDebounceMs ?? DEFAULT_PERSIST_DEBOUNCE_MS;
-    const recordsByConversation = new Map<string, CachedConversationRecord>();
-    const subscribers = new Set<ExternalPortLike>();
+    const eventStore = deps.eventStore ?? createIndexedDbExternalEventStore({ now });
+    const defaultBatchSize = clampBatchSize(deps.defaultBatchSize, DEFAULT_BATCH_SIZE);
+    const maxReplayBatchSize = clampBatchSize(deps.maxReplayBatchSize, MAX_BATCH_SIZE);
+    const wakeThrottleMs = Math.max(0, deps.wakeThrottleMs ?? DEFAULT_WAKE_THROTTLE_MS);
+    const sendWakeMessage = deps.sendWakeMessage ?? (async () => {});
 
-    let latestConversationId: string | null = null;
-    let hydrated = false;
-    let hydrationPromise: Promise<void> | null = null;
-    let persistTimer: ReturnType<typeof setTimeout> | null = null;
-    let persistInFlight: Promise<void> | null = null;
-    let persistRequestedWhileInFlight = false;
+    const subscribers = new Map<ExternalPortLike, SubscriberState>();
+
+    let initialized = false;
+    let initializePromise: Promise<void> | null = null;
+    let wakeGate: Promise<void> = Promise.resolve();
+
+    const ensureHydrated = async () => {
+        if (initialized) {
+            return;
+        }
+        if (!initializePromise) {
+            initializePromise = eventStore
+                .init()
+                .then(() => {
+                    initialized = true;
+                })
+                .catch((error) => {
+                    deps.logger?.warn('Failed to initialize external event store', { error });
+                    throw error;
+                })
+                .finally(() => {
+                    initializePromise = null;
+                });
+        }
+        await initializePromise;
+    };
 
     const removeSubscriber = (port: ExternalPortLike) => {
         subscribers.delete(port);
     };
 
-    const ensureHydrated = async () => {
-        if (hydrated) {
-            return;
+    const hasOnlineDeliverySubscriber = async () => {
+        const designatedConsumerId = await eventStore.getDeliveryConsumerId();
+        if (!designatedConsumerId) {
+            return false;
         }
-        if (hydrationPromise) {
-            await hydrationPromise;
-            return;
-        }
-        hydrationPromise = deps.storage
-            .get(storageKey)
-            .then((result) => {
-                const persisted = parsePersistedState(result[storageKey]);
-                if (!persisted) {
-                    return;
-                }
-                latestConversationId = persisted.latestConversationId;
-                for (const record of persisted.records) {
-                    setBoundedMapValue(recordsByConversation, record.conversation_id, record, maxCachedConversations);
-                }
-            })
-            .catch((error) => {
-                deps.logger?.warn('Failed to hydrate external API cache from storage', { error });
-            })
-            .finally(() => {
-                hydrated = true;
-                hydrationPromise = null;
-            });
-        await hydrationPromise;
-    };
-
-    const resolveLatestConversationIdForRecords = (records: CachedConversationRecord[]): string | null => {
-        if (latestConversationId && records.some((record) => record.conversation_id === latestConversationId)) {
-            return latestConversationId;
-        }
-        return records[records.length - 1]?.conversation_id ?? null;
-    };
-
-    const persistState = async (records: CachedConversationRecord[]) => {
-        const state: PersistedCacheState = {
-            latestConversationId: resolveLatestConversationIdForRecords(records),
-            records,
-        };
-        await deps.storage.set({ [storageKey]: state });
-    };
-
-    const persist = async () => {
-        const allRecords = [...recordsByConversation.values()];
-        let droppedRecords = 0;
-
-        // Progressive shed strategy: on quota errors we increase `droppedRecords` so
-        // `allRecords.slice(droppedRecords)` drops oldest records, recomputes
-        // `latestConversationId` for the reduced snapshot, and retries. We run up to
-        // n+1 attempts (where n is `allRecords.length`) so the final iteration can
-        // still persist an empty state.
-        while (droppedRecords <= allRecords.length) {
-            const records = allRecords.slice(droppedRecords);
-            try {
-                await persistState(records);
-                return;
-            } catch (error) {
-                if (!isQuotaError(error)) {
-                    deps.logger?.warn('Failed to persist external API cache to storage', {
-                        error,
-                        attemptedRecordCount: records.length,
-                    });
-                    return;
-                }
-                droppedRecords += 1;
-                if (droppedRecords > allRecords.length) {
-                    deps.logger?.warn('Failed to persist external API cache after quota retries', {
-                        error,
-                        attemptedRecordCount: records.length,
-                    });
-                    return;
-                }
+        for (const state of subscribers.values()) {
+            if (!state.subscribed) {
+                continue;
+            }
+            if (state.senderExtensionId === designatedConsumerId) {
+                return true;
             }
         }
+        return false;
     };
 
-    const runPersistNow = async () => {
-        if (persistInFlight) {
-            persistRequestedWhileInFlight = true;
-            return;
-        }
-        do {
-            persistRequestedWhileInFlight = false;
-            persistInFlight = persist().finally(() => {
-                persistInFlight = null;
-            });
-            await persistInFlight;
-        } while (persistRequestedWhileInFlight);
-    };
+    const maybeSendWake = async (headSeq: number) => {
+        const run = async () => {
+            const designatedConsumerId = await eventStore.getDeliveryConsumerId();
+            if (!designatedConsumerId) {
+                return;
+            }
+            if (await hasOnlineDeliverySubscriber()) {
+                return;
+            }
 
-    const debouncedPersist = () => {
-        if (persistDebounceMs <= 0) {
-            void runPersistNow();
-            return;
-        }
-        if (persistTimer !== null) {
-            clearTimeout(persistTimer);
-        }
-        persistTimer = setTimeout(() => {
-            persistTimer = null;
-            void runPersistNow();
-        }, persistDebounceMs);
-    };
+            const nowTs = now();
+            const lastWakeSentAt = await eventStore.getLastWakeSentAt();
+            if (lastWakeSentAt > 0 && nowTs - lastWakeSentAt < wakeThrottleMs) {
+                return;
+            }
 
-    const flushPersist = async () => {
-        if (persistTimer !== null) {
-            clearTimeout(persistTimer);
-            persistTimer = null;
-        }
-        await runPersistNow();
-    };
-
-    const buildSuccessResponse = (
-        record: CachedConversationRecord,
-        format: ExternalPullFormat,
-    ): ExternalConversationSuccessResponse => {
-        if (format === 'common') {
-            return {
-                ok: true,
-                api: EXTERNAL_API_VERSION,
-                ts: now(),
-                conversation_id: record.conversation_id,
-                format: 'common',
-                data: buildCommonExport(record.payload, providerToPlatformName(record.provider)),
-            };
-        }
-        return {
-            ok: true,
-            api: EXTERNAL_API_VERSION,
-            ts: now(),
-            conversation_id: record.conversation_id,
-            format: 'original',
-            data: record.payload,
+            try {
+                await sendWakeMessage(designatedConsumerId, {
+                    type: 'BLACKIYA_WAKE',
+                    head_seq: headSeq,
+                    ts: nowTs,
+                });
+                await eventStore.setLastWakeSentAt(nowTs);
+            } catch (error) {
+                deps.logger?.warn('Failed to send wake signal to delivery consumer', {
+                    designatedConsumerId,
+                    error,
+                });
+            }
         };
+        wakeGate = wakeGate.then(run, run);
+        await wakeGate;
     };
 
-    const broadcast = (event: ExternalConversationEvent): ExternalEventDeliveryStats => {
+    const broadcastLiveEvent = async (event: ExternalStoredConversationEvent): Promise<ExternalEventDeliveryStats> => {
         if (subscribers.size === 0) {
-            deps.logger?.debug?.('External hub broadcast skipped: no subscribers', {
-                conversationId: event.conversation_id,
-                eventType: event.type,
-                tabId: event.tab_id ?? null,
-            });
             return {
                 subscriberCount: 0,
                 delivered: 0,
                 dropped: 0,
+                designatedDelivered: false,
             };
         }
+
+        const designatedConsumerId = await eventStore.getDeliveryConsumerId();
         let delivered = 0;
         let dropped = 0;
-        for (const port of [...subscribers]) {
+        let designatedDelivered = false;
+
+        for (const [port, state] of [...subscribers.entries()]) {
+            if (!state.subscribed) {
+                continue;
+            }
+            const eventForSubscriber = formatStoredEventForDelivery(event, state.payloadFormat);
             try {
-                port.postMessage(event);
+                port.postMessage(eventForSubscriber satisfies ExternalPortOutboundMessage);
+                state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, event.seq);
                 delivered += 1;
+                if (designatedConsumerId && state.senderExtensionId === designatedConsumerId) {
+                    designatedDelivered = true;
+                }
             } catch {
                 subscribers.delete(port);
                 dropped += 1;
             }
         }
-        deps.logger?.debug?.('External hub broadcast complete', {
-            conversationId: event.conversation_id,
-            eventType: event.type,
-            tabId: event.tab_id ?? null,
-            subscriberCount: subscribers.size,
-            delivered,
-            dropped,
-        });
+
         return {
             subscriberCount: subscribers.size,
             delivered,
             dropped,
+            designatedDelivered,
         };
     };
 
-    const addSubscriber = (port: ExternalPortLike): boolean => {
+    const readReplayBatch = async (cursor: number, replayBatchSize: number): Promise<ReplayBatch | null> => {
+        const events = await eventStore.getSince(cursor, replayBatchSize);
+        if (events.length === 0) {
+            return null;
+        }
+        const headSeq = await eventStore.getHeadSeq();
+        const batchStart = events[0]?.seq ?? cursor;
+        const batchEnd = events[events.length - 1]?.seq ?? cursor;
+        return {
+            events,
+            headSeq,
+            batchStart,
+            batchEnd,
+        };
+    };
+
+    const postReplayBatch = (port: ExternalPortLike, batch: ReplayBatch, payloadFormat: ExternalPullFormat) => {
+        const events = batch.events.map((event) => formatStoredEventForDelivery(event, payloadFormat));
+        port.postMessage({
+            type: 'events.batch',
+            events,
+            head_seq: batch.headSeq,
+            batch_start: batch.batchStart,
+            batch_end: batch.batchEnd,
+        } satisfies ExternalPortOutboundMessage);
+        const state = subscribers.get(port);
+        if (state) {
+            state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, batch.batchEnd);
+        }
+    };
+
+    const streamReplayBatches = async (
+        port: ExternalPortLike,
+        replayCursor: number,
+        replayBatchSize: number,
+        payloadFormat: ExternalPullFormat,
+    ) => {
+        let cursor = replayCursor;
+        while (subscribers.has(port)) {
+            const batch = await readReplayBatch(cursor, replayBatchSize);
+            if (!batch) {
+                break;
+            }
+            postReplayBatch(port, batch, payloadFormat);
+            cursor = batch.batchEnd;
+        }
+    };
+
+    const postReplayCompleteIfConnected = async (port: ExternalPortLike, replayCursor: number) => {
+        if (!subscribers.has(port)) {
+            return;
+        }
+        const completeMessage: ExternalReplayCompleteMessage = {
+            type: 'replay.complete',
+            cursor: replayCursor,
+            head_seq: await eventStore.getHeadSeq(),
+        };
+        port.postMessage(completeMessage satisfies ExternalPortOutboundMessage);
+    };
+
+    const replaySinceCursor = async (port: ExternalPortLike, subscribeMessage: ExternalSubscribeMessage) => {
+        const state = subscribers.get(port);
+        if (!state || state.replayInFlight) {
+            return;
+        }
+
+        state.replayInFlight = true;
+        const replayCursor = Math.max(0, Math.floor(subscribeMessage.cursor));
+        const replayBatchSize = Math.min(state.maxBatch, maxReplayBatchSize);
+
+        try {
+            await streamReplayBatches(port, replayCursor, replayBatchSize, state.payloadFormat);
+            await postReplayCompleteIfConnected(port, replayCursor);
+        } catch {
+            removeSubscriber(port);
+        } finally {
+            const latestState = subscribers.get(port);
+            if (latestState) {
+                latestState.replayInFlight = false;
+            }
+        }
+    };
+
+    const disconnectSubscriber = (port: ExternalPortLike) => {
+        removeSubscriber(port);
+        try {
+            port.disconnect?.();
+        } catch {}
+    };
+
+    const authorizeDeliverySubscription = async (
+        port: ExternalPortLike,
+        state: SubscriberState,
+        message: ExternalSubscribeMessage,
+    ): Promise<boolean> => {
+        if (message.consumer_role !== 'delivery') {
+            return true;
+        }
+        if (!state.senderExtensionId) {
+            deps.logger?.warn('External hub subscribe rejected: missing senderExtensionId', {
+                consumerRole: message.consumer_role,
+            });
+            disconnectSubscriber(port);
+            return false;
+        }
+
+        const result = await eventStore.ensureDeliveryConsumer(state.senderExtensionId);
+        if (!result.authorized) {
+            deps.logger?.warn('External hub subscribe from non-designated delivery consumer', {
+                senderExtensionId: state.senderExtensionId,
+                designatedConsumerId: result.designatedConsumerId,
+            });
+            disconnectSubscriber(port);
+            return false;
+        }
+
+        return true;
+    };
+
+    const handleSubscribe = async (port: ExternalPortLike, message: ExternalSubscribeMessage) => {
+        const state = subscribers.get(port);
+        if (!state) {
+            return;
+        }
+
+        const nextCursor = Math.max(0, Math.floor(message.cursor));
+        const nextMaxBatch = clampBatchSize(message.max_batch, defaultBatchSize);
+
+        const authorized = await authorizeDeliverySubscription(port, state, message);
+        if (!authorized) {
+            return;
+        }
+
+        state.subscribed = true;
+        state.cursor = nextCursor;
+        state.maxBatch = nextMaxBatch;
+        state.payloadFormat = toFormat(message.payload_format);
+        state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, nextCursor);
+
+        await replaySinceCursor(port, message);
+    };
+
+    const handleCommit = async (port: ExternalPortLike, message: ExternalCommitMessage) => {
+        const state = subscribers.get(port);
+        if (!state?.senderExtensionId) {
+            return;
+        }
+
+        const requestedUpToSeq = Math.max(0, Math.floor(message.up_to_seq));
+        if (requestedUpToSeq > state.lastDeliveredSeq) {
+            deps.logger?.warn('External hub commit exceeds delivered watermark', {
+                senderExtensionId: state.senderExtensionId,
+                upToSeq: requestedUpToSeq,
+                lastDeliveredSeq: state.lastDeliveredSeq,
+            });
+            return;
+        }
+
+        const result = await eventStore.commit(state.senderExtensionId, requestedUpToSeq);
+        if (!result.authorized) {
+            deps.logger?.warn('External hub commit rejected for non-designated consumer', {
+                senderExtensionId: state.senderExtensionId,
+                upToSeq: requestedUpToSeq,
+            });
+            return;
+        }
+
+        const pruneResult = await eventStore.prune();
+        if (pruneResult.blockedByUncommitted) {
+            deps.logger?.warn('External hub prune blocked by uncommitted backlog', {
+                totalEvents: pruneResult.total,
+            });
+        }
+    };
+
+    const handlePortInboundMessage = async (port: ExternalPortLike, message: ExternalPortInboundMessage) => {
+        await ensureHydrated();
+
+        if (isExternalSubscribeMessage(message)) {
+            await handleSubscribe(port, message);
+            return;
+        }
+        if (isExternalCommitMessage(message)) {
+            await handleCommit(port, message);
+        }
+    };
+
+    const addSubscriber = (port: ExternalPortLike, context?: { senderExtensionId?: string | null }): boolean => {
         if (port.name !== EXTERNAL_EVENTS_PORT_NAME) {
             deps.logger?.warn('External hub rejected subscriber with invalid port name', { portName: port.name });
             try {
@@ -354,142 +404,97 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             } catch {}
             return false;
         }
-        subscribers.add(port);
-        deps.logger?.debug?.('External hub subscriber connected', {
-            portName: port.name,
-            subscriberCount: subscribers.size,
-        });
+
+        const state: SubscriberState = {
+            senderExtensionId: context?.senderExtensionId ?? null,
+            subscribed: false,
+            cursor: 0,
+            maxBatch: defaultBatchSize,
+            payloadFormat: EXPORT_FORMAT.ORIGINAL,
+            replayInFlight: false,
+            lastDeliveredSeq: 0,
+        };
+
+        subscribers.set(port, state);
+
         const disconnectHandler = () => {
             removeSubscriber(port);
             port.onDisconnect.removeListener?.(disconnectHandler);
-            deps.logger?.debug?.('External hub subscriber disconnected', {
-                portName: port.name,
-                subscriberCount: subscribers.size,
+            if (port.onMessage && onMessageHandler) {
+                port.onMessage.removeListener?.(onMessageHandler);
+            }
+        };
+
+        const onMessageHandler = (message: unknown) => {
+            if (!isExternalPortInboundMessage(message)) {
+                return;
+            }
+            void handlePortInboundMessage(port, message).catch((error) => {
+                deps.logger?.warn('External hub failed to process inbound port message', {
+                    error,
+                    senderExtensionId: state.senderExtensionId,
+                    messageType: message.type,
+                });
             });
         };
+
+        if (port.onMessage) {
+            port.onMessage.addListener(onMessageHandler);
+        }
         port.onDisconnect.addListener(disconnectHandler);
-        void replayLatestToSubscriber(port);
+
         return true;
     };
 
-    const resolveLatestRecordForTab = (tabId: number): CachedConversationRecord | null => {
-        let latestForTab: CachedConversationRecord | null = null;
-        for (const record of recordsByConversation.values()) {
-            if (record.tab_id !== tabId) {
-                continue;
-            }
-            if (!latestForTab || record.ts > latestForTab.ts) {
-                latestForTab = record;
-            }
+    const ingestEvent = async (event: ExternalInboundConversationEvent, senderTabId?: number) => {
+        await ensureHydrated();
+
+        const resolvedTabId = event.tab_id ?? asTabId(senderTabId);
+        const normalizedEvent =
+            resolvedTabId === undefined
+                ? event
+                : {
+                      ...event,
+                      tab_id: resolvedTabId,
+                  };
+
+        const appendedEvent = await eventStore.append(normalizedEvent);
+        const deliveryStats = await broadcastLiveEvent(appendedEvent);
+        if (!deliveryStats.designatedDelivered) {
+            await maybeSendWake(appendedEvent.seq);
         }
-        return latestForTab;
+
+        return deliveryStats;
     };
 
-    const resolveCurrentLatestRecord = (): CachedConversationRecord | null => {
-        if (latestConversationId) {
-            const latestRecord = recordsByConversation.get(latestConversationId);
-            if (latestRecord) {
-                return latestRecord;
-            }
+    const buildGetSinceResponse = async (
+        cursor: number,
+        limitCandidate: number | undefined,
+        formatCandidate: ExternalPullFormat | undefined,
+    ): Promise<ExternalResponse> => {
+        const limit = clampBatchSize(limitCandidate, defaultBatchSize);
+        const format = toFormat(formatCandidate);
+        const storedEvents = await eventStore.getSince(Math.max(0, Math.floor(cursor)), limit);
+        if (format === EXPORT_FORMAT.COMMON) {
+            const events = storedEvents.map((event) => formatStoredEventForDelivery(event, EXPORT_FORMAT.COMMON));
+            return {
+                ok: true,
+                api: EXTERNAL_API_VERSION,
+                ts: now(),
+                format: EXPORT_FORMAT.COMMON,
+                head_seq: await eventStore.getHeadSeq(),
+                events,
+            };
         }
-
-        let fallbackLatest: CachedConversationRecord | null = null;
-        for (const record of recordsByConversation.values()) {
-            if (!fallbackLatest || record.ts > fallbackLatest.ts) {
-                fallbackLatest = record;
-            }
-        }
-        latestConversationId = fallbackLatest?.conversation_id ?? null;
-        return fallbackLatest;
-    };
-
-    const resolveAndUpdateLatestRecord = (tabId?: number): CachedConversationRecord | null => {
-        if (typeof tabId === 'number') {
-            return resolveLatestRecordForTab(tabId);
-        }
-        return resolveCurrentLatestRecord();
-    };
-
-    const buildReplayEvent = (record: CachedConversationRecord): ExternalConversationEvent => {
-        const replayEvent: ExternalConversationEvent = {
+        const events = storedEvents.map((event) => formatStoredEventForDelivery(event, EXPORT_FORMAT.ORIGINAL));
+        return {
+            ok: true,
             api: EXTERNAL_API_VERSION,
-            type: record.event_type ?? 'conversation.ready',
-            event_id: record.event_id ?? `replay:${record.conversation_id}:${record.ts}`,
-            ts: record.ts,
-            provider: record.provider,
-            conversation_id: record.conversation_id,
-            payload: record.payload,
-            attempt_id: record.attempt_id,
-            capture_meta: record.capture_meta,
-            content_hash: record.content_hash,
+            ts: now(),
+            format: EXPORT_FORMAT.ORIGINAL,
+            head_seq: await eventStore.getHeadSeq(),
+            events,
         };
-        if (record.tab_id === undefined) {
-            return replayEvent;
-        }
-        return { ...replayEvent, tab_id: record.tab_id };
-    };
-
-    const replayLatestToSubscriber = async (port: ExternalPortLike) => {
-        await ensureHydrated();
-        if (!subscribers.has(port)) {
-            return;
-        }
-        const latestRecord = resolveCurrentLatestRecord();
-        if (!latestRecord) {
-            deps.logger?.debug?.('External hub replay skipped: no cached conversation', {
-                portName: port.name,
-                subscriberCount: subscribers.size,
-            });
-            return;
-        }
-        try {
-            const replayEvent = buildReplayEvent(latestRecord);
-            port.postMessage(replayEvent);
-            deps.logger?.debug?.('External hub replay delivered', {
-                conversationId: replayEvent.conversation_id,
-                eventType: replayEvent.type,
-                tabId: replayEvent.tab_id ?? null,
-                portName: port.name,
-            });
-        } catch {
-            removeSubscriber(port);
-            deps.logger?.debug?.('External hub replay failed; subscriber removed', {
-                portName: port.name,
-                subscriberCount: subscribers.size,
-            });
-        }
-    };
-
-    const ingestEvent = async (event: ExternalConversationEvent, senderTabId?: number) => {
-        await ensureHydrated();
-        const resolvedTabId = event.tab_id ?? (typeof senderTabId === 'number' ? senderTabId : undefined);
-        const enrichedEvent: ExternalConversationEvent =
-            resolvedTabId === undefined ? event : { ...event, tab_id: resolvedTabId };
-
-        const record: CachedConversationRecord = {
-            conversation_id: enrichedEvent.conversation_id,
-            provider: enrichedEvent.provider,
-            event_id: enrichedEvent.event_id,
-            event_type: enrichedEvent.type,
-            payload: enrichedEvent.payload,
-            attempt_id: enrichedEvent.attempt_id,
-            capture_meta: enrichedEvent.capture_meta,
-            content_hash: enrichedEvent.content_hash,
-            ts: enrichedEvent.ts,
-            tab_id: enrichedEvent.tab_id,
-        };
-        setBoundedMapValue(recordsByConversation, enrichedEvent.conversation_id, record, maxCachedConversations);
-        latestConversationId = enrichedEvent.conversation_id;
-        deps.logger?.debug?.('External hub ingested event', {
-            conversationId: enrichedEvent.conversation_id,
-            eventType: enrichedEvent.type,
-            tabId: enrichedEvent.tab_id ?? null,
-            provider: enrichedEvent.provider,
-            captureSource: enrichedEvent.capture_meta.captureSource,
-            completeness: enrichedEvent.capture_meta.completeness,
-        });
-        debouncedPersist();
-        return broadcast(enrichedEvent);
     };
 
     const handleExternalRequest = async (request: unknown): Promise<ExternalResponse> => {
@@ -507,19 +512,23 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             return response;
         }
 
+        if (request.type === 'events.getSince') {
+            return buildGetSinceResponse(request.cursor, request.limit, request.format);
+        }
+
         if (request.type === 'conversation.getLatest') {
-            const record = resolveAndUpdateLatestRecord(request.tab_id);
+            const record = await eventStore.getLatest(request.tab_id);
             if (!record) {
                 return buildFailureResponse(now, 'UNAVAILABLE', 'No conversation data available');
             }
-            return buildSuccessResponse(record, toFormat(request.format));
+            return buildSuccessResponse(record, toFormat(request.format), now);
         }
 
-        const record = recordsByConversation.get(request.conversation_id);
+        const record = await eventStore.getByConversationId(request.conversation_id);
         if (!record) {
             return buildFailureResponse(now, 'NOT_FOUND', 'Conversation not found');
         }
-        return buildSuccessResponse(record, toFormat(request.format));
+        return buildSuccessResponse(record, toFormat(request.format), now);
     };
 
     return {
@@ -528,6 +537,6 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         ingestEvent,
         handleExternalRequest,
         ensureHydrated,
-        flushPersist,
+        flushPersist: async () => {},
     };
 };

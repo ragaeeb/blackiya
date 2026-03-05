@@ -61,6 +61,7 @@ describe('canonical-stabilization-tick', () => {
             refreshButtonState: mock(() => {}),
 
             emitWarn: mock(() => {}),
+            emitDebug: mock(() => {}),
             emitInfo: mock(() => {}),
         };
     });
@@ -171,7 +172,7 @@ describe('canonical-stabilization-tick', () => {
         it('should trigger warnings if max retries exhausted', () => {
             deps.retryCounts.set('attempt-1', 5);
             scheduleCanonicalStabilizationRetry('conv-1', 'attempt-1', deps);
-            expect(deps.emitWarn).toHaveBeenCalled();
+            expect(deps.emitDebug).toHaveBeenCalled();
             expect(deps.retryTimers.has('attempt-1')).toBeFalse();
         });
 

@@ -6,14 +6,10 @@
  * @module entrypoints/background
  */
 
-import {
-    createExternalApiHub,
-    type ExternalPortLike,
-    type ExternalStorageLike,
-} from '@/utils/external-api/background-hub';
-import { EXTERNAL_API_VERSION, isExternalInternalEventMessage } from '@/utils/external-api/contracts';
+import { getBuildFingerprint } from '@/utils/build-fingerprint';
 import { logger } from '@/utils/logger';
 import { type LogEntry, logsStorage } from '@/utils/logs-storage';
+import { isBulkExportProgressMessage } from '@/utils/runner/bulk-chat-export-contract';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 import {
     isProbeLeaseClaimRequest,
@@ -25,6 +21,11 @@ import { createProbeLeaseStore } from '@/utils/sfe/probe-lease-store';
 
 type BackgroundLogger = Pick<typeof logger, 'debug' | 'info' | 'warn' | 'error'>;
 type BackgroundSender = { tab?: { url?: string; id?: number } };
+type ActionApi = {
+    setBadgeText: (details: { text: string; tabId?: number }) => Promise<void> | void;
+    setBadgeBackgroundColor?: (details: { color: string; tabId?: number }) => Promise<void> | void;
+    setTitle?: (details: { title: string; tabId?: number }) => Promise<void> | void;
+};
 
 const isLogContext = (value: unknown): value is LogEntry['context'] => {
     return value === 'background' || value === 'content' || value === 'popup' || value === 'unknown';
@@ -47,8 +48,62 @@ const isLogEntryPayload = (payload: unknown): payload is LogEntry => {
 type BackgroundMessageHandlerDeps = {
     saveLog: (payload: LogEntry) => Promise<void>;
     leaseCoordinator: ProbeLeaseCoordinator;
-    externalApiHub: ReturnType<typeof createExternalApiHub>;
     logger: BackgroundLogger;
+    actionApi: ActionApi | null;
+};
+
+const toBadgeCounterText = (value: number | undefined): string => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return '';
+    }
+    const normalized = Math.floor(value);
+    if (normalized > 999) {
+        return '999+';
+    }
+    return String(normalized);
+};
+
+const handleBulkExportProgressMessage = (
+    message: unknown,
+    sender: BackgroundSender,
+    deps: BackgroundMessageHandlerDeps,
+): boolean => {
+    if (!isBulkExportProgressMessage(message)) {
+        return false;
+    }
+    const tabId = sender.tab?.id;
+    const actionApi = deps.actionApi;
+    if (!actionApi || typeof tabId !== 'number') {
+        return true;
+    }
+
+    if (message.stage === 'completed') {
+        void actionApi.setBadgeText({ text: '', tabId });
+        void actionApi.setTitle?.({
+            title: `Blackiya: Export completed (${message.exported ?? 0}/${message.attempted ?? 0})`,
+            tabId,
+        });
+        return true;
+    }
+
+    if (message.stage === 'failed') {
+        void actionApi.setBadgeText({ text: '!', tabId });
+        void actionApi.setBadgeBackgroundColor?.({ color: '#b91c1c', tabId });
+        void actionApi.setTitle?.({
+            title: `Blackiya: Export failed${message.message ? ` - ${message.message}` : ''}`,
+            tabId,
+        });
+        return true;
+    }
+
+    const remainingText = toBadgeCounterText(message.remaining);
+    void actionApi.setBadgeText({ text: remainingText, tabId });
+    void actionApi.setBadgeBackgroundColor?.({ color: '#1d4ed8', tabId });
+    void actionApi.setTitle?.({
+        title: `Blackiya: Exporting ${message.platform ?? 'chats'} (${message.attempted ?? 0}/${message.discovered ?? 0})`,
+        tabId,
+    });
+    return true;
 };
 
 const handleGenericBackgroundMessage = (
@@ -76,36 +131,8 @@ const handleGenericBackgroundMessage = (
 
 export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDeps) => {
     return (message: unknown, sender: BackgroundSender, sendResponse: (response: unknown) => void) => {
-        if (isExternalInternalEventMessage(message)) {
-            const event = message.event;
-            deps.logger.debug?.('External event internal message received', {
-                conversationId: event.conversation_id,
-                eventType: event.type,
-                eventId: event.event_id,
-                senderTabId: sender.tab?.id ?? null,
-            });
-            void deps.externalApiHub
-                .ingestEvent(event, sender.tab?.id)
-                .then((delivery) => {
-                    deps.logger.debug?.('External event internal message ingested', {
-                        conversationId: event.conversation_id,
-                        eventType: event.type,
-                        eventId: event.event_id,
-                        senderTabId: sender.tab?.id ?? null,
-                        subscriberCount: delivery.subscriberCount,
-                        delivered: delivery.delivered,
-                        dropped: delivery.dropped,
-                    });
-                    sendResponse({ success: true, delivery });
-                })
-                .catch((error) => {
-                    deps.logger.error('Failed to ingest external API event in background', error);
-                    sendResponse({
-                        success: false,
-                        error: 'Failed to ingest external API event',
-                    });
-                });
-            return true;
+        if (handleBulkExportProgressMessage(message, sender, deps)) {
+            return;
         }
 
         if (isProbeLeaseClaimRequest(message)) {
@@ -164,65 +191,15 @@ export const createBackgroundMessageHandler = (deps: BackgroundMessageHandlerDep
     };
 };
 
-type ExternalMessageHandlerDeps = {
-    externalApiHub: ReturnType<typeof createExternalApiHub>;
-    logger: BackgroundLogger;
-};
-
-export const createExternalMessageHandler = (deps: ExternalMessageHandlerDeps) => {
-    return (message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => {
-        try {
-            void deps.externalApiHub
-                .handleExternalRequest(message)
-                .then((response) => {
-                    sendResponse(response);
-                })
-                .catch((error) => {
-                    deps.logger.error('Failed to handle external API request', error);
-                    sendResponse({
-                        ok: false,
-                        api: EXTERNAL_API_VERSION,
-                        code: 'INTERNAL_ERROR',
-                        message: 'Failed to handle external API request',
-                        ts: Date.now(),
-                    });
-                });
-        } catch (error) {
-            deps.logger.error('External API handler crashed before request dispatch', error);
-            sendResponse({
-                ok: false,
-                api: EXTERNAL_API_VERSION,
-                code: 'INTERNAL_ERROR',
-                message: 'Failed to handle external API request',
-                ts: Date.now(),
-            });
-        }
-        return true;
-    };
-};
-
-type ExternalConnectHandlerDeps = {
-    externalApiHub: ReturnType<typeof createExternalApiHub>;
-};
-
-export const createExternalConnectHandler = (deps: ExternalConnectHandlerDeps) => {
-    return (port: ExternalPortLike) => {
-        deps.externalApiHub.addSubscriber(port);
-    };
-};
-
 export default defineBackground(() => {
+    const buildFingerprint = getBuildFingerprint();
     const leaseCoordinator = new ProbeLeaseCoordinator({
         store: createProbeLeaseStore(),
     });
-    const externalApiHub = createExternalApiHub({
-        storage: browser.storage.local as ExternalStorageLike,
-        logger,
-    });
-    void externalApiHub.ensureHydrated();
 
     logger.info('Background service worker started', {
         id: browser.runtime.id,
+        build: buildFingerprint,
     });
 
     browser.runtime.onInstalled.addListener((details) => {
@@ -237,21 +214,8 @@ export default defineBackground(() => {
         createBackgroundMessageHandler({
             saveLog: (payload) => logsStorage.saveLog(payload),
             leaseCoordinator,
-            externalApiHub,
             logger,
-        }),
-    );
-
-    browser.runtime.onMessageExternal?.addListener(
-        createExternalMessageHandler({
-            externalApiHub,
-            logger,
-        }),
-    );
-
-    browser.runtime.onConnectExternal?.addListener(
-        createExternalConnectHandler({
-            externalApiHub,
+            actionApi: browser.action ?? null,
         }),
     );
 });

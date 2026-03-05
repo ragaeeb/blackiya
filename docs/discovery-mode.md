@@ -37,8 +37,6 @@ Current host scope:
    - `x.com` (Grok surface)
 2. ChatGPT is not part of this discovery-host filter today.
 
-If stream dump is enabled, discovery is complemented with frame/chunk-level capture for stream forensics.
-
 ## When To Use
 Use discovery mode if:
 1. Save never enables after clear completion.
@@ -56,10 +54,9 @@ Use discovery mode if:
 2. Reproduce once with minimal noise (single tab first).
 3. Export debug report TXT.
 4. If unclear, export full logs JSON.
-5. If stream timing/parsing is unclear, enable stream dump and export JSON.
-6. Identify changed endpoints, payload shapes, and lifecycle ordering.
-7. Update adapter parsing/patterns and tests.
-8. Re-run single-tab, then multi-tab stress.
+5. Identify changed endpoints, payload shapes, and lifecycle ordering.
+6. Update adapter parsing/patterns and tests.
+7. Re-run single-tab, then multi-tab stress.
 
 ## HAR Triage Workflow (Automatable)
 Use this when you already have a DevTools `.har` export and want a repeatable, agent-friendly summary.

@@ -1,8 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
 import { setupMainWorldBridge, shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
+import {
+    maybeCaptureGeminiBatchexecuteContext,
+    resetGeminiBatchexecuteContext,
+} from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
+import {
+    maybeCaptureXGrokGraphqlContext,
+    resetXGrokGraphqlContext,
+} from '@/entrypoints/interceptor/x-grok-graphql-context-store';
+import {
+    GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
+    GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
+} from '@/utils/gemini-batchexecute-bridge';
+import { PLATFORM_HEADERS_REQUEST_MESSAGE, PLATFORM_HEADERS_RESPONSE_MESSAGE } from '@/utils/platform-header-bridge';
+import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
+import {
+    X_GROK_GRAPHQL_CONTEXT_REQUEST_MESSAGE,
+    X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE,
+} from '@/utils/x-grok-graphql-bridge';
 
 describe('bootstrap-main-bridge', () => {
     let windowInstance: Window;
@@ -13,6 +31,9 @@ describe('bootstrap-main-bridge', () => {
         originalWindow = (globalThis as any).window;
         (globalThis as any).window = windowInstance;
         setSessionToken('bk:test-main-bridge');
+        platformHeaderStore.clear();
+        resetGeminiBatchexecuteContext();
+        resetXGrokGraphqlContext();
     });
 
     afterEach(() => {
@@ -30,8 +51,6 @@ describe('bootstrap-main-bridge', () => {
         setupMainWorldBridge({
             getRawCaptureHistory: () => [],
             cleanupDisposedAttempt: () => {},
-            setStreamDumpEnabled: () => {},
-            clearStreamDumpCaches: () => {},
         });
 
         expect((windowInstance as any).__blackiya).toBeUndefined();
@@ -42,8 +61,6 @@ describe('bootstrap-main-bridge', () => {
         setupMainWorldBridge({
             getRawCaptureHistory: () => [],
             cleanupDisposedAttempt,
-            setStreamDumpEnabled: () => {},
-            clearStreamDumpCaches: () => {},
         });
 
         windowInstance.postMessage(
@@ -67,8 +84,6 @@ describe('bootstrap-main-bridge', () => {
         setupMainWorldBridge({
             getRawCaptureHistory: () => [],
             cleanupDisposedAttempt,
-            setStreamDumpEnabled: () => {},
-            clearStreamDumpCaches: () => {},
         });
 
         windowInstance.postMessage(
@@ -87,38 +102,119 @@ describe('bootstrap-main-bridge', () => {
         });
     });
 
-    it('should update stream dump state and clear caches when disabled', () => {
-        const setStreamDumpEnabled = mock(() => {});
-        const clearStreamDumpCaches = mock(() => {});
+    it('should respond to platform headers requests with captured headers', () => {
         setupMainWorldBridge({
             getRawCaptureHistory: () => [],
             cleanupDisposedAttempt: () => {},
-            setStreamDumpEnabled,
-            clearStreamDumpCaches,
         });
 
-        windowInstance.postMessage(
-            {
-                type: MESSAGE_TYPES.STREAM_DUMP_CONFIG,
-                enabled: true,
-                __blackiyaToken: getSessionToken(),
-            },
-            windowInstance.location.origin,
-        );
-        windowInstance.postMessage(
-            {
-                type: MESSAGE_TYPES.STREAM_DUMP_CONFIG,
-                enabled: false,
-                __blackiyaToken: getSessionToken(),
-            },
-            windowInstance.location.origin,
-        );
+        platformHeaderStore.update('ChatGPT', {
+            authorization: 'Bearer test',
+            'oai-device-id': 'device-1',
+        });
+
         return new Promise<void>((resolve) => {
-            windowInstance.setTimeout(() => {
-                expect(setStreamDumpEnabled).toHaveBeenCalledTimes(2);
-                expect(clearStreamDumpCaches).toHaveBeenCalledTimes(1);
+            const requestId = 'request-1';
+            const onMessage = (event: MessageEvent) => {
+                const message = event.data as Record<string, unknown> | null;
+                if (
+                    message?.type !== PLATFORM_HEADERS_RESPONSE_MESSAGE ||
+                    message.requestId !== requestId ||
+                    message.platformName !== 'ChatGPT'
+                ) {
+                    return;
+                }
+                windowInstance.removeEventListener('message', onMessage as any);
+                const headers = message.headers as Record<string, string> | undefined;
+                expect(headers?.authorization).toBe('Bearer test');
+                expect(headers?.['oai-device-id']).toBe('device-1');
                 resolve();
-            }, 0);
+            };
+
+            windowInstance.addEventListener('message', onMessage as any);
+            windowInstance.postMessage(
+                {
+                    type: PLATFORM_HEADERS_REQUEST_MESSAGE,
+                    requestId,
+                    platformName: 'ChatGPT',
+                    __blackiyaToken: getSessionToken(),
+                },
+                windowInstance.location.origin,
+            );
+        });
+    });
+
+    it('should respond to gemini batchexecute context requests', () => {
+        maybeCaptureGeminiBatchexecuteContext(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c',
+            'f.req=%5B%5D&at=AJvToken%3A1&',
+        );
+
+        setupMainWorldBridge({
+            getRawCaptureHistory: () => [],
+            cleanupDisposedAttempt: () => {},
+        });
+
+        return new Promise<void>((resolve) => {
+            const requestId = 'gemini-context-1';
+            const onMessage = (event: MessageEvent) => {
+                const message = event.data as Record<string, unknown> | null;
+                if (message?.type !== GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE || message.requestId !== requestId) {
+                    return;
+                }
+                windowInstance.removeEventListener('message', onMessage as any);
+                const context = message.context as Record<string, unknown> | undefined;
+                expect(context?.bl).toBe('boq');
+                expect(context?.fSid).toBe('123');
+                expect(context?.at).toBe('AJvToken:1');
+                resolve();
+            };
+
+            windowInstance.addEventListener('message', onMessage as any);
+            windowInstance.postMessage(
+                {
+                    type: GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
+                    requestId,
+                    __blackiyaToken: getSessionToken(),
+                },
+                windowInstance.location.origin,
+            );
+        });
+    });
+
+    it('should respond to x-grok graphql context requests', () => {
+        maybeCaptureXGrokGraphqlContext(
+            'https://x.com/i/api/graphql/n2bhau0B2DSY6R_bLolgSg/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222029114150362702208%22%7D&features=%7B%22responsive_web_grok_annotations_enabled%22%3Atrue%7D',
+        );
+
+        setupMainWorldBridge({
+            getRawCaptureHistory: () => [],
+            cleanupDisposedAttempt: () => {},
+        });
+
+        return new Promise<void>((resolve) => {
+            const requestId = 'x-grok-context-1';
+            const onMessage = (event: MessageEvent) => {
+                const message = event.data as Record<string, unknown> | null;
+                if (message?.type !== X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE || message.requestId !== requestId) {
+                    return;
+                }
+                windowInstance.removeEventListener('message', onMessage as any);
+                const context = message.context as Record<string, unknown> | undefined;
+                expect(context?.queryId).toBe('n2bhau0B2DSY6R_bLolgSg');
+                expect(context?.features).toBe('{"responsive_web_grok_annotations_enabled":true}');
+                resolve();
+            };
+
+            windowInstance.addEventListener('message', onMessage as any);
+            windowInstance.postMessage(
+                {
+                    type: X_GROK_GRAPHQL_CONTEXT_REQUEST_MESSAGE,
+                    requestId,
+                    __blackiyaToken: getSessionToken(),
+                },
+                windowInstance.location.origin,
+            );
         });
     });
 });

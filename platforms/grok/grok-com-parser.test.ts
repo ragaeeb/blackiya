@@ -14,11 +14,13 @@ import type { MessageNode } from '@/utils/types';
 
 let grokAdapter: any;
 let resetGrokAdapterState: (() => void) | null = null;
+let grokState: { conversationTitles: { has: (key: string) => boolean } } | null = null;
 
 beforeAll(async () => {
     const mod = await import('@/platforms/grok');
     grokAdapter = mod.grokAdapter;
     resetGrokAdapterState = mod.resetGrokAdapterState ?? null;
+    grokState = mod.grokState ?? null;
 });
 
 beforeEach(() => {
@@ -217,6 +219,127 @@ describe('Grok Adapter — grok.com REST parsing', () => {
             expect(followup?.title).toBe('My cached title');
         });
 
+        it('should parse conversations_v2 NDJSON payload with wrapped response objects', () => {
+            const conversationId = '53d21d0d-add5-4fd6-bfe8-136705227759';
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`;
+            const payload = [
+                JSON.stringify({
+                    result: {
+                        conversation: {
+                            conversationId,
+                            title: 'NDJSON title',
+                            createTime: '2026-03-04T20:00:00.000Z',
+                            modifyTime: '2026-03-04T20:00:05.000Z',
+                        },
+                    },
+                }),
+                JSON.stringify({
+                    result: {
+                        response: {
+                            modelResponse: {
+                                responseId: 'ndjson-resp-1',
+                                message: 'Assistant response from conversations_v2',
+                                sender: 'assistant',
+                                createTime: '2026-03-04T20:00:04.000Z',
+                                partial: false,
+                                model: 'grok-4',
+                            },
+                        },
+                    },
+                }),
+            ].join('\n');
+
+            const result = grokAdapter.parseInterceptedData(payload, metaUrl);
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe(conversationId);
+            expect(result?.title).toBe('NDJSON title');
+            expect(result?.mapping['ndjson-resp-1']?.message?.content?.parts?.[0]).toBe(
+                'Assistant response from conversations_v2',
+            );
+        });
+
+        it('should not overwrite a specific title with a generic one from conversations_v2', () => {
+            const conversationId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+            const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}`;
+
+            // First, set a specific title via meta
+            const metaWithTitle = JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'Classical Islamic Translation Rules',
+                    createTime: '2026-02-16T17:32:35Z',
+                    modifyTime: '2026-02-16T17:32:35Z',
+                },
+            });
+            grokAdapter.parseInterceptedData(metaWithTitle, metaUrl);
+
+            // Add messages so the conversation is ready
+            const loadResponsesPayload = JSON.stringify({
+                responses: [
+                    {
+                        responseId: 'preserve-resp-1',
+                        message: 'Test response',
+                        sender: 'assistant',
+                        createTime: '2026-02-16T17:32:36Z',
+                        partial: false,
+                        model: 'grok-4',
+                    },
+                ],
+            });
+            const withMessages = grokAdapter.parseInterceptedData(loadResponsesPayload, loadResponsesUrl);
+            expect(withMessages?.title).toBe('Classical Islamic Translation Rules');
+
+            // Now send a conversations_v2 with generic title — should NOT overwrite
+            const genericMeta = JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'New conversation',
+                    createTime: '2026-02-16T17:32:35Z',
+                    modifyTime: '2026-02-16T17:32:35Z',
+                },
+            });
+            grokAdapter.parseInterceptedData(genericMeta, metaUrl);
+
+            // Re-fetch — title should be preserved
+            const refetch = grokAdapter.parseInterceptedData(loadResponsesPayload, loadResponsesUrl);
+            expect(refetch?.title).toBe('Classical Islamic Translation Rules');
+        });
+
+        it('should not cache generic titles in grokState.conversationTitles', () => {
+            const conversationId = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}`;
+            const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
+
+            // Send meta with generic title
+            const genericMeta = JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'New conversation',
+                    createTime: '2026-02-16T17:32:35Z',
+                    modifyTime: '2026-02-16T17:32:35Z',
+                },
+            });
+            grokAdapter.parseInterceptedData(genericMeta, metaUrl);
+
+            // The conversation should have the generic title set directly on the object
+            const loadResponsesPayload = JSON.stringify({
+                responses: [
+                    {
+                        responseId: 'generic-cache-resp',
+                        message: 'Test response',
+                        sender: 'assistant',
+                        createTime: '2026-02-16T17:32:36Z',
+                        partial: false,
+                        model: 'grok-4',
+                    },
+                ],
+            });
+            const result = grokAdapter.parseInterceptedData(loadResponsesPayload, loadResponsesUrl);
+            expect(result?.title).toBe('New conversation');
+            expect(grokState?.conversationTitles.has(conversationId)).toBeFalse();
+        });
+
         it('should return null (not throw) for malformed conversations_v2 payload', () => {
             const url =
                 'https://grok.com/rest/app-chat/conversations_v2/af642f01-1a30-4ad2-a588-c15293a4fafe?includeWorkspaces=true';
@@ -244,6 +367,48 @@ describe('Grok Adapter — grok.com REST parsing', () => {
                 result = grokAdapter.parseInterceptedData('{"broken"', url);
             }).not.toThrow();
             expect(result).toBeNull();
+        });
+    });
+
+    describe('reconnect-response-v2 endpoint', () => {
+        it('should parse single JSON reconnect envelopes using last active conversation context', () => {
+            const conversationId = '53d21d0d-add5-4fd6-bfe8-136705227759';
+            const responseId = '631a3b52-a0d6-4496-9fe2-eb2061286449';
+            const reconnectUrl = `https://grok.com/rest/app-chat/conversations/reconnect-response-v2/${responseId}`;
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`;
+
+            const metaPayload = JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'Reconnect target conversation',
+                    createTime: '2026-03-03T14:07:59.103Z',
+                    modifyTime: '2026-03-03T14:08:10.000Z',
+                },
+            });
+            grokAdapter.parseInterceptedData(metaPayload, metaUrl);
+
+            const reconnectPayload = JSON.stringify({
+                result: {
+                    response: {
+                        modelResponse: {
+                            responseId,
+                            message: 'Recovered reconnect payload',
+                            sender: 'assistant',
+                            createTime: '2026-03-03T14:07:59.103Z',
+                            partial: false,
+                            model: 'grok-4',
+                        },
+                        isThinking: false,
+                        isSoftStop: true,
+                        responseId,
+                    },
+                },
+            });
+
+            const result = grokAdapter.parseInterceptedData(reconnectPayload, reconnectUrl);
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe(conversationId);
+            expect(result?.mapping[responseId]?.message?.content?.parts?.[0]).toBe('Recovered reconnect payload');
         });
     });
 });

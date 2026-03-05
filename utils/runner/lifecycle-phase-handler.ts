@@ -9,8 +9,8 @@
 
 import { logger } from '@/utils/logger';
 import type { ResponseLifecycleMessage } from '@/utils/protocol/messages';
-import type { RunnerStreamPreviewState } from '@/utils/runner/stream-preview';
-import { ensureLiveRunnerStreamPreview } from '@/utils/runner/stream-preview';
+import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
+import { ensureLiveRunnerStreamPreview } from '@/utils/runner/stream/stream-preview';
 import type { ExportMeta } from '@/utils/sfe/types';
 
 export type LifecyclePhaseHandlerDeps = {
@@ -34,6 +34,7 @@ export type LifecyclePhaseHandlerDeps = {
     shouldIngestAsCanonicalSample: (meta: ExportMeta) => boolean;
     scheduleCanonicalStabilizationRetry: (conversationId: string, attemptId: string) => void;
     runStreamDoneProbe: (conversationId: string, attemptId: string) => void;
+    isPlatformGenerating: () => boolean;
 };
 
 export const applyActiveLifecyclePhase = (
@@ -81,11 +82,20 @@ export const applyLifecyclePhaseForConversation = (
         return;
     }
     if (phase === 'completed') {
+        if (platform === 'ChatGPT' && deps.isPlatformGenerating()) {
+            logger.info('Lifecycle completed ignored while platform still generating', {
+                platform,
+                attemptId,
+                conversationId,
+                source,
+            });
+            return;
+        }
         deps.setLifecycleAttemptId(attemptId);
         deps.setLifecycleConversationId(conversationId);
         deps.setLifecycleState('completed', conversationId);
+        void deps.runStreamDoneProbe(conversationId, attemptId);
         if (!deps.sfeEnabled()) {
-            void deps.runStreamDoneProbe(conversationId, attemptId);
             return;
         }
         const resolution = deps.sfeResolve(attemptId);
@@ -97,6 +107,5 @@ export const applyLifecyclePhaseForConversation = (
         if (shouldRetry) {
             deps.scheduleCanonicalStabilizationRetry(conversationId, attemptId);
         }
-        void deps.runStreamDoneProbe(conversationId, attemptId);
     }
 };

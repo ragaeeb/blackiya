@@ -1,4 +1,5 @@
 import type { CommonConversationExport } from '@/utils/common-export';
+import { EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
 import type { ExportMeta } from '@/utils/sfe/types';
 import { hasString, isFiniteNumber, isNullableString, isRecord } from '@/utils/type-guards';
 import type { ConversationData } from '@/utils/types';
@@ -11,20 +12,44 @@ export const EXTERNAL_PUSH_EVENT_TYPES = ['conversation.ready', 'conversation.up
 export type ExternalApiVersion = typeof EXTERNAL_API_VERSION;
 export type ExternalProvider = 'chatgpt' | 'gemini' | 'grok' | 'unknown';
 export type ExternalPushEventType = (typeof EXTERNAL_PUSH_EVENT_TYPES)[number];
-export type ExternalPullFormat = 'original' | 'common';
+export type ExternalPullFormat = ExportFormat;
 
-export type ExternalConversationEvent = {
+type ExternalConversationEventBase = {
     api: ExternalApiVersion;
     type: ExternalPushEventType;
     event_id: string;
+    seq: number;
+    created_at: number;
     ts: number;
+    format: ExternalPullFormat;
     provider: ExternalProvider;
     tab_id?: number;
     conversation_id: string;
-    payload: ConversationData;
     attempt_id?: string | null;
     capture_meta: ExportMeta;
     content_hash: string | null;
+};
+
+export type ExternalOriginalConversationEvent = ExternalConversationEventBase & {
+    format: typeof EXPORT_FORMAT.ORIGINAL;
+    payload: ConversationData;
+};
+
+export type ExternalCommonConversationEvent = ExternalConversationEventBase & {
+    format: typeof EXPORT_FORMAT.COMMON;
+    payload: CommonConversationExport;
+};
+
+export type ExternalConversationEvent = ExternalOriginalConversationEvent | ExternalCommonConversationEvent;
+export type ExternalStoredConversationEvent = ExternalOriginalConversationEvent;
+
+export type ExternalInboundConversationEvent = Omit<
+    ExternalOriginalConversationEvent,
+    'seq' | 'created_at' | 'format'
+> & {
+    seq?: number;
+    created_at?: number;
+    format?: typeof EXPORT_FORMAT.ORIGINAL;
 };
 
 export type ExternalGetLatestRequest = {
@@ -41,12 +66,24 @@ export type ExternalGetByIdRequest = {
     format?: ExternalPullFormat;
 };
 
+export type ExternalGetSinceRequest = {
+    api: ExternalApiVersion;
+    type: 'events.getSince';
+    cursor: number;
+    limit?: number;
+    format?: ExternalPullFormat;
+};
+
 export type ExternalHealthPingRequest = {
     api: ExternalApiVersion;
     type: 'health.ping';
 };
 
-export type ExternalRequest = ExternalGetLatestRequest | ExternalGetByIdRequest | ExternalHealthPingRequest;
+export type ExternalRequest =
+    | ExternalGetLatestRequest
+    | ExternalGetByIdRequest
+    | ExternalGetSinceRequest
+    | ExternalHealthPingRequest;
 
 export type ExternalHealthSuccessResponse = {
     ok: true;
@@ -60,7 +97,7 @@ export type ExternalConversationSuccessResponse =
           api: ExternalApiVersion;
           ts: number;
           conversation_id: string;
-          format: 'original';
+          format: typeof EXPORT_FORMAT.ORIGINAL;
           data: ConversationData;
       }
     | {
@@ -68,8 +105,24 @@ export type ExternalConversationSuccessResponse =
           api: ExternalApiVersion;
           ts: number;
           conversation_id: string;
-          format: 'common';
+          format: typeof EXPORT_FORMAT.COMMON;
           data: CommonConversationExport;
+      }
+    | {
+          ok: true;
+          api: ExternalApiVersion;
+          ts: number;
+          format: typeof EXPORT_FORMAT.ORIGINAL;
+          head_seq: number;
+          events: ExternalOriginalConversationEvent[];
+      }
+    | {
+          ok: true;
+          api: ExternalApiVersion;
+          ts: number;
+          format: typeof EXPORT_FORMAT.COMMON;
+          head_seq: number;
+          events: ExternalCommonConversationEvent[];
       };
 
 export type ExternalSuccessResponse = ExternalHealthSuccessResponse | ExternalConversationSuccessResponse;
@@ -86,10 +139,54 @@ export type ExternalResponse = ExternalSuccessResponse | ExternalFailureResponse
 
 export type ExternalInternalEventMessage = {
     type: typeof EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE;
-    event: ExternalConversationEvent;
+    event: ExternalInboundConversationEvent;
 };
 
+export type ExternalSubscribeMessage = {
+    type: 'subscribe';
+    cursor: number;
+    consumer_role: 'delivery';
+    max_batch?: number;
+    payload_format?: ExternalPullFormat;
+};
+
+export type ExternalCommitMessage = {
+    type: 'commit';
+    up_to_seq: number;
+};
+
+export type ExternalPortInboundMessage = ExternalSubscribeMessage | ExternalCommitMessage;
+
+export type ExternalEventsBatchMessage = {
+    type: 'events.batch';
+    events: ExternalConversationEvent[];
+    head_seq: number;
+    batch_start: number;
+    batch_end: number;
+};
+
+export type ExternalReplayCompleteMessage = {
+    type: 'replay.complete';
+    cursor: number;
+    head_seq: number;
+};
+
+export type ExternalWakeMessage = {
+    type: 'BLACKIYA_WAKE';
+    head_seq: number;
+    ts: number;
+};
+
+export type ExternalPortOutboundMessage =
+    | ExternalConversationEvent
+    | ExternalEventsBatchMessage
+    | ExternalReplayCompleteMessage;
+
 const isExternalApiVersion = (value: unknown): value is ExternalApiVersion => value === EXTERNAL_API_VERSION;
+const isNonNegativeInteger = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isPositiveInteger = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value > 0;
 
 const isExternalProvider = (value: unknown): value is ExternalProvider =>
     value === 'chatgpt' || value === 'gemini' || value === 'grok' || value === 'unknown';
@@ -98,7 +195,7 @@ const isExternalPushEventType = (value: unknown): value is ExternalPushEventType
     typeof value === 'string' && (EXTERNAL_PUSH_EVENT_TYPES as readonly string[]).includes(value);
 
 const isExternalPullFormat = (value: unknown): value is ExternalPullFormat =>
-    value === 'original' || value === 'common';
+    value === EXPORT_FORMAT.ORIGINAL || value === EXPORT_FORMAT.COMMON;
 
 export const isExportMeta = (value: unknown): value is ExportMeta => {
     if (!isRecord(value)) {
@@ -136,6 +233,24 @@ export const isConversationDataLike = (value: unknown): value is ConversationDat
     );
 };
 
+const isCommonConversationExportLike = (value: unknown): value is CommonConversationExport => {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return (
+        value.format === EXPORT_FORMAT.COMMON &&
+        hasString(value.llm) &&
+        (value.model === undefined || hasString(value.model)) &&
+        (value.title === undefined || hasString(value.title)) &&
+        (value.conversation_id === undefined || hasString(value.conversation_id)) &&
+        (value.created_at === undefined || hasString(value.created_at)) &&
+        (value.updated_at === undefined || hasString(value.updated_at)) &&
+        typeof value.prompt === 'string' &&
+        typeof value.response === 'string' &&
+        isStringArray(value.reasoning)
+    );
+};
+
 export const isExternalConversationEvent = (value: unknown): value is ExternalConversationEvent => {
     if (!isRecord(value)) {
         return false;
@@ -144,9 +259,35 @@ export const isExternalConversationEvent = (value: unknown): value is ExternalCo
         isExternalApiVersion(value.api) &&
         isExternalPushEventType(value.type) &&
         hasString(value.event_id) &&
-        isFiniteNumber(value.ts) &&
+        isNonNegativeInteger(value.seq) &&
+        isNonNegativeInteger(value.created_at) &&
+        isNonNegativeInteger(value.ts) &&
+        isExternalPullFormat(value.format) &&
         isExternalProvider(value.provider) &&
-        (value.tab_id === undefined || isFiniteNumber(value.tab_id)) &&
+        (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
+        hasString(value.conversation_id) &&
+        ((value.format === EXPORT_FORMAT.ORIGINAL && isConversationDataLike(value.payload)) ||
+            (value.format === EXPORT_FORMAT.COMMON && isCommonConversationExportLike(value.payload))) &&
+        (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
+        isExportMeta(value.capture_meta) &&
+        isNullableString(value.content_hash)
+    );
+};
+
+export const isExternalInboundConversationEvent = (value: unknown): value is ExternalInboundConversationEvent => {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return (
+        isExternalApiVersion(value.api) &&
+        isExternalPushEventType(value.type) &&
+        hasString(value.event_id) &&
+        (value.seq === undefined || isNonNegativeInteger(value.seq)) &&
+        (value.created_at === undefined || isNonNegativeInteger(value.created_at)) &&
+        isNonNegativeInteger(value.ts) &&
+        (value.format === undefined || value.format === EXPORT_FORMAT.ORIGINAL) &&
+        isExternalProvider(value.provider) &&
+        (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         hasString(value.conversation_id) &&
         isConversationDataLike(value.payload) &&
         (value.attempt_id === undefined || isNullableString(value.attempt_id)) &&
@@ -159,7 +300,7 @@ export const isExternalInternalEventMessage = (value: unknown): value is Externa
     if (!isRecord(value)) {
         return false;
     }
-    return value.type === EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE && isExternalConversationEvent(value.event);
+    return value.type === EXTERNAL_INTERNAL_EVENT_MESSAGE_TYPE && isExternalInboundConversationEvent(value.event);
 };
 
 const isExternalGetLatestRequest = (value: Record<string, unknown>): value is ExternalGetLatestRequest => {
@@ -167,7 +308,7 @@ const isExternalGetLatestRequest = (value: Record<string, unknown>): value is Ex
         return false;
     }
     return (
-        (value.tab_id === undefined || isFiniteNumber(value.tab_id)) &&
+        (value.tab_id === undefined || isNonNegativeInteger(value.tab_id)) &&
         (value.format === undefined || isExternalPullFormat(value.format))
     );
 };
@@ -179,6 +320,17 @@ const isExternalGetByIdRequest = (value: Record<string, unknown>): value is Exte
     return hasString(value.conversation_id) && (value.format === undefined || isExternalPullFormat(value.format));
 };
 
+const isExternalGetSinceRequest = (value: Record<string, unknown>): value is ExternalGetSinceRequest => {
+    if (value.type !== 'events.getSince') {
+        return false;
+    }
+    return (
+        isNonNegativeInteger(value.cursor) &&
+        (value.limit === undefined || isPositiveInteger(value.limit)) &&
+        (value.format === undefined || isExternalPullFormat(value.format))
+    );
+};
+
 const isExternalHealthPingRequest = (value: Record<string, unknown>): value is ExternalHealthPingRequest =>
     value.type === 'health.ping';
 
@@ -186,8 +338,35 @@ export const isExternalRequest = (value: unknown): value is ExternalRequest => {
     if (!isRecord(value) || !isExternalApiVersion(value.api)) {
         return false;
     }
-    return isExternalGetLatestRequest(value) || isExternalGetByIdRequest(value) || isExternalHealthPingRequest(value);
+    return (
+        isExternalGetLatestRequest(value) ||
+        isExternalGetByIdRequest(value) ||
+        isExternalGetSinceRequest(value) ||
+        isExternalHealthPingRequest(value)
+    );
 };
+
+export const isExternalSubscribeMessage = (value: unknown): value is ExternalSubscribeMessage => {
+    if (!isRecord(value) || value.type !== 'subscribe') {
+        return false;
+    }
+    return (
+        isNonNegativeInteger(value.cursor) &&
+        value.consumer_role === 'delivery' &&
+        (value.max_batch === undefined || isPositiveInteger(value.max_batch)) &&
+        (value.payload_format === undefined || isExternalPullFormat(value.payload_format))
+    );
+};
+
+export const isExternalCommitMessage = (value: unknown): value is ExternalCommitMessage => {
+    if (!isRecord(value) || value.type !== 'commit') {
+        return false;
+    }
+    return isNonNegativeInteger(value.up_to_seq);
+};
+
+export const isExternalPortInboundMessage = (value: unknown): value is ExternalPortInboundMessage =>
+    isExternalSubscribeMessage(value) || isExternalCommitMessage(value);
 
 export const normalizeExternalProvider = (platformName: string | null | undefined): ExternalProvider => {
     const lower = (platformName ?? '').trim().toLowerCase();

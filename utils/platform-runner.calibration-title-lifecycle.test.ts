@@ -158,7 +158,7 @@ mock.module('wxt/browser', () => ({
 
 import { getSessionToken } from '@/utils/protocol/session-token';
 // Import subject under test AFTER mocking
-import { resolveExportConversationTitle, runPlatform } from '@/utils/runner/platform-runtime';
+import { resolveExportConversationTitle, runPlatform } from '@/utils/runner/runtime/platform-runtime';
 
 /** Stamps the session token onto a test message before posting via window.postMessage */
 const postStampedMessage = (data: Record<string, unknown>, origin: string) => {
@@ -608,6 +608,68 @@ describe('Platform Runner', () => {
             window.location.origin,
         );
         await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
+    });
+
+    it('should ignore ChatGPT completed lifecycle signals while the platform is still generating', async () => {
+        currentAdapterMock = {
+            ...createMockAdapter(),
+            name: 'ChatGPT',
+            extractConversationId: () => '123',
+            isPlatformGenerating: () => true,
+            evaluateReadiness: evaluateReadinessMock,
+        };
+
+        runPlatform();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                phase: 'prompt-sent',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                phase: 'completed',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Streaming');
+
+        currentAdapterMock.isPlatformGenerating = () => false;
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_FINISHED',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:chatgpt-generating-guard',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
         expect(document.getElementById('blackiya-lifecycle-badge')?.textContent).toContain('Completed');
     });
 

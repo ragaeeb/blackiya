@@ -18,8 +18,6 @@ export const cleanupDisposedAttemptState = (
     attemptIdToRemove: string,
     state: {
         disposedAttemptIds: Set<string>;
-        streamDumpFrameCountByAttempt: Map<string, number>;
-        streamDumpLastTextByAttempt: Map<string, string>;
         latestAttemptIdByPlatform: Map<string, string>;
         attemptByConversationId: Map<string, string>;
         promptHintByAttempt?: Map<string, string>;
@@ -27,8 +25,6 @@ export const cleanupDisposedAttemptState = (
     maxDisposedAttempts = DEFAULT_MAX_INTERCEPTOR_DISPOSED_ATTEMPTS,
 ) => {
     addBoundedSetValue(state.disposedAttemptIds, attemptIdToRemove, maxDisposedAttempts);
-    state.streamDumpFrameCountByAttempt.delete(attemptIdToRemove);
-    state.streamDumpLastTextByAttempt.delete(attemptIdToRemove);
     state.promptHintByAttempt?.delete(attemptIdToRemove);
     for (const [platform, attemptId] of state.latestAttemptIdByPlatform.entries()) {
         if (attemptId === attemptIdToRemove) {

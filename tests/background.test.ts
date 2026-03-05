@@ -1,6 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { InMemoryLeaseStore } from '@/tests/helpers/in-memory-lease-store';
-import type { ExternalConversationEvent } from '@/utils/external-api/contracts';
 import { ProbeLeaseCoordinator } from '@/utils/sfe/probe-lease-coordinator';
 
 type MessageHandler = (
@@ -11,20 +10,9 @@ type MessageHandler = (
 
 describe('background message handler', () => {
     let handlerFactory: (deps: any) => MessageHandler;
-    let externalMessageHandlerFactory: (deps: {
-        externalApiHub: { handleExternalRequest: (request: unknown) => Promise<unknown> };
-        logger: {
-            debug?: (...args: unknown[]) => void;
-            info: (...args: unknown[]) => void;
-            warn: (...args: unknown[]) => void;
-            error: (...args: unknown[]) => void;
-        };
-    }) => (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => true;
-    let externalConnectHandlerFactory: (deps: {
-        externalApiHub: { addSubscriber: (port: unknown) => boolean };
-    }) => (port: unknown) => void;
     let savedLogs: unknown[];
     let now: number;
+    let actionCalls: Array<{ method: string; payload: unknown }>;
 
     const flushAsyncWork = async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -51,16 +39,20 @@ describe('background message handler', () => {
                 onMessage: { addListener: () => {} },
                 getManifest: () => ({ version: '0.0.0-test' }),
             },
+            action: {
+                setBadgeText: () => {},
+                setBadgeBackgroundColor: () => {},
+                setTitle: () => {},
+            },
         };
         const mod = await import('@/entrypoints/background');
         handlerFactory = mod.createBackgroundMessageHandler as typeof handlerFactory;
-        externalMessageHandlerFactory = mod.createExternalMessageHandler as typeof externalMessageHandlerFactory;
-        externalConnectHandlerFactory = mod.createExternalConnectHandler as typeof externalConnectHandlerFactory;
     });
 
     beforeEach(() => {
         savedLogs = [];
         now = 1_000;
+        actionCalls = [];
     });
 
     it('returns claim/release responses for lease messages and preserves owner-only release', async () => {
@@ -71,15 +63,13 @@ describe('background message handler', () => {
         const handler = handlerFactory({
             saveLog: async () => {},
             leaseCoordinator: coordinator,
-            externalApiHub: {
-                ingestEvent: async () => ({ subscriberCount: 0, delivered: 0, dropped: 0 }),
-            },
             logger: {
                 debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {},
             },
+            actionApi: null,
         });
 
         const responses: unknown[] = [];
@@ -170,15 +160,13 @@ describe('background message handler', () => {
                 savedLogs.push(payload);
             },
             leaseCoordinator: coordinator,
-            externalApiHub: {
-                ingestEvent: async () => ({ subscriberCount: 0, delivered: 0, dropped: 0 }),
-            },
             logger: {
                 debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {},
             },
+            actionApi: null,
         });
 
         const responses: unknown[] = [];
@@ -220,9 +208,6 @@ describe('background message handler', () => {
                 savedLogs.push(payload);
             },
             leaseCoordinator: coordinator,
-            externalApiHub: {
-                ingestEvent: async () => ({ subscriberCount: 0, delivered: 0, dropped: 0 }),
-            },
             logger: {
                 debug: () => {},
                 info: () => {},
@@ -231,6 +216,7 @@ describe('background message handler', () => {
                 },
                 error: () => {},
             },
+            actionApi: null,
         });
 
         const result = handler(
@@ -248,159 +234,72 @@ describe('background message handler', () => {
         expect(warned).toBeTrue();
     });
 
-    it('forwards internal external-api events to hub with sender tab id', async () => {
+    it('updates badge progress for bulk export status messages', async () => {
         const coordinator = new ProbeLeaseCoordinator({
             store: new InMemoryLeaseStore(),
             now: () => now,
         });
-        const seen: Array<{ event: ExternalConversationEvent; senderTabId?: number }> = [];
-        const debugCalls: Array<{ message: unknown; data: unknown }> = [];
+        const actionApi = {
+            setBadgeText: (payload: unknown) => {
+                actionCalls.push({ method: 'setBadgeText', payload });
+            },
+            setBadgeBackgroundColor: (payload: unknown) => {
+                actionCalls.push({ method: 'setBadgeBackgroundColor', payload });
+            },
+            setTitle: (payload: unknown) => {
+                actionCalls.push({ method: 'setTitle', payload });
+            },
+        };
         const handler = handlerFactory({
             saveLog: async () => {},
             leaseCoordinator: coordinator,
-            externalApiHub: {
-                ingestEvent: async (event: ExternalConversationEvent, senderTabId?: number) => {
-                    seen.push({ event, senderTabId });
-                    return { subscriberCount: 2, delivered: 2, dropped: 0 };
-                },
-            },
             logger: {
-                debug: (message: unknown, data: unknown) => {
-                    debugCalls.push({ message, data });
-                },
+                debug: () => {},
                 info: () => {},
                 warn: () => {},
                 error: () => {},
             },
+            actionApi,
         });
 
-        const result = handler(
+        const progressResult = handler(
             {
-                type: 'BLACKIYA_EXTERNAL_EVENT',
-                event: {
-                    api: 'blackiya.events.v1',
-                    type: 'conversation.ready',
-                    event_id: 'evt-1',
-                    ts: 123,
-                    provider: 'chatgpt',
-                    conversation_id: 'conv-1',
-                    payload: {
-                        title: 'Test',
-                        create_time: 1,
-                        update_time: 2,
-                        current_node: 'root',
-                        moderation_results: [],
-                        plugin_ids: null,
-                        gizmo_id: null,
-                        gizmo_type: null,
-                        is_archived: false,
-                        default_model_slug: 'gpt',
-                        safe_urls: [],
-                        blocked_urls: [],
-                        conversation_id: 'conv-1',
-                        mapping: {
-                            root: {
-                                id: 'root',
-                                message: null,
-                                parent: null,
-                                children: [],
-                            },
-                        },
-                    },
-                    capture_meta: {
-                        captureSource: 'canonical_api',
-                        fidelity: 'high',
-                        completeness: 'complete',
-                    },
-                    content_hash: 'hash:1',
-                },
+                type: 'BLACKIYA_BULK_EXPORT_PROGRESS',
+                stage: 'progress',
+                platform: 'ChatGPT',
+                discovered: 10,
+                attempted: 4,
+                exported: 3,
+                failed: 1,
+                remaining: 6,
             },
-            { tab: { url: 'https://chatgpt.com/c/conv-1', id: 77 } },
+            { tab: { id: 77 } },
             () => {},
         );
-
-        expect(result).toBeTrue();
-        await flushAsyncWork();
-        expect(seen).toHaveLength(1);
-        expect(seen[0]?.senderTabId).toBe(77);
-        expect(seen[0]?.event.conversation_id).toBe('conv-1');
-        expect(debugCalls.some((entry) => entry.message === 'External event internal message received')).toBeTrue();
-        expect(debugCalls.some((entry) => entry.message === 'External event internal message ingested')).toBeTrue();
-    });
-
-    it('routes external requests through the external message handler', async () => {
-        const handler = externalMessageHandlerFactory({
-            externalApiHub: {
-                handleExternalRequest: async (request) => ({ ok: true, request }),
-            },
-            logger: {
-                debug: () => {},
-                info: () => {},
-                warn: () => {},
-                error: () => {},
-            },
+        expect(progressResult).toBeUndefined();
+        expect(actionCalls).toContainEqual({
+            method: 'setBadgeText',
+            payload: { text: '6', tabId: 77 },
         });
 
-        const responses: unknown[] = [];
-        const result = handler({ api: 'blackiya.events.v1', type: 'health.ping' }, {}, (response) => {
-            responses.push(response);
-        });
-
-        expect(result).toBeTrue();
-        await flushAsyncWork();
-        expect(responses).toEqual([{ ok: true, request: { api: 'blackiya.events.v1', type: 'health.ping' } }]);
-    });
-
-    it('returns internal error response when external request handling fails', async () => {
-        let didLogError = false;
-        const handler = externalMessageHandlerFactory({
-            externalApiHub: {
-                handleExternalRequest: async () => {
-                    throw new Error('boom');
-                },
-            },
-            logger: {
-                debug: () => {},
-                info: () => {},
-                warn: () => {},
-                error: () => {
-                    didLogError = true;
-                },
-            },
-        });
-
-        const responses: unknown[] = [];
-        const result = handler({ api: 'blackiya.events.v1', type: 'health.ping' }, {}, (response) => {
-            responses.push(response);
-        });
-
-        expect(result).toBeTrue();
-        await flushAsyncWork();
-        expect(didLogError).toBeTrue();
-        expect(responses).toEqual([
+        const completedResult = handler(
             {
-                ok: false,
-                api: 'blackiya.events.v1',
-                code: 'INTERNAL_ERROR',
-                message: 'Failed to handle external API request',
-                ts: expect.any(Number),
+                type: 'BLACKIYA_BULK_EXPORT_PROGRESS',
+                stage: 'completed',
+                platform: 'ChatGPT',
+                discovered: 10,
+                attempted: 10,
+                exported: 10,
+                failed: 0,
+                remaining: 0,
             },
-        ]);
-    });
-
-    it('attaches external subscribers through the external connect handler', () => {
-        const seenPorts: unknown[] = [];
-        const handler = externalConnectHandlerFactory({
-            externalApiHub: {
-                addSubscriber: (port) => {
-                    seenPorts.push(port);
-                    return true;
-                },
-            },
+            { tab: { id: 77 } },
+            () => {},
+        );
+        expect(completedResult).toBeUndefined();
+        expect(actionCalls).toContainEqual({
+            method: 'setBadgeText',
+            payload: { text: '', tabId: 77 },
         });
-
-        const fakePort = { name: 'blackiya.events.v1' };
-        handler(fakePort);
-        expect(seenPorts).toEqual([fakePort]);
     });
 });

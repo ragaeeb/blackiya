@@ -134,10 +134,9 @@ describe('Grok Adapter — URL handling', () => {
         it('should provide grok.com fetch candidates for UUID conversation IDs', () => {
             const id = '01cb0729-6455-471d-b33a-124b3de76a29';
             const urls = grokAdapter.buildApiUrls?.(id) ?? [];
-            expect(urls.length).toBe(3);
-            expect(urls[0]).toContain(`/conversations/${id}/load-responses`);
+            expect(urls.length).toBe(2);
+            expect(urls[0]).toContain(`/conversations_v2/${id}`);
             expect(urls[1]).toContain(`/conversations/${id}/response-node`);
-            expect(urls[2]).toContain(`/conversations_v2/${id}`);
         });
 
         it('should not provide grok.com fetch candidates for x.com numeric IDs', () => {

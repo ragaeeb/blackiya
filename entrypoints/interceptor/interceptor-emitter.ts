@@ -11,7 +11,6 @@ import type {
     ResponseFinishedMessage,
     ResponseLifecycleMessage,
     StreamDeltaMessage,
-    StreamDumpFrameMessage,
 } from '@/utils/protocol/messages';
 import { stampToken } from '@/utils/protocol/session-token';
 
@@ -23,18 +22,13 @@ export type InterceptorEmitterState = {
     lifecycleSignalCache: Map<string, number>;
     conversationResolvedSignalCache: Map<string, number>;
     promptHintByAttempt: Map<string, string>;
-    streamDumpFrameCountByAttempt: Map<string, number>;
-    streamDumpLastTextByAttempt: Map<string, string>;
     /** Mutated by the emitter's internal cache-pruning sweep. */
     lastCachePruneAtMs: number;
-    /** Written by the BLACKIYA_STREAM_DUMP_CONFIG message handler in bootstrap. */
-    streamDumpEnabled: boolean;
 };
 
 export type InterceptorEmitterDeps = {
     state: InterceptorEmitterState;
     maxDedupeEntries: number;
-    maxStreamDumpAttempts: number;
     cacheTtlMs: number;
     cachePruneIntervalMs: number;
     defaultPlatformName: string;
@@ -51,7 +45,6 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
     const {
         state,
         maxDedupeEntries,
-        maxStreamDumpAttempts,
         cacheTtlMs,
         cachePruneIntervalMs,
         defaultPlatformName,
@@ -234,37 +227,17 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
     const emitStreamDumpFrame = (
         attemptId: string,
         conversationId: string | undefined,
-        kind: StreamDumpFrameMessage['kind'],
+        kind: 'snapshot' | 'heuristic' | 'delta' | 'lifecycle',
         text: string,
         chunkBytes?: number,
         platformOverride?: string,
     ) => {
-        if (!state.streamDumpEnabled || isAttemptDisposed(attemptId)) {
-            return;
-        }
-        const normalized = text.replace(/\r\n/g, '\n');
-        const trimmed = normalized.trim();
-        if (trimmed.length === 0 || /^v\d+$/i.test(trimmed)) {
-            return;
-        }
-        if (state.streamDumpLastTextByAttempt.get(attemptId) === normalized) {
-            return;
-        }
-        setBoundedMapValue(state.streamDumpLastTextByAttempt, attemptId, normalized, maxStreamDumpAttempts);
-        const frameIndex = (state.streamDumpFrameCountByAttempt.get(attemptId) ?? 0) + 1;
-        setBoundedMapValue(state.streamDumpFrameCountByAttempt, attemptId, frameIndex, maxStreamDumpAttempts);
-        const payload: StreamDumpFrameMessage = {
-            type: MESSAGE_TYPES.STREAM_DUMP_FRAME,
-            platform: platformOverride ?? defaultPlatformName,
-            attemptId,
-            conversationId,
-            kind,
-            text: normalized,
-            frameIndex,
-            timestampMs: Date.now(),
-            ...(typeof chunkBytes === 'number' ? { chunkBytes } : {}),
-        };
-        window.postMessage(stampToken(payload), window.location.origin);
+        void attemptId;
+        void conversationId;
+        void kind;
+        void text;
+        void chunkBytes;
+        void platformOverride;
     };
 
     /** Wraps emitStreamDumpFrame with an API-response header and body preview. */
@@ -275,23 +248,11 @@ export const createInterceptorEmitter = (deps: InterceptorEmitterDeps) => {
         attemptId: string,
         conversationId?: string,
     ) => {
-        if (!state.streamDumpEnabled) {
-            return;
-        }
-        const path = safePathname(url);
-        const header = `[${adapterName} API] ${path} (${responseText.length}b)`;
-        const body =
-            responseText.length > 8000
-                ? `${responseText.slice(0, 8000)}\n...<truncated ${responseText.length - 8000}b>`
-                : responseText;
-        emitStreamDumpFrame(
-            attemptId,
-            conversationId,
-            'snapshot',
-            `${header}\n${body}`,
-            responseText.length,
-            adapterName,
-        );
+        void adapterName;
+        void url;
+        void responseText;
+        void attemptId;
+        void conversationId;
     };
 
     const emitResponseFinished = (adapter: LLMPlatform, url: string) => {

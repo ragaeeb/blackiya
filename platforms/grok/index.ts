@@ -16,7 +16,12 @@ import type { ConversationData } from '@/utils/types';
 import { tryParseGrokComRestEndpoint, tryParseJsonIfNeeded } from './grok-com-parser';
 import { tryParseGrokNdjson } from './ndjson-parser';
 import { evaluateGrokReadiness } from './readiness';
-import { GROK_ENDPOINT_REGISTRY, GROK_SELECTOR_REGISTRY, resolveGrokButtonInjectionTarget } from './registry';
+import {
+    GROK_DEFAULT_TITLES,
+    GROK_ENDPOINT_REGISTRY,
+    GROK_SELECTOR_REGISTRY,
+    resolveGrokButtonInjectionTarget,
+} from './registry';
 import { tryHandleGrokTitlesEndpoint } from './titles';
 import {
     extractGrokComConversationIdFromUrl,
@@ -27,14 +32,14 @@ import {
 } from './url-utils';
 import { parseGrokResponse } from './x-graphql-parser';
 
-export { GrokAdapterState, resetGrokAdapterState } from './state';
+export { GrokAdapterState, grokState, resetGrokAdapterState } from './state';
 
 const MAX_TITLE_LENGTH = 80;
 const GROK_GENERIC_DOM_TITLES = new Set(['grok', 'grok / x', 'x / grok']);
 
 const normalizeDomTitle = (value: string | null | undefined): string => value?.replace(/\s+/g, ' ').trim() ?? '';
 
-const normalizeGrokDomTitleCandidate = (raw: string, defaultTitles: string[]): string | null => {
+const normalizeGrokDomTitleCandidate = (raw: string, defaultTitles: readonly string[]): string | null => {
     const normalized = normalizeDomTitle(raw);
     if (!normalized) {
         return null;
@@ -49,7 +54,7 @@ const normalizeGrokDomTitleCandidate = (raw: string, defaultTitles: string[]): s
     return normalized;
 };
 
-const queryGrokTitleFromDom = (defaultTitles: string[]): string | null => {
+const queryGrokTitleFromDom = (defaultTitles: readonly string[]): string | null => {
     for (const selector of GROK_SELECTOR_REGISTRY.domTitleCandidates) {
         const element = document.querySelector(selector);
         const text = normalizeDomTitle(element?.textContent ?? null);
@@ -145,9 +150,8 @@ export const grokAdapter: LLMPlatform = {
             return [];
         }
         return [
-            `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`,
-            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
             `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
+            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
         ];
     },
 
@@ -210,7 +214,7 @@ export const grokAdapter: LLMPlatform = {
         return false;
     },
 
-    defaultTitles: ['New conversation', 'Grok Conversation', 'Grok / X'],
+    defaultTitles: GROK_DEFAULT_TITLES,
 
     extractTitleFromDom(): string | null {
         const defaultTitles = this.defaultTitles ?? [];

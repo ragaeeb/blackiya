@@ -8,6 +8,7 @@
 
 import type { PlatformReadiness } from '@/platforms/types';
 import { logger } from '@/utils/logger';
+import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 import { shouldUseCachedConversationForWarmFetch } from '@/utils/sfe/capture-fidelity';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
@@ -26,24 +27,44 @@ export type WarmFetchDeps = {
     evaluateReadiness: (data: ConversationData) => PlatformReadiness;
     /** Returns persisted capture metadata for a conversation. */
     getCaptureMeta: (conversationId: string) => ExportMeta;
+    /** Returns captured auth/client headers for the platform, if any. */
+    getAuthHeaders?: () => HeaderRecord | undefined;
 };
 
 const WARM_FETCH_TIMEOUT_MS = 15_000;
 
+const toPathname = (url: string): string => {
+    try {
+        return new URL(url, window.location.origin).pathname;
+    } catch {
+        return url;
+    }
+};
+
+export type WarmFetchCandidateResult = {
+    success: boolean;
+    /** True when the server returned 404 — the resource does not exist and retrying is pointless. */
+    notFound: boolean;
+};
+
 /**
  * Fetches a single API URL and ingests the response.
- * Returns `true` when the fetch succeeded and a conversation was cached.
+ * Returns a result indicating success and whether the resource was not found (404).
  */
 export const tryWarmFetchCandidate = async (
     conversationId: string,
     reason: WarmFetchReason,
     apiUrl: string,
     deps: WarmFetchDeps,
-): Promise<boolean> => {
+): Promise<WarmFetchCandidateResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), WARM_FETCH_TIMEOUT_MS);
     try {
-        const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
+        const response = await fetch(apiUrl, {
+            credentials: 'include',
+            signal: controller.signal,
+            headers: deps.getAuthHeaders?.(),
+        });
         if (!response.ok) {
             logger.debug('Warm fetch HTTP error', {
                 conversationId,
@@ -51,12 +72,12 @@ export const tryWarmFetchCandidate = async (
                 status: response.status,
                 path: new URL(apiUrl, window.location.origin).pathname,
             });
-            return false;
+            return { success: false, notFound: response.status === 404 };
         }
         const text = await response.text();
         deps.ingestInterceptedData({ url: apiUrl, data: text, platform: deps.platformName });
         if (!deps.getConversation(conversationId)) {
-            return false;
+            return { success: false, notFound: false };
         }
         logger.debug('Warm fetch captured conversation', {
             conversationId,
@@ -64,14 +85,14 @@ export const tryWarmFetchCandidate = async (
             reason,
             path: new URL(apiUrl, window.location.origin).pathname,
         });
-        return true;
+        return { success: true, notFound: false };
     } catch (err) {
         logger.debug('Warm fetch network error', {
             conversationId,
             reason,
             error: err instanceof Error ? err.message : String(err),
         });
-        return false;
+        return { success: false, notFound: false };
     } finally {
         clearTimeout(timeoutId);
     }
@@ -90,12 +111,31 @@ export const executeWarmFetchCandidates = async (
     if (candidates.length === 0) {
         return false;
     }
-    for (const apiUrl of candidates.slice(0, 2)) {
-        if (await tryWarmFetchCandidate(conversationId, reason, apiUrl, deps)) {
+    const triedCandidates = candidates.slice(0, 2);
+    let allNotFound = true;
+    for (const apiUrl of triedCandidates) {
+        const result = await tryWarmFetchCandidate(conversationId, reason, apiUrl, deps);
+        if (result.success) {
             return true;
         }
+        if (!result.notFound) {
+            allNotFound = false;
+        }
     }
-    logger.debug('Warm fetch all candidates failed', { conversationId, reason });
+    if (allNotFound && triedCandidates.length > 0) {
+        logger.debug('Warm fetch all candidates returned 404 — aborting', {
+            conversationId,
+            reason,
+            triedPaths: triedCandidates.map((candidate) => toPathname(candidate)),
+        });
+        return false;
+    }
+    logger.debug('Warm fetch all candidates failed', {
+        conversationId,
+        reason,
+        candidateCount: candidates.length,
+        triedPaths: triedCandidates.map((candidate) => toPathname(candidate)),
+    });
     return false;
 };
 
@@ -111,8 +151,35 @@ export const warmFetchConversationSnapshot = (
     inFlight: Map<string, Promise<boolean>>,
 ): Promise<boolean> => {
     const cached = deps.getConversation(conversationId);
+    const cachedReadiness = cached ? deps.evaluateReadiness(cached) : null;
     const captureMeta = deps.getCaptureMeta(conversationId);
-    if (cached && shouldUseCachedConversationForWarmFetch(deps.evaluateReadiness(cached), captureMeta)) {
+    const skipReadyChatGptStabilizationRetry =
+        deps.platformName === 'ChatGPT' &&
+        reason === 'stabilization-retry' &&
+        cachedReadiness?.ready === true &&
+        captureMeta.fidelity !== 'degraded';
+
+    if (skipReadyChatGptStabilizationRetry) {
+        logger.debug('Warm fetch skipped: ChatGPT stabilization retry already has ready cached snapshot', {
+            conversationId,
+            reason,
+        });
+        return Promise.resolve(true);
+    }
+
+    const skipDegradedChatGptStabilizationRetry =
+        deps.platformName === 'ChatGPT' && reason === 'stabilization-retry' && captureMeta.fidelity === 'degraded';
+    if (skipDegradedChatGptStabilizationRetry) {
+        logger.debug('Warm fetch skipped: ChatGPT stabilization retry uses snapshot recovery for degraded capture', {
+            conversationId,
+            reason,
+            captureSource: captureMeta.captureSource,
+            completeness: captureMeta.completeness,
+        });
+        return Promise.resolve(false);
+    }
+
+    if (cached && cachedReadiness && shouldUseCachedConversationForWarmFetch(cachedReadiness, captureMeta)) {
         logger.debug('Warm fetch skipped: cache is ready+canonical', { conversationId, reason });
         return Promise.resolve(true);
     }
