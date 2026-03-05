@@ -166,9 +166,14 @@ const isCriticalLine = (line: string): boolean => {
         line.includes('late_signal_dropped_after_dispose') ||
         line.includes('force_save_degraded_export') ||
         line.includes('Awaiting canonical stabilization before ready') ||
+        line.includes('Stream done probe start') ||
+        line.includes('Stream done probe fetch HTTP error') ||
+        line.includes('Stream done probe fetch error') ||
         line.includes('Stream done probe canceled') ||
         line.includes('response finished hint') ||
         line.includes('Response finished signal') ||
+        line.includes('Lifecycle transition') ||
+        line.includes('Lifecycle completed ignored while platform still generating') ||
         line.includes('Calibration ') ||
         line.includes('fetch response') ||
         line.includes('fetch err') ||
@@ -238,6 +243,13 @@ const pickFallbackDiagnosticLines = (logs: LogEntry[]): string[] => {
         'Button state',
         'Button target missing',
         'Button skipped',
+        'Stream done probe start',
+        'Stream done probe fetch HTTP error',
+        'Stream done probe fetch error',
+        'Lifecycle transition',
+        'Lifecycle completed ignored while platform still generating',
+        'Stream done snapshot fallback requested',
+        'Stream done snapshot fallback captured',
         'No data captured for this conversation yet',
         'No currentAdapter in manager',
         'Intercepted XHR:',
@@ -378,6 +390,7 @@ const isSyntheticSessionAnchor = (line: string): boolean => {
         line.includes('Successfully captured') ||
         line.includes('captured/cached') ||
         line.includes('Lifecycle phase') ||
+        line.includes('Lifecycle transition') ||
         line.includes('response finished hint') ||
         line.includes('Response finished signal') ||
         line.includes('RESPONSE_FINISHED') ||

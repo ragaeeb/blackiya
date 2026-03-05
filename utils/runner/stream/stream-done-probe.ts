@@ -7,6 +7,7 @@
  * All dependencies are injected so the module is unit-testable in isolation.
  */
 
+import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 import { isConversationDataLike, isRawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import type { ConversationData } from '@/utils/types';
 
@@ -66,6 +67,8 @@ export type StreamDoneProbeDeps = {
     isProbeKeyActive: (probeKey: string) => boolean;
     /** General-purpose logger for info and warn messages. */
     emitLog: (level: 'debug' | 'info' | 'warn', message: string, payload?: Record<string, unknown>) => void;
+    /** Returns captured auth/client headers for the platform, if any. */
+    getAuthHeaders?: () => HeaderRecord | undefined;
 };
 
 type ProbeContext = {
@@ -73,6 +76,14 @@ type ProbeContext = {
     attemptId: string;
     probeKey: string;
     controller: AbortController;
+};
+
+const toPathname = (url: string) => {
+    try {
+        return new URL(url, window.location.origin).pathname;
+    } catch {
+        return url;
+    }
 };
 
 // Internal helpers
@@ -196,6 +207,39 @@ const handleNoCandidates = async (context: ProbeContext, deps: StreamDoneProbeDe
     });
 };
 
+const shouldStopCandidateFetch = (context: ProbeContext, deps: StreamDoneProbeDeps) =>
+    context.controller.signal.aborted || deps.isAttemptDisposedOrSuperseded(context.attemptId);
+
+const logCandidateHttpError = (context: ProbeContext, deps: StreamDoneProbeDeps, apiUrl: string, status: number) => {
+    deps.emitLog('info', 'Stream done probe fetch HTTP error', {
+        platform: deps.platformName,
+        conversationId: context.conversationId,
+        status,
+        path: toPathname(apiUrl),
+    });
+};
+
+const logCandidateFetchError = (context: ProbeContext, deps: StreamDoneProbeDeps, apiUrl: string, error: unknown) => {
+    deps.emitLog('debug', 'Stream done probe fetch error', {
+        platform: deps.platformName,
+        conversationId: context.conversationId,
+        path: toPathname(apiUrl),
+        error: error instanceof Error ? error.message : String(error),
+    });
+};
+
+const handleCandidateSuccess = (context: ProbeContext, deps: StreamDoneProbeDeps, parsed: ConversationData) => {
+    const body = deps.extractResponseText(parsed) || '(empty response text)';
+    if (deps.isProbeKeyActive(context.probeKey)) {
+        deps.setStreamDonePanel(context.conversationId, 'stream-done: fetched full text', body);
+    }
+    deps.emitLog('info', 'Stream done probe success', {
+        platform: deps.platformName,
+        conversationId: context.conversationId,
+        textLength: body.length,
+    });
+};
+
 /**
  * Iterates URL candidates, fetches each, and returns `true` on the first
  * successful canonical capture. Panel is updated only when this probe is
@@ -207,15 +251,17 @@ const tryFetchCandidates = async (
     deps: StreamDoneProbeDeps,
 ): Promise<boolean> => {
     for (const apiUrl of apiUrls) {
-        if (context.controller.signal.aborted || deps.isAttemptDisposedOrSuperseded(context.attemptId)) {
+        if (shouldStopCandidateFetch(context, deps)) {
             return true;
         }
         try {
             const response = await fetch(apiUrl, {
                 credentials: 'include',
                 signal: context.controller.signal,
+                headers: deps.getAuthHeaders?.(),
             });
             if (!response.ok) {
+                logCandidateHttpError(context, deps, apiUrl, response.status);
                 continue;
             }
             const text = await response.text();
@@ -223,18 +269,10 @@ const tryFetchCandidates = async (
             if (!parsed?.conversation_id || parsed.conversation_id !== context.conversationId) {
                 continue;
             }
-            const body = deps.extractResponseText(parsed) || '(empty response text)';
-            if (deps.isProbeKeyActive(context.probeKey)) {
-                deps.setStreamDonePanel(context.conversationId, 'stream-done: fetched full text', body);
-            }
-            deps.emitLog('info', 'Stream done probe success', {
-                platform: deps.platformName,
-                conversationId: context.conversationId,
-                textLength: body.length,
-            });
+            handleCandidateSuccess(context, deps, parsed);
             return true;
-        } catch {
-            // try next candidate
+        } catch (error) {
+            logCandidateFetchError(context, deps, apiUrl, error);
         }
     }
     return false;

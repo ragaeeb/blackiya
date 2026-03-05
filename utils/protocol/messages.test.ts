@@ -11,22 +11,6 @@ describe('protocol/messages', () => {
                 phase: 'prompt-sent',
             }),
         ).toBeTrue();
-        expect(
-            protocol.isBlackiyaMessage({
-                type: 'BLACKIYA_STREAM_DUMP_CONFIG',
-                enabled: true,
-            }),
-        ).toBeTrue();
-        expect(
-            protocol.isBlackiyaMessage({
-                type: 'BLACKIYA_STREAM_DUMP_FRAME',
-                platform: 'ChatGPT',
-                attemptId: 'a-1',
-                kind: 'snapshot',
-                text: 'hello',
-                __blackiyaToken: 'bk:test',
-            }),
-        ).toBeTrue();
     });
 
     it('keeps tokenized wire messages type-compatible', () => {

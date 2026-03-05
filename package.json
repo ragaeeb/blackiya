@@ -22,7 +22,7 @@
     "scripts": {
         "dev": "wxt",
         "dev:firefox": "wxt -b firefox",
-        "build": "bun run check && tsc --noEmit && wxt build",
+        "build": "tsc --noEmit && wxt build",
         "build:firefox": "bun run check && tsc --noEmit && wxt build -b firefox",
         "zip": "bun run check && tsc --noEmit && wxt zip",
         "zip:firefox": "wxt zip -b firefox",

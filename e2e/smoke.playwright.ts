@@ -1,20 +1,16 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { chromium, expect, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { resolveExtensionPath } from './extension-path';
+import { closeExtensionContext, launchExtensionContext } from './extension-test-context';
 
-const extensionPath = process.env.BLACKIYA_EXTENSION_PATH;
+const extension = resolveExtensionPath();
 
 test.describe('blackiya smoke harness', () => {
-    test.skip(!extensionPath, 'Set BLACKIYA_EXTENSION_PATH to run extension smoke tests');
+    test.skip(!extension.valid, extension.reason ?? 'Unable to resolve extension path');
 
-    const launchContext = async () =>
-        chromium.launchPersistentContext('', {
-            headless: true,
-            args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
-        });
-
-    const resolveExtensionWorker = async (context: Awaited<ReturnType<typeof launchContext>>) => {
+    const resolveExtensionWorker = async (context: Awaited<ReturnType<typeof launchExtensionContext>>['context']) => {
         return (
             context.serviceWorkers()[0] ??
             (await context.waitForEvent('serviceworker', {
@@ -24,7 +20,7 @@ test.describe('blackiya smoke harness', () => {
     };
 
     test('loads extension popup shell in Chromium', async () => {
-        const manifestPath = path.join(extensionPath!, 'manifest.json');
+        const manifestPath = path.join(extension.extensionPath, 'manifest.json');
         const manifestRaw = await readFile(manifestPath, 'utf8');
         const manifest = JSON.parse(manifestRaw) as { background?: { service_worker?: string } };
         const serviceWorkerPath = manifest.background?.service_worker ?? null;
@@ -33,38 +29,40 @@ test.describe('blackiya smoke harness', () => {
             throw new Error('Expected background.service_worker in extension manifest');
         }
 
-        const context = await launchContext();
+        const extensionContext = await launchExtensionContext(extension.extensionPath);
         try {
-            const background = await resolveExtensionWorker(context);
+            const background = await resolveExtensionWorker(extensionContext.context);
             expect(background ?? null).not.toBeNull();
             const backgroundUrl = new URL(background.url());
             expect(backgroundUrl.protocol).toBe('chrome-extension:');
             expect(backgroundUrl.pathname).toBe(`/${serviceWorkerPath}`);
         } finally {
-            await context.close();
+            await closeExtensionContext(extensionContext);
         }
     });
 
     test('renders popup controls and metadata from extension page', async () => {
-        const context = await launchContext();
+        const extensionContext = await launchExtensionContext(extension.extensionPath);
         try {
-            const background = await resolveExtensionWorker(context);
+            const background = await resolveExtensionWorker(extensionContext.context);
             const extensionId = new URL(background.url()).host;
             expect(extensionId.length).toBeGreaterThan(0);
 
-            const page = await context.newPage();
+            const page = await extensionContext.context.newPage();
             await page.goto(`chrome-extension://${extensionId}/popup.html`);
 
             await expect(page.locator('text=Blackiya Settings')).toBeVisible();
             await expect(page.locator('#logLevel')).toBeVisible();
             await expect(page.locator('#exportFormat')).toBeVisible();
-            await expect(page.locator('#streamDumpEnabled')).toBeVisible();
-            await expect(page.locator('#streamProbeVisible')).toBeVisible();
+            await expect(page.locator('#bulkExportLimit')).toBeVisible();
+            await expect(page.locator('text=Export Chats')).toBeVisible();
             await expect(page.locator('text=Export Full Logs (JSON)')).toBeVisible();
             await expect(page.locator('text=Export Debug Report (TXT)')).toBeVisible();
-            await expect(page.locator('text=Export Stream Dump (JSON)')).toBeVisible();
+            await expect(page.locator('#bulkExportDelayMs')).toHaveCount(0);
+            await expect(page.locator('#bulkExportTimeoutMs')).toHaveCount(0);
+            await expect(page.locator('#streamProbeVisible')).toHaveCount(0);
         } finally {
-            await context.close();
+            await closeExtensionContext(extensionContext);
         }
     });
 });

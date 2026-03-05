@@ -50,14 +50,6 @@ export type ButtonStateManagerDeps = {
     setLifecycleState: (state: LifecycleUiState, conversationId?: string) => void;
     syncCalibrationButtonDisplay: () => void;
     syncRunnerStateCalibration: (state: CalibrationUiState) => void;
-    emitExternalConversationEvent: (args: {
-        conversationId: string;
-        data: ConversationData;
-        readinessMode: ReadinessDecision['mode'];
-        captureMeta: ExportMeta;
-        attemptId: string | null;
-        allowWhenActionsBlocked?: boolean;
-    }) => void;
 
     buttonManager: {
         exists: () => boolean;
@@ -218,20 +210,6 @@ export const refreshButtonState = (
     const isCanonicalReady = decision.mode === 'canonical_ready';
     const isDegraded = decision.mode === 'degraded_manual_only';
     const hasData = isCanonicalReady || isDegraded;
-    const attemptId = deps.peekAttemptId(conversationId);
-
-    // External subscribers should receive canonical-ready events even when
-    // UI actions remain disabled due an in-flight lifecycle state.
-    if (isCanonicalReady && cached) {
-        deps.emitExternalConversationEvent({
-            conversationId,
-            data: cached,
-            readinessMode: decision.mode,
-            captureMeta,
-            attemptId,
-            allowWhenActionsBlocked: true,
-        });
-    }
 
     if (shouldDisableButtonActions(conversationId, deps)) {
         applyDisabledButtonState(conversationId, deps, lastButtonStateLog);

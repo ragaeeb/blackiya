@@ -3,12 +3,11 @@
  *
  * Processes cross-world postMessage events (lifecycle, response-finished,
  * stream-delta, title-resolved, conversation-id-resolved, attempt-disposed,
- * and stream-dump-frame).
+ * and conversation-id-resolved).
  */
 
 import type { LLMPlatform } from '@/platforms/types';
 import { setBoundedMapValue } from '@/utils/bounded-collections';
-import type { StreamDumpFrameInput } from '@/utils/diagnostics-stream-dump';
 import { logger } from '@/utils/logger';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import type {
@@ -17,7 +16,6 @@ import type {
     ResponseFinishedMessage,
     ResponseLifecycleMessage,
     StreamDeltaMessage,
-    StreamDumpFrameMessage,
     TitleResolvedMessage,
 } from '@/utils/protocol/messages';
 import { type RunnerStreamPreviewState, removePendingRunnerStreamPreview } from '@/utils/runner/stream/stream-preview';
@@ -75,9 +73,6 @@ export type WireMessageHandlerDeps = {
 
     appendPendingStreamProbeText: (attemptId: string, text: string) => void;
     appendLiveStreamProbeText: (conversationId: string, text: string) => void;
-
-    isStreamDumpEnabled: () => boolean;
-    saveStreamDumpFrame: (frame: StreamDumpFrameInput) => void;
 
     pendingLifecycleByAttempt: Map<
         string,
@@ -255,35 +250,6 @@ export const handleStreamDeltaMessage = (message: unknown, deps: WireMessageHand
     }
     deps.bindAttempt(conversationId, attemptId);
     deps.appendLiveStreamProbeText(conversationId, typed.text);
-    return true;
-};
-
-export const handleStreamDumpFrameMessage = (message: unknown, deps: WireMessageHandlerDeps): boolean => {
-    const typed = message as StreamDumpFrameMessage | undefined;
-    if (typed?.type !== MESSAGE_TYPES.STREAM_DUMP_FRAME) {
-        return false;
-    }
-    if (
-        typeof typed.attemptId !== 'string' ||
-        typeof typed.platform !== 'string' ||
-        typeof typed.text !== 'string' ||
-        typeof typed.kind !== 'string'
-    ) {
-        return true;
-    }
-    if (!deps.isStreamDumpEnabled() || deps.isStaleAttemptMessage(typed.attemptId, typed.conversationId, 'delta')) {
-        return true;
-    }
-    deps.saveStreamDumpFrame({
-        platform: typed.platform,
-        attemptId: typed.attemptId,
-        conversationId: typed.conversationId,
-        kind: typed.kind,
-        text: typed.text,
-        chunkBytes: typed.chunkBytes,
-        frameIndex: typed.frameIndex,
-        timestampMs: typed.timestampMs,
-    });
     return true;
 };
 

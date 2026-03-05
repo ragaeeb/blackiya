@@ -1,7 +1,7 @@
 # Debug Logs Guide
 
 ## Purpose
-Use the smallest log artifact that still explains the failure. Default to token-lean debug reports, escalate to full logs/stream dumps only when needed.
+Use the smallest log artifact that still explains the failure. Default to token-lean debug reports, escalate to full logs only when needed.
 
 ## Readiness Model (Current)
 Save/Copy are controlled by SFE readiness, not by a single lifecycle event:
@@ -133,10 +133,6 @@ These are often benign:
 - Use for race/order issues, especially multi-tab.
 - Use when debug TXT appears incomplete for background-tab behavior.
 
-3. Stream dump (JSON):
-- Use for stream parsing/lifecycle bugs.
-- Enable before repro.
-- Bounded/redacted by default.
 
 4. HAR + HAR analysis (JSON/MD):
 - Use when endpoint families changed or stream payload paths are unclear.
@@ -149,24 +145,10 @@ In multi-tab runs, one debug TXT may not represent all tabs equally. For cross-t
 
 1. One debug TXT from a failing tab.
 2. One full logs JSON from the overall run.
-3. Stream dump JSON if streaming signals are suspect.
-
-## Per-Tab Payload Overlay
-For tab-specific payload forensics (what was captured and what was emitted to external subscribers), use the popup toggle:
-
-1. Open the target ChatGPT/Gemini/Grok tab.
-2. In popup, enable **Active Tab Debug Overlay**.
-3. Reproduce once and capture screenshot/video of the overlay.
-
-Notes:
-- Overlay is tab-scoped (session storage + tab message), so enabling it in one tab does not affect other tabs.
-- Overlay keeps a bounded recent history of capture records and external event emissions (`conversation.ready`/`conversation.updated`) including payload previews.
-- For each emitted external event, the accordion summary/details include listener delivery stats (`listeners`, `delivered`, `dropped`) when available from background ingestion.
 
 ## Recommended Bug Report Bundle
 1. Platform + exact URL(s).
 2. Repro steps and timing (foreground/background tab, number of tabs).
 3. Debug report TXT.
 4. Full logs JSON (required for multi-tab/race bugs).
-5. Stream dump JSON (required for stream/timing bugs).
-6. Screenshot of final UI (status, Save/Force Save, Calibrate, toast).
+5. Screenshot of final UI (status, Save/Force Save, Calibrate, toast).

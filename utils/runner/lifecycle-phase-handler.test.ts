@@ -106,7 +106,7 @@ describe('lifecycle-phase-handler', () => {
             expect(deps.scheduleCanonicalStabilizationRetry).not.toHaveBeenCalled();
         });
 
-        it('should ignore ChatGPT completed phase while platform is still generating', () => {
+        it('should not trigger probe when ChatGPT completed phase is ignored while platform is still generating', () => {
             deps.isPlatformGenerating = () => true;
 
             applyLifecyclePhaseForConversation('completed', 'ChatGPT', 'attempt-1', 'conv-1', 'direct', deps);
@@ -134,6 +134,7 @@ describe('lifecycle-phase-handler', () => {
 
             expect(deps.scheduleCanonicalStabilizationRetry).toHaveBeenCalledWith('conv-1', 'attempt-1');
             expect(deps.runStreamDoneProbe).toHaveBeenCalledWith('conv-1', 'attempt-1');
+            expect(deps.runStreamDoneProbe).toHaveBeenCalledTimes(1);
         });
 
         it('should not schedule stabilization retry if timed out in conditions', () => {

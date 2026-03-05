@@ -1,19 +1,23 @@
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
+import { normalizeBulkExportLimitInput } from '@/entrypoints/popup/bulk-export-input';
 import { getBuildFilenameTag } from '@/utils/build-fingerprint';
-import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { downloadAsJSON } from '@/utils/download';
 import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
 import { downloadMinimalDebugReport } from '@/utils/minimal-logs';
+import { BULK_EXPORT_CHATS_MESSAGE, type BulkExportChatsResponse } from '@/utils/runner/bulk-chat-export-contract';
 import { getExportFormat } from '@/utils/runner/runtime/runtime-settings';
 import {
-    TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
-    TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
-    TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
-} from '@/utils/runner/tab-debug-overlay';
-import { DEFAULT_EXPORT_FORMAT, EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+    DEFAULT_BULK_EXPORT_DELAY_MS,
+    DEFAULT_BULK_EXPORT_LIMIT,
+    DEFAULT_BULK_EXPORT_TIMEOUT_MS,
+    DEFAULT_EXPORT_FORMAT,
+    EXPORT_FORMAT,
+    type ExportFormat,
+    STORAGE_KEYS,
+} from '@/utils/settings';
 
 const ABOUT_AUTHOR_NAME = 'Ragaeeb Haq';
 const ABOUT_REPOSITORY_URL = 'https://github.com/ragaeeb/blackiya';
@@ -24,9 +28,9 @@ const App = () => {
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
     const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
-    const [streamDumpEnabled, setStreamDumpEnabled] = useState<boolean>(false);
-    const [streamProbeVisible, setStreamProbeVisible] = useState<boolean>(false);
-    const [tabDebugOverlayEnabled, setTabDebugOverlayEnabled] = useState<boolean | null>(null);
+    const [bulkExportLimitInput, setBulkExportLimitInput] = useState<string>(String(DEFAULT_BULK_EXPORT_LIMIT));
+    const [bulkExportInProgress, setBulkExportInProgress] = useState<boolean>(false);
+    const [bulkExportStatus, setBulkExportStatus] = useState<string>('');
 
     const getActiveTabId = async (): Promise<number | null> => {
         try {
@@ -37,30 +41,13 @@ const App = () => {
         }
     };
 
-    const sendTabDebugOverlayMessage = async (message: {
-        type: string;
-        enabled?: boolean;
-    }): Promise<{
-        ok: true;
-        enabled: boolean;
-        snapshot?: unknown;
-    } | null> => {
-        const tabId = await getActiveTabId();
-        if (tabId === null) {
-            return null;
-        }
-        try {
-            return (await browser.tabs.sendMessage(tabId, message)) as { ok: true; enabled: boolean };
-        } catch {
-            return null;
-        }
-    };
-
-    const refreshActiveTabDebugOverlayState = async () => {
-        const response = await sendTabDebugOverlayMessage({
-            type: TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
-        });
-        setTabDebugOverlayEnabled(response?.ok === true ? response.enabled : null);
+    const resolveBulkExportOptions = () => {
+        const normalizedLimit = normalizeBulkExportLimitInput(bulkExportLimitInput);
+        return {
+            limit: normalizedLimit,
+            delayMs: DEFAULT_BULK_EXPORT_DELAY_MS,
+            timeoutMs: DEFAULT_BULK_EXPORT_TIMEOUT_MS,
+        };
     };
 
     useEffect(() => {
@@ -68,18 +55,22 @@ const App = () => {
             try {
                 const result = await browser.storage.local.get([
                     STORAGE_KEYS.LOG_LEVEL,
-                    STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED,
-                    STORAGE_KEYS.STREAM_PROBE_VISIBLE,
+                    STORAGE_KEYS.BULK_EXPORT_LIMIT,
                 ]);
                 const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
                 if (level) {
                     setLogLevel(level);
                     logger.setLevel(level);
                 }
-                setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
-                setStreamProbeVisible(result[STORAGE_KEYS.STREAM_PROBE_VISIBLE] === true);
+                setBulkExportLimitInput(String(normalizeBulkExportLimitInput(result[STORAGE_KEYS.BULK_EXPORT_LIMIT])));
             } catch (error) {
                 logger.warn('Failed to load popup settings from local storage', error);
+            }
+
+            try {
+                await browser.storage.local.set({ [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: false });
+            } catch (error) {
+                logger.warn('Failed to disable legacy stream probe visibility setting', error);
             }
 
             try {
@@ -95,7 +86,6 @@ const App = () => {
         logsStorage.getLogs().then((logs) => {
             setLogCount(logs.length);
         });
-        void refreshActiveTabDebugOverlayState();
     }, []);
 
     const handleLevelChange: JSX.GenericEventHandler<HTMLSelectElement> = (e) => {
@@ -116,50 +106,79 @@ const App = () => {
         logger.info(`Export format changed to ${normalizedFormat}`);
     };
 
-    const handleStreamDumpEnabledChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
+    const handleBulkExportLimitChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
         const target = e.currentTarget as HTMLInputElement | null;
-        const enabled = target?.checked === true;
-        setStreamDumpEnabled(enabled);
-        browser.storage.local.set({ [STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]: enabled });
-        logger.info(`Stream dump diagnostics ${enabled ? 'enabled' : 'disabled'}`);
+        const nextValue = target?.value ?? '';
+        setBulkExportLimitInput(nextValue);
+        const normalized = normalizeBulkExportLimitInput(nextValue);
+        void browser.storage.local.set({ [STORAGE_KEYS.BULK_EXPORT_LIMIT]: normalized });
     };
 
-    const handleStreamProbeVisibilityChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
-        const target = e.currentTarget as HTMLInputElement | null;
-        const enabled = target?.checked === true;
-        setStreamProbeVisible(enabled);
-        browser.storage.local.set({ [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: enabled });
-        logger.info(`In-page stream toast ${enabled ? 'enabled' : 'disabled'}`);
-    };
-
-    const handleTabDebugOverlayChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
-        const target = e.currentTarget as HTMLInputElement | null;
-        const enabled = target?.checked === true;
-        void sendTabDebugOverlayMessage({
-            type: TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
-            enabled,
-        }).then((response) => {
-            if (!response?.ok) {
-                setTabDebugOverlayEnabled(null);
-                alert('Active tab is not running Blackiya content script.');
-                return;
-            }
-            setTabDebugOverlayEnabled(response.enabled);
-            logger.info(`Tab debug overlay ${response.enabled ? 'enabled' : 'disabled'} for active tab`);
+    const persistBulkExportSettings = async (options: { limit: number }) => {
+        await browser.storage.local.set({
+            [STORAGE_KEYS.BULK_EXPORT_LIMIT]: options.limit,
         });
     };
 
-    const handleExportActiveTabOverlaySnapshot = async () => {
-        const response = await sendTabDebugOverlayMessage({
-            type: TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
-        });
-        if (!response?.ok || !response.snapshot) {
-            alert('Active tab is not running Blackiya content script.');
+    const requestBulkExportFromActiveTab = async (
+        tabId: number,
+        options: { limit: number; delayMs: number; timeoutMs: number },
+    ) => {
+        const response = (await browser.tabs.sendMessage(tabId, {
+            type: BULK_EXPORT_CHATS_MESSAGE,
+            limit: options.limit,
+            delayMs: options.delayMs,
+            timeoutMs: options.timeoutMs,
+        })) as BulkExportChatsResponse | undefined;
+
+        if (!response) {
+            throw new Error('No response from content script.');
+        }
+        if (!response.ok) {
+            throw new Error(response.error || 'Bulk export failed.');
+        }
+        return response.result;
+    };
+
+    const formatBulkExportStatus = (result: {
+        exported: number;
+        attempted: number;
+        platform: string;
+        warnings: string[];
+    }) => {
+        const warningText = result.warnings.length > 0 ? ` Warnings: ${result.warnings.join(' | ')}` : '';
+        return `Exported ${result.exported}/${result.attempted} chats on ${result.platform}.${warningText}`;
+    };
+
+    const handleBulkExportChats = async () => {
+        if (bulkExportInProgress) {
             return;
         }
-        const timestamp = new Date().toISOString().replace(/[:]/g, '-');
-        downloadAsJSON(response.snapshot, `blackiya-tab-overlay-snapshot-${buildFilenameTag}-${timestamp}`);
-        logger.info('Active tab overlay snapshot exported by user');
+        const tabId = await getActiveTabId();
+        if (tabId === null) {
+            alert('No active tab found.');
+            return;
+        }
+
+        const options = resolveBulkExportOptions();
+        setBulkExportLimitInput(String(options.limit));
+        await persistBulkExportSettings(options);
+
+        setBulkExportInProgress(true);
+        setBulkExportStatus('Export in progress...');
+
+        try {
+            const result = await requestBulkExportFromActiveTab(tabId, options);
+            setBulkExportStatus(formatBulkExportStatus(result));
+            logger.info('Bulk chat export finished', result);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setBulkExportStatus(`Bulk export failed: ${message}`);
+            logger.warn('Bulk chat export failed from popup', { error: message });
+            alert(`Bulk export failed: ${message}`);
+        } finally {
+            setBulkExportInProgress(false);
+        }
     };
 
     const handleExport = async () => {
@@ -206,30 +225,6 @@ const App = () => {
         }
     };
 
-    const handleExportStreamDump = async () => {
-        try {
-            const dump = await streamDumpStorage.getStore();
-            if (dump.sessions.length === 0) {
-                alert('No stream dump data to export.');
-                return;
-            }
-            const timestamp = new Date().toISOString().replace(/[:]/g, '-');
-            downloadAsJSON(dump, `blackiya-stream-dump-${buildFilenameTag}-${timestamp}`);
-            logger.info('Stream dump exported by user');
-        } catch (error) {
-            console.error('Failed to export stream dump', error);
-            logger.error('Failed to export stream dump', error);
-        }
-    };
-
-    const handleClearStreamDump = async () => {
-        if (!confirm('Clear saved stream dump diagnostics?')) {
-            return;
-        }
-        await streamDumpStorage.clearStore();
-        logger.info('Stream dump diagnostics cleared by user');
-    };
-
     return (
         <div>
             <div className="title">
@@ -260,50 +255,24 @@ const App = () => {
             </div>
 
             <div className="section">
-                <div className="section-heading">Stream Toast</div>
-                <div className="section-description">Shows a small overlay during active streaming sessions.</div>
-                <label htmlFor="streamProbeVisible" className="checkbox-row">
-                    <input
-                        id="streamProbeVisible"
-                        type="checkbox"
-                        checked={streamProbeVisible}
-                        onChange={handleStreamProbeVisibilityChange}
-                    />
-                    Enable stream toast overlay
-                </label>
-            </div>
-
-            <div className="section">
-                <div className="section-heading">Active Tab Debug Overlay</div>
-                <div className="section-description">
-                    Per-tab overlay with captured payloads and external events sent to subscriber extensions.
-                </div>
-                <label htmlFor="tabDebugOverlayVisible" className="checkbox-row">
-                    <input
-                        id="tabDebugOverlayVisible"
-                        type="checkbox"
-                        checked={tabDebugOverlayEnabled === true}
-                        disabled={tabDebugOverlayEnabled === null}
-                        onChange={handleTabDebugOverlayChange}
-                    />
-                    Enable for active tab only
-                </label>
-                <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
-                    {tabDebugOverlayEnabled === null
-                        ? 'Open a supported ChatGPT/Gemini/Grok tab to toggle.'
-                        : tabDebugOverlayEnabled
-                          ? 'Enabled for this tab.'
-                          : 'Disabled for this tab.'}
-                </div>
+                <div className="section-heading">Export Chats</div>
+                <label htmlFor="bulkExportLimit">Max chats (0 = all)</label>
+                <input
+                    id="bulkExportLimit"
+                    type="number"
+                    min={0}
+                    value={bulkExportLimitInput}
+                    onChange={handleBulkExportLimitChange}
+                />
                 <button
                     type="button"
-                    className="secondary"
-                    onClick={handleExportActiveTabOverlaySnapshot}
-                    disabled={tabDebugOverlayEnabled === null}
-                    style={{ marginTop: '8px' }}
+                    className="primary"
+                    onClick={handleBulkExportChats}
+                    disabled={bulkExportInProgress}
                 >
-                    Export Active Tab Overlay Snapshot (JSON)
+                    {bulkExportInProgress ? 'Exporting Chats...' : 'Export Chats'}
                 </button>
+                {bulkExportStatus ? <div className="status-text">{bulkExportStatus}</div> : null}
             </div>
 
             <button type="button" className="primary" onClick={handleExport}>
@@ -312,30 +281,6 @@ const App = () => {
 
             <button type="button" className="primary" onClick={handleDebugExport}>
                 Export Debug Report (TXT)
-            </button>
-
-            <div className="section diagnostics-section">
-                <div className="section-heading">Diagnostics Stream Dump</div>
-                <div className="section-description">
-                    Opt-in bounded capture of streaming frame text for forensic debugging.
-                </div>
-                <label htmlFor="streamDumpEnabled" className="checkbox-row">
-                    <input
-                        id="streamDumpEnabled"
-                        type="checkbox"
-                        checked={streamDumpEnabled}
-                        onChange={handleStreamDumpEnabledChange}
-                    />
-                    Enable stream dump capture
-                </label>
-            </div>
-
-            <button type="button" className="primary" onClick={handleExportStreamDump}>
-                Export Stream Dump (JSON)
-            </button>
-
-            <button type="button" className="secondary" onClick={handleClearStreamDump}>
-                Clear Stream Dump
             </button>
 
             <button type="button" className="secondary" onClick={handleClear}>

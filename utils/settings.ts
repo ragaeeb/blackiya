@@ -12,8 +12,7 @@ export const STORAGE_KEYS = {
     CALIBRATION_PROFILES: 'userSettings.calibrationProfiles',
     SFE_ENABLED: 'userSettings.sfe.enabled',
     STREAM_PROBE_VISIBLE: 'userSettings.ui.streamProbeVisible',
-    DIAGNOSTICS_STREAM_DUMP_ENABLED: 'userSettings.diagnostics.streamDumpEnabled',
-    DIAGNOSTICS_STREAM_DUMP_STORE: 'diagnostics.streamDumpStore',
+    BULK_EXPORT_LIMIT: 'userSettings.bulkExport.limit',
 } as const;
 
 export const EXPORT_FORMAT = {
@@ -26,3 +25,7 @@ export const EXPORT_FORMAT_VALUES = [EXPORT_FORMAT.ORIGINAL, EXPORT_FORMAT.COMMO
 export type ExportFormat = (typeof EXPORT_FORMAT_VALUES)[number];
 
 export const DEFAULT_EXPORT_FORMAT: ExportFormat = EXPORT_FORMAT.ORIGINAL;
+
+export const DEFAULT_BULK_EXPORT_LIMIT = 0;
+export const DEFAULT_BULK_EXPORT_DELAY_MS = 1_200;
+export const DEFAULT_BULK_EXPORT_TIMEOUT_MS = 20_000;

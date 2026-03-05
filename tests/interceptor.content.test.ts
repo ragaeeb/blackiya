@@ -10,8 +10,6 @@ type CleanupDisposedAttemptState = (
     attemptId: string,
     state: {
         disposedAttemptIds: Set<string>;
-        streamDumpFrameCountByAttempt: Map<string, number>;
-        streamDumpLastTextByAttempt: Map<string, string>;
         latestAttemptIdByPlatform: Map<string, string>;
         attemptByConversationId: Map<string, string>;
     },
@@ -116,14 +114,6 @@ describe('interceptor.content utilities', () => {
     it('cleans attempt-scoped caches when attempt is disposed', () => {
         const state = {
             disposedAttemptIds: new Set<string>(),
-            streamDumpFrameCountByAttempt: new Map<string, number>([
-                ['attempt-a', 9],
-                ['attempt-b', 4],
-            ]),
-            streamDumpLastTextByAttempt: new Map<string, string>([
-                ['attempt-a', 'abc'],
-                ['attempt-b', 'def'],
-            ]),
             latestAttemptIdByPlatform: new Map<string, string>([
                 ['Gemini', 'attempt-a'],
                 ['Grok', 'attempt-b'],
@@ -136,8 +126,6 @@ describe('interceptor.content utilities', () => {
 
         cleanupDisposedAttemptState('attempt-a', state, 2);
 
-        expect(state.streamDumpFrameCountByAttempt.has('attempt-a')).toBeFalse();
-        expect(state.streamDumpLastTextByAttempt.has('attempt-a')).toBeFalse();
         expect(state.latestAttemptIdByPlatform.get('Gemini')).toBeUndefined();
         expect(state.attemptByConversationId.get('conv-a')).toBeUndefined();
         expect(state.disposedAttemptIds.has('attempt-a')).toBeTrue();

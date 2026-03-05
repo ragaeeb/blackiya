@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Route } from '@playwright/test';
-import { chromium, expect, test } from '@playwright/test';
-import type { CachedConversationRecord } from '../utils/external-api/background-hub';
+import { expect, test } from '@playwright/test';
+import type { CachedConversationRecord } from '../utils/external-api/background-hub-types';
 import { EXTERNAL_CACHE_STORAGE_KEY } from '../utils/external-api/constants';
+import { resolveExtensionPath } from './extension-path';
+import { closeExtensionContext, launchExtensionContext } from './extension-test-context';
 
-const extensionPath = process.env.BLACKIYA_EXTENSION_PATH;
+const extension = resolveExtensionPath();
 const CHATGPT_CONVERSATION_ID = '696bc3d5-fa84-8328-b209-4d65cb229e59';
 const GEMINI_CONVERSATION_ID = '9cf87bbddf79d497';
 const GROK_CONVERSATION_ID = '01cb0729-6455-471d-b33a-124b3de76a29';
@@ -23,13 +25,7 @@ const createHarnessHtml = (title: string) => `<!doctype html>
 
 type HeadersLike = Record<string, string>;
 
-const launchContext = async () =>
-    chromium.launchPersistentContext('', {
-        headless: true,
-        args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
-    });
-
-const resolveExtensionWorker = async (context: Awaited<ReturnType<typeof launchContext>>) => {
+const resolveExtensionWorker = async (context: Awaited<ReturnType<typeof launchExtensionContext>>['context']) => {
     return (
         context.serviceWorkers()[0] ??
         (await context.waitForEvent('serviceworker', {
@@ -103,7 +99,7 @@ const waitForCachedConversation = async (
 };
 
 test.describe('blackiya lifecycle capture harness', () => {
-    test.skip(!extensionPath, 'Set BLACKIYA_EXTENSION_PATH to run extension lifecycle tests');
+    test.skip(!extension.valid, extension.reason ?? 'Unable to resolve extension path');
 
     let chatGptCanonicalResponse = '';
     let chatGptSseResponse = '';
@@ -154,10 +150,10 @@ test.describe('blackiya lifecycle capture harness', () => {
     });
 
     test('should capture ChatGPT lifecycle from streaming to canonical_ready', async () => {
-        const context = await launchContext();
+        const extensionContext = await launchExtensionContext(extension.extensionPath);
         try {
-            const extensionWorker = await resolveExtensionWorker(context);
-            const page = await context.newPage();
+            const extensionWorker = await resolveExtensionWorker(extensionContext.context);
+            const page = await extensionContext.context.newPage();
 
             await page.route('https://chatgpt.com/**', async (route) => {
                 const request = route.request();
@@ -207,15 +203,15 @@ test.describe('blackiya lifecycle capture harness', () => {
             expect(cached.provider).toBe('chatgpt');
             expect(cached.payload?.conversation_id).toBe(CHATGPT_CONVERSATION_ID);
         } finally {
-            await context.close();
+            await closeExtensionContext(extensionContext);
         }
     });
 
     test('should capture Gemini lifecycle from streaming to canonical_ready', async () => {
-        const context = await launchContext();
+        const extensionContext = await launchExtensionContext(extension.extensionPath);
         try {
-            const extensionWorker = await resolveExtensionWorker(context);
-            const page = await context.newPage();
+            const extensionWorker = await resolveExtensionWorker(extensionContext.context);
+            const page = await extensionContext.context.newPage();
 
             await page.route('https://gemini.google.com/**', async (route) => {
                 const request = route.request();
@@ -256,15 +252,15 @@ test.describe('blackiya lifecycle capture harness', () => {
             expect(cached.provider).toBe('gemini');
             expect(cached.payload?.conversation_id).toBe(GEMINI_CONVERSATION_ID);
         } finally {
-            await context.close();
+            await closeExtensionContext(extensionContext);
         }
     });
 
     test('should capture Grok lifecycle from streaming to canonical_ready', async () => {
-        const context = await launchContext();
+        const extensionContext = await launchExtensionContext(extension.extensionPath);
         try {
-            const extensionWorker = await resolveExtensionWorker(context);
-            const page = await context.newPage();
+            const extensionWorker = await resolveExtensionWorker(extensionContext.context);
+            const page = await extensionContext.context.newPage();
 
             await page.route('https://grok.com/**', async (route) => {
                 const request = route.request();
@@ -284,7 +280,7 @@ test.describe('blackiya lifecycle capture harness', () => {
                     return;
                 }
 
-                if (pathname === `/rest/app-chat/conversations/${GROK_CONVERSATION_ID}/load-responses`) {
+                if (pathname === `/rest/app-chat/conversations_v2/${GROK_CONVERSATION_ID}`) {
                     await fulfillJson(route, grokLoadResponsesResponse);
                     return;
                 }
@@ -300,17 +296,20 @@ test.describe('blackiya lifecycle capture harness', () => {
                     credentials: 'include',
                     body: '{}',
                 });
-                await fetch(`/rest/app-chat/conversations/${conversationId}/load-responses`, {
-                    method: 'GET',
-                    credentials: 'include',
-                });
+                await fetch(
+                    `/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
+                    {
+                        method: 'GET',
+                        credentials: 'include',
+                    },
+                );
             }, GROK_CONVERSATION_ID);
 
             const cached = await waitForCachedConversation(extensionWorker, GROK_CONVERSATION_ID);
             expect(cached.provider).toBe('grok');
             expect(cached.payload?.conversation_id).toBe(GROK_CONVERSATION_ID);
         } finally {
-            await context.close();
+            await closeExtensionContext(extensionContext);
         }
     });
 });

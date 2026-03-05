@@ -32,22 +32,6 @@ export const getExportFormat = async (defaultFormat: ExportFormat): Promise<Expo
     return (await readAreaFormats('local')) ?? (await readAreaFormats('sync')) ?? defaultFormat;
 };
 
-export type StreamDumpSettingDeps = {
-    setStreamDumpEnabled: (enabled: boolean) => void;
-    emitStreamDumpConfig: () => void;
-};
-
-export const loadStreamDumpSetting = async (deps: StreamDumpSettingDeps) => {
-    try {
-        const result = await browser.storage.local.get(STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED);
-        deps.setStreamDumpEnabled(result[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED] === true);
-    } catch (error) {
-        logger.warn('Failed to load stream dump diagnostics setting', error);
-        deps.setStreamDumpEnabled(false);
-    }
-    deps.emitStreamDumpConfig();
-};
-
 export type StreamProbeVisibilitySettingDeps = {
     setStreamProbeVisible: (visible: boolean) => void;
     getStreamProbeVisible: () => boolean;
@@ -68,8 +52,6 @@ export const loadStreamProbeVisibilitySetting = async (deps: StreamProbeVisibili
 };
 
 export type StorageChangeListenerDeps = {
-    setStreamDumpEnabled: (enabled: boolean) => void;
-    emitStreamDumpConfig: () => void;
     setStreamProbeVisible: (visible: boolean) => void;
     removeStreamProbePanel: () => void;
     setSfeEnabled: (enabled: boolean) => void;
@@ -83,10 +65,6 @@ export const createStorageChangeListener = (deps: StorageChangeListenerDeps) => 
     const listener: Parameters<typeof browser.storage.onChanged.addListener>[0] = (changes, areaName) => {
         if (areaName !== 'local') {
             return;
-        }
-        if (changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]) {
-            deps.setStreamDumpEnabled(changes[STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]?.newValue === true);
-            deps.emitStreamDumpConfig();
         }
         if (changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]) {
             const visible = changes[STORAGE_KEYS.STREAM_PROBE_VISIBLE]?.newValue === true;

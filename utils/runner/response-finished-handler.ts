@@ -108,7 +108,7 @@ export const processFinishedConversation = (
     }
 
     const shouldPromoteGenericCompleted =
-        deps.getLifecycleState() !== 'completed' && source === 'dom' && deps.adapterName() === 'ChatGPT';
+        deps.getLifecycleState() !== 'completed' && source === 'dom' && deps.adapterName() === 'ChatGPT' && true;
     if (shouldPromoteGenericCompleted) {
         deps.setCompletedLifecycleState(conversationId, attemptId);
     }

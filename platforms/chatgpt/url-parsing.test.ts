@@ -125,10 +125,10 @@ describe('ChatGPT URL parsing', () => {
             expect(urls).toContain(`https://chat.openai.com/backend-api/conversation/${id}`);
         });
 
-        it('should include f/conversation path in buildApiUrls as fallback candidate', () => {
+        it('should not include f/conversation path in buildApiUrls pull candidates', () => {
             const urls = adapter.buildApiUrls(id);
-            expect(urls).toContain(`https://chatgpt.com/backend-api/f/conversation/${id}`);
-            expect(urls).toContain(`https://chat.openai.com/backend-api/f/conversation/${id}`);
+            expect(urls).not.toContain(`https://chatgpt.com/backend-api/f/conversation/${id}`);
+            expect(urls).not.toContain(`https://chat.openai.com/backend-api/f/conversation/${id}`);
         });
     });
 });

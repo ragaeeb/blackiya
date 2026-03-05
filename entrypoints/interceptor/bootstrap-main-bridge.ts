@@ -1,17 +1,30 @@
+import { getGeminiBatchexecuteContext } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
 import { getPageConversationSnapshot } from '@/entrypoints/interceptor/page-snapshot';
+import { getXGrokGraphqlContext } from '@/entrypoints/interceptor/x-grok-graphql-context-store';
+import {
+    GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
+    type GeminiBatchexecuteContextResponseMessage,
+    isGeminiBatchexecuteContextRequestMessage,
+} from '@/utils/gemini-batchexecute-bridge';
+import {
+    isPlatformHeadersRequestMessage,
+    PLATFORM_HEADERS_RESPONSE_MESSAGE,
+    type PlatformHeadersResponseMessage,
+} from '@/utils/platform-header-bridge';
+import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import type {
-    AttemptDisposedMessage,
-    CaptureInterceptedMessage,
-    SessionInitMessage,
-    StreamDumpConfigMessage,
-} from '@/utils/protocol/messages';
+import type { AttemptDisposedMessage, CaptureInterceptedMessage, SessionInitMessage } from '@/utils/protocol/messages';
 import {
     getSessionToken,
     resolveTokenValidationFailureReason,
     setSessionToken,
     stampToken,
 } from '@/utils/protocol/session-token';
+import {
+    isXGrokGraphqlContextRequestMessage,
+    X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE,
+    type XGrokGraphqlContextResponseMessage,
+} from '@/utils/x-grok-graphql-bridge';
 
 type PageSnapshotRequest = {
     type: typeof MESSAGE_TYPES.PAGE_SNAPSHOT_REQUEST;
@@ -60,8 +73,6 @@ const buildSnapshotResponse = (requestId: string, snapshot: unknown | null): Pag
 export type MainWorldBridgeDeps = {
     getRawCaptureHistory: () => CaptureInterceptedMessage[];
     cleanupDisposedAttempt: (attemptId: string) => void;
-    setStreamDumpEnabled: (enabled: boolean) => void;
-    clearStreamDumpCaches: () => void;
 };
 
 export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
@@ -93,20 +104,6 @@ export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
         deps.cleanupDisposedAttempt(attemptDisposedMessage.attemptId);
     };
 
-    const handleStreamDumpConfigMessage = (message: unknown) => {
-        const streamDumpConfigMessage = message as StreamDumpConfigMessage & { __blackiyaToken?: string };
-        if (typeof streamDumpConfigMessage.enabled !== 'boolean') {
-            return;
-        }
-        if (resolveTokenValidationFailureReason(streamDumpConfigMessage) !== null) {
-            return;
-        }
-        deps.setStreamDumpEnabled(streamDumpConfigMessage.enabled);
-        if (!streamDumpConfigMessage.enabled) {
-            deps.clearStreamDumpCaches();
-        }
-    };
-
     const handleSessionInitMessage = (message: unknown) => {
         const sessionInitMessage = message as SessionInitMessage;
         if (typeof sessionInitMessage.token !== 'string') {
@@ -117,14 +114,69 @@ export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
         }
     };
 
+    const handlePlatformHeadersRequest = (message: unknown) => {
+        if (!isPlatformHeadersRequestMessage(message)) {
+            return false;
+        }
+        if (resolveTokenValidationFailureReason(message) !== null) {
+            return true;
+        }
+        const headers = platformHeaderStore.get(message.platformName);
+        const response: PlatformHeadersResponseMessage = {
+            type: PLATFORM_HEADERS_RESPONSE_MESSAGE,
+            requestId: message.requestId,
+            platformName: message.platformName,
+            headers,
+        };
+        window.postMessage(stampToken(response), window.location.origin);
+        return true;
+    };
+
+    const handleGeminiBatchexecuteContextRequest = (message: unknown) => {
+        if (!isGeminiBatchexecuteContextRequestMessage(message)) {
+            return false;
+        }
+        if (resolveTokenValidationFailureReason(message) !== null) {
+            return true;
+        }
+        const response: GeminiBatchexecuteContextResponseMessage = {
+            type: GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
+            requestId: message.requestId,
+            context: getGeminiBatchexecuteContext(),
+        };
+        window.postMessage(stampToken(response), window.location.origin);
+        return true;
+    };
+
+    const handleXGrokGraphqlContextRequest = (message: unknown) => {
+        if (!isXGrokGraphqlContextRequestMessage(message)) {
+            return false;
+        }
+        if (resolveTokenValidationFailureReason(message) !== null) {
+            return true;
+        }
+        const response: XGrokGraphqlContextResponseMessage = {
+            type: X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE,
+            requestId: message.requestId,
+            context: getXGrokGraphqlContext(),
+        };
+        window.postMessage(stampToken(response), window.location.origin);
+        return true;
+    };
+
     const handleTypedMessage = (message: unknown) => {
+        if (handlePlatformHeadersRequest(message)) {
+            return;
+        }
+        if (handleGeminiBatchexecuteContextRequest(message)) {
+            return;
+        }
+        if (handleXGrokGraphqlContextRequest(message)) {
+            return;
+        }
         const type = (message as { type?: unknown })?.type;
         if (type === MESSAGE_TYPES.ATTEMPT_DISPOSED) {
             handleAttemptDisposedMessage(message);
-            return;
-        }
-        if (type === MESSAGE_TYPES.STREAM_DUMP_CONFIG) {
-            handleStreamDumpConfigMessage(message);
             return;
         }
         if (type === MESSAGE_TYPES.SESSION_INIT) {

@@ -3,7 +3,6 @@ import {
     createStorageChangeListener,
     createVisibilityChangeHandler,
     getExportFormat,
-    loadStreamDumpSetting,
     loadStreamProbeVisibilitySetting,
     scheduleButtonInjectionRetries,
 } from '@/utils/runner/runtime/runtime-settings';
@@ -121,45 +120,9 @@ describe('runtime-settings', () => {
         });
     });
 
-    describe('loadStreamDumpSetting', () => {
-        it('should load config and emit', async () => {
-            const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
-            };
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                [STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]: true,
-            }));
-
-            await loadStreamDumpSetting(deps);
-
-            expect(deps.setStreamDumpEnabled).toHaveBeenCalledWith(true);
-            expect(deps.emitStreamDumpConfig).toHaveBeenCalled();
-        });
-
-        it('should call setStreamDumpEnabled(false) and emitStreamDumpConfig when storage read fails', async () => {
-            const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
-            };
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
-                throw new Error('storage read error');
-            });
-
-            await loadStreamDumpSetting(deps);
-
-            expect(deps.setStreamDumpEnabled).toHaveBeenCalledWith(false);
-            expect(deps.emitStreamDumpConfig).toHaveBeenCalled();
-        });
-    });
-
     describe('createStorageChangeListener', () => {
         it('should handle property changes for local storage', () => {
             const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
                 setStreamProbeVisible: mock(() => {}),
                 removeStreamProbePanel: mock(() => {}),
                 setSfeEnabled: mock(() => {}),
@@ -173,19 +136,16 @@ describe('runtime-settings', () => {
 
             // ignore non-local
             listener({}, 'sync');
-            expect(deps.setStreamDumpEnabled).not.toHaveBeenCalled();
+            expect(deps.setSfeEnabled).not.toHaveBeenCalled();
 
             listener(
                 {
-                    [STORAGE_KEYS.DIAGNOSTICS_STREAM_DUMP_ENABLED]: { newValue: true as any, oldValue: false as any },
                     [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: { newValue: false as any, oldValue: true as any },
                     [STORAGE_KEYS.SFE_ENABLED]: { newValue: false as any, oldValue: true as any },
                 },
                 'local',
             );
 
-            expect(deps.setStreamDumpEnabled).toHaveBeenCalledWith(true);
-            expect(deps.emitStreamDumpConfig).toHaveBeenCalled();
             expect(deps.setStreamProbeVisible).toHaveBeenCalledWith(false);
             expect(deps.removeStreamProbePanel).toHaveBeenCalled();
             expect(deps.setSfeEnabled).toHaveBeenCalledWith(false);
@@ -246,8 +206,6 @@ describe('runtime-settings', () => {
     describe('createStorageChangeListener - calibration profiles', () => {
         it('should call handleCalibrationProfilesChanged when CALIBRATION_PROFILES changes and adapter exists', () => {
             const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
                 setStreamProbeVisible: mock(() => {}),
                 removeStreamProbePanel: mock(() => {}),
                 setSfeEnabled: mock(() => {}),
@@ -271,8 +229,6 @@ describe('runtime-settings', () => {
 
         it('should not call handleCalibrationProfilesChanged when adapter is absent', () => {
             const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
                 setStreamProbeVisible: mock(() => {}),
                 removeStreamProbePanel: mock(() => {}),
                 setSfeEnabled: mock(() => {}),
@@ -295,8 +251,6 @@ describe('runtime-settings', () => {
 
         it('should not call removeStreamProbePanel when probe visibility is toggled to true', () => {
             const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
                 setStreamProbeVisible: mock(() => {}),
                 removeStreamProbePanel: mock(() => {}),
                 setSfeEnabled: mock(() => {}),
@@ -320,8 +274,6 @@ describe('runtime-settings', () => {
 
         it('should treat SFE_ENABLED as true when newValue is not explicitly false', () => {
             const deps = {
-                setStreamDumpEnabled: mock(() => {}),
-                emitStreamDumpConfig: mock(() => {}),
                 setStreamProbeVisible: mock(() => {}),
                 removeStreamProbePanel: mock(() => {}),
                 setSfeEnabled: mock(() => {}),

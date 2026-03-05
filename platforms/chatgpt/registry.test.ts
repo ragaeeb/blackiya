@@ -16,6 +16,11 @@ describe('chatgpt registry', () => {
                 '/backend-api/conversation/696bc3d5-fa84-8328-b209-4d65cb229e59/stream_status',
             ),
         ).toBeTrue();
+        expect(
+            CHATGPT_ENDPOINT_REGISTRY.apiEndpointPattern.test(
+                '/backend-api/conversations?offset=0&limit=100&order=updated&is_archived=false&is_starred=false',
+            ),
+        ).toBeTrue();
     });
 
     it('should resolve button injection target from selector matches', () => {
@@ -39,6 +44,11 @@ describe('chatgpt registry', () => {
 
     it('should classify likely chatgpt api paths for endpoint-miss diagnostics', () => {
         expect(isLikelyChatGptApiPath('https://chatgpt.com/backend-api/textdocs/abc')).toBeTrue();
+        expect(
+            isLikelyChatGptApiPath(
+                'https://chatgpt.com/backend-api/conversations?offset=0&limit=100&order=updated&is_archived=false&is_starred=false',
+            ),
+        ).toBeTrue();
         expect(isLikelyChatGptApiPath('https://chatgpt.com/c/123')).toBeFalse();
     });
 });

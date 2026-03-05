@@ -16,9 +16,17 @@ import { logger } from '@/utils/logger';
 import { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { NavigationManager } from '@/utils/managers/navigation-manager';
+import { readPlatformHeadersFromCache, writePlatformHeadersToCache } from '@/utils/platform-header-cache';
+import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { generateSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 import { createAttemptCoordinator } from '@/utils/runner/attempt-coordinator';
+import { runBulkChatExport } from '@/utils/runner/bulk-chat-export';
+import {
+    BULK_EXPORT_PROGRESS_MESSAGE,
+    type BulkExportChatsResponse,
+    isBulkExportChatsMessage,
+} from '@/utils/runner/bulk-chat-export-contract';
 import {
     injectSaveButton as injectSaveButtonCore,
     isConversationReadyForActions as isConversationReadyForActionsCore,
@@ -47,7 +55,6 @@ import {
     buildSavePipelineDeps,
     buildStorageChangeListenerDeps,
     buildStreamDoneCoordinatorDeps,
-    buildStreamDumpSettingDeps,
     buildStreamProbeVisibilitySettingDeps,
     buildVisibilityRecoveryDeps,
     buildWarmFetchDeps,
@@ -62,7 +69,6 @@ import {
     resolveIsolatedSnapshotData,
     shouldBlockActionsForGeneration,
 } from '@/utils/runner/engine/core-utils';
-import { emitExternalConversationEvent } from '@/utils/runner/engine/external-event-emission';
 import {
     emitAttemptDisposed,
     ingestSfeCanonicalSample,
@@ -73,7 +79,9 @@ import {
 import type { EngineCtx } from '@/utils/runner/engine/types';
 import { MAX_STREAM_PREVIEWS } from '@/utils/runner/engine/types';
 import { createExternalEventDispatcherState } from '@/utils/runner/external-event-dispatch';
+import { requestGeminiBatchexecuteContextFromMainWorld } from '@/utils/runner/gemini-batchexecute-request';
 import { processInterceptionCapture as processInterceptionCaptureCore } from '@/utils/runner/interception-capture';
+import { requestPlatformHeadersFromMainWorld } from '@/utils/runner/platform-header-request';
 import { processResponseFinished as processResponseFinishedCore } from '@/utils/runner/response-finished-handler';
 import { createCalibrationRuntime } from '@/utils/runner/runtime/platform-runtime-calibration';
 import { createStreamProbeRuntime } from '@/utils/runner/runtime/platform-runtime-stream-probe';
@@ -82,7 +90,6 @@ import { createCleanupRuntime } from '@/utils/runner/runtime/runtime-cleanup';
 import {
     createStorageChangeListener as createStorageChangeListenerCore,
     createVisibilityChangeHandler as createVisibilityChangeHandlerCore,
-    loadStreamDumpSetting as loadStreamDumpSettingCore,
     loadStreamProbeVisibilitySetting as loadStreamProbeVisibilitySettingCore,
     scheduleButtonInjectionRetries as scheduleButtonInjectionRetriesCore,
 } from '@/utils/runner/runtime/runtime-settings';
@@ -92,21 +99,7 @@ import {
 } from '@/utils/runner/save-pipeline';
 import { RunnerState } from '@/utils/runner/state';
 import { createStreamDoneCoordinator } from '@/utils/runner/stream/stream-done-coordinator';
-import {
-    addTabDebugCaptureEntry,
-    addTabDebugExternalEventEntry,
-    buildTabDebugOverlaySnapshot,
-    createTabDebugOverlayState,
-    persistTabDebugOverlayVisibilityToSession,
-    readTabDebugOverlayVisibilityFromSession,
-    removeTabDebugOverlayPanel,
-    renderTabDebugOverlay,
-    TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE,
-    TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE,
-    TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE,
-    TAB_DEBUG_OVERLAY_TOGGLE_MESSAGE,
-    type TabDebugRuntimeMessage,
-} from '@/utils/runner/tab-debug-overlay';
+import { requestXGrokGraphqlContextFromMainWorld } from '@/utils/runner/x-grok-graphql-request';
 import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
@@ -151,7 +144,6 @@ export const runPlatform = (): void => {
         calibrationState: 'idle',
         activeAttemptId: null,
         sfeEnabled: true,
-        streamDumpEnabled: false,
         streamProbeVisible: false,
         cleanedUp: false,
         lastResponseFinishedAt: 0,
@@ -169,7 +161,7 @@ export const runPlatform = (): void => {
         cleanupWindowBridge: null,
         cleanupCompletionWatcher: null,
         cleanupButtonHealthCheck: null,
-        cleanupTabDebugRuntimeListener: null,
+        cleanupRuntimeMessageListener: null,
         lastButtonStateLogRef: { value: '' },
         attemptByConversation: runnerState.attemptByConversation,
         attemptAliasForward: runnerState.attemptAliasForward,
@@ -205,7 +197,6 @@ export const runPlatform = (): void => {
         },
         externalEventDispatchState: createExternalEventDispatcherState(),
         streamProbeRuntime: null,
-        tabDebugOverlayState: createTabDebugOverlayState(),
         // Function stubs — populated below during coordinator wiring
         setCurrentConversation: null!,
         setActiveAttempt: null!,
@@ -260,11 +251,6 @@ export const runPlatform = (): void => {
         appendPendingStreamProbeText: null!,
         migratePendingStreamProbeText: null!,
         appendLiveStreamProbeText: null!,
-        setTabDebugOverlayVisible: null!,
-        refreshTabDebugOverlay: null!,
-        recordTabDebugCapture: null!,
-        recordTabDebugExternalEvent: null!,
-        handleTabDebugRuntimeMessage: null!,
         isStaleAttemptMessage: null!,
         buildExportPayloadForFormat: null!,
         getExportFormat: null!,
@@ -290,7 +276,7 @@ export const runPlatform = (): void => {
     ctx.isStaleAttemptMessage = (aid, cid, st) => isStaleAttemptMessage(ctx, aid, cid, st);
     ctx.buildExportPayloadForFormat = (data, format) => buildExportPayloadForFormat(ctx, data, format);
     ctx.getExportFormat = getExportFormat;
-    ctx.emitExternalConversationEvent = (args) => emitExternalConversationEvent(ctx, args);
+    ctx.emitExternalConversationEvent = () => {};
 
     ctx.streamProbeRuntime = createStreamProbeRuntime({
         streamPreviewState: ctx.streamPreviewState,
@@ -308,60 +294,6 @@ export const runPlatform = (): void => {
     ctx.appendPendingStreamProbeText = (aid, text) => ctx.streamProbeRuntime?.appendPendingStreamProbeText(aid, text);
     ctx.migratePendingStreamProbeText = (cid, aid) => ctx.streamProbeRuntime?.migratePendingStreamProbeText(cid, aid);
     ctx.appendLiveStreamProbeText = (cid, text) => ctx.streamProbeRuntime?.appendLiveStreamProbeText(cid, text);
-    ctx.tabDebugOverlayState.visible = readTabDebugOverlayVisibilityFromSession();
-    ctx.refreshTabDebugOverlay = () => renderTabDebugOverlay(ctx.tabDebugOverlayState);
-    ctx.setTabDebugOverlayVisible = (visible) => {
-        ctx.tabDebugOverlayState.visible = visible;
-        persistTabDebugOverlayVisibilityToSession(visible);
-        if (!visible) {
-            removeTabDebugOverlayPanel();
-            return;
-        }
-        ctx.refreshTabDebugOverlay();
-    };
-    ctx.recordTabDebugCapture = ({ conversationId, data, attemptId, source }) => {
-        addTabDebugCaptureEntry(ctx.tabDebugOverlayState, {
-            conversationId,
-            payload: data,
-            attemptId,
-            source: source ?? 'unknown',
-        });
-        if (ctx.tabDebugOverlayState.visible) {
-            ctx.refreshTabDebugOverlay();
-        }
-    };
-    ctx.recordTabDebugExternalEvent = ({ event, status, error, delivery }) => {
-        addTabDebugExternalEventEntry(ctx.tabDebugOverlayState, { event, status, error, delivery });
-        if (ctx.tabDebugOverlayState.visible) {
-            ctx.refreshTabDebugOverlay();
-        }
-    };
-    ctx.handleTabDebugRuntimeMessage = (message) => {
-        const typed = message as TabDebugRuntimeMessage | null;
-        if (!typed || typeof typed !== 'object' || typeof typed.type !== 'string') {
-            return { handled: false };
-        }
-        if (typed.type === TAB_DEBUG_OVERLAY_GET_STATE_MESSAGE) {
-            return { handled: true, enabled: ctx.tabDebugOverlayState.visible };
-        }
-        if (typed.type === TAB_DEBUG_OVERLAY_GET_SNAPSHOT_MESSAGE) {
-            return {
-                handled: true,
-                enabled: ctx.tabDebugOverlayState.visible,
-                snapshot: buildTabDebugOverlaySnapshot(ctx.tabDebugOverlayState),
-            };
-        }
-        if (typed.type === TAB_DEBUG_OVERLAY_TOGGLE_MESSAGE) {
-            ctx.setTabDebugOverlayVisible(!ctx.tabDebugOverlayState.visible);
-            return { handled: true, enabled: ctx.tabDebugOverlayState.visible };
-        }
-        if (typed.type === TAB_DEBUG_OVERLAY_SET_STATE_MESSAGE) {
-            ctx.setTabDebugOverlayVisible(typed.enabled === true);
-            return { handled: true, enabled: ctx.tabDebugOverlayState.visible };
-        }
-        return { handled: false };
-    };
-
     const attemptCoord = createAttemptCoordinator(buildAttemptCoordinatorDeps(ctx));
     ctx.setCurrentConversation = attemptCoord.setCurrentConversation;
     ctx.setActiveAttempt = attemptCoord.setActiveAttempt;
@@ -380,12 +312,6 @@ export const runPlatform = (): void => {
         () => ctx.handleCalibrationClick(),
     );
     ctx.interceptionManager = new InterceptionManager((capturedId, data, meta) => {
-        ctx.recordTabDebugCapture({
-            conversationId: capturedId,
-            data,
-            attemptId: meta?.attemptId,
-            source: meta?.source,
-        });
         processInterceptionCaptureCore(capturedId, data, meta, buildInterceptionCaptureDeps(ctx));
     });
     let handleNavigationChange: () => void;
@@ -396,7 +322,8 @@ export const runPlatform = (): void => {
     const streamDoneCoord = createStreamDoneCoordinator(buildStreamDoneCoordinatorDeps(ctx));
     ctx.cancelStreamDoneProbe = streamDoneCoord.cancelStreamDoneProbe;
     ctx.clearProbeLeaseRetry = streamDoneCoord.clearProbeLeaseRetry;
-    ctx.runStreamDoneProbe = streamDoneCoord.runStreamDoneProbe;
+    ctx.runStreamDoneProbe = (conversationId, attemptId) =>
+        streamDoneCoord.runStreamDoneProbe(conversationId, attemptId);
 
     ctx.clearCanonicalStabilizationRetry = (aid) =>
         clearCanonicalStabilizationRetryCore(aid, buildCanonicalStabilizationTickDeps(ctx));
@@ -495,10 +422,15 @@ export const runPlatform = (): void => {
         build: getBuildFingerprint(),
     });
 
+    void readPlatformHeadersFromCache(ctx.currentAdapter.name).then((cachedHeaders) => {
+        if (cachedHeaders) {
+            platformHeaderStore.update(ctx.currentAdapter?.name ?? '', cachedHeaders);
+        }
+    });
+
     ctx.interceptionManager.updateAdapter(ctx.currentAdapter);
     void ctx.ensureCalibrationPreferenceLoaded(ctx.currentAdapter.name);
     void ctx.loadSfeSettings();
-    void loadStreamDumpSettingCore(buildStreamDumpSettingDeps(ctx));
     void loadStreamProbeVisibilitySettingCore(buildStreamProbeVisibilitySettingDeps(ctx));
 
     const storageChangeListener = createStorageChangeListenerCore(buildStorageChangeListenerDeps(ctx));
@@ -509,27 +441,101 @@ export const runPlatform = (): void => {
     ctx.cleanupWindowBridge = runtimeWiring.registerWindowBridge();
     ctx.cleanupCompletionWatcher = runtimeWiring.registerCompletionWatcher();
     ctx.cleanupButtonHealthCheck = runtimeWiring.registerButtonHealthCheck();
-    ctx.refreshTabDebugOverlay();
 
-    const tabDebugRuntimeMessageListener: Parameters<typeof browser.runtime.onMessage.addListener>[0] = (
+    const resolveBulkExportRuntimeContext = async (platformName: string) => {
+        const cachedHeaders = await readPlatformHeadersFromCache(platformName);
+        const localHeaders = platformHeaderStore.get(platformName);
+        const bridgedHeaders = await requestPlatformHeadersFromMainWorld(platformName);
+        const mergedHeaders = {
+            ...(cachedHeaders ?? {}),
+            ...(localHeaders ?? {}),
+            ...(bridgedHeaders ?? {}),
+        };
+        const resolvedHeaders = Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined;
+        if (resolvedHeaders) {
+            void writePlatformHeadersToCache(platformName, resolvedHeaders);
+            platformHeaderStore.update(platformName, resolvedHeaders);
+        }
+        const geminiBatchexecuteContext =
+            platformName === 'Gemini' ? await requestGeminiBatchexecuteContextFromMainWorld() : undefined;
+        const xGrokGraphqlContext =
+            platformName === 'Grok' ? await requestXGrokGraphqlContextFromMainWorld() : undefined;
+        if (
+            platformName === 'ChatGPT' &&
+            (!resolvedHeaders ||
+                typeof resolvedHeaders.authorization !== 'string' ||
+                resolvedHeaders.authorization.length === 0)
+        ) {
+            throw new Error(
+                'Missing ChatGPT auth headers. Trigger one normal ChatGPT request in this tab, then retry Export Chats.',
+            );
+        }
+        return {
+            resolvedHeaders,
+            geminiBatchexecuteContext,
+            xGrokGraphqlContext,
+        };
+    };
+
+    const runtimeMessageListener: Parameters<typeof browser.runtime.onMessage.addListener>[0] = (
         message,
         _sender,
         sendResponse,
     ) => {
-        const result = ctx.handleTabDebugRuntimeMessage(message);
-        if (!result.handled) {
-            return;
+        if (isBulkExportChatsMessage(message)) {
+            const platformName = ctx.currentAdapter?.name ?? '';
+            void Promise.resolve()
+                .then(() => resolveBulkExportRuntimeContext(platformName))
+                .then(({ resolvedHeaders, geminiBatchexecuteContext, xGrokGraphqlContext }) =>
+                    runBulkChatExport(message, {
+                        getAdapter: () => ctx.currentAdapter,
+                        getExportFormat: () => ctx.getExportFormat(),
+                        buildExportPayloadForFormat: (data, format) => ctx.buildExportPayloadForFormat(data, format),
+                        getAuthHeaders: () => resolvedHeaders,
+                        getGeminiBatchexecuteContext: () => geminiBatchexecuteContext,
+                        getXGrokGraphqlContext: () => xGrokGraphqlContext,
+                        locationHref: () => window.location.href,
+                        onProgress: (progress) => {
+                            void browser.runtime.sendMessage({
+                                ...progress,
+                                type: BULK_EXPORT_PROGRESS_MESSAGE,
+                            });
+                        },
+                    }),
+                )
+                .then((result) => {
+                    logger.info('Bulk chat export completed', result);
+                    sendResponse({
+                        ok: true,
+                        result,
+                    } satisfies BulkExportChatsResponse);
+                })
+                .catch((error) => {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    void browser.runtime.sendMessage({
+                        type: BULK_EXPORT_PROGRESS_MESSAGE,
+                        stage: 'failed',
+                        platform: platformName,
+                        message: errorMessage,
+                    });
+                    logger.warn('Bulk chat export failed', { error: errorMessage });
+                    sendResponse({
+                        ok: false,
+                        error: errorMessage,
+                    } satisfies BulkExportChatsResponse);
+                });
+            return true;
         }
-        sendResponse({ ok: true, enabled: result.enabled, snapshot: result.snapshot });
-        return true;
+
+        return;
     };
     if (browser.runtime?.onMessage?.addListener) {
-        browser.runtime.onMessage.addListener(tabDebugRuntimeMessageListener);
-        ctx.cleanupTabDebugRuntimeListener = () => {
-            browser.runtime.onMessage.removeListener?.(tabDebugRuntimeMessageListener);
+        browser.runtime.onMessage.addListener(runtimeMessageListener);
+        ctx.cleanupRuntimeMessageListener = () => {
+            browser.runtime.onMessage.removeListener?.(runtimeMessageListener);
         };
     } else {
-        ctx.cleanupTabDebugRuntimeListener = null;
+        ctx.cleanupRuntimeMessageListener = null;
     }
 
     const handleVisibilityChange = createVisibilityChangeHandlerCore(buildVisibilityRecoveryDeps(ctx));
@@ -551,7 +557,7 @@ export const runPlatform = (): void => {
     cleanupDeps.cleanupWindowBridge = ctx.cleanupWindowBridge;
     cleanupDeps.cleanupCompletionWatcher = ctx.cleanupCompletionWatcher;
     cleanupDeps.cleanupButtonHealthCheck = ctx.cleanupButtonHealthCheck;
-    cleanupDeps.cleanupTabDebugRuntimeListener = ctx.cleanupTabDebugRuntimeListener;
+    cleanupDeps.cleanupRuntimeMessageListener = ctx.cleanupRuntimeMessageListener;
     const cleanupRuntime = createCleanupRuntime(cleanupDeps);
 
     ctx.beforeUnloadHandler = cleanupRuntime;

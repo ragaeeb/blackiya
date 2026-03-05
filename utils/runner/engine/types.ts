@@ -1,5 +1,4 @@
 import type { LLMPlatform } from '@/platforms/types';
-import type { ExternalInboundConversationEvent } from '@/utils/external-api/contracts';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import type { InterceptionManager } from '@/utils/managers/interception-manager';
 import type { NavigationManager } from '@/utils/managers/navigation-manager';
@@ -17,7 +16,6 @@ import type { RunnerCleanupDeps } from '@/utils/runner/runtime/runtime-cleanup';
 import type { SavePipelineDeps } from '@/utils/runner/save-pipeline';
 import type { RunnerState } from '@/utils/runner/state';
 import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
-import type { TabDebugOverlaySnapshot, TabDebugOverlayState } from '@/utils/runner/tab-debug-overlay';
 import type { WarmFetchDeps, WarmFetchReason } from '@/utils/runner/warm-fetch';
 import type { ExportFormat } from '@/utils/settings';
 import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
@@ -50,7 +48,6 @@ export type EngineCtx = {
     calibrationState: CalibrationUiState;
     activeAttemptId: string | null;
     sfeEnabled: boolean;
-    streamDumpEnabled: boolean;
     streamProbeVisible: boolean;
     cleanedUp: boolean;
     lastResponseFinishedAt: number;
@@ -68,7 +65,7 @@ export type EngineCtx = {
     cleanupWindowBridge: (() => void) | null;
     cleanupCompletionWatcher: (() => void) | null;
     cleanupButtonHealthCheck: (() => void) | null;
-    cleanupTabDebugRuntimeListener: (() => void) | null;
+    cleanupRuntimeMessageListener: (() => void) | null;
     lastButtonStateLogRef: { value: string };
 
     attemptByConversation: Map<string, string>;
@@ -106,7 +103,6 @@ export type EngineCtx = {
     streamProbeRuntime: ReturnType<
         typeof import('@/utils/runner/runtime/platform-runtime-stream-probe').createStreamProbeRuntime
     > | null;
-    tabDebugOverlayState: TabDebugOverlayState;
 
     setCurrentConversation: (cid: string | null) => void;
     setActiveAttempt: (aid: string | null) => void;
@@ -168,26 +164,6 @@ export type EngineCtx = {
     appendPendingStreamProbeText: (aid: string, text: string) => void;
     migratePendingStreamProbeText: (cid: string, aid: string) => void;
     appendLiveStreamProbeText: (cid: string, text: string) => void;
-    setTabDebugOverlayVisible: (visible: boolean) => void;
-    refreshTabDebugOverlay: () => void;
-    recordTabDebugCapture: (args: {
-        conversationId: string;
-        data: ConversationData;
-        attemptId?: string | null;
-        source?: string;
-    }) => void;
-    recordTabDebugExternalEvent: (args: {
-        event: ExternalInboundConversationEvent;
-        status: 'sent' | 'failed';
-        error?: unknown;
-        delivery?: import('@/utils/runner/tab-debug-overlay').TabDebugOverlayDeliveryStats | null;
-    }) => void;
-    handleTabDebugRuntimeMessage: (
-        message: unknown,
-    ) =>
-        | { handled: true; enabled: boolean; snapshot?: undefined }
-        | { handled: true; enabled: boolean; snapshot: TabDebugOverlaySnapshot }
-        | { handled: false; enabled?: undefined; snapshot?: undefined };
     isStaleAttemptMessage: (
         aid: string,
         cid: string | undefined,
@@ -202,6 +178,7 @@ export type EngineCtx = {
         captureMeta: ExportMeta;
         attemptId: string | null;
         allowWhenActionsBlocked?: boolean;
+        forceEmit?: boolean;
     }) => void;
     ingestSfeLifecycleFromWirePhase: (
         phase: ResponseLifecycleMessage['phase'],

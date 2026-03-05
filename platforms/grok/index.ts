@@ -150,9 +150,8 @@ export const grokAdapter: LLMPlatform = {
             return [];
         }
         return [
-            `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`,
-            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
             `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
+            `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
         ];
     },
 

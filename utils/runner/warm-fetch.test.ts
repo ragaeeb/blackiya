@@ -196,6 +196,60 @@ describe('warm-fetch', () => {
             expect(globalThis.fetch).not.toHaveBeenCalled();
         });
 
+        it('should skip ChatGPT stabilization-retry fetch when cached canonical data is already ready', async () => {
+            deps.platformName = 'ChatGPT';
+            deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
+            deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: true, terminal: true }));
+            deps.getCaptureMeta.mockImplementationOnce(() => ({
+                captureSource: 'canonical_api',
+                fidelity: 'high',
+                completeness: 'complete',
+            }));
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'stabilization-retry', deps, inFlight);
+
+            expect(result).toBeTrue();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should not return success for ChatGPT stabilization-retry when ready data is degraded', async () => {
+            deps.platformName = 'ChatGPT';
+            deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
+            deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: true, terminal: true }));
+            deps.getCaptureMeta.mockImplementationOnce(() => ({
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            }));
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'stabilization-retry', deps, inFlight);
+
+            expect(result).toBeFalse();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should skip ChatGPT stabilization-retry network fetch for degraded captures even when not ready', async () => {
+            deps.platformName = 'ChatGPT';
+            deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
+            deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: false, terminal: false }));
+            deps.getCaptureMeta.mockImplementationOnce(() => ({
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            }));
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'stabilization-retry', deps, inFlight);
+
+            expect(result).toBeFalse();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
         it('should execute candidates and set/clear inFlight', async () => {
             const inFlight = new Map();
             let mockCalled = false;

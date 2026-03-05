@@ -23,6 +23,12 @@ const extractTurnRole = (turn: Element): 'system' | 'user' | 'assistant' | 'tool
     return null;
 };
 
+const extractTurnModelSlug = (turn: Element): string | null => {
+    const modelEl = findElementByAttribute(turn, 'data-message-model-slug');
+    const slug = modelEl?.getAttribute('data-message-model-slug');
+    return typeof slug === 'string' && slug.trim().length > 0 ? slug.trim() : null;
+};
+
 const extractTurnText = (turn: Element): string => {
     const el =
         turn.querySelector(
@@ -78,6 +84,60 @@ const buildDomMessageContent = (text: string, thoughtFragments: string[]): Recor
     };
 };
 
+type DomTurnResult = {
+    messageId: string;
+    node: Record<string, unknown>;
+    modelSlug: string | null;
+};
+
+const buildDomTurnNode = (
+    turn: Element,
+    conversationId: string,
+    index: number,
+    parentId: string,
+    now: number,
+): DomTurnResult | null => {
+    const role = extractTurnRole(turn);
+    if (!role) {
+        return null;
+    }
+    const text = extractTurnText(turn);
+    const thoughtFragments = extractThoughtFragments(turn);
+    if (!text && thoughtFragments.length === 0) {
+        return null;
+    }
+    const modelSlug = role === 'assistant' ? extractTurnModelSlug(turn) : null;
+    const messageId = `dom-${conversationId}-${index}`;
+    const content = buildDomMessageContent(text, thoughtFragments);
+    const metadata: Record<string, unknown> =
+        thoughtFragments.length > 0 ? { reasoning: thoughtFragments.join('\n\n') } : {};
+    if (modelSlug) {
+        metadata.model_slug = modelSlug;
+    }
+    return {
+        messageId,
+        modelSlug,
+        node: {
+            id: messageId,
+            message: {
+                id: messageId,
+                author: { role, name: null, metadata: {} },
+                create_time: now + index,
+                update_time: now + index,
+                content,
+                status: 'finished_successfully',
+                end_turn: true,
+                weight: 1,
+                metadata,
+                recipient: 'all',
+                channel: null,
+            },
+            parent: parentId,
+            children: [],
+        },
+    };
+};
+
 // Public API
 
 const findConversationTurns = (): Element[] => {
@@ -113,44 +173,21 @@ export const buildDomConversationSnapshot = (conversationId: string): unknown | 
     const now = Math.floor(Date.now() / 1000);
     let parentId = 'root';
     let index = 0;
+    let lastModelSlug: string | null = null;
 
     for (const turn of turns) {
-        const role = extractTurnRole(turn);
-        if (!role) {
-            continue;
-        }
-
-        const text = extractTurnText(turn);
-        const thoughtFragments = extractThoughtFragments(turn);
-        if (!text && thoughtFragments.length === 0) {
-            continue;
-        }
-
         index += 1;
-        const messageId = `dom-${conversationId}-${index}`;
-        const content = buildDomMessageContent(text, thoughtFragments);
-        const metadata = thoughtFragments.length > 0 ? { reasoning: thoughtFragments.join('\n\n') } : {};
-
-        mapping[messageId] = {
-            id: messageId,
-            message: {
-                id: messageId,
-                author: { role, name: null, metadata: {} },
-                create_time: now + index,
-                update_time: now + index,
-                content,
-                status: 'finished_successfully',
-                end_turn: true,
-                weight: 1,
-                metadata,
-                recipient: 'all',
-                channel: null,
-            },
-            parent: parentId,
-            children: [],
-        };
-        mapping[parentId].children.push(messageId);
-        parentId = messageId;
+        const result = buildDomTurnNode(turn, conversationId, index, parentId, now);
+        if (!result) {
+            index -= 1;
+            continue;
+        }
+        if (result.modelSlug) {
+            lastModelSlug = result.modelSlug;
+        }
+        mapping[result.messageId] = result.node;
+        mapping[parentId].children.push(result.messageId);
+        parentId = result.messageId;
     }
 
     if (parentId === 'root') {
@@ -169,7 +206,7 @@ export const buildDomConversationSnapshot = (conversationId: string): unknown | 
         gizmo_id: null,
         gizmo_type: null,
         is_archived: false,
-        default_model_slug: 'unknown',
+        default_model_slug: lastModelSlug || 'unknown',
         safe_urls: [],
         blocked_urls: [],
     };

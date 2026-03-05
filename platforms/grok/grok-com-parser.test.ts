@@ -219,6 +219,45 @@ describe('Grok Adapter — grok.com REST parsing', () => {
             expect(followup?.title).toBe('My cached title');
         });
 
+        it('should parse conversations_v2 NDJSON payload with wrapped response objects', () => {
+            const conversationId = '53d21d0d-add5-4fd6-bfe8-136705227759';
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`;
+            const payload = [
+                JSON.stringify({
+                    result: {
+                        conversation: {
+                            conversationId,
+                            title: 'NDJSON title',
+                            createTime: '2026-03-04T20:00:00.000Z',
+                            modifyTime: '2026-03-04T20:00:05.000Z',
+                        },
+                    },
+                }),
+                JSON.stringify({
+                    result: {
+                        response: {
+                            modelResponse: {
+                                responseId: 'ndjson-resp-1',
+                                message: 'Assistant response from conversations_v2',
+                                sender: 'assistant',
+                                createTime: '2026-03-04T20:00:04.000Z',
+                                partial: false,
+                                model: 'grok-4',
+                            },
+                        },
+                    },
+                }),
+            ].join('\n');
+
+            const result = grokAdapter.parseInterceptedData(payload, metaUrl);
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe(conversationId);
+            expect(result?.title).toBe('NDJSON title');
+            expect(result?.mapping['ndjson-resp-1']?.message?.content?.parts?.[0]).toBe(
+                'Assistant response from conversations_v2',
+            );
+        });
+
         it('should not overwrite a specific title with a generic one from conversations_v2', () => {
             const conversationId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
             const loadResponsesUrl = `https://grok.com/rest/app-chat/conversations/${conversationId}/load-responses`;
@@ -328,6 +367,48 @@ describe('Grok Adapter — grok.com REST parsing', () => {
                 result = grokAdapter.parseInterceptedData('{"broken"', url);
             }).not.toThrow();
             expect(result).toBeNull();
+        });
+    });
+
+    describe('reconnect-response-v2 endpoint', () => {
+        it('should parse single JSON reconnect envelopes using last active conversation context', () => {
+            const conversationId = '53d21d0d-add5-4fd6-bfe8-136705227759';
+            const responseId = '631a3b52-a0d6-4496-9fe2-eb2061286449';
+            const reconnectUrl = `https://grok.com/rest/app-chat/conversations/reconnect-response-v2/${responseId}`;
+            const metaUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`;
+
+            const metaPayload = JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'Reconnect target conversation',
+                    createTime: '2026-03-03T14:07:59.103Z',
+                    modifyTime: '2026-03-03T14:08:10.000Z',
+                },
+            });
+            grokAdapter.parseInterceptedData(metaPayload, metaUrl);
+
+            const reconnectPayload = JSON.stringify({
+                result: {
+                    response: {
+                        modelResponse: {
+                            responseId,
+                            message: 'Recovered reconnect payload',
+                            sender: 'assistant',
+                            createTime: '2026-03-03T14:07:59.103Z',
+                            partial: false,
+                            model: 'grok-4',
+                        },
+                        isThinking: false,
+                        isSoftStop: true,
+                        responseId,
+                    },
+                },
+            });
+
+            const result = grokAdapter.parseInterceptedData(reconnectPayload, reconnectUrl);
+            expect(result).not.toBeNull();
+            expect(result?.conversation_id).toBe(conversationId);
+            expect(result?.mapping[responseId]?.message?.content?.parts?.[0]).toBe('Recovered reconnect payload');
         });
     });
 });

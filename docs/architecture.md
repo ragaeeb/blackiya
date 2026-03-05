@@ -51,7 +51,6 @@ flowchart LR
   - `utils/runner/canonical-stabilization.ts` (canonical stabilization retry state helpers)
   - `utils/runner/readiness.ts`
   - `utils/runner/stream/stream-preview.ts` (pending/live stream preview merge and snapshot preservation)
-  - `utils/runner/tab-debug-overlay.ts` (per-tab diagnostics overlay for captured/emitted payload forensics)
 - Calibration profile management:
   - `utils/calibration-profile.ts` (strategy defaults, `CalibrationStep` type, `buildCalibrationProfileFromStep` manual-strict policy)
   - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
@@ -72,7 +71,7 @@ flowchart LR
   - `utils/sfe/cross-tab-probe-lease.ts`
 - Background lease coordinator:
   - `entrypoints/background.ts`
-- External API hub + contract:
+- External API hub + contract (disabled / not wired in runtime):
   - `utils/external-api/background-hub.ts`
   - `utils/external-api/contracts.ts`
 - Protocol message definitions:
@@ -90,37 +89,15 @@ Primary events:
 - `BLACKIYA_TITLE_RESOLVED` (stream-derived title)
 - `LLM_CAPTURE_DATA_INTERCEPTED` (raw canonical payload)
   - Optional `promptHint` is attached for Grok attempts when captured from CreateGrokConversation request bodies.
-- `BLACKIYA_STREAM_DUMP_FRAME` (optional diagnostics stream dump)
 - `attemptId` is mandatory for lifecycle/finished/delta wire messages (legacy attempt-less compatibility removed in v2.0.2)
 
 See:
 - `utils/protocol/messages.ts`
 
-### 3.1 External Extension API (ISOLATED -> Background -> Other Extensions)
+### 3.1 External Extension API
 
-Runner emits canonical-ready conversation events to background via:
-- `BLACKIYA_EXTERNAL_EVENT` (internal runtime message)
-
-Background owns the public API surface and provides:
-1. Push stream (`runtime.onConnectExternal`) on port `blackiya.events.v1`
-   - Event types: `conversation.ready`, `conversation.updated`
-   - Event envelope includes durable fields: `event_id`, `seq`, `created_at`, `format`
-   - Control messages from consumer: `subscribe`, `commit`
-   - `subscribe` supports `payload_format: "original" | "common"` (no multi-format mode)
-   - Control messages from producer: `events.batch`, `replay.complete`
-2. Pull API (`runtime.onMessageExternal`)
-   - `health.ping`
-   - `conversation.getLatest` (`format: "original" | "common"`)
-   - `conversation.getById` (`format: "original" | "common"`)
-   - `events.getSince` (`cursor`, `limit`, `format`) for cursor replay fallback
-
-Notes:
-- Background is a durable append-first producer backed by IndexedDB (`externalEvents`, `externalMeta`).
-- On `subscribe(cursor)`, background replays `seq > cursor` in ordered batches with the subscriber's requested payload format, then emits `replay.complete`.
-- Commit authority is restricted to the designated delivery consumer (first `consumer_role='delivery'` subscriber); non-designated consumers can read but cannot mutate commit cursor.
-- Pruning only removes committed ranges per retention policy; uncommitted backlog is never pruned.
-- When new events append with no online delivery subscriber, background emits rate-limited wake messages (`BLACKIYA_WAKE`) to the designated consumer extension id.
-- Legacy page-global API (`window.__blackiya`) and `BLACKIYA_GET_JSON_*` bridge are removed.
+External extension messaging is currently disabled in runtime.  
+`entrypoints/background.ts` does not register `runtime.onMessageExternal` or `runtime.onConnectExternal`, and runner flows do not emit external ready/update events.
 
 ## 4) Lifecycle and Readiness Model
 
@@ -146,12 +123,12 @@ Readiness decision modes:
 Critical invariant:
 - Completion hint alone never guarantees export readiness.
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
+- Every accepted `completed` lifecycle signal triggers one immediate canonical probe/pull attempt (ChatGPT skips this while DOM still reports generating; no additional backoff is introduced by the signal itself).
+- ChatGPT stabilization retries skip warm-fetch network pulls when a ready cached snapshot already exists, and also skip degraded snapshot retries (snapshot recovery only) to avoid repeated `/backend-api/conversation/{id}` 404 loops.
 - Network completion debounce is attempt-aware: same-conversation new attempts use a shorter debounce window than repeated same-attempt hints.
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
 - Cross-world message ingress is token-validated for both live `postMessage` traffic and late-start queue drains (`__BLACKIYA_CAPTURE_QUEUE__`, `__BLACKIYA_LOG_QUEUE__`).
-- External API emissions are canonical-ready only, apply the shared title precedence policy (stream/cache/dom/first-user) before dispatch, are deduped by canonical payload/hash change (not title heuristics), and are surfaced via background `blackiya.events.v1`.
-- Tab debug overlay visibility is tab-scoped via `sessionStorage` and runtime tab messaging, so toggling diagnostics in one tab never changes another tab.
 - Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
 - Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
 - Interceptor queue trimming increments bounded drop counters and emits throttled warnings (log/capture/history queues) to surface silent drop pressure.
@@ -194,7 +171,7 @@ sequenceDiagram
 Key endpoints/signals:
 - Prompt stream: `/backend-api/f/conversation` (SSE)
 - Completion hint endpoint: `/backend-api/conversation/{id}/stream_status`
-- Canonical fetch candidates: `/backend-api/conversation/{id}` then `/backend-api/f/conversation/{id}` fallback
+- Canonical fetch candidate: `/backend-api/conversation/{id}`
 
 Flow:
 1. Interceptor detects POST to `/backend-api/f/conversation`.
@@ -385,13 +362,44 @@ Ingestion invariants:
 - Visibility recovery and force-save snapshot recovery also replay raw snapshots (including replay URL candidates), then evaluate readiness from cache.
 - This preserves richer fields (`model`, reasoning metadata/chunks) when direct canonical fetch candidates (`/backend-api/conversation/{id}`, `/backend-api/f/conversation/{id}`) are unavailable.
 
+### 8.4 Popup Bulk Export Chats
+
+Blackiya also supports a popup-driven bulk export path (independent of live lifecycle reactivity):
+
+1. User clicks `Export Chats` in popup and configures:
+   - `Max chats` (`0 = all`, default `0`)
+2. Popup sends `BLACKIYA_BULK_EXPORT_CHATS` to the active tab content script.
+3. Runner executes `runBulkChatExport`:
+   - discovers conversation IDs from the platform list endpoint
+   - fetches each conversation detail payload
+   - parses via the active adapter
+   - applies export format (`original` or `common`) + export metadata
+   - downloads one JSON file per conversation (same filename policy as Save JSON)
+   - when list discovery fails, result warnings include HTTP status/message for easier diagnosis
+
+Rate-limit behavior:
+- Requests are paced by fixed internal delay (`1200ms`).
+- Per-request timeout uses fixed internal timeout (`20000ms`).
+- HTTP `429` is retried with `retry-after` / `x-rate-limit-reset` awareness (bounded retries).
+- Detail URL candidate fallback continues on `404` (endpoint drift).
+
+Current platform coverage:
+- ChatGPT (`/backend-api/conversations` with query fallback variants + `/backend-api/conversation/{id}`)
+- Grok.com (`/rest/app-chat/conversations` + conversation detail endpoints);
+  bulk detail fallback now also derives reconnect IDs from `response-node` payloads and probes
+  `/rest/app-chat/conversations/reconnect-response-v2/{responseId}` when `conversations_v2`/`response-node` are metadata-only.
+- X Grok (`GrokHistory` + `GrokConversationItemsByRestId`)
+  - detail fetches prioritize observed `GrokConversationItemsByRestId` context captured from intercepted requests
+    (dynamic GraphQL `queryId` + `features`/`fieldToggles`) before static fallback query IDs.
+- Gemini best-effort via batchexecute RPC IDs (`MaZiqc` titles list + `hNvQHb` conversation);
+  when `MaZiqc` returns no parseable IDs (or fails), bulk export falls back to cached Gemini title IDs captured from intercepted traffic.
+  Gemini detail fetches use intercepted batchexecute request context (`bl`, `f.sid`, `hl`, `_reqid`, `at`) and issue `POST` `hNvQHb` requests rather than `GET`.
+
 ## 9) Diagnostics and Debugging
 
 Debug artifacts:
 - Debug report (token-lean): `utils/minimal-logs.ts`
 - Full logs JSON: persistent logs storage
-- Optional stream dump:
-  - captures `delta`, `heuristic`, `snapshot`, `lifecycle` frames by attempt
 - Readiness debug logs:
   - canonical-ready decisions are TTL-deduped per conversation to avoid health-check log floods
 

@@ -78,7 +78,6 @@ describe('button-state-manager', () => {
             setLifecycleState: mock(() => {}),
             syncCalibrationButtonDisplay: mock(() => {}),
             syncRunnerStateCalibration: mock(() => {}),
-            emitExternalConversationEvent: mock(() => {}),
 
             buttonManager: {
                 exists: mock(() => true),
@@ -210,21 +209,10 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setSaveButtonMode).not.toHaveBeenCalled();
         });
 
-        it('should still emit external canonical-ready event when button is not injected', () => {
+        it('should still resolve readiness when button is not injected', () => {
             deps.buttonManager.exists = () => false;
             refreshButtonState('123', deps, lastButtonStateLog);
-            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
-                conversationId: '123',
-                data: { conversation_id: '123' },
-                readinessMode: 'canonical_ready',
-                captureMeta: {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                attemptId: 'attempt-1',
-                allowWhenActionsBlocked: true,
-            });
+            expect(deps.buttonManager.setSaveButtonMode).toHaveBeenCalledWith('default');
         });
 
         it('should clear UI if no conversation is found in URL and no arg provided', () => {
@@ -240,18 +228,6 @@ describe('button-state-manager', () => {
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('0.6');
-            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
-                conversationId: '123',
-                data: { conversation_id: '123' },
-                readinessMode: 'canonical_ready',
-                captureMeta: {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                attemptId: 'attempt-1',
-                allowWhenActionsBlocked: true,
-            });
         });
 
         it('should enable save button in degraded mode', () => {
@@ -280,18 +256,6 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(true);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('1');
             expect(deps.setCalibrationState).toHaveBeenCalledWith('success');
-            expect(deps.emitExternalConversationEvent).toHaveBeenCalledWith({
-                conversationId: '123',
-                data: { conversation_id: '123' },
-                readinessMode: 'canonical_ready',
-                captureMeta: {
-                    captureSource: 'canonical_api',
-                    fidelity: 'high',
-                    completeness: 'complete',
-                },
-                attemptId: 'attempt-1',
-                allowWhenActionsBlocked: true,
-            });
         });
 
         it('should clear calibration success state if no longer ready', () => {
@@ -305,7 +269,6 @@ describe('button-state-manager', () => {
             );
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.setCalibrationState).toHaveBeenCalledWith('idle');
-            expect(deps.emitExternalConversationEvent).not.toHaveBeenCalled();
         });
 
         it('should extract canonical sample if fully completed', () => {

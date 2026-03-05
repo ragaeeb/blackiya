@@ -35,7 +35,7 @@ export type RunnerCleanupDeps = {
     cleanupWindowBridge: (() => void) | null;
     cleanupCompletionWatcher: (() => void) | null;
     cleanupButtonHealthCheck: (() => void) | null;
-    cleanupTabDebugRuntimeListener: (() => void) | null;
+    cleanupRuntimeMessageListener: (() => void) | null;
     removeStorageChangeListener: () => void;
 
     autoCaptureRetryTimers: Map<string, number>;
@@ -76,7 +76,7 @@ export const createCleanupRuntime = (deps: RunnerCleanupDeps) => {
             deps.cleanupWindowBridge?.();
             deps.cleanupCompletionWatcher?.();
             deps.cleanupButtonHealthCheck?.();
-            deps.cleanupTabDebugRuntimeListener?.();
+            deps.cleanupRuntimeMessageListener?.();
             deps.removeStorageChangeListener();
 
             clearTimeoutMap(deps.autoCaptureRetryTimers);

@@ -30,6 +30,7 @@ type MaybeBuildExternalConversationEventArgs = {
     shouldBlockActions: boolean;
     evaluateReadinessForData: (data: ConversationData) => PlatformReadiness;
     state: ExternalEventDispatcherState;
+    forceEmit?: boolean;
     now?: () => number;
     createEventId?: () => string;
 };
@@ -136,10 +137,10 @@ const shouldEmit = (
     if (args.readinessMode !== 'canonical_ready') {
         return false;
     }
-    if (args.shouldBlockActions) {
+    if (!args.forceEmit && args.shouldBlockActions) {
         return false;
     }
-    if (args.captureMeta.captureSource !== 'canonical_api') {
+    if (!args.forceEmit && args.captureMeta.captureSource !== 'canonical_api') {
         return false;
     }
     return true;

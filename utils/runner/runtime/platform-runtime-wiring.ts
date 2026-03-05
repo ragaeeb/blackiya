@@ -1,5 +1,4 @@
 import type { LLMPlatform } from '@/platforms/types';
-import { streamDumpStorage } from '@/utils/diagnostics-stream-dump';
 import { logger } from '@/utils/logger';
 import type { ResponseLifecycleMessage } from '@/utils/protocol/messages';
 import type { AutoCaptureReason } from '@/utils/runner/auto-capture';
@@ -26,7 +25,6 @@ import {
     handleLifecycleMessage as handleLifecycleMessageCore,
     handleResponseFinishedMessage as handleResponseFinishedMessageCore,
     handleStreamDeltaMessage as handleStreamDeltaMessageCore,
-    handleStreamDumpFrameMessage as handleStreamDumpFrameMessageCore,
     handleTitleResolvedMessage as handleTitleResolvedMessageCore,
 } from '@/utils/runner/wire-message-handlers';
 import type { ExportMeta } from '@/utils/sfe/types';
@@ -69,7 +67,6 @@ export type RuntimeWiringDeps = {
     handleResponseFinished: (source: 'network' | 'dom', hintedConversationId?: string) => void;
     appendPendingStreamProbeText: (attemptId: string, text: string) => void;
     appendLiveStreamProbeText: (conversationId: string, text: string) => void;
-    isStreamDumpEnabled: () => boolean;
     pendingLifecycleByAttempt: Map<
         string,
         { phase: ResponseLifecycleMessage['phase']; platform: string; receivedAtMs: number }
@@ -181,10 +178,6 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
         handleResponseFinished: deps.handleResponseFinished,
         appendPendingStreamProbeText: deps.appendPendingStreamProbeText,
         appendLiveStreamProbeText: deps.appendLiveStreamProbeText,
-        isStreamDumpEnabled: deps.isStreamDumpEnabled,
-        saveStreamDumpFrame: (frame) => {
-            void streamDumpStorage.saveFrame(frame);
-        },
         pendingLifecycleByAttempt: deps.pendingLifecycleByAttempt,
         sfeUpdateConversationId: deps.sfeUpdateConversationId,
         refreshButtonState: deps.refreshButtonState,
@@ -208,9 +201,6 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
     const handleStreamDeltaMessage = (message: unknown) =>
         handleStreamDeltaMessageCore(message, buildWireMessageHandlerDeps());
 
-    const handleStreamDumpFrameMessage = (message: unknown) =>
-        handleStreamDumpFrameMessageCore(message, buildWireMessageHandlerDeps());
-
     const handleConversationIdResolvedMessage = (message: unknown) =>
         handleConversationIdResolvedMessageCore(message, buildWireMessageHandlerDeps());
 
@@ -222,7 +212,6 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
             handleAttemptDisposedMessage,
             handleConversationIdResolvedMessage,
             handleStreamDeltaMessage,
-            handleStreamDumpFrameMessage,
             handleTitleResolvedMessage,
             handleLifecycleMessage,
             handleResponseFinishedMessage,

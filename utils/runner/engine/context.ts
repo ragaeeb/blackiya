@@ -6,6 +6,7 @@
  */
 
 import { logger } from '@/utils/logger';
+import { platformHeaderStore } from '@/utils/platform-header-store';
 import type { AttemptCoordinatorDeps } from '@/utils/runner/attempt-coordinator';
 import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from '@/utils/runner/attempt-state';
 import type { ButtonStateManagerDeps } from '@/utils/runner/button-state-manager';
@@ -17,7 +18,6 @@ import {
 import type { CanonicalStabilizationTickDeps } from '@/utils/runner/canonical-stabilization-tick';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import {
-    emitStreamDumpConfig,
     evaluateReadinessForData,
     extractConversationIdFromLocation,
     getCaptureMeta,
@@ -50,7 +50,6 @@ import type { RuntimeWiringDeps } from '@/utils/runner/runtime/platform-runtime-
 import type { RunnerCleanupDeps } from '@/utils/runner/runtime/runtime-cleanup';
 import type {
     StorageChangeListenerDeps,
-    StreamDumpSettingDeps,
     StreamProbeVisibilitySettingDeps,
     VisibilityRecoveryDeps,
 } from '@/utils/runner/runtime/runtime-settings';
@@ -155,6 +154,7 @@ export const buildStreamDoneCoordinatorDeps = (ctx: EngineCtx): StreamDoneCoordi
         ctx.lastStreamProbeConversationId = cid;
     },
     isProbeKeyActive: (key) => ctx.lastStreamProbeKey === key,
+    getAuthHeaders: () => platformHeaderStore.get(ctx.currentAdapter?.name ?? ''),
 });
 
 export const buildCanonicalStabilizationTickDeps = (ctx: EngineCtx): CanonicalStabilizationTickDeps => ({
@@ -226,6 +226,7 @@ export const buildWarmFetchDeps = (ctx: EngineCtx): WarmFetchDeps => ({
     getConversation: (cid) => ctx.interceptionManager.getConversation(cid) ?? null,
     evaluateReadiness: (data) => evaluateReadinessForData(ctx, data),
     getCaptureMeta: (cid) => getCaptureMeta(ctx, cid),
+    getAuthHeaders: () => platformHeaderStore.get(ctx.currentAdapter?.name ?? ''),
 });
 
 export const buildCalibrationCaptureDeps = (ctx: EngineCtx, _conversationId: string): CalibrationCaptureDeps => ({
@@ -320,7 +321,6 @@ export const buildButtonStateManagerDeps = (ctx: EngineCtx): ButtonStateManagerD
     syncRunnerStateCalibration: (state) => {
         ctx.runnerState.calibrationState = state;
     },
-    emitExternalConversationEvent: (args) => ctx.emitExternalConversationEvent(args),
     buttonManager: {
         exists: () => ctx.buttonManager.exists(),
         inject: (target, cid) => ctx.buttonManager.inject(target, cid),
@@ -407,7 +407,6 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     handleResponseFinished: (source, hintedCid) => ctx.handleResponseFinished(source, hintedCid),
     appendPendingStreamProbeText: (aid, text) => ctx.appendPendingStreamProbeText(aid, text),
     appendLiveStreamProbeText: (cid, text) => ctx.appendLiveStreamProbeText(cid, text),
-    isStreamDumpEnabled: () => ctx.streamDumpEnabled,
     pendingLifecycleByAttempt: ctx.pendingLifecycleByAttempt,
     sfeUpdateConversationId: (aid, cid) => ctx.sfe.getAttemptTracker().updateConversationId(aid, cid),
     refreshButtonState: (cid) => ctx.refreshButtonState(cid),
@@ -471,13 +470,6 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     },
 });
 
-export const buildStreamDumpSettingDeps = (ctx: EngineCtx): StreamDumpSettingDeps => ({
-    setStreamDumpEnabled: (enabled) => {
-        ctx.streamDumpEnabled = enabled;
-    },
-    emitStreamDumpConfig: () => emitStreamDumpConfig(ctx),
-});
-
 export const buildStreamProbeVisibilitySettingDeps = (ctx: EngineCtx): StreamProbeVisibilitySettingDeps => ({
     setStreamProbeVisible: (visible) => {
         ctx.streamProbeVisible = visible;
@@ -487,10 +479,6 @@ export const buildStreamProbeVisibilitySettingDeps = (ctx: EngineCtx): StreamPro
 });
 
 export const buildStorageChangeListenerDeps = (ctx: EngineCtx): StorageChangeListenerDeps => ({
-    setStreamDumpEnabled: (enabled) => {
-        ctx.streamDumpEnabled = enabled;
-    },
-    emitStreamDumpConfig: () => emitStreamDumpConfig(ctx),
     setStreamProbeVisible: (visible) => {
         ctx.streamProbeVisible = visible;
     },
@@ -553,7 +541,7 @@ export const buildCleanupRuntimeDeps = (
     cleanupWindowBridge: ctx.cleanupWindowBridge,
     cleanupCompletionWatcher: ctx.cleanupCompletionWatcher,
     cleanupButtonHealthCheck: ctx.cleanupButtonHealthCheck,
-    cleanupTabDebugRuntimeListener: ctx.cleanupTabDebugRuntimeListener,
+    cleanupRuntimeMessageListener: ctx.cleanupRuntimeMessageListener,
     removeStorageChangeListener: () => {
         (async () => {
             const { browser } = await import('wxt/browser');

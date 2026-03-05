@@ -13,7 +13,7 @@ Core goals:
 1. Detect response lifecycle (`idle -> prompt-sent -> streaming -> completed`)
 2. Capture canonical conversation JSON
 3. Gate export readiness correctly (`Save JSON` vs `Force Save`)
-4. Provide high-signal diagnostics (debug report + optional stream dump)
+4. Provide high-signal diagnostics (debug report + full logs)
 
 ## 2) Source of Truth Docs
 
@@ -137,7 +137,6 @@ Test isolation rules (avoid cross-module pollution):
 Debug artifacts:
 - Debug report TXT (token-lean summary)
 - Full logs JSON
-- Stream dump JSON (optional, bounded)
 - HAR analysis JSON/MD (`bun run har:analyze --input <file.har> ...`)
 
 Guidance:

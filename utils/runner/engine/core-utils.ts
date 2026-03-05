@@ -1,7 +1,4 @@
 import type { LLMPlatform } from '@/platforms/types';
-import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import type { StreamDumpConfigMessage } from '@/utils/protocol/messages';
-import { stampToken } from '@/utils/protocol/session-token';
 import { isConversationDataLike, isRawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import type { EngineCtx } from '@/utils/runner/engine/types';
@@ -88,11 +85,6 @@ export const shouldBlockActionsForGeneration = (ctx: EngineCtx, conversationId: 
         return false;
     }
     return isPlatformGenerating(ctx.currentAdapter);
-};
-
-export const emitStreamDumpConfig = (ctx: EngineCtx) => {
-    const payload: StreamDumpConfigMessage = { type: MESSAGE_TYPES.STREAM_DUMP_CONFIG, enabled: ctx.streamDumpEnabled };
-    window.postMessage(stampToken(payload), window.location.origin);
 };
 
 export const buildExportPayloadForFormat = (ctx: EngineCtx, data: ConversationData, format: ExportFormat): unknown =>

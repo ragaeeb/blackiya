@@ -94,8 +94,8 @@ export const applyLifecyclePhaseForConversation = (
         deps.setLifecycleAttemptId(attemptId);
         deps.setLifecycleConversationId(conversationId);
         deps.setLifecycleState('completed', conversationId);
+        void deps.runStreamDoneProbe(conversationId, attemptId);
         if (!deps.sfeEnabled()) {
-            void deps.runStreamDoneProbe(conversationId, attemptId);
             return;
         }
         const resolution = deps.sfeResolve(attemptId);
@@ -107,6 +107,5 @@ export const applyLifecyclePhaseForConversation = (
         if (shouldRetry) {
             deps.scheduleCanonicalStabilizationRetry(conversationId, attemptId);
         }
-        void deps.runStreamDoneProbe(conversationId, attemptId);
     }
 };

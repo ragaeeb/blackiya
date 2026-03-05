@@ -698,12 +698,6 @@ describe('runner external event emission', () => {
             };
         };
 
-        const debugEvents: Array<{ status?: string; delivery?: { listenerCount?: number; delivered?: number } }> = [];
-        const recordTabDebugExternalEvent = mock(
-            (entry: { status?: string; delivery?: { listenerCount?: number; delivered?: number } }) => {
-                debugEvents.push(entry);
-            },
-        );
         const ctx: any = {
             currentAdapter: {
                 name: 'ChatGPT',
@@ -718,7 +712,6 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-ack',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
-            recordTabDebugExternalEvent,
             retryTimeoutIds: [],
         };
 
@@ -737,15 +730,7 @@ describe('runner external event emission', () => {
         await new Promise((resolve) => setTimeout(resolve, 40));
 
         expect(sentMessages).toHaveLength(2);
-        const statuses = debugEvents.map((entry) => entry.status);
-        expect(statuses).toContain('failed');
-        expect(statuses).toContain('sent');
-        expect(
-            debugEvents.some(
-                (entry) =>
-                    entry.status === 'failed' && entry.delivery?.listenerCount === 1 && entry.delivery?.delivered === 0,
-            ),
-        ).toBeTrue();
+        expect(ctx.externalEventDispatchState.byConversation.has('conv-ack')).toBeTrue();
     });
 
     it('should not mark dispatch state as sent when negative ACK persists across retries', async () => {
@@ -762,7 +747,6 @@ describe('runner external event emission', () => {
             };
         };
 
-        const debugEvents: Array<{ status?: string }> = [];
         const ctx: any = {
             currentAdapter: {
                 name: 'ChatGPT',
@@ -777,9 +761,6 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-ack-persistent',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
-            recordTabDebugExternalEvent: mock((entry: { status?: string }) => {
-                debugEvents.push(entry);
-            }),
             retryTimeoutIds: [],
         };
 
@@ -798,7 +779,6 @@ describe('runner external event emission', () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
 
         expect(sentMessages.length).toBeGreaterThanOrEqual(4);
-        expect(debugEvents.every((entry) => entry.status !== 'sent')).toBeTrue();
         expect(ctx.externalEventDispatchState.byConversation.has('conv-ack-persistent')).toBeFalse();
     });
 
@@ -832,7 +812,6 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-ack-superseded',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
-            recordTabDebugExternalEvent: mock(() => {}),
             retryTimeoutIds: [],
         };
 
@@ -897,7 +876,6 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-pending-dedupe',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
-            recordTabDebugExternalEvent: mock(() => {}),
             retryTimeoutIds: [],
         };
 
@@ -963,7 +941,6 @@ describe('runner external event emission', () => {
             };
         };
 
-        const debugEvents: Array<{ status?: string }> = [];
         const ctx: any = {
             currentAdapter: {
                 name: 'ChatGPT',
@@ -978,9 +955,6 @@ describe('runner external event emission', () => {
             currentConversationId: 'conv-timeout-retry',
             lifecycleState: 'completed',
             externalEventDispatchState: createExternalEventDispatcherState(),
-            recordTabDebugExternalEvent: mock((entry: { status?: string }) => {
-                debugEvents.push(entry);
-            }),
             retryTimeoutIds: [],
             externalEventSendTimeoutMs: 20,
         };
@@ -999,7 +973,6 @@ describe('runner external event emission', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 80));
         expect(sentMessages).toHaveLength(2);
-        expect(debugEvents.some((entry) => entry.status === 'failed')).toBeTrue();
-        expect(debugEvents.some((entry) => entry.status === 'sent')).toBeTrue();
+        expect(ctx.externalEventDispatchState.byConversation.has('conv-timeout-retry')).toBeTrue();
     });
 });

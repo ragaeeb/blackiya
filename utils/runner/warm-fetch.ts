@@ -8,6 +8,7 @@
 
 import type { PlatformReadiness } from '@/platforms/types';
 import { logger } from '@/utils/logger';
+import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 import { shouldUseCachedConversationForWarmFetch } from '@/utils/sfe/capture-fidelity';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
@@ -26,6 +27,8 @@ export type WarmFetchDeps = {
     evaluateReadiness: (data: ConversationData) => PlatformReadiness;
     /** Returns persisted capture metadata for a conversation. */
     getCaptureMeta: (conversationId: string) => ExportMeta;
+    /** Returns captured auth/client headers for the platform, if any. */
+    getAuthHeaders?: () => HeaderRecord | undefined;
 };
 
 const WARM_FETCH_TIMEOUT_MS = 15_000;
@@ -57,7 +60,11 @@ export const tryWarmFetchCandidate = async (
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), WARM_FETCH_TIMEOUT_MS);
     try {
-        const response = await fetch(apiUrl, { credentials: 'include', signal: controller.signal });
+        const response = await fetch(apiUrl, {
+            credentials: 'include',
+            signal: controller.signal,
+            headers: deps.getAuthHeaders?.(),
+        });
         if (!response.ok) {
             logger.debug('Warm fetch HTTP error', {
                 conversationId,
@@ -144,8 +151,35 @@ export const warmFetchConversationSnapshot = (
     inFlight: Map<string, Promise<boolean>>,
 ): Promise<boolean> => {
     const cached = deps.getConversation(conversationId);
+    const cachedReadiness = cached ? deps.evaluateReadiness(cached) : null;
     const captureMeta = deps.getCaptureMeta(conversationId);
-    if (cached && shouldUseCachedConversationForWarmFetch(deps.evaluateReadiness(cached), captureMeta)) {
+    const skipReadyChatGptStabilizationRetry =
+        deps.platformName === 'ChatGPT' &&
+        reason === 'stabilization-retry' &&
+        cachedReadiness?.ready === true &&
+        captureMeta.fidelity !== 'degraded';
+
+    if (skipReadyChatGptStabilizationRetry) {
+        logger.debug('Warm fetch skipped: ChatGPT stabilization retry already has ready cached snapshot', {
+            conversationId,
+            reason,
+        });
+        return Promise.resolve(true);
+    }
+
+    const skipDegradedChatGptStabilizationRetry =
+        deps.platformName === 'ChatGPT' && reason === 'stabilization-retry' && captureMeta.fidelity === 'degraded';
+    if (skipDegradedChatGptStabilizationRetry) {
+        logger.debug('Warm fetch skipped: ChatGPT stabilization retry uses snapshot recovery for degraded capture', {
+            conversationId,
+            reason,
+            captureSource: captureMeta.captureSource,
+            completeness: captureMeta.completeness,
+        });
+        return Promise.resolve(false);
+    }
+
+    if (cached && cachedReadiness && shouldUseCachedConversationForWarmFetch(cachedReadiness, captureMeta)) {
         logger.debug('Warm fetch skipped: cache is ready+canonical', { conversationId, reason });
         return Promise.resolve(true);
     }

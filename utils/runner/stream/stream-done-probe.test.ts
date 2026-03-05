@@ -91,6 +91,27 @@ describe('stream-done-probe', () => {
         delete (globalThis as any).fetch;
     });
 
+    it('should log HTTP error status for failed fetch candidates', async () => {
+        const fetchMock = mock(() => Promise.resolve({ ok: false, status: 404 })) as any;
+        (globalThis as any).fetch = fetchMock;
+
+        deps.requestSnapshot = mock(() => Promise.resolve(null));
+        deps.buildIsolatedSnapshot = mock(() => null);
+
+        await runStreamDoneProbe('conv-1', 'attempt-1', deps);
+
+        expect(deps.emitLog).toHaveBeenCalledWith(
+            'info',
+            'Stream done probe fetch HTTP error',
+            expect.objectContaining({
+                conversationId: 'conv-1',
+                status: 404,
+            }),
+        );
+
+        delete (globalThis as any).fetch;
+    });
+
     it('should display awaiting panel if snapshot also fails', async () => {
         deps.getFetchUrlCandidates = mock(() => []); // simulate no candidates to hit fallback immediately
 

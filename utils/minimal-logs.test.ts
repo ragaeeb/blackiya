@@ -509,6 +509,36 @@ describe('Minimal Debug Report', () => {
         expect(report).toContain('404');
     });
 
+    it('should retain lifecycle transition and completed-ignore diagnostics from content logs', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: '[i] API match ChatGPT',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'Lifecycle transition',
+                data: [{ from: 'streaming', to: 'completed', conversationId: '69a868b1-6fe4-8331-a3ba-141134075350' }],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'Lifecycle completed ignored while platform still generating',
+                data: [{ platform: 'ChatGPT', conversationId: '69a868b1-6fe4-8331-a3ba-141134075350' }],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+        expect(report).toContain('Lifecycle transition');
+        expect(report).toContain('Lifecycle completed ignored while platform still generating');
+    });
+
     it('should retain calibration lines across deduped Grok sessions and derive convId from data', () => {
         const logs: LogEntry[] = [
             {

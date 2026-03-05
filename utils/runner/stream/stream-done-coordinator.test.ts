@@ -101,6 +101,21 @@ describe('stream-done-coordinator', () => {
             await coordinator.runStreamDoneProbe('c-1', 'a-1');
         });
 
+        it('should skip duplicate run requests while a probe is already active for the same attempt', async () => {
+            deps.streamProbeControllers.set('a-1', { signal: { aborted: false }, abort: mock(() => {}) } as any);
+            await coordinator.runStreamDoneProbe('c-1', 'a-1');
+
+            expect(deps.runStreamDoneProbeCore).not.toHaveBeenCalled();
+            expect(deps.structuredLogger.emit).toHaveBeenCalledWith(
+                'a-1',
+                'debug',
+                'probe_dedup_active',
+                expect.any(String),
+                expect.objectContaining({ conversationId: 'c-1' }),
+                expect.any(String),
+            );
+        });
+
         it('should handle unacquired probe leases by establishing retry timer sequence', async () => {
             let builtAcquire: any;
             deps.runStreamDoneProbeCore = mock((_c: string, _a: string | undefined, p: any) => {

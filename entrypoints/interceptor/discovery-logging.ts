@@ -6,14 +6,14 @@ import {
 import { isLikelyChatGptApiPath } from '@/platforms/chatgpt/registry';
 import { isLikelyGeminiApiPath } from '@/platforms/gemini/registry';
 import { isLikelyGrokApiPath } from '@/platforms/grok/registry';
-import type { StreamDumpFrameMessage } from '@/utils/protocol/messages';
 
 type LogFn = (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
 type ShouldLogTransientFn = (key: string, intervalMs?: number) => boolean;
+type StreamDumpKind = 'snapshot' | 'heuristic' | 'delta' | 'lifecycle';
 type EmitStreamDumpFn = (
     attemptId: string,
     conversationId: string | undefined,
-    kind: StreamDumpFrameMessage['kind'],
+    kind: StreamDumpKind,
     text: string,
     chunkBytes?: number,
     platformOverride?: string,

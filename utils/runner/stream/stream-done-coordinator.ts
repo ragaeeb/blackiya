@@ -1,6 +1,7 @@
 import type { LLMPlatform } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
+import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 import type { StreamDoneProbeDeps } from '@/utils/runner/stream/stream-done-probe';
 import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import type { PlatformReadiness } from '@/utils/sfe/types';
@@ -38,6 +39,8 @@ export type StreamDoneCoordinatorDeps = {
     extractResponseText: (data: ConversationData) => string;
     setLastProbeKey: (key: string, conversationId: string) => void;
     isProbeKeyActive: (key: string) => boolean;
+    /** Returns captured auth/client headers for the platform, if any. */
+    getAuthHeaders?: () => HeaderRecord | undefined;
 };
 
 export const createStreamDoneCoordinator = (deps: StreamDoneCoordinatorDeps) => {
@@ -137,13 +140,27 @@ export const createStreamDoneCoordinator = (deps: StreamDoneCoordinatorDeps) => 
                 : level === 'info'
                   ? logger.info(message, payload)
                   : logger.warn(message, payload),
+        getAuthHeaders: deps.getAuthHeaders,
     });
 
     const runStreamDoneProbe = (conversationId: string, hintedAttemptId?: string): Promise<void> => {
         if (!deps.getCurrentAdapter()) {
             return Promise.resolve();
         }
-        return deps.runStreamDoneProbeCore(conversationId, hintedAttemptId, buildStreamDoneProbeDeps());
+        const effectiveAttemptId = hintedAttemptId ?? deps.resolveAttemptId(conversationId);
+        const activeController = deps.streamProbeControllers.get(effectiveAttemptId);
+        if (activeController && !activeController.signal.aborted) {
+            deps.structuredLogger.emit(
+                effectiveAttemptId,
+                'debug',
+                'probe_dedup_active',
+                'Skipped duplicate stream done probe while probe already active',
+                { conversationId },
+                `probe-dedup:${conversationId}`,
+            );
+            return Promise.resolve();
+        }
+        return deps.runStreamDoneProbeCore(conversationId, effectiveAttemptId, buildStreamDoneProbeDeps());
     };
 
     return {

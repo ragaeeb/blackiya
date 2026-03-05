@@ -115,6 +115,7 @@ export const emitExternalConversationEvent = (
         captureMeta: ExportMeta;
         attemptId: string | null;
         allowWhenActionsBlocked?: boolean;
+        forceEmit?: boolean;
     },
 ) => {
     const shouldBlockActions = args.allowWhenActionsBlocked
@@ -130,6 +131,7 @@ export const emitExternalConversationEvent = (
         captureMeta: args.captureMeta,
         attemptId: args.attemptId,
         shouldBlockActions,
+        forceEmit: args.forceEmit,
         evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
         state: ctx.externalEventDispatchState,
     });
@@ -164,6 +166,7 @@ export const emitExternalConversationEvent = (
         attemptId: args.attemptId,
         shouldBlockActions,
         allowWhenActionsBlocked: !!args.allowWhenActionsBlocked,
+        forceEmit: args.forceEmit === true,
         qualityPassed: qualityResult.passed,
         qualityIssues: qualityResult.issues.length > 0 ? qualityResult.issues : undefined,
     });
@@ -259,12 +262,6 @@ export const emitExternalConversationEvent = (
                         message: 'External event rejected by background hub',
                         response: typed ?? null,
                     };
-                    ctx.recordTabDebugExternalEvent({
-                        event,
-                        status: 'failed',
-                        error: ackError,
-                        delivery,
-                    });
                     logger.debug('External event send negative ACK', {
                         conversationId: event.conversation_id,
                         type: event.type,
@@ -280,11 +277,6 @@ export const emitExternalConversationEvent = (
                     }
                     return;
                 }
-                ctx.recordTabDebugExternalEvent({
-                    event,
-                    status: 'sent',
-                    delivery,
-                });
                 logger.debug('External event send success', {
                     conversationId: event.conversation_id,
                     eventType: event.type,
@@ -296,11 +288,6 @@ export const emitExternalConversationEvent = (
                 });
             })
             .catch((error) => {
-                ctx.recordTabDebugExternalEvent({
-                    event,
-                    status: 'failed',
-                    error,
-                });
                 logger.warn('External event send failed', {
                     conversationId: event.conversation_id,
                     type: event.type,

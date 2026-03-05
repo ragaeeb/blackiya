@@ -1,6 +1,7 @@
-import type { ResponseLifecycleMessage, StreamDumpFrameMessage } from '@/utils/protocol/messages';
+import type { ResponseLifecycleMessage } from '@/utils/protocol/messages';
 
 export type StreamLifecyclePhase = ResponseLifecycleMessage['phase'];
+type StreamDumpKind = 'snapshot' | 'heuristic' | 'delta' | 'lifecycle';
 
 /**
  * Callback bundle passed into stream lifecycle monitors so they remain fully
@@ -15,7 +16,7 @@ export type StreamMonitorEmitter = {
     streamDump: (
         attemptId: string,
         conversationId: string | undefined,
-        kind: StreamDumpFrameMessage['kind'],
+        kind: StreamDumpKind,
         text: string,
         chunkBytes?: number,
         platform?: string,

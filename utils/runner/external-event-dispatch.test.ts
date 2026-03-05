@@ -350,6 +350,38 @@ describe('runner/external-event-dispatch', () => {
         expect(event).toBeNull();
     });
 
+    it('should emit when forceEmit is enabled even if capture source is degraded', () => {
+        const state = createExternalEventDispatcherState();
+        const event = maybeBuildExternalConversationEvent({
+            conversationId: 'conv-1',
+            data: buildConversation('conv-1'),
+            providerName: 'ChatGPT',
+            readinessMode: 'canonical_ready',
+            captureMeta: {
+                captureSource: 'dom_snapshot_degraded',
+                fidelity: 'degraded',
+                completeness: 'partial',
+            },
+            attemptId: 'attempt-1',
+            shouldBlockActions: true,
+            forceEmit: true,
+            evaluateReadinessForData: () =>
+                ({
+                    ready: true,
+                    terminal: true,
+                    reason: 'terminal',
+                    contentHash: 'hash:forced',
+                    latestAssistantTextLength: 10,
+                }) as any,
+            state,
+            now: () => 123,
+            createEventId: () => 'evt-forced',
+        });
+
+        expect(event).not.toBeNull();
+        expect(event?.type).toBe('conversation.ready');
+    });
+
     it('should evict oldest dispatch entries when max state size is reached', () => {
         const state = createExternalEventDispatcherState(2);
 
