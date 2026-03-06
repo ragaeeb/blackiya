@@ -49,24 +49,24 @@ These should usually be enough for first-pass triage:
 - `Button state ...`
 - `Button target missing; retry pending`
 
-## Known Gap: Grok x.com Titles
-On `x.com/i/grok`, generic export titles can occur even when canonical capture is ready.
+## Known Gap: Grok Placeholder Titles
+On `grok.com`, generic export titles can occur if streaming data is captured before conversation metadata arrives.
 
 Typical signal pattern:
 1. `Successfully captured/cached data for conversation: ...` appears.
-2. `Title fallback check` shows `cachedTitle: "Grok Conversation"` (or `Grok / X`) with `resolvedSource: "fallback"`.
-3. No prior `GrokHistory` / `[Blackiya/Grok/Titles]` lines for that conversation.
+2. `Title fallback check` shows `cachedTitle: "Grok Conversation"` with `resolvedSource: "fallback"`.
+3. No prior `conversations_v2` metadata was captured for that conversation.
 
 Why this happens:
 - Streaming on `grok.x.com/2/grok/add_response.json` does not include conversation title metadata.
-- Title metadata is usually delivered by GraphQL `GrokHistory`, which often fires only after opening the History panel.
+- Title metadata usually arrives via `conversations_v2` or another metadata fetch after the stream starts.
 
 Current workaround:
-1. Open Grok History once.
+1. Refresh the conversation or trigger a metadata fetch on the page.
 2. Re-export.
 3. Confirm logs show:
-   - `[Blackiya/Grok/Titles] Detected titles endpoint`
-   - `Retroactively updated title for active conversation ...`
+   - `Successfully captured/cached data for conversation: ...`
+   - a subsequent `Title fallback check` with `resolvedSource: "cache"` or `resolvedSource: "dom"`
 
 ## Bottom-Left Toast / Probe Panel Statuses
 These statuses are expected during normal capture retries unless noted otherwise.

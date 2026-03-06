@@ -60,11 +60,9 @@ import {
     buildWarmFetchDeps,
 } from '@/utils/runner/engine/context';
 import {
-    buildExportPayloadForFormat,
     evaluateReadinessForData,
     extractConversationIdFromLocation,
     getCaptureMeta,
-    getExportFormat,
     resolveConversationIdForUserAction,
     resolveIsolatedSnapshotData,
     shouldBlockActionsForGeneration,
@@ -99,7 +97,6 @@ import {
 } from '@/utils/runner/save-pipeline';
 import { RunnerState } from '@/utils/runner/state';
 import { createStreamDoneCoordinator } from '@/utils/runner/stream/stream-done-coordinator';
-import { requestXGrokGraphqlContextFromMainWorld } from '@/utils/runner/x-grok-graphql-request';
 import { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import { ReadinessGate } from '@/utils/sfe/readiness-gate';
 import { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
@@ -252,8 +249,6 @@ export const runPlatform = (): void => {
         migratePendingStreamProbeText: null!,
         appendLiveStreamProbeText: null!,
         isStaleAttemptMessage: null!,
-        buildExportPayloadForFormat: null!,
-        getExportFormat: null!,
         emitExternalConversationEvent: null!,
         ingestSfeLifecycleFromWirePhase: null!,
         buildCalibrationOrchestrationDeps: null!,
@@ -274,8 +269,6 @@ export const runPlatform = (): void => {
     ctx.ingestSfeCanonicalSample = (data, aid) => ingestSfeCanonicalSample(ctx, data, aid);
     ctx.ingestSfeLifecycleFromWirePhase = (phase, aid, cid) => ingestSfeLifecycleFromWirePhase(ctx, phase, aid, cid);
     ctx.isStaleAttemptMessage = (aid, cid, st) => isStaleAttemptMessage(ctx, aid, cid, st);
-    ctx.buildExportPayloadForFormat = (data, format) => buildExportPayloadForFormat(ctx, data, format);
-    ctx.getExportFormat = getExportFormat;
     ctx.emitExternalConversationEvent = () => {};
 
     ctx.streamProbeRuntime = createStreamProbeRuntime({
@@ -458,8 +451,6 @@ export const runPlatform = (): void => {
         }
         const geminiBatchexecuteContext =
             platformName === 'Gemini' ? await requestGeminiBatchexecuteContextFromMainWorld() : undefined;
-        const xGrokGraphqlContext =
-            platformName === 'Grok' ? await requestXGrokGraphqlContextFromMainWorld() : undefined;
         if (
             platformName === 'ChatGPT' &&
             (!resolvedHeaders ||
@@ -473,7 +464,6 @@ export const runPlatform = (): void => {
         return {
             resolvedHeaders,
             geminiBatchexecuteContext,
-            xGrokGraphqlContext,
         };
     };
 
@@ -486,14 +476,11 @@ export const runPlatform = (): void => {
             const platformName = ctx.currentAdapter?.name ?? '';
             void Promise.resolve()
                 .then(() => resolveBulkExportRuntimeContext(platformName))
-                .then(({ resolvedHeaders, geminiBatchexecuteContext, xGrokGraphqlContext }) =>
+                .then(({ resolvedHeaders, geminiBatchexecuteContext }) =>
                     runBulkChatExport(message, {
                         getAdapter: () => ctx.currentAdapter,
-                        getExportFormat: () => ctx.getExportFormat(),
-                        buildExportPayloadForFormat: (data, format) => ctx.buildExportPayloadForFormat(data, format),
                         getAuthHeaders: () => resolvedHeaders,
                         getGeminiBatchexecuteContext: () => geminiBatchexecuteContext,
-                        getXGrokGraphqlContext: () => xGrokGraphqlContext,
                         locationHref: () => window.location.href,
                         onProgress: (progress) => {
                             void browser.runtime.sendMessage({

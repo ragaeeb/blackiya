@@ -15,16 +15,12 @@ import type {
 import { BULK_EXPORT_PROGRESS_MESSAGE } from '@/utils/runner/bulk-chat-export-contract';
 import { attachExportMeta } from '@/utils/runner/export-helpers';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
-import type { ExportFormat } from '@/utils/settings';
 import type { ConversationData } from '@/utils/types';
-import type { XGrokGraphqlContext } from '@/utils/x-grok-graphql-bridge';
 
 const CHATGPT_HOSTS = ['chatgpt.com', 'chat.openai.com'];
 const CHATGPT_CONVERSATION_ID_PATTERN = /^[a-f0-9-]{8,}$/i;
 const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const GEMINI_CONVERSATION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,}$/;
-const X_GROK_HISTORY_QUERY_ID = '9Hyh5D4-WXLnExZkONSkZg';
-const X_GROK_DETAIL_QUERY_ID_CANDIDATES = ['6QmFg', X_GROK_HISTORY_QUERY_ID];
 const DEFAULT_DELAY_MS = 1_200;
 const DEFAULT_TIMEOUT_MS = 20_000;
 const MIN_DELAY_MS = 250;
@@ -36,11 +32,8 @@ const GEMINI_BATCHEXECUTE_PATH = '/_/BardChatUi/data/batchexecute';
 
 type BulkChatExportDeps = {
     getAdapter: () => LLMPlatform | null;
-    getExportFormat: () => Promise<ExportFormat>;
-    buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
     getAuthHeaders: () => HeaderRecord | undefined;
     getGeminiBatchexecuteContext?: () => GeminiBatchexecuteContext | undefined;
-    getXGrokGraphqlContext?: () => XGrokGraphqlContext | undefined;
     fetchImpl?: typeof fetch;
     downloadImpl?: (payload: unknown, filename: string) => void;
     sleepImpl?: (milliseconds: number) => Promise<void>;
@@ -58,17 +51,14 @@ type NormalizedOptions = {
 type RequestContext = {
     options: NormalizedOptions;
     adapter: LLMPlatform;
-    format: ExportFormat;
     fetchImpl: typeof fetch;
     downloadImpl: (payload: unknown, filename: string) => void;
     sleepImpl: (milliseconds: number) => Promise<void>;
     nowImpl: () => number;
     authHeaders: HeaderRecord | undefined;
     geminiBatchexecuteContext: GeminiBatchexecuteContext | undefined;
-    xGrokGraphqlContext: XGrokGraphqlContext | undefined;
     requestCount: number;
     locationHref: () => string;
-    buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
 };
 
 type ListPageResult = {
@@ -81,7 +71,7 @@ type ConversationListResult = {
     warnings: string[];
 };
 
-type PlatformKind = 'chatgpt' | 'gemini' | 'grok-com' | 'x-grok' | 'unsupported';
+type PlatformKind = 'chatgpt' | 'gemini' | 'grok-com' | 'unsupported';
 
 type FetchTextResult =
     | { ok: true; text: string }
@@ -347,34 +337,6 @@ const extractGrokResponseIdsFromNodeText = (text: string): string[] => {
     return uniqueStrings(ids);
 };
 
-const extractXGrokConversationIdFromItem = (item: unknown): string | null => {
-    const record = asRecord(item);
-    return firstNonNull([readString(record, 'rest_id'), readNestedString(record, 'grokConversation', 'rest_id')]);
-};
-
-const extractXGrokHistoryCursor = (history: Record<string, unknown> | null): string | null => {
-    const cursor = firstNonNull([
-        readString(history, 'cursor'),
-        readString(history, 'next_cursor'),
-        readString(history, 'nextCursor'),
-    ]);
-    return cursor && cursor.length > 0 ? cursor : null;
-};
-
-const extractXGrokHistoryPage = (payload: unknown): ListPageResult => {
-    const dataRecord = asRecord(asRecord(payload)?.data);
-    const history = asRecord(dataRecord?.grok_conversation_history);
-    const items = Array.isArray(history?.items) ? history.items : [];
-    const ids = items
-        .map((item) => extractXGrokConversationIdFromItem(item))
-        .filter((conversationId): conversationId is string => typeof conversationId === 'string');
-
-    return {
-        ids: uniqueStrings(ids),
-        nextCursor: extractXGrokHistoryCursor(history),
-    };
-};
-
 const extractGeminiConversationIdsFromBatchexecuteText = (text: string): string[] => {
     const ids: string[] = [];
 
@@ -533,9 +495,6 @@ const resolvePlatformKind = (adapter: LLMPlatform, locationHref: string): Platfo
         if (hostname === 'grok.com') {
             return 'grok-com';
         }
-        if (hostname === 'x.com' && pathname.startsWith('/i/grok')) {
-            return 'x-grok';
-        }
     } catch {
         return 'unsupported';
     }
@@ -675,43 +634,6 @@ const listConversationIdsGrokCom = async (context: RequestContext): Promise<Conv
     };
 };
 
-const buildXGrokHistoryUrl = (cursor: string | null) => {
-    const variables = cursor ? { cursor } : {};
-    return `https://x.com/i/api/graphql/${X_GROK_HISTORY_QUERY_ID}/GrokHistory?variables=${encodeURIComponent(JSON.stringify(variables))}`;
-};
-
-const listConversationIdsXGrok = async (context: RequestContext): Promise<ConversationListResult> => {
-    const limit = context.options.maxItems;
-    const ids: string[] = [];
-    const seenCursors = new Set<string>();
-    let cursor: string | null = null;
-
-    while (limit === null || ids.length < limit) {
-        const response = await fetchText(buildXGrokHistoryUrl(cursor), context);
-        if (!response.ok) {
-            break;
-        }
-
-        const page = extractXGrokHistoryPage(parseJsonSafe(response.text));
-        if (page.ids.length === 0) {
-            break;
-        }
-
-        ids.push(...page.ids);
-        if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
-            break;
-        }
-
-        seenCursors.add(page.nextCursor);
-        cursor = page.nextCursor;
-    }
-
-    return {
-        ids: uniqueStrings(limit === null ? ids : ids.slice(0, limit)),
-        warnings: [],
-    };
-};
-
 const listConversationIdsGemini = async (context: RequestContext): Promise<ConversationListResult> => {
     const warnings: string[] = [];
     const host = resolveHostFromLocation(context.locationHref(), 'gemini.google.com');
@@ -777,18 +699,6 @@ const uniqueUrls = (urls: string[]): string[] => {
     return result;
 };
 
-const buildXGrokDetailUrl = (queryId: string, conversationId: string, context: XGrokGraphqlContext | undefined) => {
-    const params = new URLSearchParams();
-    params.set('variables', JSON.stringify({ restId: conversationId }));
-    if (typeof context?.features === 'string' && context.features.length > 0) {
-        params.set('features', context.features);
-    }
-    if (typeof context?.fieldToggles === 'string' && context.fieldToggles.length > 0) {
-        params.set('fieldToggles', context.fieldToggles);
-    }
-    return `https://x.com/i/api/graphql/${queryId}/GrokConversationItemsByRestId?${params.toString()}`;
-};
-
 const buildDetailUrls = (
     platform: PlatformKind,
     adapter: LLMPlatform,
@@ -820,17 +730,6 @@ const buildDetailUrls = (
                       `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
                   ],
         );
-    }
-
-    if (platform === 'x-grok') {
-        const observedQueryId = context.xGrokGraphqlContext?.queryId;
-        const observedUrl = observedQueryId
-            ? buildXGrokDetailUrl(observedQueryId, conversationId, context.xGrokGraphqlContext)
-            : null;
-        const fallbackUrls = X_GROK_DETAIL_QUERY_ID_CANDIDATES.map((queryId) =>
-            buildXGrokDetailUrl(queryId, conversationId, undefined),
-        );
-        return uniqueUrls([...(observedUrl ? [observedUrl] : []), ...fallbackUrls]);
     }
 
     return [];
@@ -1017,9 +916,6 @@ const listConversationIds = async (
     if (platform === 'grok-com') {
         return listConversationIdsGrokCom(context);
     }
-    if (platform === 'x-grok') {
-        return listConversationIdsXGrok(context);
-    }
     return { ids: [], warnings: [] };
 };
 
@@ -1042,17 +938,14 @@ export const runBulkChatExport = async (
     const context: RequestContext = {
         options,
         adapter,
-        format: await deps.getExportFormat(),
         fetchImpl: deps.fetchImpl ?? fetch,
         downloadImpl: deps.downloadImpl ?? downloadAsJSON,
         sleepImpl: deps.sleepImpl ?? sleep,
         nowImpl: deps.nowImpl ?? Date.now,
         authHeaders: deps.getAuthHeaders(),
         geminiBatchexecuteContext: deps.getGeminiBatchexecuteContext?.(),
-        xGrokGraphqlContext: deps.getXGrokGraphqlContext?.(),
         requestCount: 0,
         locationHref,
-        buildExportPayloadForFormat: deps.buildExportPayloadForFormat,
     };
 
     const startedAt = context.nowImpl();
@@ -1069,11 +962,6 @@ export const runBulkChatExport = async (
         failed: 0,
         remaining: ids.length,
     });
-    if (platformKind === 'x-grok' && !context.xGrokGraphqlContext?.queryId) {
-        warnings.push(
-            'No observed x-grok detail query context. Open one Grok conversation in this tab, then retry Export Chats.',
-        );
-    }
     if (ids.length === 0) {
         warnings.push('No conversations discovered from list endpoint.');
     }
@@ -1102,7 +990,7 @@ export const runBulkChatExport = async (
         }
 
         applyResolvedExportTitle(conversation);
-        const payload = attachExportMeta(context.buildExportPayloadForFormat(conversation, context.format), {
+        const payload = attachExportMeta(conversation, {
             captureSource: 'canonical_api',
             fidelity: 'high',
             completeness: 'complete',
@@ -1151,7 +1039,6 @@ export const __testables__ = {
     extractGrokComConversationIdsFromPayload,
     extractGrokComConversationIdsFromText,
     extractGrokResponseIdsFromNodeText,
-    extractXGrokHistoryPage,
     extractGeminiConversationIdsFromBatchexecuteText,
     normalizeOptions,
     resolvePlatformKind,

@@ -17,7 +17,6 @@ import type { SavePipelineDeps } from '@/utils/runner/save-pipeline';
 import type { RunnerState } from '@/utils/runner/state';
 import type { RunnerStreamPreviewState } from '@/utils/runner/stream/stream-preview';
 import type { WarmFetchDeps, WarmFetchReason } from '@/utils/runner/warm-fetch';
-import type { ExportFormat } from '@/utils/settings';
 import type { CrossTabProbeLease } from '@/utils/sfe/cross-tab-probe-lease';
 import type { SignalFusionEngine } from '@/utils/sfe/signal-fusion-engine';
 import type { ExportMeta, LifecyclePhase, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
@@ -169,8 +168,6 @@ export type EngineCtx = {
         cid: string | undefined,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
     ) => boolean;
-    buildExportPayloadForFormat: (data: ConversationData, format: ExportFormat) => unknown;
-    getExportFormat: () => Promise<ExportFormat>;
     emitExternalConversationEvent: (args: {
         conversationId: string;
         data: ConversationData;

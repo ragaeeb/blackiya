@@ -13,9 +13,9 @@ const getNormalizedPath = (url: string) => {
 
 export const GROK_ENDPOINT_REGISTRY = {
     apiEndpointPattern:
-        /\/i\/api\/graphql\/[^/]+\/(GrokConversationItemsByRestId|GrokHistory)|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/(?:new|reconnect-response-v2\/[^/?#]+|[^/]+(?:\/(response-node|load-responses))?)/i,
+        /\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/(?:new|reconnect-response-v2\/[^/?#]+|[^/]+(?:\/(response-node|load-responses))?)/i,
     completionTriggerPattern:
-        /\/i\/api\/graphql\/[^/]+\/GrokConversationItemsByRestId|\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/i,
+        /\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/i,
 } as const;
 
 export const GROK_PATH_REGISTRY = {
@@ -23,20 +23,15 @@ export const GROK_PATH_REGISTRY = {
     reconnectMarker: '/rest/app-chat/conversations/reconnect-response-v2/',
     completionMarkers: ['/load-responses', '/response-node'],
     completionBaseMarker: '/rest/app-chat/conversations/',
-    apiHintMarkers: ['/rest/app-chat/', '/2/grok/', '/i/api/graphql/'],
+    apiHintMarkers: ['/rest/app-chat/', '/2/grok/'],
 } as const;
 
 export const GROK_SELECTOR_REGISTRY = {
     buttonInjectionTargets: ['[data-testid="grok-header"]', '[role="banner"]', 'header nav', 'header', 'body'],
-    domTitleCandidates: [
-        '[aria-current="page"][href*="/i/grok?conversation="] [dir="ltr"]',
-        '[aria-current="page"][href*="/i/grok?conversation="] span',
-        '[data-testid="grok-header"] h1',
-        'main h1',
-    ],
+    domTitleCandidates: ['[data-testid="grok-header"] h1', 'main h1'],
 } as const;
 
-export const GROK_DEFAULT_TITLES = ['New conversation', 'Grok Conversation', 'Grok / X'] as const;
+export const GROK_DEFAULT_TITLES = ['New conversation', 'Grok Conversation'] as const;
 
 const maybeLogButtonTargetMiss = () => {
     const now = Date.now();

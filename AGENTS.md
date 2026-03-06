@@ -7,7 +7,7 @@ Operational guide for AI/code agents working in this repository.
 Blackiya is a Chrome MV3 extension that captures conversation data from:
 - ChatGPT
 - Gemini
-- Grok (grok.com + x.com Grok surface)
+- Grok (`grok.com`)
 
 Core goals:
 1. Detect response lifecycle (`idle -> prompt-sent -> streaming -> completed`)

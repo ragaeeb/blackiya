@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import { geminiState, resetGeminiAdapterState } from '@/platforms/gemini/state';
 import type { LLMPlatform } from '@/platforms/types';
 import { __testables__, runBulkChatExport } from '@/utils/runner/bulk-chat-export';
-import { EXPORT_FORMAT } from '@/utils/settings';
 import type { ConversationData } from '@/utils/types';
 
 const buildConversation = (conversationId: string, title = 'Title'): ConversationData => {
@@ -110,6 +109,17 @@ describe('bulk-chat-export', () => {
         expect(normalized.timeoutMs).toBeGreaterThanOrEqual(5000);
     });
 
+    it('should treat x.com Grok pages as unsupported for bulk export', () => {
+        const grokAdapter: LLMPlatform = {
+            ...buildAdapter(),
+            name: 'Grok',
+        };
+
+        expect(__testables__.resolvePlatformKind(grokAdapter, 'https://x.com/i/grok?conversation=123')).toBe(
+            'unsupported',
+        );
+    });
+
     it('should parse chatgpt conversation ids from list payload', () => {
         const ids = __testables__.extractChatGptConversationIdsFromPayload({
             items: [
@@ -195,8 +205,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => buildAdapter(),
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/abc',
                 sleepImpl: async () => {},
@@ -254,8 +262,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => buildAdapter(),
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => undefined,
                 locationHref: () => 'https://chatgpt.com/c/abc',
                 sleepImpl: async (milliseconds) => {
@@ -294,8 +300,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => buildAdapter(),
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/abc',
                 sleepImpl: async () => {},
@@ -325,8 +329,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => buildAdapter(),
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/abc',
                 sleepImpl: async () => {},
@@ -366,8 +368,6 @@ describe('bulk-chat-export', () => {
                 },
                 {
                     getAdapter: () => buildGeminiAdapter(),
-                    getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                    buildExportPayloadForFormat: (data) => data,
                     getAuthHeaders: () => undefined,
                     locationHref: () => 'https://gemini.google.com/app/current-conv-id',
                     sleepImpl: async () => {},
@@ -412,8 +412,6 @@ describe('bulk-chat-export', () => {
                 },
                 {
                     getAdapter: () => buildGeminiAdapter(),
-                    getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                    buildExportPayloadForFormat: (data) => data,
                     getAuthHeaders: () => undefined,
                     locationHref: () => 'https://gemini.google.com/app/current-conv-id',
                     sleepImpl: async () => {},
@@ -456,8 +454,6 @@ describe('bulk-chat-export', () => {
                 },
                 {
                     getAdapter: () => buildGeminiAdapter(),
-                    getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                    buildExportPayloadForFormat: (data) => data,
                     getAuthHeaders: () => ({ 'x-same-domain': '1' }),
                     getGeminiBatchexecuteContext: () => ({
                         bl: 'boq_assistant-bard-web-server_20260301.05_p0',
@@ -497,78 +493,6 @@ describe('bulk-chat-export', () => {
         }
     });
 
-    it('should use observed x-grok detail query id and features for conversation detail fetch', async () => {
-        const fetchedUrls: string[] = [];
-        const conversationId = '2029114150362702208';
-        const conv = buildConversation(conversationId, 'X Grok Conversation');
-        const grokAdapter: LLMPlatform = {
-            ...buildAdapter(),
-            name: 'Grok',
-            parseInterceptedData: (data: string) => {
-                try {
-                    return JSON.parse(data) as ConversationData;
-                } catch {
-                    return null;
-                }
-            },
-        };
-
-        const result = await runBulkChatExport(
-            {
-                type: 'BLACKIYA_BULK_EXPORT_CHATS',
-                limit: 1,
-                delayMs: 1,
-                timeoutMs: 5000,
-            },
-            {
-                getAdapter: () => grokAdapter,
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
-                getAuthHeaders: () => ({ authorization: 'Bearer test' }),
-                getXGrokGraphqlContext: () => ({
-                    queryId: 'n2bhau0B2DSY6R_bLolgSg',
-                    features: '{"responsive_web_grok_annotations_enabled":true}',
-                    updatedAt: Date.now(),
-                }),
-                locationHref: () => 'https://x.com/i/grok?conversation=2029114150362702208',
-                sleepImpl: async () => {},
-                downloadImpl: () => {},
-                fetchImpl: (async (input) => {
-                    const url = String(input);
-                    fetchedUrls.push(url);
-                    if (url.includes('/i/api/graphql/9Hyh5D4-WXLnExZkONSkZg/GrokHistory')) {
-                        return new Response(
-                            JSON.stringify({
-                                data: {
-                                    grok_conversation_history: {
-                                        items: [{ rest_id: conversationId }],
-                                        cursor: null,
-                                    },
-                                },
-                            }),
-                            { status: 200 },
-                        );
-                    }
-                    if (url.includes('/i/api/graphql/n2bhau0B2DSY6R_bLolgSg/GrokConversationItemsByRestId')) {
-                        expect(url.includes('features=')).toBeTrue();
-                        return new Response(JSON.stringify(conv), { status: 200 });
-                    }
-                    return new Response('not found', { status: 404 });
-                }) as typeof fetch,
-            },
-        );
-
-        expect(result.discovered).toBe(1);
-        expect(result.exported).toBe(1);
-        expect(
-            fetchedUrls.some(
-                (url) =>
-                    url.includes('/i/api/graphql/n2bhau0B2DSY6R_bLolgSg/GrokConversationItemsByRestId') &&
-                    url.includes('features='),
-            ),
-        ).toBeTrue();
-    });
-
     it('should surface grok list fetch status in warnings when list endpoint fails', async () => {
         const grokAdapter: LLMPlatform = {
             ...buildAdapter(),
@@ -584,8 +508,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => grokAdapter,
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => undefined,
                 locationHref: () => 'https://grok.com/c/53d21d0d-add5-4fd6-bfe8-136705227759',
                 sleepImpl: async () => {},
@@ -637,8 +559,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => grokAdapter,
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => undefined,
                 locationHref: () => `https://grok.com/c/${conversationA}`,
                 sleepImpl: async () => {},
@@ -707,8 +627,6 @@ describe('bulk-chat-export', () => {
             },
             {
                 getAdapter: () => grokAdapter,
-                getExportFormat: async () => EXPORT_FORMAT.ORIGINAL,
-                buildExportPayloadForFormat: (data) => data,
                 getAuthHeaders: () => undefined,
                 locationHref: () => 'https://grok.com/c/53d21d0d-add5-4fd6-bfe8-136705227759',
                 sleepImpl: async () => {},

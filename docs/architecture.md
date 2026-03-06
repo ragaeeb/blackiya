@@ -88,7 +88,7 @@ Primary events:
 - `BLACKIYA_CONVERSATION_ID_RESOLVED` (late ID resolution)
 - `BLACKIYA_TITLE_RESOLVED` (stream-derived title)
 - `LLM_CAPTURE_DATA_INTERCEPTED` (raw canonical payload)
-  - Optional `promptHint` is attached for Grok attempts when captured from CreateGrokConversation request bodies.
+  - Optional `promptHint` is attached for Grok attempts when captured from streaming request bodies.
 - `attemptId` is mandatory for lifecycle/finished/delta wire messages (legacy attempt-less compatibility removed in v2.0.2)
 
 See:
@@ -221,8 +221,7 @@ State management:
 
 Surfaces:
 - `grok.com` REST/NDJSON
-- `x.com` Grok endpoint variants
-- `grok.x.com` x-surface streaming host (`/2/grok/add_response.json`)
+- `grok.x.com` streaming host (`/2/grok/add_response.json`)
 
 Generation and completion classification:
 - `utils/grok-request-classifier.ts`
@@ -238,7 +237,7 @@ Streaming parser:
 
 Flow:
 1. Interceptor observes Grok generation request.
-2. For `CreateGrokConversation`, interceptor extracts a prompt hint from request JSON and binds it to the active attempt.
+2. For `/2/grok/add_response.json`, interceptor extracts a prompt hint from request JSON and binds it to the active attempt.
 3. Emits `prompt-sent` and `streaming` only for generation endpoints.
 4. Parses NDJSON chunks and emits live stream deltas.
 5. Captures canonical payloads from response-node/load-responses.
@@ -247,14 +246,8 @@ Flow:
 8. Runner stabilizes and enables Save.
 
 Title strategy:
-1. `conversations_v2`/history-derived titles.
+1. `conversations_v2`-derived titles.
 2. DOM fallback on save for placeholder titles like `New conversation`.
-
-Known limitation (x.com):
-- On `x.com/i/grok`, canonical response streams from `grok.x.com/2/grok/add_response.json` do not include conversation titles.
-- Conversation titles are typically populated only after `x.com/i/api/graphql/*/GrokHistory` is fetched (often triggered by opening the History panel).
-- If `GrokHistory` has not fired yet and no reliable DOM title is present, exports may retain a generic title (`Grok Conversation`/`Grok / X`).
-- This is currently a known gap; capture correctness is unaffected, but export title fidelity can lag until history metadata is fetched.
 
 Primary code:
 - `platforms/grok/index.ts`
@@ -302,9 +295,7 @@ Save pipeline:
 2. `getConversationData` fetches cached canonical conversation.
 3. Applies title fallback resolution if title is generic.
 4. Builds export payload:
-   - Original conversation JSON, or
-   - Common-export format (`buildCommonExport`) if selected.
-   - Common export resolves `model` and `reasoning` from the latest turn chain first, then falls back to recent mapping metadata/reasoning when branch/current-node topology is incomplete (for example snapshot-derived chains). Model fallback checks assistant metadata first, then broader message metadata (`resolved_model_slug`, `model_slug`, `default_model_slug`, `model`).
+   - Original conversation JSON only.
 5. Attaches `capture_meta`:
    - `captureSource`
    - `fidelity`
@@ -313,7 +304,6 @@ Save pipeline:
 
 Primary code:
 - `utils/runner/engine/platform-runner-engine.ts`
-- `utils/common-export.ts`
 - `utils/download.ts`
 
 ### 8.1 Title Consistency and Stickiness
@@ -373,7 +363,7 @@ Blackiya also supports a popup-driven bulk export path (independent of live life
    - discovers conversation IDs from the platform list endpoint
    - fetches each conversation detail payload
    - parses via the active adapter
-   - applies export format (`original` or `common`) + export metadata
+   - attaches export metadata to the original conversation payload
    - downloads one JSON file per conversation (same filename policy as Save JSON)
    - when list discovery fails, result warnings include HTTP status/message for easier diagnosis
 
@@ -388,9 +378,6 @@ Current platform coverage:
 - Grok.com (`/rest/app-chat/conversations` + conversation detail endpoints);
   bulk detail fallback now also derives reconnect IDs from `response-node` payloads and probes
   `/rest/app-chat/conversations/reconnect-response-v2/{responseId}` when `conversations_v2`/`response-node` are metadata-only.
-- X Grok (`GrokHistory` + `GrokConversationItemsByRestId`)
-  - detail fetches prioritize observed `GrokConversationItemsByRestId` context captured from intercepted requests
-    (dynamic GraphQL `queryId` + `features`/`fieldToggles`) before static fallback query IDs.
 - Gemini best-effort via batchexecute RPC IDs (`MaZiqc` titles list + `hNvQHb` conversation);
   when `MaZiqc` returns no parseable IDs (or fails), bulk export falls back to cached Gemini title IDs captured from intercepted traffic.
   Gemini detail fetches use intercepted batchexecute request context (`bl`, `f.sid`, `hl`, `_reqid`, `at`) and issue `POST` `hNvQHb` requests rather than `GET`.

@@ -12,7 +12,11 @@
  * @module utils/payload-quality-gate
  */
 
-import { buildCommonExport } from '@/utils/common-export';
+import {
+    extractConversationModel,
+    extractConversationReasoning,
+    extractLatestTurnPromptAndResponse,
+} from '@/utils/conversation-inspection';
 import { logger } from '@/utils/logger';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
@@ -48,23 +52,15 @@ export type PayloadQualityDiagnostic = {
 };
 
 /**
- * Evaluates the quality of a common export payload.
+ * Evaluates the quality of an original ConversationData payload.
  * Returns a result indicating whether the payload passes quality checks.
  */
-export const evaluatePayloadQuality = (data: ConversationData, platformName: string): PayloadQualityResult => {
+export const evaluatePayloadQuality = (data: ConversationData, _platformName?: string): PayloadQualityResult => {
     try {
-        const common = buildCommonExport(data, platformName) as {
-            model?: string;
-            reasoning?: string[];
-            prompt?: string;
-            response?: string;
-        };
-
         const issues: PayloadQualityIssue[] = [];
-        const model = typeof common.model === 'string' && common.model.length > 0 ? common.model : undefined;
-        const reasoning = Array.isArray(common.reasoning) ? common.reasoning : [];
-        const prompt = typeof common.prompt === 'string' ? common.prompt : '';
-        const response = typeof common.response === 'string' ? common.response : '';
+        const model = extractConversationModel(data);
+        const reasoning = extractConversationReasoning(data);
+        const latestTurn = extractLatestTurnPromptAndResponse(data);
 
         if (!model) {
             issues.push('missing_model');
@@ -78,8 +74,8 @@ export const evaluatePayloadQuality = (data: ConversationData, platformName: str
             issues,
             model,
             reasoningCount: reasoning.length,
-            promptLength: prompt.length,
-            responseLength: response.length,
+            promptLength: latestTurn.prompt.length,
+            responseLength: latestTurn.response.length,
         };
     } catch (error) {
         logger.warn('Payload quality evaluation failed', {
@@ -161,7 +157,7 @@ export const runPayloadQualityGate = (
     captureMeta: ExportMeta,
     data: ConversationData,
 ): PayloadQualityResult => {
-    const quality = evaluatePayloadQuality(data, platformName);
+    const quality = evaluatePayloadQuality(data);
 
     if (quality.passed) {
         logger.debug('Payload quality gate passed', {

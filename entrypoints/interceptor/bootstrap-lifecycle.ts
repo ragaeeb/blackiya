@@ -34,7 +34,6 @@ export type BootstrapRequestLifecycleDeps = {
     safePathname: (url: string) => string;
 };
 
-const GROK_CREATE_CONVERSATION_PATH_PATTERN = /\/i\/api\/graphql\/[^/]+\/CreateGrokConversation(?:\?|$)/i;
 const GROK_ADD_RESPONSE_PATH_PATTERN = /\/2\/grok\/add_response\.json(?:\?|$)/i;
 
 const normalizePromptCandidate = (value: unknown): string | null => {
@@ -53,16 +52,9 @@ const isIgnoredPromptCandidateKey = (key: string): boolean => {
     return /(messageType|queryId|operationName|model|conversationId)/i.test(key);
 };
 
-const isLikelyGraphqlDocument = (value: string): boolean => {
-    return /^\s*(mutation|query|fragment)\b[\s\S]*\{/.test(value);
-};
-
 const extractPromptFromRecord = (record: Record<string, unknown>): string | null => {
     for (const [key, candidate] of Object.entries(record)) {
         if (!isPromptCandidateKey(key) || isIgnoredPromptCandidateKey(key)) {
-            continue;
-        }
-        if (key.toLowerCase() === 'query' && typeof candidate === 'string' && isLikelyGraphqlDocument(candidate)) {
             continue;
         }
         const prompt = normalizePromptCandidate(candidate);
@@ -162,21 +154,17 @@ export const resolveGrokPromptHintFromFetchArgs = async (args: Parameters<typeof
     return extractPromptHintFromBodyText(requestBodyText);
 };
 
-const isGrokCreateConversationRequest = (url: string): boolean => {
-    return GROK_CREATE_CONVERSATION_PATH_PATTERN.test(url);
-};
-
 const isGrokAddResponseRequest = (url: string): boolean => {
     return GROK_ADD_RESPONSE_PATH_PATTERN.test(url);
 };
 
-const cachePromptHintFromGrokRequest = (
+const cachePromptHintForGrokLifecycleRequest = (
     context: FetchInterceptorContext,
     adapter: LLMPlatform,
     attemptId: string,
     emitter: BootstrapRequestLifecycleDeps['emitter'],
 ) => {
-    if (adapter.name !== 'Grok' || !isGrokCreateConversationRequest(context.outgoingUrl)) {
+    if (adapter.name !== 'Grok' || !isGrokAddResponseRequest(context.outgoingUrl)) {
         return;
     }
     const promptHint = extractGrokPromptHintFromFetchArgs(context.args);
@@ -186,14 +174,11 @@ const cachePromptHintFromGrokRequest = (
     emitter.cachePromptHintForAttempt(attemptId, promptHint);
 };
 
-export const cachePromptHintFromGrokCreateConversationRequest = async (
+export const cachePromptHintFromGrokRequest = async (
     context: Pick<FetchInterceptorContext, 'args' | 'outgoingMethod' | 'outgoingUrl' | 'nonChatAttemptId'>,
     deps: Pick<BootstrapRequestLifecycleDeps, 'emitter' | 'resolveAttemptIdForConversation'>,
 ) => {
-    if (
-        context.outgoingMethod !== 'POST' ||
-        (!isGrokCreateConversationRequest(context.outgoingUrl) && !isGrokAddResponseRequest(context.outgoingUrl))
-    ) {
+    if (context.outgoingMethod !== 'POST' || !isGrokAddResponseRequest(context.outgoingUrl)) {
         return;
     }
     const promptHint = await resolveGrokPromptHintFromFetchArgs(context.args);
@@ -258,7 +243,7 @@ export const emitFetchPromptLifecycle = (
     if (!attemptId) {
         return;
     }
-    cachePromptHintFromGrokRequest(context, adapter, attemptId, deps.emitter);
+    cachePromptHintForGrokLifecycleRequest(context, adapter, attemptId, deps.emitter);
     deps.emitter.emitLifecycle(attemptId, 'prompt-sent', context.nonChatConversationId, adapter.name);
     if (adapter.name !== 'Gemini') {
         deps.emitter.emitLifecycle(attemptId, 'streaming', context.nonChatConversationId, adapter.name);

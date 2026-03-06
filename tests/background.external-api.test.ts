@@ -255,7 +255,7 @@ describe('background external api hub', () => {
         }
     });
 
-    it('should return common-formatted events for events.getSince when requested', async () => {
+    it('should reject removed common-format selectors on events.getSince', async () => {
         const hub = createExternalApiHub({
             eventStore: createInMemoryExternalEventStore(),
             now: () => now,
@@ -271,19 +271,10 @@ describe('background external api hub', () => {
             format: 'common',
         });
 
-        expect(response).toMatchObject({ ok: true, head_seq: 1, format: 'common' });
-        if (response.ok && 'events' in response) {
-            expect(response.events).toHaveLength(1);
-            expect(response.events[0]).toMatchObject({
-                seq: 1,
-                conversation_id: 'conv-1',
-                format: 'common',
-                payload: expect.objectContaining({ format: 'common' }),
-            });
-        }
+        expect(response).toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
     });
 
-    it('should honor subscriber payload_format for replay and live push delivery', async () => {
+    it('should replay and push original payloads to subscribers', async () => {
         const hub = createExternalApiHub({
             eventStore: createInMemoryExternalEventStore(),
             now: () => now,
@@ -293,7 +284,7 @@ describe('background external api hub', () => {
 
         const port = createFakePort(EXTERNAL_API_VERSION);
         hub.addSubscriber(port, { senderExtensionId: 'extendo-id' });
-        port.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery', payload_format: 'common' });
+        port.emitMessage({ type: 'subscribe', cursor: 0, consumer_role: 'delivery' });
         await flushAsyncTasks();
 
         expect(port.postMessage).toHaveBeenNthCalledWith(
@@ -304,8 +295,8 @@ describe('background external api hub', () => {
                     expect.objectContaining({
                         seq: 1,
                         conversation_id: 'conv-1',
-                        format: 'common',
-                        payload: expect.objectContaining({ format: 'common' }),
+                        format: 'original',
+                        payload: expect.objectContaining({ conversation_id: 'conv-1' }),
                     }),
                 ],
             }),
@@ -318,8 +309,8 @@ describe('background external api hub', () => {
                 type: 'conversation.ready',
                 seq: 2,
                 conversation_id: 'conv-2',
-                format: 'common',
-                payload: expect.objectContaining({ format: 'common' }),
+                format: 'original',
+                payload: expect.objectContaining({ conversation_id: 'conv-2' }),
             }),
         );
     });

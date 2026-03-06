@@ -17,8 +17,8 @@ describe('grok-request-classifier', () => {
         expect(shouldEmitGrokCompletion(url)).toBeFalse();
     });
 
-    it('should classify x.com add_response as generation endpoint', () => {
-        const url = 'https://x.com/2/grok/add_response.json';
+    it('should classify grok.x.com add_response as generation endpoint', () => {
+        const url = 'https://grok.x.com/2/grok/add_response.json';
         expect(isGrokGenerationEndpoint(url)).toBeTrue();
         expect(isGrokStreamingEndpoint(url)).toBeTrue();
         expect(shouldEmitGrokLifecycle(url)).toBeTrue();

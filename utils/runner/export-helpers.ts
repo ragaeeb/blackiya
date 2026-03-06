@@ -3,31 +3,9 @@
  * No runner state dependencies — fully testable in isolation.
  */
 
-import { buildCommonExport } from '@/utils/common-export';
-import { logger } from '@/utils/logger';
-import { EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
+import { extractAllAssistantText, extractLatestTurnPromptAndResponse } from '@/utils/conversation-inspection';
 import type { ExportMeta } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
-
-/**
- * Serialises conversation data into the requested export format.
- * Falls back to the original format when `common` conversion throws.
- */
-export const buildExportPayloadForFormat = (
-    data: ConversationData,
-    format: ExportFormat,
-    platformName: string,
-): unknown => {
-    if (format !== EXPORT_FORMAT.COMMON) {
-        return data;
-    }
-    try {
-        return buildCommonExport(data, platformName);
-    } catch (error) {
-        logger.error('Failed to build common export format, falling back to original.', error);
-        return data;
-    }
-};
 
 /**
  * Merges export metadata into the `__blackiya.exportMeta` field of a payload object.
@@ -53,32 +31,19 @@ export const attachExportMeta = (payload: unknown, meta: ExportMeta): unknown =>
 
 /**
  * Extracts human-readable response text from a ConversationData for display
- * in the stream probe panel. Tries the common export format first (which gives
- * the cleanest `response` field), then falls back to raw assistant message parts.
+ * in the stream probe panel. Prefers the latest turn's assistant response,
+ * then falls back to the latest prompt, then all assistant message text.
  */
-export const extractResponseTextFromConversation = (data: ConversationData, platformName: string): string => {
-    try {
-        const common = buildCommonExport(data, platformName) as {
-            response?: string | null;
-            prompt?: string | null;
-        };
-        const response = (common.response ?? '').trim();
-        const prompt = (common.prompt ?? '').trim();
-        if (response) {
-            return response;
-        }
-        if (prompt) {
-            return `(No assistant response found yet)\nPrompt: ${prompt}`;
-        }
-    } catch {
-        // fall through to raw extraction
+export const extractResponseTextFromConversation = (data: ConversationData, _platformName?: string): string => {
+    if (!data.current_node || !data.mapping[data.current_node]?.message) {
+        return extractAllAssistantText(data);
     }
-    return Object.values(data.mapping)
-        .map((node) => node.message)
-        .filter((msg): msg is NonNullable<(typeof data.mapping)[string]['message']> => !!msg)
-        .filter((msg) => msg.author.role === 'assistant')
-        .flatMap((msg) => msg.content.parts ?? [])
-        .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-        .join('\n\n')
-        .trim();
+    const latestTurn = extractLatestTurnPromptAndResponse(data);
+    if (latestTurn.response) {
+        return latestTurn.response;
+    }
+    if (latestTurn.prompt) {
+        return `(No assistant response found yet)\nPrompt: ${latestTurn.prompt}`;
+    }
+    return extractAllAssistantText(data);
 };

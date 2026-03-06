@@ -196,7 +196,6 @@ export const buildSavePipelineDeps = (ctx: EngineCtx): SavePipelineDeps => ({
     resolveReadinessDecision: (cid) => ctx.resolveReadinessDecision(cid),
     shouldBlockActionsForGeneration: (cid) => shouldBlockActionsForGeneration(ctx, cid),
     getCaptureMeta: (cid) => getCaptureMeta(ctx, cid),
-    getExportFormat: () => ctx.getExportFormat(),
     getStreamResolvedTitle: (cid) => ctx.streamResolvedTitles.get(cid) ?? null,
     evaluateReadinessForData: (data) => evaluateReadinessForData(ctx, data),
     markCanonicalCaptureMeta: (cid) => ctx.markCanonicalCaptureMeta(cid),

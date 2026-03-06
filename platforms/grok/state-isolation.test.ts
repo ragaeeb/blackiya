@@ -74,21 +74,17 @@ describe('Grok Adapter — state isolation', () => {
 
     it('should not leak titles across resets', () => {
         const conversationId = '7c5e5d2b-8a9c-4d6f-9e1b-3f2a7c8d9e10';
-        const historyData = {
-            data: {
-                grok_history: {
-                    conversations: [
-                        {
-                            rest_id: conversationId,
-                            default_response: { message: '' },
-                            created_at: '2026-02-18T00:00:00Z',
-                            core: { name: 'Leaked Title' },
-                        },
-                    ],
+        grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                conversation: {
+                    conversationId,
+                    title: 'Leaked Title',
+                    createTime: '2026-02-18T00:00:00Z',
+                    modifyTime: '2026-02-18T00:00:00Z',
                 },
-            },
-        };
-        grokAdapter.parseInterceptedData(JSON.stringify(historyData), 'https://x.com/i/api/graphql/test/GrokHistory');
+            }),
+            `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true`,
+        );
         resetGrokAdapterState?.();
 
         // Re-parse with same ID after reset — title must not carry over

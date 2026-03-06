@@ -169,7 +169,7 @@ The extension requires the following permissions:
 - `https://chatgpt.com/*` - ChatGPT platform
 - `https://chat.openai.com/*` - Legacy ChatGPT platform
 - `https://gemini.google.com/*` - Gemini platform
-- `https://x.com/i/grok*` - Grok platform
+- `https://grok.com/*` - Grok platform
 
 ### External Extension API
 

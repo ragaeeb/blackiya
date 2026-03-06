@@ -7,7 +7,6 @@ import {
     DEFAULT_WAKE_THROTTLE_MS,
     formatStoredEventForDelivery,
     MAX_BATCH_SIZE,
-    toFormat,
 } from '@/utils/external-api/background-hub-helpers';
 import type {
     ExternalEventDeliveryStats,
@@ -20,7 +19,6 @@ import type {
     ExternalInboundConversationEvent,
     ExternalPortInboundMessage,
     ExternalPortOutboundMessage,
-    ExternalPullFormat,
     ExternalReplayCompleteMessage,
     ExternalResponse,
     ExternalStoredConversationEvent,
@@ -39,7 +37,6 @@ import {
     createIndexedDbExternalEventStore,
     createInMemoryExternalEventStore,
 } from '@/utils/external-api/external-event-store';
-import { EXPORT_FORMAT } from '@/utils/settings';
 
 export type {
     CachedConversationRecord,
@@ -67,7 +64,6 @@ type SubscriberState = {
     subscribed: boolean;
     cursor: number;
     maxBatch: number;
-    payloadFormat: ExternalPullFormat;
     replayInFlight: boolean;
     lastDeliveredSeq: number;
 };
@@ -187,7 +183,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             if (!state.subscribed) {
                 continue;
             }
-            const eventForSubscriber = formatStoredEventForDelivery(event, state.payloadFormat);
+            const eventForSubscriber = formatStoredEventForDelivery(event);
             try {
                 port.postMessage(eventForSubscriber satisfies ExternalPortOutboundMessage);
                 state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, event.seq);
@@ -225,8 +221,8 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         };
     };
 
-    const postReplayBatch = (port: ExternalPortLike, batch: ReplayBatch, payloadFormat: ExternalPullFormat) => {
-        const events = batch.events.map((event) => formatStoredEventForDelivery(event, payloadFormat));
+    const postReplayBatch = (port: ExternalPortLike, batch: ReplayBatch) => {
+        const events = batch.events.map((event) => formatStoredEventForDelivery(event));
         port.postMessage({
             type: 'events.batch',
             events,
@@ -244,7 +240,6 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         port: ExternalPortLike,
         replayCursor: number,
         replayBatchSize: number,
-        payloadFormat: ExternalPullFormat,
     ) => {
         let cursor = replayCursor;
         while (subscribers.has(port)) {
@@ -252,7 +247,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             if (!batch) {
                 break;
             }
-            postReplayBatch(port, batch, payloadFormat);
+            postReplayBatch(port, batch);
             cursor = batch.batchEnd;
         }
     };
@@ -280,7 +275,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         const replayBatchSize = Math.min(state.maxBatch, maxReplayBatchSize);
 
         try {
-            await streamReplayBatches(port, replayCursor, replayBatchSize, state.payloadFormat);
+            await streamReplayBatches(port, replayCursor, replayBatchSize);
             await postReplayCompleteIfConnected(port, replayCursor);
         } catch {
             removeSubscriber(port);
@@ -345,7 +340,6 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         state.subscribed = true;
         state.cursor = nextCursor;
         state.maxBatch = nextMaxBatch;
-        state.payloadFormat = toFormat(message.payload_format);
         state.lastDeliveredSeq = Math.max(state.lastDeliveredSeq, nextCursor);
 
         await replaySinceCursor(port, message);
@@ -410,7 +404,6 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             subscribed: false,
             cursor: 0,
             maxBatch: defaultBatchSize,
-            payloadFormat: EXPORT_FORMAT.ORIGINAL,
             replayInFlight: false,
             lastDeliveredSeq: 0,
         };
@@ -470,28 +463,15 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
     const buildGetSinceResponse = async (
         cursor: number,
         limitCandidate: number | undefined,
-        formatCandidate: ExternalPullFormat | undefined,
     ): Promise<ExternalResponse> => {
         const limit = clampBatchSize(limitCandidate, defaultBatchSize);
-        const format = toFormat(formatCandidate);
         const storedEvents = await eventStore.getSince(Math.max(0, Math.floor(cursor)), limit);
-        if (format === EXPORT_FORMAT.COMMON) {
-            const events = storedEvents.map((event) => formatStoredEventForDelivery(event, EXPORT_FORMAT.COMMON));
-            return {
-                ok: true,
-                api: EXTERNAL_API_VERSION,
-                ts: now(),
-                format: EXPORT_FORMAT.COMMON,
-                head_seq: await eventStore.getHeadSeq(),
-                events,
-            };
-        }
-        const events = storedEvents.map((event) => formatStoredEventForDelivery(event, EXPORT_FORMAT.ORIGINAL));
+        const events = storedEvents.map((event) => formatStoredEventForDelivery(event));
         return {
             ok: true,
             api: EXTERNAL_API_VERSION,
             ts: now(),
-            format: EXPORT_FORMAT.ORIGINAL,
+            format: 'original',
             head_seq: await eventStore.getHeadSeq(),
             events,
         };
@@ -513,7 +493,7 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
         }
 
         if (request.type === 'events.getSince') {
-            return buildGetSinceResponse(request.cursor, request.limit, request.format);
+            return buildGetSinceResponse(request.cursor, request.limit);
         }
 
         if (request.type === 'conversation.getLatest') {
@@ -521,14 +501,14 @@ export const createExternalApiHub = (deps: ExternalApiHubDeps) => {
             if (!record) {
                 return buildFailureResponse(now, 'UNAVAILABLE', 'No conversation data available');
             }
-            return buildSuccessResponse(record, toFormat(request.format), now);
+            return buildSuccessResponse(record, now);
         }
 
         const record = await eventStore.getByConversationId(request.conversation_id);
         if (!record) {
             return buildFailureResponse(now, 'NOT_FOUND', 'Conversation not found');
         }
-        return buildSuccessResponse(record, toFormat(request.format), now);
+        return buildSuccessResponse(record, now);
     };
 
     return {

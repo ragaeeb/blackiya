@@ -32,7 +32,7 @@ const parseDiscoveryUrl = (url: string) => {
 };
 
 export const isDiscoveryModeHost = (hostname: string) =>
-    hostname.includes('gemini.google.com') || hostname.includes('x.com') || hostname.includes('grok.com');
+    hostname.includes('gemini.google.com') || hostname.includes('grok.com');
 
 const emitDiscoveryDumpFrame = (label: string, path: string, text: string, streamDump: EmitStreamDumpFn) => {
     if (text.length <= 1000) {
@@ -117,7 +117,7 @@ const resolveEndpointMissPlatform = (hostname: string, url: string): 'ChatGPT' |
     if (hostname.includes('gemini.google.com') && isLikelyGeminiApiPath(url)) {
         return 'Gemini';
     }
-    if ((hostname.includes('grok.com') || hostname.includes('x.com')) && isLikelyGrokApiPath(url)) {
+    if (hostname.includes('grok.com') && isLikelyGrokApiPath(url)) {
         return 'Grok';
     }
     return null;

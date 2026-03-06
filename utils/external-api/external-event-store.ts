@@ -1,6 +1,5 @@
 import type { ExternalEventStore } from '@/utils/external-api/background-hub-types';
 import type { ExternalInboundConversationEvent, ExternalStoredConversationEvent } from '@/utils/external-api/contracts';
-import { EXPORT_FORMAT } from '@/utils/settings';
 
 type ExternalMetaRecord<T = unknown> = {
     key: string;
@@ -46,7 +45,7 @@ export const createInMemoryExternalEventStore = (deps?: {
             }
             const created = {
                 ...event,
-                format: EXPORT_FORMAT.ORIGINAL,
+                format: 'original',
                 seq: nextSeq,
                 created_at: now(),
             } satisfies ExternalStoredConversationEvent;
@@ -296,7 +295,7 @@ export const createIndexedDbExternalEventStore = (deps?: IndexedDbStoreDeps): Ex
             const nextSeq = coerceNumber(nextSeqRecord?.value, 1);
             const created = {
                 ...event,
-                format: EXPORT_FORMAT.ORIGINAL,
+                format: 'original',
                 seq: nextSeq,
                 created_at: now(),
             } satisfies ExternalStoredConversationEvent;

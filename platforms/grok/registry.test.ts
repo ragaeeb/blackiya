@@ -9,10 +9,10 @@ import {
 } from '@/platforms/grok/registry';
 
 describe('grok registry', () => {
-    it('should expose endpoint patterns matching x.com GraphQL and grok.com REST URLs', () => {
+    it('should expose endpoint patterns matching grok.x.com streaming and grok.com REST URLs', () => {
         expect(
             GROK_ENDPOINT_REGISTRY.apiEndpointPattern.test(
-                'https://x.com/i/api/graphql/6QmFg/GrokConversationItemsByRestId?variables=%7B%7D',
+                'https://grok.x.com/2/grok/add_response.json',
             ),
         ).toBeTrue();
         expect(
@@ -45,7 +45,7 @@ describe('grok registry', () => {
     });
 
     it('should classify likely grok api paths for endpoint-miss diagnostics', () => {
-        expect(isLikelyGrokApiPath('https://x.com/i/api/graphql/abc/Unknown')).toBeTrue();
-        expect(isLikelyGrokApiPath('https://x.com/i/grok?conversation=123')).toBeFalse();
+        expect(isLikelyGrokApiPath('https://grok.com/rest/app-chat/conversations/new')).toBeTrue();
+        expect(isLikelyGrokApiPath('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBeFalse();
     });
 });

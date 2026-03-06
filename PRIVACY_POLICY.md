@@ -26,7 +26,7 @@ The extension requests the following permissions for the reasons stated:
 - **`host_permissions`**: Required to communicate with the internal APIs of ChatGPT, Gemini, and Grok to retrieve the conversation data for exporting.
 
 ## 6. Website Content
-The extension reads content from the supported websites (`chatgpt.com`, `gemini.google.com`, `x.com`) only for the purpose of facilitating the export feature. This data is processed in real-time and is not stored by the extension after the export is complete, except for what you choose to download or copy.
+The extension reads content from the supported websites (`chatgpt.com`, `gemini.google.com`, `grok.com`) only for the purpose of facilitating the export feature. This data is processed in real-time and is not stored by the extension after the export is complete, except for what you choose to download or copy.
 
 ## 7. Changes to This Policy
 We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Effective Date" at the top.

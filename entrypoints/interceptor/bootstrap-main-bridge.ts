@@ -1,6 +1,5 @@
 import { getGeminiBatchexecuteContext } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
 import { getPageConversationSnapshot } from '@/entrypoints/interceptor/page-snapshot';
-import { getXGrokGraphqlContext } from '@/entrypoints/interceptor/x-grok-graphql-context-store';
 import {
     GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
     type GeminiBatchexecuteContextResponseMessage,
@@ -20,11 +19,6 @@ import {
     setSessionToken,
     stampToken,
 } from '@/utils/protocol/session-token';
-import {
-    isXGrokGraphqlContextRequestMessage,
-    X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE,
-    type XGrokGraphqlContextResponseMessage,
-} from '@/utils/x-grok-graphql-bridge';
 
 type PageSnapshotRequest = {
     type: typeof MESSAGE_TYPES.PAGE_SNAPSHOT_REQUEST;
@@ -148,30 +142,11 @@ export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
         return true;
     };
 
-    const handleXGrokGraphqlContextRequest = (message: unknown) => {
-        if (!isXGrokGraphqlContextRequestMessage(message)) {
-            return false;
-        }
-        if (resolveTokenValidationFailureReason(message) !== null) {
-            return true;
-        }
-        const response: XGrokGraphqlContextResponseMessage = {
-            type: X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE,
-            requestId: message.requestId,
-            context: getXGrokGraphqlContext(),
-        };
-        window.postMessage(stampToken(response), window.location.origin);
-        return true;
-    };
-
     const handleTypedMessage = (message: unknown) => {
         if (handlePlatformHeadersRequest(message)) {
             return;
         }
         if (handleGeminiBatchexecuteContextRequest(message)) {
-            return;
-        }
-        if (handleXGrokGraphqlContextRequest(message)) {
             return;
         }
         const type = (message as { type?: unknown })?.type;

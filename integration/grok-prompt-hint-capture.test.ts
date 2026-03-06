@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
-import { cachePromptHintFromGrokCreateConversationRequest } from '@/entrypoints/interceptor/bootstrap-lifecycle';
+import { cachePromptHintFromGrokRequest } from '@/entrypoints/interceptor/bootstrap-lifecycle';
 import { createInterceptorEmitter, type InterceptorEmitterState } from '@/entrypoints/interceptor/interceptor-emitter';
 import { InterceptionManager } from '@/utils/managers/interception-manager';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
@@ -133,12 +133,12 @@ describe('integration: grok prompt hint backfill across interceptor and manager'
             nonChatAttemptId: attemptId,
         } as const;
 
-        await cachePromptHintFromGrokCreateConversationRequest(context, {
+        await cachePromptHintFromGrokRequest(context, {
             emitter: emitter as any,
             resolveAttemptIdForConversation: () => attemptId,
         });
 
-        emitter.emitCapturePayload('https://x.com/2/grok/add_response.json', '{"ok":true}', 'Grok', attemptId);
+        emitter.emitCapturePayload('https://grok.x.com/2/grok/add_response.json', '{"ok":true}', 'Grok', attemptId);
 
         await new Promise((resolve) => setTimeout(resolve, 0));
 

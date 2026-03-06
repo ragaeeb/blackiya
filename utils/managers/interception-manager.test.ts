@@ -244,7 +244,7 @@ describe('InterceptionManager', () => {
         } as any);
 
         manager.ingestInterceptedData({
-            url: 'https://x.com/2/grok/add_response.json',
+            url: 'https://grok.x.com/2/grok/add_response.json',
             data: '{"ok":true}',
             platform: 'Grok',
             promptHint: 'What is the ruling on this issue?',

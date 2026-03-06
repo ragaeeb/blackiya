@@ -11,7 +11,6 @@ const COMMON_GENERIC_TITLES = new Set([
     'gemini conversation',
     'conversation with gemini',
     'grok conversation',
-    'grok / x',
 ]);
 
 const normalizeTitle = (title: string | null | undefined): string => {

@@ -1,23 +1,19 @@
 import { describe, expect, it, mock } from 'bun:test';
 import {
-    cachePromptHintFromGrokCreateConversationRequest,
+    cachePromptHintFromGrokRequest,
     emitFetchPromptLifecycle,
     extractGrokPromptHintFromFetchArgs,
     resolveGrokPromptHintFromFetchArgs,
 } from '@/entrypoints/interceptor/bootstrap-lifecycle';
 
 describe('bootstrap lifecycle prompt hints', () => {
-    it('should extract Grok prompt hint from CreateGrokConversation fetch body', () => {
+    it('should extract Grok prompt hint from add_response fetch body', () => {
         const args = [
-            'https://x.com/i/api/graphql/vvC5uy7pWWHXS2aDi1FZeA/CreateGrokConversation',
+            'https://grok.x.com/2/grok/add_response.json',
             {
                 method: 'POST',
                 body: JSON.stringify({
-                    variables: {
-                        request: {
-                            message: 'Translate these segments exactly.',
-                        },
-                    },
+                    responses: [{ message: 'Translate these segments exactly.', sender: 1 }],
                 }),
             },
         ] as unknown as Parameters<typeof fetch>;
@@ -25,18 +21,14 @@ describe('bootstrap lifecycle prompt hints', () => {
         expect(extractGrokPromptHintFromFetchArgs(args)).toBe('Translate these segments exactly.');
     });
 
-    it('should ignore GraphQL operation documents and prefer variables message text', () => {
+    it('should prefer responses message text over promptMetadata', () => {
         const args = [
-            'https://x.com/i/api/graphql/vvC5uy7pWWHXS2aDi1FZeA/CreateGrokConversation',
+            'https://grok.x.com/2/grok/add_response.json',
             {
                 method: 'POST',
                 body: JSON.stringify({
-                    query: 'mutation CreateGrokConversation { create_grok_conversation { id } }',
-                    variables: {
-                        request: {
-                            message: 'Actual user prompt text',
-                        },
-                    },
+                    responses: [{ message: 'Actual user prompt text', sender: 1 }],
+                    promptMetadata: { promptSource: 'NATURAL', action: 'INPUT' },
                 }),
             },
         ] as unknown as Parameters<typeof fetch>;
@@ -44,7 +36,7 @@ describe('bootstrap lifecycle prompt hints', () => {
         expect(extractGrokPromptHintFromFetchArgs(args)).toBe('Actual user prompt text');
     });
 
-    it('should cache prompt hint for Grok CreateGrokConversation requests', () => {
+    it('should cache prompt hint for Grok add_response requests', () => {
         const emitLifecycle = mock(() => {});
         const cachePromptHintForAttempt = mock(() => {});
         const log = mock(() => {});
@@ -52,21 +44,17 @@ describe('bootstrap lifecycle prompt hints', () => {
 
         const context = {
             args: [
-                'https://x.com/i/api/graphql/vvC5uy7pWWHXS2aDi1FZeA/CreateGrokConversation',
+                'https://grok.x.com/2/grok/add_response.json',
                 {
                     method: 'POST',
                     body: JSON.stringify({
-                        variables: {
-                            request: {
-                                message: 'Explain istijmar in detail',
-                            },
-                        },
+                        responses: [{ message: 'Explain istijmar in detail', sender: 1 }],
                     }),
                 },
             ] as unknown as Parameters<typeof fetch>,
-            outgoingUrl: 'https://x.com/i/api/graphql/vvC5uy7pWWHXS2aDi1FZeA/CreateGrokConversation',
+            outgoingUrl: 'https://grok.x.com/2/grok/add_response.json',
             outgoingMethod: 'POST',
-            outgoingPath: '/i/api/graphql/vvC5uy7pWWHXS2aDi1FZeA/CreateGrokConversation',
+            outgoingPath: '/2/grok/add_response.json',
             fetchApiAdapter: { name: 'Grok' },
             isNonChatGptApiRequest: true,
             shouldEmitNonChatLifecycle: true,
@@ -96,7 +84,7 @@ describe('bootstrap lifecycle prompt hints', () => {
         expect(emitLifecycle).toHaveBeenCalledWith('grok:attempt-1', 'streaming', undefined, 'Grok');
     });
 
-    it('should cache prompt hint even when CreateGrokConversation is unmatched by adapter', async () => {
+    it('should ignore CreateGrokConversation prompt-hint caching after x-grok removal', async () => {
         const cachePromptHintForAttempt = mock(() => {});
         const resolveAttemptIdForConversation = mock(() => 'grok:attempt-unmatched');
 
@@ -119,15 +107,15 @@ describe('bootstrap lifecycle prompt hints', () => {
             nonChatAttemptId: undefined,
         } as const;
 
-        await cachePromptHintFromGrokCreateConversationRequest(context, {
+        await cachePromptHintFromGrokRequest(context, {
             emitter: {
                 cachePromptHintForAttempt,
             } as any,
             resolveAttemptIdForConversation,
         });
 
-        expect(resolveAttemptIdForConversation).toHaveBeenCalledWith(undefined, 'Grok');
-        expect(cachePromptHintForAttempt).toHaveBeenCalledWith('grok:attempt-unmatched', 'What is a hadith?');
+        expect(resolveAttemptIdForConversation).not.toHaveBeenCalled();
+        expect(cachePromptHintForAttempt).not.toHaveBeenCalled();
     });
 
     it('should cache prompt hint for add_response request payloads', async () => {
@@ -142,7 +130,7 @@ describe('bootstrap lifecycle prompt hints', () => {
             }),
         });
 
-        await cachePromptHintFromGrokCreateConversationRequest(
+        await cachePromptHintFromGrokRequest(
             {
                 args: [request] as unknown as Parameters<typeof fetch>,
                 outgoingMethod: 'POST',
@@ -159,16 +147,11 @@ describe('bootstrap lifecycle prompt hints', () => {
         expect(cachePromptHintForAttempt).toHaveBeenCalledWith('grok:attempt-add-response', 'What is a hadith');
     });
 
-    it('should resolve prompt hint from Request body when init body is absent', async () => {
-        const request = new Request('https://x.com/i/api/graphql/vvC5uy7pWWHXS2aDi1FZeA/CreateGrokConversation', {
+    it('should resolve prompt hint from add_response request body when init body is absent', async () => {
+        const request = new Request('https://grok.x.com/2/grok/add_response.json', {
             method: 'POST',
             body: JSON.stringify({
-                query: 'mutation CreateGrokConversation { create_grok_conversation { id } }',
-                variables: {
-                    request: {
-                        message: 'What is a hadith?',
-                    },
-                },
+                responses: [{ message: 'What is a hadith?', sender: 1 }],
             }),
         });
 

@@ -11,10 +11,9 @@ import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import type { RawCaptureSnapshot } from '@/utils/runner/calibration-capture';
-import { attachExportMeta, buildExportPayloadForFormat } from '@/utils/runner/export-helpers';
+import { attachExportMeta } from '@/utils/runner/export-helpers';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import { buildExportMetaForSave, confirmDegradedForceSave } from '@/utils/runner/save-export';
-import type { ExportFormat } from '@/utils/settings';
 import type { ExportMeta, PlatformReadiness, ReadinessDecision } from '@/utils/sfe/types';
 import {
     deriveConversationTitleFromFirstUserMessage,
@@ -29,7 +28,6 @@ export type SavePipelineDeps = {
     resolveReadinessDecision: (conversationId: string) => ReadinessDecision;
     shouldBlockActionsForGeneration: (conversationId: string) => boolean;
     getCaptureMeta: (conversationId: string) => ExportMeta;
-    getExportFormat: () => Promise<ExportFormat>;
     getStreamResolvedTitle: (conversationId: string) => string | null;
     evaluateReadinessForData: (data: ConversationData) => PlatformReadiness;
     markCanonicalCaptureMeta: (conversationId: string) => void;
@@ -173,11 +171,8 @@ export const getConversationData = async (
 const buildExportPayload = async (
     data: ConversationData,
     meta: ExportMeta,
-    deps: SavePipelineDeps,
 ): Promise<unknown> => {
-    const format = await deps.getExportFormat();
-    const adapter = deps.getAdapter();
-    return attachExportMeta(buildExportPayloadForFormat(data, format, adapter?.name ?? 'Unknown'), meta);
+    return attachExportMeta(data, meta);
 };
 
 export const saveConversation = async (
@@ -204,7 +199,7 @@ export const saveConversation = async (
         });
         const filename = adapter.formatFilename(data);
         const exportMeta = buildExportMetaForSave(data.conversation_id, options.allowDegraded, deps.getCaptureMeta);
-        const exportPayload = await buildExportPayload(data, exportMeta, deps);
+        const exportPayload = await buildExportPayload(data, exportMeta);
         downloadAsJSON(exportPayload, filename);
         logger.info(`Saved conversation: ${filename}.json`);
         if (options.allowDegraded === true) {

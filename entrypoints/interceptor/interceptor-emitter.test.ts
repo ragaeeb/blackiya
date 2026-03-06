@@ -41,7 +41,12 @@ describe('interceptor emitter prompt hints', () => {
         });
 
         emitter.cachePromptHintForAttempt('grok:attempt-1', 'Original user prompt');
-        emitter.emitCapturePayload('https://x.com/2/grok/add_response.json', '{"ok":true}', 'Grok', 'grok:attempt-1');
+        emitter.emitCapturePayload(
+            'https://grok.x.com/2/grok/add_response.json',
+            '{"ok":true}',
+            'Grok',
+            'grok:attempt-1',
+        );
 
         expect(logQueue).toHaveLength(0);
         expect(captureQueue).toHaveLength(1);

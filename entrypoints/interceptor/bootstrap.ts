@@ -2,7 +2,7 @@ import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/atte
 import {
     type BootstrapRequestLifecycleDeps,
     cacheGeminiPromptHintFromXhrBody as cacheGeminiPromptHintFromXhrBodyCore,
-    cachePromptHintFromGrokCreateConversationRequest as cachePromptHintFromGrokCreateConversationRequestCore,
+    cachePromptHintFromGrokRequest as cachePromptHintFromGrokRequestCore,
     emitFetchPromptLifecycle as emitFetchPromptLifecycleCore,
     emitXhrRequestLifecycle as emitXhrRequestLifecycleCore,
     maybeMonitorFetchStreams as maybeMonitorFetchStreamsCore,
@@ -28,7 +28,6 @@ import { createInterceptorEmitter, type InterceptorEmitterState } from '@/entryp
 import { ProactiveFetchRunner } from '@/entrypoints/interceptor/proactive-fetch-runner';
 import { cleanupDisposedAttemptState } from '@/entrypoints/interceptor/state';
 import type { StreamMonitorEmitter } from '@/entrypoints/interceptor/stream-monitors/stream-emitter';
-import { maybeCaptureXGrokGraphqlContext } from '@/entrypoints/interceptor/x-grok-graphql-context-store';
 import type { XhrInterceptionDeps } from '@/entrypoints/interceptor/xhr-interception';
 import { buildXhrLifecycleContext, type XhrLifecycleContext } from '@/entrypoints/interceptor/xhr-pipeline';
 import { notifyXhrOpen } from '@/entrypoints/interceptor/xhr-wrapper';
@@ -126,8 +125,8 @@ const shouldEmitNonChatLifecycleForRequest = (adapter: LLMPlatform, url: string)
 const emitFetchPromptLifecycle = (context: FetchInterceptorContext) =>
     emitFetchPromptLifecycleCore(context, buildRequestLifecycleDeps());
 
-const cachePromptHintFromGrokCreateConversationRequest = (context: FetchInterceptorContext) =>
-    cachePromptHintFromGrokCreateConversationRequestCore(context, buildRequestLifecycleDeps());
+const cachePromptHintFromGrokRequest = (context: FetchInterceptorContext) =>
+    cachePromptHintFromGrokRequestCore(context, buildRequestLifecycleDeps());
 
 const maybeMonitorFetchStreams = (context: FetchInterceptorContext, response: Response, emit: StreamMonitorEmitter) =>
     maybeMonitorFetchStreamsCore(context, response, emit, buildRequestLifecycleDeps());
@@ -208,10 +207,9 @@ export default defineContentScript({
                 resolveLifecycleConversationId,
                 safePathname,
             });
-            await cachePromptHintFromGrokCreateConversationRequest(context);
+            await cachePromptHintFromGrokRequest(context);
             emitFetchPromptLifecycle(context);
             await maybeCaptureGeminiContextFromFetchArgs(args, context.outgoingMethod, context.outgoingUrl);
-            maybeCaptureXGrokGraphqlContext(context.outgoingUrl);
 
             const response = await originalFetch(...args);
             maybeMonitorFetchStreams(context, response, streamMonitorEmitter);
@@ -287,7 +285,6 @@ export default defineContentScript({
             if (context.methodUpper === 'POST') {
                 maybeCaptureGeminiBatchexecuteContext(context.requestUrl, body);
             }
-            maybeCaptureXGrokGraphqlContext(context.requestUrl);
             emitXhrRequestLifecycle(xhr, context, streamMonitorEmitter);
             registerXhrLoadHandler(xhr, context.methodUpper, xhrInterceptionDeps);
             return originalSend.call(this, body);

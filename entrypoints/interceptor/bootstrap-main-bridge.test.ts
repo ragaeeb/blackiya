@@ -6,10 +6,6 @@ import {
     resetGeminiBatchexecuteContext,
 } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
 import {
-    maybeCaptureXGrokGraphqlContext,
-    resetXGrokGraphqlContext,
-} from '@/entrypoints/interceptor/x-grok-graphql-context-store';
-import {
     GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
     GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
 } from '@/utils/gemini-batchexecute-bridge';
@@ -17,10 +13,6 @@ import { PLATFORM_HEADERS_REQUEST_MESSAGE, PLATFORM_HEADERS_RESPONSE_MESSAGE } f
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
-import {
-    X_GROK_GRAPHQL_CONTEXT_REQUEST_MESSAGE,
-    X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE,
-} from '@/utils/x-grok-graphql-bridge';
 
 describe('bootstrap-main-bridge', () => {
     let windowInstance: Window;
@@ -33,7 +25,6 @@ describe('bootstrap-main-bridge', () => {
         setSessionToken('bk:test-main-bridge');
         platformHeaderStore.clear();
         resetGeminiBatchexecuteContext();
-        resetXGrokGraphqlContext();
     });
 
     afterEach(() => {
@@ -174,42 +165,6 @@ describe('bootstrap-main-bridge', () => {
             windowInstance.postMessage(
                 {
                     type: GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
-                    requestId,
-                    __blackiyaToken: getSessionToken(),
-                },
-                windowInstance.location.origin,
-            );
-        });
-    });
-
-    it('should respond to x-grok graphql context requests', () => {
-        maybeCaptureXGrokGraphqlContext(
-            'https://x.com/i/api/graphql/n2bhau0B2DSY6R_bLolgSg/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222029114150362702208%22%7D&features=%7B%22responsive_web_grok_annotations_enabled%22%3Atrue%7D',
-        );
-
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
-        });
-
-        return new Promise<void>((resolve) => {
-            const requestId = 'x-grok-context-1';
-            const onMessage = (event: MessageEvent) => {
-                const message = event.data as Record<string, unknown> | null;
-                if (message?.type !== X_GROK_GRAPHQL_CONTEXT_RESPONSE_MESSAGE || message.requestId !== requestId) {
-                    return;
-                }
-                windowInstance.removeEventListener('message', onMessage as any);
-                const context = message.context as Record<string, unknown> | undefined;
-                expect(context?.queryId).toBe('n2bhau0B2DSY6R_bLolgSg');
-                expect(context?.features).toBe('{"responsive_web_grok_annotations_enabled":true}');
-                resolve();
-            };
-
-            windowInstance.addEventListener('message', onMessage as any);
-            windowInstance.postMessage(
-                {
-                    type: X_GROK_GRAPHQL_CONTEXT_REQUEST_MESSAGE,
                     requestId,
                     __blackiyaToken: getSessionToken(),
                 },
