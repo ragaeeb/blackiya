@@ -8,14 +8,10 @@ import { type LogLevel, logger } from '@/utils/logger';
 import { logsStorage } from '@/utils/logs-storage';
 import { downloadMinimalDebugReport } from '@/utils/minimal-logs';
 import { BULK_EXPORT_CHATS_MESSAGE, type BulkExportChatsResponse } from '@/utils/runner/bulk-chat-export-contract';
-import { getExportFormat } from '@/utils/runner/runtime/runtime-settings';
 import {
     DEFAULT_BULK_EXPORT_DELAY_MS,
     DEFAULT_BULK_EXPORT_LIMIT,
     DEFAULT_BULK_EXPORT_TIMEOUT_MS,
-    DEFAULT_EXPORT_FORMAT,
-    EXPORT_FORMAT,
-    type ExportFormat,
     STORAGE_KEYS,
 } from '@/utils/settings';
 
@@ -27,8 +23,7 @@ const App = () => {
     const buildFilenameTag = getBuildFilenameTag();
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
-    const [exportFormat, setExportFormat] = useState<ExportFormat>(DEFAULT_EXPORT_FORMAT);
-    const [bulkExportLimitInput, setBulkExportLimitInput] = useState<string>(String(DEFAULT_BULK_EXPORT_LIMIT));
+    const [bulkExportLimitInput, setBulkExportLimitInput] = useState<string>('');
     const [bulkExportInProgress, setBulkExportInProgress] = useState<boolean>(false);
     const [bulkExportStatus, setBulkExportStatus] = useState<string>('');
 
@@ -62,7 +57,8 @@ const App = () => {
                     setLogLevel(level);
                     logger.setLevel(level);
                 }
-                setBulkExportLimitInput(String(normalizeBulkExportLimitInput(result[STORAGE_KEYS.BULK_EXPORT_LIMIT])));
+                const normalizedLimit = normalizeBulkExportLimitInput(result[STORAGE_KEYS.BULK_EXPORT_LIMIT]);
+                setBulkExportLimitInput(normalizedLimit === DEFAULT_BULK_EXPORT_LIMIT ? '' : String(normalizedLimit));
             } catch (error) {
                 logger.warn('Failed to load popup settings from local storage', error);
             }
@@ -71,13 +67,6 @@ const App = () => {
                 await browser.storage.local.set({ [STORAGE_KEYS.STREAM_PROBE_VISIBLE]: false });
             } catch (error) {
                 logger.warn('Failed to disable legacy stream probe visibility setting', error);
-            }
-
-            try {
-                setExportFormat(await getExportFormat(DEFAULT_EXPORT_FORMAT));
-            } catch (error) {
-                logger.warn('Failed to resolve popup export format setting', error);
-                setExportFormat(DEFAULT_EXPORT_FORMAT);
             }
         };
         void loadSettings();
@@ -95,15 +84,6 @@ const App = () => {
         browser.storage.local.set({ [STORAGE_KEYS.LOG_LEVEL]: newLevel });
         logger.setLevel(newLevel);
         logger.info(`Log level changed to ${newLevel}`);
-    };
-
-    const handleExportFormatChange: JSX.GenericEventHandler<HTMLSelectElement> = (e) => {
-        const target = e.currentTarget as HTMLSelectElement | null;
-        const newFormat = (target?.value || DEFAULT_EXPORT_FORMAT) as ExportFormat;
-        const normalizedFormat = newFormat === EXPORT_FORMAT.COMMON ? EXPORT_FORMAT.COMMON : EXPORT_FORMAT.ORIGINAL;
-        setExportFormat(normalizedFormat);
-        browser.storage.local.set({ [STORAGE_KEYS.EXPORT_FORMAT]: normalizedFormat });
-        logger.info(`Export format changed to ${normalizedFormat}`);
     };
 
     const handleBulkExportLimitChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
@@ -161,7 +141,7 @@ const App = () => {
         }
 
         const options = resolveBulkExportOptions();
-        setBulkExportLimitInput(String(options.limit));
+        setBulkExportLimitInput(options.limit === DEFAULT_BULK_EXPORT_LIMIT ? '' : String(options.limit));
         await persistBulkExportSettings(options);
 
         setBulkExportInProgress(true);
@@ -233,6 +213,30 @@ const App = () => {
             </div>
 
             <div className="section">
+                <div className="section-heading">Export Chats</div>
+                <div className="split-row">
+                    <button
+                        type="button"
+                        className="primary split-row-button"
+                        onClick={handleBulkExportChats}
+                        disabled={bulkExportInProgress}
+                    >
+                        {bulkExportInProgress ? 'Exporting Chats...' : 'Export Chats'}
+                    </button>
+                    <input
+                        id="bulkExportLimit"
+                        type="number"
+                        min={0}
+                        value={bulkExportLimitInput}
+                        onChange={handleBulkExportLimitChange}
+                        placeholder="Max chats (0 = all)"
+                    />
+                </div>
+                {bulkExportStatus ? <div className="status-text">{bulkExportStatus}</div> : null}
+            </div>
+
+            <div className="section">
+                <div className="section-heading">Logs</div>
                 <label htmlFor="logLevel">Log Level</label>
                 <select id="logLevel" value={logLevel} onChange={handleLevelChange}>
                     <option value="debug">Debug</option>
@@ -240,52 +244,19 @@ const App = () => {
                     <option value="warn">Warn</option>
                     <option value="error">Error</option>
                 </select>
-                <div style={{ fontSize: '12px', color: '#666' }}>Current Logs: {logCount} entries</div>
-            </div>
-
-            <div className="section">
-                <label htmlFor="exportFormat">Export Format</label>
-                <select id="exportFormat" value={exportFormat} onChange={handleExportFormatChange}>
-                    <option value={EXPORT_FORMAT.ORIGINAL}>Original (Raw JSON)</option>
-                    <option value={EXPORT_FORMAT.COMMON}>Common (Normalized)</option>
-                </select>
-                <div style={{ fontSize: '12px', color: '#666' }}>
-                    Applies to Save actions in supported chat platforms.
+                <div className="section-meta">Current Logs: {logCount} entries</div>
+                <div className="button-row compact-button-row">
+                    <button type="button" className="primary compact-button" onClick={handleExport}>
+                        Full
+                    </button>
+                    <button type="button" className="primary compact-button" onClick={handleDebugExport}>
+                        Debug
+                    </button>
+                    <button type="button" className="secondary compact-button" onClick={handleClear}>
+                        Clear
+                    </button>
                 </div>
             </div>
-
-            <div className="section">
-                <div className="section-heading">Export Chats</div>
-                <label htmlFor="bulkExportLimit">Max chats (0 = all)</label>
-                <input
-                    id="bulkExportLimit"
-                    type="number"
-                    min={0}
-                    value={bulkExportLimitInput}
-                    onChange={handleBulkExportLimitChange}
-                />
-                <button
-                    type="button"
-                    className="primary"
-                    onClick={handleBulkExportChats}
-                    disabled={bulkExportInProgress}
-                >
-                    {bulkExportInProgress ? 'Exporting Chats...' : 'Export Chats'}
-                </button>
-                {bulkExportStatus ? <div className="status-text">{bulkExportStatus}</div> : null}
-            </div>
-
-            <button type="button" className="primary" onClick={handleExport}>
-                Export Full Logs (JSON)
-            </button>
-
-            <button type="button" className="primary" onClick={handleDebugExport}>
-                Export Debug Report (TXT)
-            </button>
-
-            <button type="button" className="secondary" onClick={handleClear}>
-                Clear Logs
-            </button>
 
             <div className="about">
                 <p>Blackiya v{manifest.version}</p>

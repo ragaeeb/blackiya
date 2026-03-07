@@ -10,7 +10,7 @@ import { grokState } from './state';
 import {
     extractGrokComConversationIdFromUrl,
     GROK_COM_CONVERSATION_ID_PATTERN,
-    X_CONVERSATION_ID_PATTERN,
+    GROK_STREAM_CONVERSATION_ID_PATTERN,
 } from './url-utils';
 
 export const parseGrokNdjsonLines = (lines: string[]): any[] => {
@@ -27,7 +27,7 @@ export const parseGrokNdjsonLines = (lines: string[]): any[] => {
 
 const hasSupportedConversationIdShape = (value: unknown): value is string =>
     typeof value === 'string' &&
-    (GROK_COM_CONVERSATION_ID_PATTERN.test(value) || X_CONVERSATION_ID_PATTERN.test(value));
+    (GROK_COM_CONVERSATION_ID_PATTERN.test(value) || GROK_STREAM_CONVERSATION_ID_PATTERN.test(value));
 
 const extractConversationIdFromParsedLine = (parsed: any): string | null => {
     const direct = parsed?.conversationId;

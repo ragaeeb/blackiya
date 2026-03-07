@@ -111,7 +111,6 @@ blackiya/
 │   │   ├── export-pipeline.ts
 │   │   ├── readiness.ts
 │   │   └── state.ts
-│   ├── external-api/          # Extension-to-extension API contracts + hub
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities
@@ -169,7 +168,9 @@ The extension requires the following permissions:
 - `https://chatgpt.com/*` - ChatGPT platform
 - `https://chat.openai.com/*` - Legacy ChatGPT platform
 - `https://gemini.google.com/*` - Gemini platform
-- `https://x.com/i/grok*` - Grok platform
+- `https://grok.com/*` - Grok platform
+
+`https://grok.x.com/*` is intentionally not listed. Grok streaming requests to `grok.x.com` are initiated by page JavaScript while you are on `grok.com`, and the MAIN-world interceptor captures those cross-origin fetch/XHR calls from the `grok.com` page context.
 
 ### External Extension API
 

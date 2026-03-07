@@ -216,7 +216,7 @@ describe('Grok Adapter — NDJSON streaming parsing', () => {
         });
     });
 
-    describe('x.com add_response.json (V2.1-027)', () => {
+    describe('grok.x.com add_response.json (V2.1-027)', () => {
         it('should parse add_response NDJSON for x.com numeric IDs and preserve thinking text', () => {
             const conversationId = '2023309163200168014';
             const ndjsonPayload = [
@@ -271,7 +271,10 @@ describe('Grok Adapter — NDJSON streaming parsing', () => {
                 }),
             ].join('\n');
 
-            const result = grokAdapter.parseInterceptedData(ndjsonPayload, 'https://x.com/2/grok/add_response.json');
+            const result = grokAdapter.parseInterceptedData(
+                ndjsonPayload,
+                'https://grok.x.com/2/grok/add_response.json',
+            );
             expect(result).not.toBeNull();
             expect(result?.conversation_id).toBe(conversationId);
             expect(result?.current_node).toBe('2023309164601069569');
@@ -288,12 +291,6 @@ describe('Grok Adapter — NDJSON streaming parsing', () => {
         });
 
         it('should match add_response.json in both apiEndpointPattern and completionTriggerPattern', () => {
-            const url = 'https://x.com/2/grok/add_response.json';
-            expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(grokAdapter.completionTriggerPattern.test(url)).toBeTrue();
-        });
-
-        it('should match grok.x.com add_response.json in both apiEndpointPattern and completionTriggerPattern', () => {
             const url = 'https://grok.x.com/2/grok/add_response.json';
             expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
             expect(grokAdapter.completionTriggerPattern.test(url)).toBeTrue();

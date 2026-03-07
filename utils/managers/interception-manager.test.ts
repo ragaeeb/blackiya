@@ -176,6 +176,62 @@ describe('InterceptionManager', () => {
         expect(parseMissWarned).toBeTrue();
     });
 
+    it('should downgrade grok.x.com add_response parse misses to metadata-only debug logs', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.updateAdapter({
+            name: 'Grok',
+            parseInterceptedData: () => null,
+        } as any);
+
+        manager.ingestInterceptedData({
+            url: 'https://grok.x.com/2/grok/add_response.json',
+            data: '{"ok":true}',
+            platform: 'Grok',
+        } as any);
+
+        const parseMissWarned = loggerSpies.warn.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Failed to parse conversation ID from intercepted data',
+        );
+        expect(parseMissWarned).toBeFalse();
+
+        const metadataLogged = loggerSpies.debug.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Metadata-only response (no messages yet)',
+        );
+        expect(metadataLogged).toBeTrue();
+    });
+
+    it('should downgrade grok load-responses parse misses to metadata-only debug logs', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.updateAdapter({
+            name: 'Grok',
+            parseInterceptedData: () => null,
+        } as any);
+
+        manager.ingestInterceptedData({
+            url: 'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
+            data: '{"ok":true}',
+            platform: 'Grok',
+        } as any);
+
+        const parseMissWarned = loggerSpies.warn.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Failed to parse conversation ID from intercepted data',
+        );
+        expect(parseMissWarned).toBeFalse();
+
+        const metadataLogged = loggerSpies.debug.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Metadata-only response (no messages yet)',
+        );
+        expect(metadataLogged).toBeTrue();
+    });
+
     it('should backfill a missing Grok user prompt node from prompt hint metadata', () => {
         const captured: Array<{ id: string; data: any }> = [];
         const manager = new InterceptionManager(
@@ -244,7 +300,7 @@ describe('InterceptionManager', () => {
         } as any);
 
         manager.ingestInterceptedData({
-            url: 'https://x.com/2/grok/add_response.json',
+            url: 'https://grok.x.com/2/grok/add_response.json',
             data: '{"ok":true}',
             platform: 'Grok',
             promptHint: 'What is the ruling on this issue?',

@@ -1,36 +1,9 @@
 import { browser } from 'wxt/browser';
 import { logger } from '@/utils/logger';
 import type { RawCaptureSnapshot } from '@/utils/runner/calibration-capture';
-import { EXPORT_FORMAT, type ExportFormat, STORAGE_KEYS } from '@/utils/settings';
+import { STORAGE_KEYS } from '@/utils/settings';
 import type { ReadinessDecision } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
-
-const LEGACY_EXPORT_FORMAT_KEY = 'exportFormat';
-
-const normalizeExportFormat = (value: unknown): ExportFormat | null => {
-    if (value === EXPORT_FORMAT.COMMON || value === EXPORT_FORMAT.ORIGINAL) {
-        return value;
-    }
-    return null;
-};
-
-export const getExportFormat = async (defaultFormat: ExportFormat): Promise<ExportFormat> => {
-    const readAreaFormats = async (area: 'local' | 'sync'): Promise<ExportFormat | null> => {
-        try {
-            const storageArea = area === 'local' ? browser.storage.local : browser.storage.sync;
-            const result = await storageArea.get([STORAGE_KEYS.EXPORT_FORMAT, LEGACY_EXPORT_FORMAT_KEY]);
-            return (
-                normalizeExportFormat(result[STORAGE_KEYS.EXPORT_FORMAT]) ??
-                normalizeExportFormat(result[LEGACY_EXPORT_FORMAT_KEY])
-            );
-        } catch (error) {
-            logger.warn(`Failed to read ${area} export format keys`, error);
-            return null;
-        }
-    };
-
-    return (await readAreaFormats('local')) ?? (await readAreaFormats('sync')) ?? defaultFormat;
-};
 
 export type StreamProbeVisibilitySettingDeps = {
     setStreamProbeVisible: (visible: boolean) => void;

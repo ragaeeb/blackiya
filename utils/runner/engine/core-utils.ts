@@ -2,11 +2,8 @@ import type { LLMPlatform } from '@/platforms/types';
 import { isConversationDataLike, isRawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import { buildIsolatedDomSnapshot } from '@/utils/runner/dom-snapshot';
 import type { EngineCtx } from '@/utils/runner/engine/types';
-import { buildExportPayloadForFormat as buildExportPayloadForFormatPure } from '@/utils/runner/export-helpers';
 import { detectPlatformGenerating } from '@/utils/runner/generation-guard';
 import { evaluateReadinessForData as evaluateReadinessForDataPure } from '@/utils/runner/readiness-evaluation';
-import { getExportFormat as getExportFormatCore } from '@/utils/runner/runtime/runtime-settings';
-import { DEFAULT_EXPORT_FORMAT, type ExportFormat } from '@/utils/settings';
 import type { ExportMeta, PlatformReadiness } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
 
@@ -86,8 +83,3 @@ export const shouldBlockActionsForGeneration = (ctx: EngineCtx, conversationId: 
     }
     return isPlatformGenerating(ctx.currentAdapter);
 };
-
-export const buildExportPayloadForFormat = (ctx: EngineCtx, data: ConversationData, format: ExportFormat): unknown =>
-    buildExportPayloadForFormatPure(data, format, ctx.currentAdapter?.name ?? 'Unknown');
-
-export const getExportFormat = (): Promise<ExportFormat> => getExportFormatCore(DEFAULT_EXPORT_FORMAT);

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import {
     createStorageChangeListener,
     createVisibilityChangeHandler,
-    getExportFormat,
     loadStreamProbeVisibilitySetting,
     scheduleButtonInjectionRetries,
 } from '@/utils/runner/runtime/runtime-settings';
@@ -25,101 +24,6 @@ mock.module('wxt/browser', () => ({
 }));
 
 describe('runtime-settings', () => {
-    describe('getExportFormat', () => {
-        it('should return default if value is missing or invalid', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
-            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
-            expect(await getExportFormat('common')).toBe('common');
-
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                [STORAGE_KEYS.EXPORT_FORMAT]: 'invalid',
-            }));
-            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
-            expect(await getExportFormat('original')).toBe('original');
-        });
-
-        it('should return value from storage if valid', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                [STORAGE_KEYS.EXPORT_FORMAT]: 'original',
-            }));
-            expect(await getExportFormat('common')).toBe('original');
-
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                [STORAGE_KEYS.EXPORT_FORMAT]: 'common',
-            }));
-            expect(await getExportFormat('original')).toBe('common');
-        });
-
-        it('should return default when storage read throws', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
-                throw new Error('storage failure');
-            });
-            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
-            expect(await getExportFormat('common')).toBe('common');
-        });
-
-        it('should continue fallbacks when local primary read throws and return sync value', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => {
-                throw new Error('local primary failure');
-            });
-            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                [STORAGE_KEYS.EXPORT_FORMAT]: 'original',
-            }));
-
-            expect(await getExportFormat('common')).toBe('original');
-        });
-
-        it('should fall back to legacy local key when primary key is missing', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                exportFormat: 'common',
-            }));
-
-            expect(await getExportFormat('original')).toBe('common');
-        });
-
-        it('should fall back to sync storage when local is missing', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
-            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                [STORAGE_KEYS.EXPORT_FORMAT]: 'common',
-            }));
-
-            expect(await getExportFormat('original')).toBe('common');
-        });
-
-        it('should fall back to legacy sync key when primary sync key is missing', async () => {
-            const { browser } = await import('wxt/browser');
-            (browser.storage.local.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({}));
-            (browser.storage.sync.get as ReturnType<typeof mock>).mockImplementationOnce(async () => ({
-                exportFormat: 'common',
-            }));
-
-            expect(await getExportFormat('original')).toBe('common');
-        });
-
-        it('should read each storage area once per getExportFormat call', async () => {
-            const { browser } = await import('wxt/browser');
-            const localGet = browser.storage.local.get as ReturnType<typeof mock>;
-            const syncGet = browser.storage.sync.get as ReturnType<typeof mock>;
-            const localCallCountBefore = localGet.mock.calls.length;
-            const syncCallCountBefore = syncGet.mock.calls.length;
-            localGet.mockImplementationOnce(async () => ({}));
-            syncGet.mockImplementationOnce(async () => ({}));
-
-            await getExportFormat('original');
-
-            expect(localGet.mock.calls.length - localCallCountBefore).toBe(1);
-            expect(syncGet.mock.calls.length - syncCallCountBefore).toBe(1);
-            expect(localGet.mock.calls.at(-1)).toEqual([[STORAGE_KEYS.EXPORT_FORMAT, 'exportFormat']]);
-            expect(syncGet.mock.calls.at(-1)).toEqual([[STORAGE_KEYS.EXPORT_FORMAT, 'exportFormat']]);
-        });
-    });
-
     describe('createStorageChangeListener', () => {
         it('should handle property changes for local storage', () => {
             const deps = {

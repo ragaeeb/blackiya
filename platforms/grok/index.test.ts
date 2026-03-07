@@ -10,9 +10,6 @@ mock.module('@/utils/logger', () => ({
     logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 }));
 
-import sampleConversation from '@/data/grok/sample_grok_conversation.json';
-import sampleHistory from '@/data/grok/sample_grok_history.json';
-
 const withMockDom = (
     href: string,
     body: HTMLElement,
@@ -54,73 +51,34 @@ beforeEach(() => {
 describe('Grok Adapter — URL handling', () => {
     describe('isPlatformUrl', () => {
         it('should recognize valid Grok URLs', () => {
-            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok?conversation=123')).toBeTrue();
-            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok')).toBeTrue();
             expect(grokAdapter.isPlatformUrl('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBeTrue();
             expect(grokAdapter.isPlatformUrl('https://grok.com/')).toBeTrue();
         });
 
         it('should reject non-Grok URLs', () => {
             expect(grokAdapter.isPlatformUrl('https://x.com/home')).toBeFalse();
+            expect(grokAdapter.isPlatformUrl('https://x.com/i/grok?conversation=123')).toBeFalse();
             expect(grokAdapter.isPlatformUrl('https://chatgpt.com')).toBeFalse();
         });
     });
 
     describe('extractConversationId', () => {
-        it('should extract ID from x.com Grok URL', () => {
-            expect(grokAdapter.extractConversationId('https://x.com/i/grok?conversation=2013295304527827227')).toBe(
-                '2013295304527827227',
-            );
-        });
-
         it('should extract ID from grok.com URL', () => {
             expect(
                 grokAdapter.extractConversationId('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29?rid=abc'),
             ).toBe('01cb0729-6455-471d-b33a-124b3de76a29');
         });
 
-        it('should extract ID with additional query params', () => {
-            expect(
-                grokAdapter.extractConversationId('https://x.com/i/grok?conversation=2013295304527827227&mode=normal'),
-            ).toBe('2013295304527827227');
-        });
-
-        it('should handle minimum-length numeric IDs', () => {
-            expect(grokAdapter.extractConversationId('https://x.com/i/grok?conversation=1234567890')).toBe(
-                '1234567890',
-            );
-        });
-
-        it('should return null for missing conversation param', () => {
-            expect(grokAdapter.extractConversationId('https://x.com/i/grok')).toBeNull();
-        });
-
         it('should return null for invalid ID format', () => {
-            expect(grokAdapter.extractConversationId('https://x.com/i/grok?conversation=invalid-id')).toBeNull();
+            expect(grokAdapter.extractConversationId('https://grok.com/c/not-a-valid-id')).toBeNull();
         });
 
-        it('should return null for too-long numeric ID (> 20 digits)', () => {
-            expect(
-                grokAdapter.extractConversationId('https://x.com/i/grok?conversation=20132953045278272271234567890'),
-            ).toBeNull();
-        });
-
-        it('should return null for non-x.com domain', () => {
-            expect(grokAdapter.extractConversationId('https://twitter.com/i/grok?conversation=123456789')).toBeNull();
-        });
-
-        it('should return null for non-Grok path', () => {
-            expect(grokAdapter.extractConversationId('https://x.com/home')).toBeNull();
+        it('should return null for x.com Grok URLs', () => {
+            expect(grokAdapter.extractConversationId('https://x.com/i/grok?conversation=2013295304527827227')).toBeNull();
         });
     });
 
     describe('extractConversationIdFromUrl', () => {
-        it('should extract x.com restId from GraphQL variables', () => {
-            const variables = JSON.stringify({ restId: '2013295304527827227' });
-            const url = `https://x.com/i/api/graphql/6QmFg/GrokConversationItemsByRestId?variables=${encodeURIComponent(variables)}`;
-            expect(grokAdapter.extractConversationIdFromUrl(url)).toBe('2013295304527827227');
-        });
-
         it('should extract grok.com UUID from REST URLs', () => {
             expect(
                 grokAdapter.extractConversationIdFromUrl(
@@ -138,28 +96,10 @@ describe('Grok Adapter — URL handling', () => {
             expect(urls[0]).toContain(`/conversations_v2/${id}`);
             expect(urls[1]).toContain(`/conversations/${id}/response-node`);
         });
-
-        it('should not provide grok.com fetch candidates for x.com numeric IDs', () => {
-            expect(grokAdapter.buildApiUrls?.('2013295304527827227') ?? []).toEqual([]);
-        });
     });
 });
 
 describe('Grok Adapter — API pattern matching', () => {
-    it('should match GrokConversationItemsByRestId GraphQL endpoint', () => {
-        expect(
-            grokAdapter.apiEndpointPattern.test(
-                'https://x.com/i/api/graphql/6QmFg/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222013295304527827227%22%7D',
-            ),
-        ).toBeTrue();
-    });
-
-    it('should match GrokHistory endpoint', () => {
-        expect(
-            grokAdapter.apiEndpointPattern.test('https://x.com/i/api/graphql/9Hyh5D4/GrokHistory?variables=%7B%7D'),
-        ).toBeTrue();
-    });
-
     it('should match grok.com conversation endpoints', () => {
         const { apiEndpointPattern } = grokAdapter;
         expect(
@@ -179,8 +119,8 @@ describe('Grok Adapter — API pattern matching', () => {
         ).toBeTrue();
     });
 
-    it('should match x.com add_response.json streaming endpoint', () => {
-        expect(grokAdapter.apiEndpointPattern.test('https://x.com/2/grok/add_response.json')).toBeTrue();
+    it('should match grok.x.com add_response.json streaming endpoint', () => {
+        expect(grokAdapter.apiEndpointPattern.test('https://grok.x.com/2/grok/add_response.json')).toBeTrue();
     });
 
     it('should match grok.com conversations/new endpoint', () => {
@@ -194,8 +134,9 @@ describe('Grok Adapter — API pattern matching', () => {
         expect(grokAdapter.completionTriggerPattern.test(url)).toBeFalse();
     });
 
-    it('should match completion trigger for add_response.json', () => {
-        expect(grokAdapter.completionTriggerPattern.test('https://x.com/2/grok/add_response.json')).toBeTrue();
+    it('should match completion trigger for grok.x.com add_response.json', () => {
+        expect(grokAdapter.completionTriggerPattern.test('https://grok.x.com/2/grok/add_response.json')).toBeTrue();
+        expect(grokAdapter.completionTriggerPattern.test('https://x.com/2/grok/add_response.json')).toBeFalse();
     });
 
     it('should match completion trigger for conversations/new', () => {
@@ -209,7 +150,7 @@ describe('Grok Adapter — API pattern matching', () => {
     });
 
     it('should NOT match plain Grok page URLs', () => {
-        expect(grokAdapter.apiEndpointPattern.test('https://x.com/i/grok?conversation=123')).toBeFalse();
+        expect(grokAdapter.apiEndpointPattern.test('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBeFalse();
     });
 
     it('conversations_v2 matches apiEndpointPattern but NOT completionTriggerPattern', () => {
@@ -218,60 +159,16 @@ describe('Grok Adapter — API pattern matching', () => {
         expect(grokAdapter.completionTriggerPattern?.test(url)).toBeFalse();
     });
 
-    it('GrokHistory does not match completionTriggerPattern', () => {
-        expect(
-            grokAdapter.completionTriggerPattern.test(
-                'https://x.com/i/api/graphql/9Hyh5D4/GrokHistory?variables=%7B%7D',
-            ),
-        ).toBeFalse();
-    });
-
-    it('completion trigger should match x.com and grok.com response endpoints', () => {
+    it('completion trigger should match grok.x.com and grok.com response endpoints', () => {
         const { completionTriggerPattern } = grokAdapter;
         expect(
-            completionTriggerPattern.test(
-                'https://x.com/i/api/graphql/6QmFg/GrokConversationItemsByRestId?variables=%7B%22restId%22%3A%222013295304527827227%22%7D',
-            ),
+            completionTriggerPattern.test('https://grok.x.com/2/grok/add_response.json'),
         ).toBeTrue();
         expect(
             completionTriggerPattern.test(
                 'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
             ),
         ).toBeTrue();
-    });
-});
-
-describe('Grok Adapter — title caching (GrokHistory)', () => {
-    it('should parse GrokHistory and cache titles without returning ConversationData', () => {
-        const historyResult = grokAdapter.parseInterceptedData(
-            JSON.stringify(sampleHistory),
-            'https://x.com/i/api/graphql/test/GrokHistory',
-        );
-        expect(historyResult).toBeNull();
-
-        // Subsequent conversation parse should pick up the cached title
-        const conversationResult = grokAdapter.parseInterceptedData(
-            JSON.stringify(sampleConversation),
-            'https://x.com/i/api/graphql/test/GrokConversationItemsByRestId',
-        );
-        expect(conversationResult).not.toBeNull();
-        expect(conversationResult?.title).toBeDefined();
-    });
-
-    it('should handle GrokHistory as raw string', () => {
-        const result = grokAdapter.parseInterceptedData(
-            JSON.stringify(sampleHistory),
-            'https://x.com/i/api/graphql/test/GrokHistory',
-        );
-        expect(result).toBeNull();
-    });
-
-    it('should handle invalid GrokHistory gracefully', () => {
-        const result = grokAdapter.parseInterceptedData(
-            JSON.stringify({ data: { invalid: 'structure' } }),
-            'https://x.com/i/api/graphql/test/GrokHistory',
-        );
-        expect(result).toBeNull();
     });
 });
 
@@ -336,7 +233,6 @@ describe('Grok Adapter — extractTitleFromDom', () => {
     it('should have the expected defaultTitles', () => {
         expect(grokAdapter.defaultTitles).toContain('New conversation');
         expect(grokAdapter.defaultTitles).toContain('Grok Conversation');
-        expect(grokAdapter.defaultTitles).toContain('Grok / X');
     });
 
     it('should strip "- Grok" suffix', () => {
@@ -357,12 +253,6 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         });
     });
 
-    it('should return null for generic "Grok / X" page title', () => {
-        withDocTitle('Grok / X', () => {
-            expect(grokAdapter.extractTitleFromDom()).toBeNull();
-        });
-    });
-
     it('should return null for empty document title', () => {
         withDocTitle('', () => {
             expect(grokAdapter.extractTitleFromDom()).toBeNull();
@@ -375,14 +265,14 @@ describe('Grok Adapter — extractTitleFromDom', () => {
         });
     });
 
-    it('should resolve title from x.com active conversation DOM when page title is generic', () => {
-        const activeConversationTitle = { textContent: 'Classical Islamic Text Translation Guidelines' } as Element;
+    it('should resolve title from grok header DOM when page title is generic', () => {
+        const headerTitle = { textContent: 'Classical Islamic Text Translation Guidelines' } as Element;
         withDoc(
             {
-                title: 'Grok / X',
+                title: 'Grok',
                 querySelector: (selector: string) =>
-                    selector === '[aria-current="page"][href*="/i/grok?conversation="] [dir="ltr"]'
-                        ? activeConversationTitle
+                    selector === '[data-testid="grok-header"] h1'
+                        ? headerTitle
                         : null,
             },
             () => {
@@ -393,17 +283,17 @@ describe('Grok Adapter — extractTitleFromDom', () => {
 });
 
 describe('Grok Adapter — getButtonInjectionTarget', () => {
-    it('should force body injection for x.com Grok conversation pages', () => {
+    it('should resolve selector-based injection target on grok.com pages', () => {
         const body = {} as HTMLElement;
         const bannerParent = {} as HTMLElement;
         const banner = { parentElement: bannerParent } as HTMLElement;
 
         withMockDom(
-            'https://x.com/i/grok?conversation=2024522069224943757',
+            'https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29',
             body,
             () => banner,
             () => {
-                expect(grokAdapter.getButtonInjectionTarget()).toBe(body);
+                expect(grokAdapter.getButtonInjectionTarget()).toBe(bannerParent);
             },
         );
     });

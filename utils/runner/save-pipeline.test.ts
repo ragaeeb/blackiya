@@ -31,7 +31,6 @@ describe('save-pipeline', () => {
             resolveReadinessDecision: mock(() => ({ mode: 'canonical_ready', reason: null }) as any),
             shouldBlockActionsForGeneration: mock(() => false),
             getCaptureMeta: mock(() => ({}) as any),
-            getExportFormat: mock(() => Promise.resolve('common' as any)),
             getStreamResolvedTitle: mock(() => null),
             evaluateReadinessForData: mock(() => ({ ready: true }) as any),
             markCanonicalCaptureMeta: mock(() => {}),

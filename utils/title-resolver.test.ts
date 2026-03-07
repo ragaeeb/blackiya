@@ -85,7 +85,6 @@ describe('title-resolver', () => {
         expect(isGenericConversationTitle('You said: hello')).toBeTrue();
         expect(isGenericConversationTitle('Chats')).toBeTrue();
         expect(isGenericConversationTitle('New chat')).toBeTrue();
-        expect(isGenericConversationTitle('Grok / X')).toBeTrue();
         expect(isGenericConversationTitle('Specific conversation title')).toBeFalse();
     });
 

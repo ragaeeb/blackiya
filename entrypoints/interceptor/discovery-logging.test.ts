@@ -70,10 +70,10 @@ describe('discovery endpoint miss diagnostics', () => {
         const log = mock(() => {});
         const shouldLogTransient = mock(() => true);
 
-        withHostname('x.com', () => {
+        withHostname('grok.com', () => {
             logAdapterEndpointMiss(
                 'xhr',
-                'https://x.com/i/api/graphql/abc123/UnknownOperation?variables=%7B%7D',
+                'https://grok.x.com/2/grok/unknown.json',
                 { method: 'POST', status: 200 },
                 log,
                 shouldLogTransient,
@@ -84,7 +84,7 @@ describe('discovery endpoint miss diagnostics', () => {
             'info',
             'Grok endpoint unmatched by adapter',
             expect.objectContaining({
-                path: '/i/api/graphql/abc123/UnknownOperation',
+                path: '/2/grok/unknown.json',
                 method: 'POST',
                 status: 200,
             }),
