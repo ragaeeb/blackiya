@@ -662,9 +662,12 @@ export class InterceptionManager {
 
         const isExpectedAuxMiss =
             isGeminiAuxMiss ||
+            url.includes('grok.x.com/2/grok/add_response.json') ||
             url.includes('/rest/app-chat/conversations_v2/') ||
             url.includes('/rest/app-chat/conversations/new') ||
-            (url.includes('/rest/app-chat/conversations/') && url.includes('/response-node'));
+            url.includes('/rest/app-chat/conversations/reconnect-response-v2/') ||
+            (url.includes('/rest/app-chat/conversations/') &&
+                (url.includes('/response-node') || url.includes('/load-responses')));
 
         return isExpectedAuxMiss ? 'info' : 'warn';
     }
