@@ -20,10 +20,7 @@ import {
     GROK_SELECTOR_REGISTRY,
     resolveGrokButtonInjectionTarget,
 } from './registry';
-import {
-    extractGrokComConversationIdFromUrl,
-    GROK_COM_CONVERSATION_ID_PATTERN,
-} from './url-utils';
+import { extractGrokComConversationIdFromUrl, GROK_COM_CONVERSATION_ID_PATTERN } from './url-utils';
 
 export { GrokAdapterState, grokState, resetGrokAdapterState } from './state';
 

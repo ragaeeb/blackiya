@@ -74,7 +74,9 @@ describe('Grok Adapter — URL handling', () => {
         });
 
         it('should return null for x.com Grok URLs', () => {
-            expect(grokAdapter.extractConversationId('https://x.com/i/grok?conversation=2013295304527827227')).toBeNull();
+            expect(
+                grokAdapter.extractConversationId('https://x.com/i/grok?conversation=2013295304527827227'),
+            ).toBeNull();
         });
     });
 
@@ -150,7 +152,9 @@ describe('Grok Adapter — API pattern matching', () => {
     });
 
     it('should NOT match plain Grok page URLs', () => {
-        expect(grokAdapter.apiEndpointPattern.test('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBeFalse();
+        expect(
+            grokAdapter.apiEndpointPattern.test('https://grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29'),
+        ).toBeFalse();
     });
 
     it('conversations_v2 matches apiEndpointPattern but NOT completionTriggerPattern', () => {
@@ -161,9 +165,7 @@ describe('Grok Adapter — API pattern matching', () => {
 
     it('completion trigger should match grok.x.com and grok.com response endpoints', () => {
         const { completionTriggerPattern } = grokAdapter;
-        expect(
-            completionTriggerPattern.test('https://grok.x.com/2/grok/add_response.json'),
-        ).toBeTrue();
+        expect(completionTriggerPattern.test('https://grok.x.com/2/grok/add_response.json')).toBeTrue();
         expect(
             completionTriggerPattern.test(
                 'https://grok.com/rest/app-chat/conversations/01cb0729-6455-471d-b33a-124b3de76a29/load-responses',
@@ -271,9 +273,7 @@ describe('Grok Adapter — extractTitleFromDom', () => {
             {
                 title: 'Grok',
                 querySelector: (selector: string) =>
-                    selector === '[data-testid="grok-header"] h1'
-                        ? headerTitle
-                        : null,
+                    selector === '[data-testid="grok-header"] h1' ? headerTitle : null,
             },
             () => {
                 expect(grokAdapter.extractTitleFromDom()).toBe('Classical Islamic Text Translation Guidelines');

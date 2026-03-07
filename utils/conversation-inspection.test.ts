@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-    extractAllAssistantText,
-    extractLatestTurnPromptAndResponse,
-} from '@/utils/conversation-inspection';
+import { extractAllAssistantText, extractLatestTurnPromptAndResponse } from '@/utils/conversation-inspection';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 const buildMessage = (
@@ -25,7 +22,12 @@ const buildMessage = (
     channel: null,
 });
 
-const buildNode = (id: string, message: Message | null, parent: string | null, children: string[] = []): MessageNode => ({
+const buildNode = (
+    id: string,
+    message: Message | null,
+    parent: string | null,
+    children: string[] = [],
+): MessageNode => ({
     id,
     message,
     parent,

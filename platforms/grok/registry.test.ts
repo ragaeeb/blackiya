@@ -11,9 +11,7 @@ import {
 describe('grok registry', () => {
     it('should expose endpoint patterns matching grok.x.com streaming and grok.com REST URLs', () => {
         expect(
-            GROK_ENDPOINT_REGISTRY.apiEndpointPattern.test(
-                'https://grok.x.com/2/grok/add_response.json',
-            ),
+            GROK_ENDPOINT_REGISTRY.apiEndpointPattern.test('https://grok.x.com/2/grok/add_response.json'),
         ).toBeTrue();
         expect(
             GROK_ENDPOINT_REGISTRY.apiEndpointPattern.test(

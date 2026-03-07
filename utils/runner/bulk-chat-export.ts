@@ -410,7 +410,8 @@ const requestWithTimeout = async (
         signal,
     });
 
-const shouldRetryRateLimit = (response: Response, attempt: number) => response.status === 429 && attempt < MAX_429_RETRIES;
+const shouldRetryRateLimit = (response: Response, attempt: number) =>
+    response.status === 429 && attempt < MAX_429_RETRIES;
 
 const buildFailedFetchResult = (status: number, message: string): FetchTextResult => ({
     ok: false,
