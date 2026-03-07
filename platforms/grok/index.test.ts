@@ -134,8 +134,9 @@ describe('Grok Adapter — API pattern matching', () => {
         expect(grokAdapter.completionTriggerPattern.test(url)).toBeFalse();
     });
 
-    it('should match completion trigger for add_response.json', () => {
-        expect(grokAdapter.completionTriggerPattern.test('https://x.com/2/grok/add_response.json')).toBeTrue();
+    it('should match completion trigger for grok.x.com add_response.json', () => {
+        expect(grokAdapter.completionTriggerPattern.test('https://grok.x.com/2/grok/add_response.json')).toBeTrue();
+        expect(grokAdapter.completionTriggerPattern.test('https://x.com/2/grok/add_response.json')).toBeFalse();
     });
 
     it('should match completion trigger for conversations/new', () => {

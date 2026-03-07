@@ -3,27 +3,21 @@ import { logger } from '@/utils/logger';
 const BUTTON_TARGET_MISS_LOG_INTERVAL_MS = 8_000;
 let lastButtonTargetMissAt = 0;
 
-const getNormalizedPath = (url: string) => {
-    try {
-        return new URL(url).pathname.toLowerCase();
-    } catch {
-        return url.toLowerCase();
-    }
-};
-
 export const GROK_ENDPOINT_REGISTRY = {
     apiEndpointPattern:
-        /\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/(?:new|reconnect-response-v2\/[^/?#]+|[^/]+(?:\/(response-node|load-responses))?)/i,
+        /grok\.x\.com\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations(_v2)?\/(?:new|reconnect-response-v2\/[^/?#]+|[^/]+(?:\/(response-node|load-responses))?)/i,
     completionTriggerPattern:
-        /\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/i,
+        /grok\.x\.com\/2\/grok\/add_response\.json|grok\.com\/rest\/app-chat\/conversations\/(new|[^/]+\/(response-node|load-responses))/i,
 } as const;
 
 export const GROK_PATH_REGISTRY = {
-    generationMarkers: ['/rest/app-chat/conversations/new', '/2/grok/add_response.json'],
+    generationMarkers: ['/rest/app-chat/conversations/new'],
+    streamingGenerationMarker: '/2/grok/add_response.json',
     reconnectMarker: '/rest/app-chat/conversations/reconnect-response-v2/',
     completionMarkers: ['/load-responses', '/response-node'],
     completionBaseMarker: '/rest/app-chat/conversations/',
-    apiHintMarkers: ['/rest/app-chat/', '/2/grok/'],
+    apiHintMarkers: ['/rest/app-chat/'],
+    streamingApiHintMarker: '/2/grok/',
 } as const;
 
 export const GROK_SELECTOR_REGISTRY = {
@@ -63,16 +57,42 @@ export const resolveGrokButtonInjectionTarget = (
 export const isGrokGenerationEndpointPath = (path: string): boolean =>
     GROK_PATH_REGISTRY.generationMarkers.some((marker) => path.includes(marker));
 
+const parseUrlHostAndPath = (url: string): { hostname: string; path: string } => {
+    try {
+        const parsed = new URL(url);
+        return { hostname: parsed.hostname.toLowerCase(), path: parsed.pathname.toLowerCase() };
+    } catch {
+        return { hostname: '', path: url.toLowerCase() };
+    }
+};
+
+const isGrokHost = (hostname: string) => hostname === 'grok.com' || hostname.endsWith('.grok.com');
+
+const isGrokStreamingHost = (hostname: string) => hostname === 'grok.x.com' || hostname.endsWith('.grok.x.com');
+
 export const isGrokGenerationEndpointUrl = (url: string): boolean =>
-    isGrokGenerationEndpointPath(getNormalizedPath(url));
+    (() => {
+        const { hostname, path } = parseUrlHostAndPath(url);
+        return (
+            (isGrokHost(hostname) && isGrokGenerationEndpointPath(path)) ||
+            (isGrokStreamingHost(hostname) && path.includes(GROK_PATH_REGISTRY.streamingGenerationMarker))
+        );
+    })();
 
 export const isGrokStreamingEndpointUrl = (url: string): boolean => {
-    const path = getNormalizedPath(url);
-    return isGrokGenerationEndpointPath(path) || path.includes(GROK_PATH_REGISTRY.reconnectMarker);
+    const { hostname, path } = parseUrlHostAndPath(url);
+    return (
+        (isGrokHost(hostname) &&
+            (isGrokGenerationEndpointPath(path) || path.includes(GROK_PATH_REGISTRY.reconnectMarker))) ||
+        (isGrokStreamingHost(hostname) && path.includes(GROK_PATH_REGISTRY.streamingGenerationMarker))
+    );
 };
 
 export const isGrokCompletionCandidateEndpointUrl = (url: string): boolean => {
-    const path = getNormalizedPath(url);
+    const { hostname, path } = parseUrlHostAndPath(url);
+    if (!isGrokHost(hostname)) {
+        return false;
+    }
     if (path.includes(GROK_PATH_REGISTRY.generationMarkers[0])) {
         return false;
     }
@@ -86,6 +106,12 @@ export const isGrokCompletionCandidateEndpointUrl = (url: string): boolean => {
 };
 
 export const isLikelyGrokApiPath = (url: string): boolean => {
-    const path = getNormalizedPath(url);
-    return GROK_PATH_REGISTRY.apiHintMarkers.some((marker) => path.includes(marker));
+    const { hostname, path } = parseUrlHostAndPath(url);
+    if (isGrokHost(hostname)) {
+        return GROK_PATH_REGISTRY.apiHintMarkers.some((marker) => path.includes(marker));
+    }
+    if (isGrokStreamingHost(hostname)) {
+        return path.includes(GROK_PATH_REGISTRY.streamingApiHintMarker);
+    }
+    return false;
 };

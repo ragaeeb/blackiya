@@ -39,6 +39,18 @@ const getMessagesByRecency = (conversation: ConversationData): Message[] =>
         .filter((message): message is Message => !!message)
         .sort((left, right) => getMessageTimestamp(right) - getMessageTimestamp(left));
 
+const getMessagesInChronologicalOrder = (conversation: ConversationData): Message[] =>
+    Object.values(conversation.mapping)
+        .map((node, index) => ({ message: node.message, index }))
+        .filter((entry): entry is { message: Message; index: number } => !!entry.message)
+        .sort((left, right) => {
+            const delta = getMessageTimestamp(left.message) - getMessageTimestamp(right.message);
+            return delta !== 0 ? delta : left.index - right.index;
+        })
+        .map((entry) => entry.message);
+
+const getNodeTimestamp = (node: MessageNode): number => (node.message ? getMessageTimestamp(node.message) : 0);
+
 const findCurrentNodeId = (conversation: ConversationData): string | null => {
     const mapping = conversation.mapping;
     if (conversation.current_node && mapping[conversation.current_node]?.message) {
@@ -48,11 +60,7 @@ const findCurrentNodeId = (conversation: ConversationData): string | null => {
     const nodes = Object.values(mapping);
     const assistantNodes = nodes
         .filter((node) => node.message?.author?.role === 'assistant')
-        .sort((left, right) => {
-            const leftTime = left.message?.create_time ?? left.message?.update_time ?? 0;
-            const rightTime = right.message?.create_time ?? right.message?.update_time ?? 0;
-            return rightTime - leftTime;
-        });
+        .sort((left, right) => getNodeTimestamp(right) - getNodeTimestamp(left));
 
     if (assistantNodes.length > 0) {
         return assistantNodes[0]?.id ?? null;
@@ -60,11 +68,7 @@ const findCurrentNodeId = (conversation: ConversationData): string | null => {
 
     const leafNodes = nodes
         .filter((node) => node.message && (!node.children || node.children.length === 0))
-        .sort((left, right) => {
-            const leftTime = left.message?.create_time ?? left.message?.update_time ?? 0;
-            const rightTime = right.message?.create_time ?? right.message?.update_time ?? 0;
-            return rightTime - leftTime;
-        });
+        .sort((left, right) => getNodeTimestamp(right) - getNodeTimestamp(left));
 
     return leafNodes[0]?.id ?? null;
 };
@@ -186,43 +190,26 @@ const updateLatestTurnText = (
     if (message.author.role === 'user') {
         return { ...current, prompt: text };
     }
-    if (message.author.role === 'assistant') {
+    if (message.author.role === 'assistant' && !current.response) {
         return { ...current, response: text };
     }
     return current;
 };
 
-const extractLatestTurnText = (messages: Message[]) => {
+const extractLatestTurnText = (messagesNewestFirst: Message[]) => {
     let latestTurn = { prompt: '', response: '' };
-    for (const message of messages) {
+    for (const message of messagesNewestFirst) {
         latestTurn = updateLatestTurnText(message, latestTurn);
+        if (latestTurn.prompt) {
+            break;
+        }
     }
     return latestTurn;
 };
 
 const hasPromptOrResponse = (value: { prompt: string; response: string }) => Boolean(value.prompt || value.response);
 
-const backfillLatestTurnText = (messages: Message[]) => {
-    const latestTurn = { prompt: '', response: '' };
-
-    for (const message of messages) {
-        const text = extractMessageText(message);
-        if (!text) {
-            continue;
-        }
-        if (!latestTurn.response && message.author.role === 'assistant') {
-            latestTurn.response = text;
-        }
-        if (!latestTurn.prompt && message.author.role === 'user') {
-            latestTurn.prompt = text;
-        }
-        if (latestTurn.prompt && latestTurn.response) {
-            break;
-        }
-    }
-
-    return latestTurn;
-};
+const backfillLatestTurnText = (messagesNewestFirst: Message[]) => extractLatestTurnText(messagesNewestFirst);
 
 export const extractLatestTurnPromptAndResponse = (
     conversation: ConversationData,
@@ -232,7 +219,7 @@ export const extractLatestTurnPromptAndResponse = (
 } => {
     const currentNodeId = findCurrentNodeId(conversation);
     const chain = currentNodeId ? buildMessageChain(conversation.mapping, currentNodeId) : [];
-    const latestFromChain = extractLatestTurnText(chain);
+    const latestFromChain = extractLatestTurnText(chain.toReversed());
     if (hasPromptOrResponse(latestFromChain)) {
         return latestFromChain;
     }
@@ -240,9 +227,7 @@ export const extractLatestTurnPromptAndResponse = (
 };
 
 export const extractAllAssistantText = (conversation: ConversationData): string =>
-    Object.values(conversation.mapping)
-        .map((node) => node.message)
-        .filter((message): message is Message => !!message)
+    getMessagesInChronologicalOrder(conversation)
         .filter((message) => message.author.role === 'assistant')
         .map((message) => extractMessageText(message))
         .filter((text) => text.length > 0)

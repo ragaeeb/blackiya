@@ -170,6 +170,8 @@ The extension requires the following permissions:
 - `https://gemini.google.com/*` - Gemini platform
 - `https://grok.com/*` - Grok platform
 
+`https://grok.x.com/*` is intentionally not listed. Grok streaming requests to `grok.x.com` are initiated by page JavaScript while you are on `grok.com`, and the MAIN-world interceptor captures those cross-origin fetch/XHR calls from the `grok.com` page context.
+
 ### External Extension API
 
 External extension messaging is currently disabled and not part of the shipped runtime flow.

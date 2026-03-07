@@ -168,13 +168,6 @@ export const getConversationData = async (
     return data;
 };
 
-const buildExportPayload = async (
-    data: ConversationData,
-    meta: ExportMeta,
-): Promise<unknown> => {
-    return attachExportMeta(data, meta);
-};
-
 export const saveConversation = async (
     data: ConversationData,
     options: { allowDegraded?: boolean },
@@ -199,7 +192,7 @@ export const saveConversation = async (
         });
         const filename = adapter.formatFilename(data);
         const exportMeta = buildExportMetaForSave(data.conversation_id, options.allowDegraded, deps.getCaptureMeta);
-        const exportPayload = await buildExportPayload(data, exportMeta);
+        const exportPayload = attachExportMeta(data, exportMeta);
         downloadAsJSON(exportPayload, filename);
         logger.info(`Saved conversation: ${filename}.json`);
         if (options.allowDegraded === true) {

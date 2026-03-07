@@ -217,6 +217,11 @@ Surfaces:
 - `grok.com` REST/NDJSON
 - `grok.x.com` streaming host (`/2/grok/add_response.json`)
 
+Permission note:
+- The extension only declares `https://grok.com/*` in `host_permissions` via [platforms/constants.ts](/Users/rhaq/workspace/blackiya/platforms/constants.ts) and `wxt.config.ts`.
+- That is intentional: the MAIN-world interceptor runs inside the `grok.com` page context and captures the page's own cross-origin fetch/XHR traffic to `grok.x.com`.
+- Because the request originates from page JavaScript on `grok.com`, Blackiya does not need a separate `https://grok.x.com/*` manifest permission. The README host-permissions section documents the same ownership boundary.
+
 Generation and completion classification:
 - `utils/grok-request-classifier.ts`
   - Generation lifecycle: `/rest/app-chat/conversations/new`, `/2/grok/add_response.json`
