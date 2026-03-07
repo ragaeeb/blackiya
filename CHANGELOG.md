@@ -1,3 +1,10 @@
+# [2.7.0](https://github.com/ragaeeb/blackiya/compare/v2.6.0...v2.7.0) (2026-03-07)
+
+
+### Features
+
+* **common:** Remove common JSON and Twitter specific code ([#44](https://github.com/ragaeeb/blackiya/issues/44)) ([0b31198](https://github.com/ragaeeb/blackiya/commit/0b31198939dd2a9026b239335ca24f38e0248d1f))
+
 # [2.6.0](https://github.com/ragaeeb/blackiya/compare/v2.5.0...v2.6.0) (2026-03-05)
 
 
