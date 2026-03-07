@@ -76,7 +76,6 @@ import {
 } from '@/utils/runner/engine/sfe-wrappers';
 import type { EngineCtx } from '@/utils/runner/engine/types';
 import { MAX_STREAM_PREVIEWS } from '@/utils/runner/engine/types';
-import { createExternalEventDispatcherState } from '@/utils/runner/external-event-dispatch';
 import { requestGeminiBatchexecuteContextFromMainWorld } from '@/utils/runner/gemini-batchexecute-request';
 import { processInterceptionCapture as processInterceptionCaptureCore } from '@/utils/runner/interception-capture';
 import { requestPlatformHeadersFromMainWorld } from '@/utils/runner/platform-header-request';
@@ -192,7 +191,6 @@ export const runPlatform = (): void => {
             preservedByConversation: new Map(),
             maxEntries: MAX_STREAM_PREVIEWS,
         },
-        externalEventDispatchState: createExternalEventDispatcherState(),
         streamProbeRuntime: null,
         // Function stubs — populated below during coordinator wiring
         setCurrentConversation: null!,
@@ -249,7 +247,6 @@ export const runPlatform = (): void => {
         migratePendingStreamProbeText: null!,
         appendLiveStreamProbeText: null!,
         isStaleAttemptMessage: null!,
-        emitExternalConversationEvent: null!,
         ingestSfeLifecycleFromWirePhase: null!,
         buildCalibrationOrchestrationDeps: null!,
         buildCalibrationCaptureDeps: null!,
@@ -269,7 +266,6 @@ export const runPlatform = (): void => {
     ctx.ingestSfeCanonicalSample = (data, aid) => ingestSfeCanonicalSample(ctx, data, aid);
     ctx.ingestSfeLifecycleFromWirePhase = (phase, aid, cid) => ingestSfeLifecycleFromWirePhase(ctx, phase, aid, cid);
     ctx.isStaleAttemptMessage = (aid, cid, st) => isStaleAttemptMessage(ctx, aid, cid, st);
-    ctx.emitExternalConversationEvent = () => {};
 
     ctx.streamProbeRuntime = createStreamProbeRuntime({
         streamPreviewState: ctx.streamPreviewState,

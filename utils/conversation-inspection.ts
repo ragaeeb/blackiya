@@ -171,6 +171,59 @@ export const extractConversationModel = (conversation: ConversationData): string
     return normalizeModel(conversation.default_model_slug);
 };
 
+const updateLatestTurnText = (
+    message: Message,
+    current: {
+        prompt: string;
+        response: string;
+    },
+) => {
+    const text = extractMessageText(message);
+    if (!text) {
+        return current;
+    }
+
+    if (message.author.role === 'user') {
+        return { ...current, prompt: text };
+    }
+    if (message.author.role === 'assistant') {
+        return { ...current, response: text };
+    }
+    return current;
+};
+
+const extractLatestTurnText = (messages: Message[]) => {
+    let latestTurn = { prompt: '', response: '' };
+    for (const message of messages) {
+        latestTurn = updateLatestTurnText(message, latestTurn);
+    }
+    return latestTurn;
+};
+
+const hasPromptOrResponse = (value: { prompt: string; response: string }) => Boolean(value.prompt || value.response);
+
+const backfillLatestTurnText = (messages: Message[]) => {
+    const latestTurn = { prompt: '', response: '' };
+
+    for (const message of messages) {
+        const text = extractMessageText(message);
+        if (!text) {
+            continue;
+        }
+        if (!latestTurn.response && message.author.role === 'assistant') {
+            latestTurn.response = text;
+        }
+        if (!latestTurn.prompt && message.author.role === 'user') {
+            latestTurn.prompt = text;
+        }
+        if (latestTurn.prompt && latestTurn.response) {
+            break;
+        }
+    }
+
+    return latestTurn;
+};
+
 export const extractLatestTurnPromptAndResponse = (
     conversation: ConversationData,
 ): {
@@ -179,43 +232,11 @@ export const extractLatestTurnPromptAndResponse = (
 } => {
     const currentNodeId = findCurrentNodeId(conversation);
     const chain = currentNodeId ? buildMessageChain(conversation.mapping, currentNodeId) : [];
-
-    let prompt = '';
-    let response = '';
-
-    for (const message of chain) {
-        const text = extractMessageText(message);
-        if (!text) {
-            continue;
-        }
-        if (message.author.role === 'user') {
-            prompt = text;
-        } else if (message.author.role === 'assistant') {
-            response = text;
-        }
+    const latestFromChain = extractLatestTurnText(chain);
+    if (hasPromptOrResponse(latestFromChain)) {
+        return latestFromChain;
     }
-
-    if (prompt || response) {
-        return { prompt, response };
-    }
-
-    for (const message of getMessagesByRecency(conversation)) {
-        const text = extractMessageText(message);
-        if (!text) {
-            continue;
-        }
-        if (!response && message.author.role === 'assistant') {
-            response = text;
-        }
-        if (!prompt && message.author.role === 'user') {
-            prompt = text;
-        }
-        if (prompt && response) {
-            break;
-        }
-    }
-
-    return { prompt, response };
+    return backfillLatestTurnText(getMessagesByRecency(conversation));
 };
 
 export const extractAllAssistantText = (conversation: ConversationData): string =>

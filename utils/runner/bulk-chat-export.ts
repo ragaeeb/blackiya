@@ -61,11 +61,6 @@ type RequestContext = {
     locationHref: () => string;
 };
 
-type ListPageResult = {
-    ids: string[];
-    nextCursor: string | null;
-};
-
 type ConversationListResult = {
     ids: string[];
     warnings: string[];
@@ -491,7 +486,7 @@ const resolvePlatformKind = (adapter: LLMPlatform, locationHref: string): Platfo
     }
 
     try {
-        const { hostname, pathname } = new URL(locationHref);
+        const { hostname } = new URL(locationHref);
         if (hostname === 'grok.com') {
             return 'grok-com';
         }
@@ -704,7 +699,6 @@ const buildDetailUrls = (
     adapter: LLMPlatform,
     conversationId: string,
     host: string,
-    context: RequestContext,
 ): string[] => {
     if (platform === 'chatgpt') {
         const fromAdapter = adapter.buildApiUrls?.(conversationId) ?? [];
@@ -851,7 +845,7 @@ const fetchConversationFromDetailUrls = async (
     context: RequestContext,
 ): Promise<DetailFetchResult> => {
     const host = resolveHostFromLocation(context.locationHref(), 'chatgpt.com');
-    const urls = buildDetailUrls(platform, context.adapter, conversationId, host, context);
+    const urls = buildDetailUrls(platform, context.adapter, conversationId, host);
     const reconnectResponseIds: string[] = [];
 
     for (const url of urls) {

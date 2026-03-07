@@ -45,9 +45,6 @@ Supporting modules:
 - SFE: `utils/sfe/*`
 - Lease arbitration: `utils/sfe/probe-lease-*`, `entrypoints/background.ts`
 - Lease store implementations: `utils/sfe/probe-lease-store.ts`
-- External extension API:
-  - `utils/external-api/contracts.ts`
-  - `utils/external-api/background-hub.ts`
 - Interception cache: `utils/managers/interception-manager.ts`
 - UI buttons: `utils/ui/button-manager.ts`
 - Runner helpers:
@@ -66,7 +63,6 @@ Supporting modules:
   - `utils/runner/interception-capture.ts`
   - `utils/runner/stale-attempt-filter.ts`
   - `utils/runner/lifecycle-phase-handler.ts`
-  - `utils/runner/external-event-dispatch.ts`
   - `utils/runner/button-state-manager.ts`
   - `utils/runner/wire-message-handlers.ts`
 - Protocol types: `utils/protocol/messages.ts`

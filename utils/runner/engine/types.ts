@@ -98,7 +98,6 @@ export type EngineCtx = {
     navigationManager: NavigationManager;
     buttonManager: ButtonManager;
     streamPreviewState: RunnerStreamPreviewState;
-    externalEventDispatchState: import('@/utils/runner/external-event-dispatch').ExternalEventDispatcherState;
     streamProbeRuntime: ReturnType<
         typeof import('@/utils/runner/runtime/platform-runtime-stream-probe').createStreamProbeRuntime
     > | null;
@@ -168,15 +167,6 @@ export type EngineCtx = {
         cid: string | undefined,
         signalType: 'lifecycle' | 'finished' | 'delta' | 'conversation-resolved',
     ) => boolean;
-    emitExternalConversationEvent: (args: {
-        conversationId: string;
-        data: ConversationData;
-        readinessMode: ReadinessDecision['mode'];
-        captureMeta: ExportMeta;
-        attemptId: string | null;
-        allowWhenActionsBlocked?: boolean;
-        forceEmit?: boolean;
-    }) => void;
     ingestSfeLifecycleFromWirePhase: (
         phase: ResponseLifecycleMessage['phase'],
         aid: string,

@@ -111,7 +111,6 @@ blackiya/
 │   │   ├── export-pipeline.ts
 │   │   ├── readiness.ts
 │   │   └── state.ts
-│   ├── external-api/          # Extension-to-extension API contracts + hub
 │   ├── managers/             # Interception/navigation managers
 │   ├── sfe/                  # Signal Fusion Engine
 │   ├── download.ts           # File download utilities

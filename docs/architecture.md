@@ -71,9 +71,6 @@ flowchart LR
   - `utils/sfe/cross-tab-probe-lease.ts`
 - Background lease coordinator:
   - `entrypoints/background.ts`
-- External API hub + contract (disabled / not wired in runtime):
-  - `utils/external-api/background-hub.ts`
-  - `utils/external-api/contracts.ts`
 - Protocol message definitions:
   - `utils/protocol/messages.ts`
 - Shared text candidate collector:
@@ -147,7 +144,6 @@ sequenceDiagram
     participant S as SFE
     participant UI as Button UI
     participant BG as Background
-    participant EXT as External Extension
 
     U->>I: Send prompt
     I->>R: LIFECYCLE prompt-sent
@@ -160,8 +156,6 @@ sequenceDiagram
     R->>S: completed_hint + stabilization checks
     S-->>R: canonical_ready OR awaiting_stabilization OR degraded_manual_only
     R->>UI: Update status + Save/Force Save modes
-    R->>BG: BLACKIYA_EXTERNAL_EVENT
-    BG-->>EXT: push to subscribers
 ```
 
 ## 6) Platform Flows
