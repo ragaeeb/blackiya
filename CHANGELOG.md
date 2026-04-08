@@ -1,3 +1,10 @@
+# [2.8.0](https://github.com/ragaeeb/blackiya/compare/v2.7.0...v2.8.0) (2026-04-08)
+
+
+### Features
+
+* **2.8:** Add on/off toggle ([4ef4107](https://github.com/ragaeeb/blackiya/commit/4ef410703b264119742d64eba38643200c2e66dd))
+
 # [2.7.0](https://github.com/ragaeeb/blackiya/compare/v2.6.0...v2.7.0) (2026-03-07)
 
 
