@@ -9,10 +9,12 @@ Blackiya is a Manifest V3 browser extension that:
 2. Detects when it is complete.
 3. Captures canonical conversation JSON.
 4. Enables export only when readiness rules pass.
+5. Honors a global popup enable/disable setting before content-script bootstrap.
 
 The architecture is split across two runtime worlds:
 - MAIN world interceptor (hooks page `fetch`/`XMLHttpRequest`).
 - ISOLATED world runner (state machine, readiness gating, UI, export).
+- Popup storage settings gate whether either world boots on new tabs.
 
 ```mermaid
 flowchart LR

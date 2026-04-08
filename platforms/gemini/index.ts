@@ -26,8 +26,8 @@ import {
 import { GeminiAdapterState, geminiState } from './state';
 import { extractTitleFromGeminiDom, GEMINI_DEFAULT_TITLES } from './title-utils';
 
-export { GeminiAdapterState };
 export { resetGeminiAdapterState } from './state';
+export { GeminiAdapterState };
 
 const MAX_TITLE_LENGTH = 80;
 

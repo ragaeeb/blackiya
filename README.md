@@ -140,19 +140,20 @@ blackiya/
 ## 🎯 Features
 
 - ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT, Gemini, and Grok.
-- ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including **Thinking/Reasoning logs**.
-- ✅ **Grok Support**: Full support for Grok's GraphQL API, including conversation history and thinking traces.
-- ✅ **Smart Titles**: Automatic conversation title capture (with retroactive updates for async title loads).
+- ✅ **Global Enable Toggle**: Turn Blackiya off from the popup so newly opened supported tabs stay inert until you re-enable it.
+- ✅ **Readiness-Gated Export**: Save is only enabled when canonical data is ready; degraded exports fall back to Force Save.
+- ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including thinking/reasoning logs and title recovery.
+- ✅ **Grok Support**: Full support for Grok's GraphQL/NDJSON flows, including conversation history and thinking traces.
+- ✅ **Smart Titles**: Automatic conversation title capture with retroactive updates for async title loads.
 - ✅ **One-Click Download**: Instant download as formatted JSON file.
 - ✅ **Clipboard Copy**: One-click copy of conversation JSON directly to system clipboard.
-- ✅ **About Section**: Dynamic extension metadata (version, author) synchronized from `package.json`.
+- ✅ **Popup Controls**: Log level, bulk export, debug export, and log clearing in one place.
 - ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
 - ✅ **Robust UI**: Seamless button injection into ChatGPT, Gemini, and Grok interfaces.
 - ✅ **Message Tree**: Preserves complete nested message structure.
-- ✅ **Extensive Testing**: Large regression-focused unit/integration test suite for adapters and runtime orchestration.
-- ✅ **Absolute Imports**: Cleaner codebase using `@/` path aliases.
-- ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
+- ✅ **Extensive Testing**: Regression-focused unit/integration coverage for adapters and runtime orchestration.
 - ✅ **Advanced Logging**: Structured, exportable debug logs with privacy-focused persistent storage.
+- ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 
 ## 🔧 Configuration
 
@@ -256,8 +257,9 @@ Build naming behavior:
 
 ### Basic Usage
 
-1. Navigate to ChatGPT, Gemini, or Grok and open a conversation
-2. The conversation JSON will download or be copied automatically.
+1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
+2. Use the popup toggle to enable or disable Blackiya globally for new tabs.
+3. The current conversation JSON will download or be copied automatically when the capture state is ready.
 3. Download format: `{conversation-title}_{timestamp}.json`
 
 ### Popup Tools

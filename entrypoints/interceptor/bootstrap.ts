@@ -1,3 +1,4 @@
+import { browser } from 'wxt/browser';
 import { createInterceptorAttemptRegistry } from '@/entrypoints/interceptor/attempt-registry';
 import {
     type BootstrapRequestLifecycleDeps,
@@ -38,6 +39,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { setBoundedMapValue } from '@/utils/bounded-collections';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { extractForwardableHeadersFromFetchArgs, toForwardableHeaderRecord } from '@/utils/proactive-fetch-headers';
+import { loadExtensionEnabledSetting, STORAGE_KEYS } from '@/utils/settings';
 
 export { shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 export {
@@ -159,11 +161,22 @@ const maybeCaptureGeminiContextFromFetchArgs = async (
     maybeCaptureGeminiBatchexecuteContext(outgoingUrl, requestBody);
 };
 
+export const registerExtensionEnabledStorageListener = (
+    storage: Pick<typeof browser.storage, 'onChanged'> | undefined,
+    listener: Parameters<NonNullable<typeof browser.storage.onChanged>['addListener']>[0],
+) => {
+    storage?.onChanged?.addListener?.(listener);
+};
+
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
     world: 'MAIN',
     runAt: 'document_start',
-    main() {
+    async main() {
+        let extensionEnabled = await loadExtensionEnabledSetting();
+        if (!extensionEnabled) {
+            return;
+        }
         if ((window as any).__BLACKIYA_INTERCEPTED__) {
             emitter.log('info', 'already init (skip duplicate interceptor bootstrap)');
             return;
@@ -180,6 +193,16 @@ export default defineContentScript({
         }
 
         const originalFetch = window.fetch.bind(window);
+        const storageChangeListener = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
+            if (areaName !== 'local') {
+                return;
+            }
+            if (changes[STORAGE_KEYS.EXTENSION_ENABLED]) {
+                extensionEnabled = changes[STORAGE_KEYS.EXTENSION_ENABLED]?.newValue !== false;
+            }
+        };
+        registerExtensionEnabledStorageListener(browser?.storage, storageChangeListener as any);
+
         const proactiveFetchRunner = new ProactiveFetchRunner(
             originalFetch,
             resolveAttemptIdForConversation,
@@ -191,9 +214,13 @@ export default defineContentScript({
         const fetchInterceptionDeps: FetchInterceptionDeps = {
             emitter,
             resolveAttemptIdForConversation,
+            isExtensionEnabled: () => extensionEnabled,
         };
 
         const interceptFetchRequest = async (args: Parameters<typeof fetch>): Promise<Response> => {
+            if (!extensionEnabled) {
+                return originalFetch(...args);
+            }
             const context = createFetchInterceptorContext(args, {
                 getRequestUrl: (req) => (req instanceof Request ? req.url : String(req)),
                 getRequestMethod: (callArgs) =>
@@ -207,11 +234,17 @@ export default defineContentScript({
                 resolveLifecycleConversationId,
                 safePathname,
             });
+            if (!extensionEnabled) {
+                return originalFetch(...args);
+            }
             await cachePromptHintFromGrokRequest(context);
             emitFetchPromptLifecycle(context);
             await maybeCaptureGeminiContextFromFetchArgs(args, context.outgoingMethod, context.outgoingUrl);
 
             const response = await originalFetch(...args);
+            if (!extensionEnabled) {
+                return response;
+            }
             maybeMonitorFetchStreams(context, response, streamMonitorEmitter);
 
             const url = args[0] instanceof Request ? args[0].url : String(args[0]);
@@ -259,9 +292,13 @@ export default defineContentScript({
             emitter,
             resolveAttemptIdForConversation,
             proactiveFetchRunner,
+            isExtensionEnabled: () => extensionEnabled,
         };
 
         XHR.prototype.send = function (body?: any) {
+            if (!extensionEnabled) {
+                return originalSend.call(this, body);
+            }
             const xhr = this as XMLHttpRequest;
             const context = buildXhrLifecycleContext(xhr, {
                 getPlatformAdapterByApiUrl,
@@ -270,6 +307,9 @@ export default defineContentScript({
                 resolveRequestConversationId,
                 peekAttemptIdForConversation,
             });
+            if (!extensionEnabled) {
+                return originalSend.call(this, body);
+            }
             const xhrHeaderAdapter = resolveHeaderCaptureAdapter(
                 context.requestAdapter,
                 getPlatformAdapterByApiUrl(context.requestUrl),

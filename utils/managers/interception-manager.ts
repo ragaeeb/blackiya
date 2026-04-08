@@ -590,7 +590,8 @@ export class InterceptionManager {
 
     private upsertPromptHintUserNode(data: ConversationData, assistantNodeId: string, promptHint: string) {
         const assistantNode = data.mapping[assistantNodeId];
-        if (!assistantNode || !assistantNode.message) {
+
+        if (!assistantNode?.message) {
             return;
         }
 

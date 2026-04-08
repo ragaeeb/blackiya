@@ -25,6 +25,7 @@ import type { ConversationData } from '@/utils/types';
 export type FetchInterceptionDeps = {
     emitter: InterceptorEmitter;
     resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string;
+    isExtensionEnabled: () => boolean;
 };
 
 const utf8Encoder = new TextEncoder();
@@ -93,6 +94,9 @@ export const handleApiMatchFromFetch = (
     deps: FetchInterceptionDeps,
     deferredCompletionAdapter?: LLMPlatform,
 ) => {
+    if (!deps.isExtensionEnabled()) {
+        return;
+    }
     const { emitter, resolveAttemptIdForConversation } = deps;
     if (emitter.shouldLogTransient(`api:match:${adapter.name}:${safePathname(url)}`, 2500)) {
         emitter.log('info', `API match ${adapter.name}`);
@@ -101,6 +105,9 @@ export const handleApiMatchFromFetch = (
     const textPromise = response.clone().text();
     void textPromise.then(
         (text) => {
+            if (!deps.isExtensionEnabled()) {
+                return;
+            }
             const shouldCapture = emitter.shouldEmitCapturedPayload(adapter.name, url, text);
             if (shouldCapture) {
                 emitter.log('info', `API ${text.length}b ${adapter.name}`);
@@ -132,6 +139,9 @@ export const handleApiMatchFromFetch = (
             }
         },
         () => {
+            if (!deps.isExtensionEnabled()) {
+                return;
+            }
             if (deferredCompletionAdapter && !shouldSuppressCompletion(deferredCompletionAdapter, url)) {
                 emitter.emitResponseFinished(deferredCompletionAdapter, url);
             }
@@ -150,10 +160,16 @@ export const inspectAuxConversationFetch = (
     adapter: LLMPlatform,
     deps: FetchInterceptionDeps,
 ) => {
+    if (!deps.isExtensionEnabled()) {
+        return;
+    }
     response
         .clone()
         .text()
         .then((text) => {
+            if (!deps.isExtensionEnabled()) {
+                return;
+            }
             deps.emitter.log('info', 'aux response', {
                 path: safePathname(url),
                 status: response.status,
@@ -176,6 +192,9 @@ export const inspectAuxConversationFetch = (
             }
         })
         .catch(() => {
+            if (!deps.isExtensionEnabled()) {
+                return;
+            }
             deps.emitter.log('info', 'aux read err', { path: safePathname(url) });
         });
 };
@@ -189,6 +208,9 @@ export const handleFetchInterception = (
     response: Response,
     deps: FetchInterceptionDeps,
 ) => {
+    if (!deps.isExtensionEnabled()) {
+        return;
+    }
     const url = args[0] instanceof Request ? args[0].url : String(args[0]);
     const apiAdapter = getPlatformAdapterByApiUrl(url);
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);

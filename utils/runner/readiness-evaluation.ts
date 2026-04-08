@@ -27,9 +27,10 @@ const INVALID_SHAPE_READINESS: PlatformReadiness = {
  * assistant message analysis.
  */
 export const evaluateReadinessForData = (data: ConversationData, adapter: LLMPlatform | null): PlatformReadiness => {
-    if (!data || !data.mapping || typeof data.mapping !== 'object') {
+    if (!data.mapping || typeof data.mapping !== 'object') {
         return INVALID_SHAPE_READINESS;
     }
+
     if (adapter?.evaluateReadiness) {
         return adapter.evaluateReadiness(data);
     }

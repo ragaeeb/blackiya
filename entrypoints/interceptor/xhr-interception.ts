@@ -30,6 +30,9 @@ export type XhrInterceptionDeps = FetchInterceptionDeps & {
 };
 
 const processXhrApiMatch = (url: string, xhr: XMLHttpRequest, adapter: LLMPlatform, deps: XhrInterceptionDeps) => {
+    if (!deps.isExtensionEnabled()) {
+        return true;
+    }
     const { emitter, resolveAttemptIdForConversation } = deps;
     try {
         emitter.log('info', `XHR API ${adapter.name}`);
@@ -58,6 +61,9 @@ const processXhrAuxConversation = (
     adapter: LLMPlatform,
     deps: XhrInterceptionDeps,
 ) => {
+    if (!deps.isExtensionEnabled()) {
+        return;
+    }
     deps.emitter.log('info', 'aux response', {
         path: safePathname(url),
         status: xhr.status,
@@ -78,6 +84,9 @@ const processXhrAuxConversation = (
  * on the synchronous `xhr.responseText` after the request completes.
  */
 export const handleXhrLoad = (xhr: XMLHttpRequest, methodUpper: string, deps: XhrInterceptionDeps) => {
+    if (!deps.isExtensionEnabled()) {
+        return;
+    }
     const url = ((xhr as any)._url as string | undefined) ?? '';
     const apiAdapter = getPlatformAdapterByApiUrl(url);
     const completionAdapter = getPlatformAdapterByCompletionUrl(url);
@@ -126,6 +135,9 @@ export const maybeRunXhrPostLoadSideEffects = (
     url: string,
     deps: XhrInterceptionDeps,
 ) => {
+    if (!deps.isExtensionEnabled()) {
+        return;
+    }
     if (methodUpper === 'POST') {
         const xhrAdapter = getPlatformAdapterByApiUrl(url);
         if (xhrAdapter?.name === 'Grok') {
@@ -153,6 +165,7 @@ export const maybeRunXhrPostLoadSideEffects = (
     }
 
     if (
+        deps.isExtensionEnabled() &&
         isDiscoveryDiagnosticsEnabled() &&
         methodUpper === 'POST' &&
         xhr.status === 200 &&

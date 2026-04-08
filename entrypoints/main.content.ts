@@ -1,5 +1,6 @@
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { runPlatform } from '@/utils/runner/runtime/platform-runtime';
+import { loadExtensionEnabledSetting } from '@/utils/settings';
 
 /**
  * Unified Content Script for all LLM Platforms
@@ -10,7 +11,10 @@ import { runPlatform } from '@/utils/runner/runtime/platform-runtime';
 export default defineContentScript({
     matches: [...SUPPORTED_PLATFORM_URLS],
     runAt: 'document_idle',
-    main() {
+    async main() {
+        if (!(await loadExtensionEnabledSetting())) {
+            return;
+        }
         runPlatform();
     },
 });

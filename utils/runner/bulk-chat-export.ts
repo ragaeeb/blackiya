@@ -536,7 +536,8 @@ const listConversationIdsChatGpt = async (context: RequestContext): Promise<Conv
         const currentHost = resolveHostFromLocation(context.locationHref(), CHATGPT_HOSTS[0]);
         const host = CHATGPT_HOSTS.includes(currentHost) ? currentHost : CHATGPT_HOSTS[0];
         const response = await fetchFirstSuccessfulResponse(buildChatGptListUrls(host, offset, pageSize), context);
-        if (!response || !response.ok) {
+
+        if (!response?.ok) {
             warnings.push(
                 `ChatGPT list endpoint failed at offset=${offset}: status=${response?.status ?? 0} message=${response?.message ?? 'Unknown error'}`,
             );

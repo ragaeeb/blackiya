@@ -136,7 +136,7 @@ const findTitleByConversationIdInHrefs = (conversationId: string): string | null
             continue;
         }
         const href = node.getAttribute('href');
-        if (!href || !href.includes('/app/')) {
+        if (!href?.includes('/app/')) {
             continue;
         }
         if (extractConversationIdFromAppHref(href) !== conversationId) {

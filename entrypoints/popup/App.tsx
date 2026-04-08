@@ -12,6 +12,7 @@ import {
     DEFAULT_BULK_EXPORT_DELAY_MS,
     DEFAULT_BULK_EXPORT_LIMIT,
     DEFAULT_BULK_EXPORT_TIMEOUT_MS,
+    DEFAULT_EXTENSION_ENABLED,
     STORAGE_KEYS,
 } from '@/utils/settings';
 
@@ -21,6 +22,7 @@ const ABOUT_REPOSITORY_URL = 'https://github.com/ragaeeb/blackiya';
 const App = () => {
     const manifest = browser.runtime.getManifest();
     const buildFilenameTag = getBuildFilenameTag();
+    const [extensionEnabled, setExtensionEnabled] = useState<boolean>(DEFAULT_EXTENSION_ENABLED);
     const [logLevel, setLogLevel] = useState<LogLevel>('info');
     const [logCount, setLogCount] = useState<number>(0);
     const [bulkExportLimitInput, setBulkExportLimitInput] = useState<string>('');
@@ -51,12 +53,14 @@ const App = () => {
                 const result = await browser.storage.local.get([
                     STORAGE_KEYS.LOG_LEVEL,
                     STORAGE_KEYS.BULK_EXPORT_LIMIT,
+                    STORAGE_KEYS.EXTENSION_ENABLED,
                 ]);
                 const level = result[STORAGE_KEYS.LOG_LEVEL] as LogLevel | undefined;
                 if (level) {
                     setLogLevel(level);
                     logger.setLevel(level);
                 }
+                setExtensionEnabled(result[STORAGE_KEYS.EXTENSION_ENABLED] !== false);
                 const normalizedLimit = normalizeBulkExportLimitInput(result[STORAGE_KEYS.BULK_EXPORT_LIMIT]);
                 setBulkExportLimitInput(normalizedLimit === DEFAULT_BULK_EXPORT_LIMIT ? '' : String(normalizedLimit));
             } catch (error) {
@@ -84,6 +88,13 @@ const App = () => {
         browser.storage.local.set({ [STORAGE_KEYS.LOG_LEVEL]: newLevel });
         logger.setLevel(newLevel);
         logger.info(`Log level changed to ${newLevel}`);
+    };
+
+    const handleExtensionEnabledChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
+        const target = e.currentTarget as HTMLInputElement | null;
+        const enabled = target?.checked !== false;
+        setExtensionEnabled(enabled);
+        void browser.storage.local.set({ [STORAGE_KEYS.EXTENSION_ENABLED]: enabled });
     };
 
     const handleBulkExportLimitChange: JSX.GenericEventHandler<HTMLInputElement> = (e) => {
@@ -207,9 +218,22 @@ const App = () => {
 
     return (
         <div>
-            <div className="title">
-                <img src="/icon/32.png" width="24" height="24" alt="Icon" />
-                Blackiya Settings
+            <div className="title-row">
+                <div className="title">
+                    <img src="/icon/32.png" width="24" height="24" alt="Icon" />
+                    Blackiya Settings
+                </div>
+                <label className="header-toggle" htmlFor="extensionEnabled" aria-label="Toggle Blackiya extension">
+                    <span className="toggle-switch compact">
+                        <input
+                            id="extensionEnabled"
+                            type="checkbox"
+                            checked={extensionEnabled}
+                            onChange={handleExtensionEnabledChange}
+                        />
+                        <span className="toggle-slider" aria-hidden="true" />
+                    </span>
+                </label>
             </div>
 
             <div className="section">

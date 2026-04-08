@@ -10,9 +10,13 @@ import { runPlatform as runPlatformEngine } from '@/utils/runner/engine/platform
 import { resolveExportConversationTitleDecision as resolveExportTitleDecision } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 
-export { beginCanonicalStabilizationTick, clearCanonicalStabilizationAttemptState };
 export type { CanonicalStabilizationAttemptState };
-export { buildCalibrationOrderForMode, shouldPersistCalibrationProfile };
+export {
+    beginCanonicalStabilizationTick,
+    buildCalibrationOrderForMode,
+    clearCanonicalStabilizationAttemptState,
+    shouldPersistCalibrationProfile,
+};
 
 export const resolveExportConversationTitle = (data: ConversationData) => resolveExportTitleDecision(data).title;
 

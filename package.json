@@ -2,7 +2,7 @@
     "name": "blackiya",
     "description": "Chrome extension to capture and save conversation JSON from ChatGPT and other LLMs",
     "private": true,
-    "version": "2.7.0",
+    "version": "2.8.0",
     "type": "module",
     "author": "Ragaeeb Haq",
     "license": "MIT",
@@ -15,10 +15,10 @@
     },
     "homepage": "https://github.com/ragaeeb/blackiya#readme",
     "engines": {
-        "bun": ">=1.3.10",
+        "bun": ">=1.3.11",
         "node": ">=25.0.0"
     },
-    "packageManager": "bun@1.3.10",
+    "packageManager": "bun@1.3.11",
     "scripts": {
         "dev": "BLACKIYA_BUILD_PROFILE=dev wxt",
         "dev:firefox": "BLACKIYA_BUILD_PROFILE=dev wxt -b firefox",
@@ -38,21 +38,21 @@
         "format": "biome format --write ."
     },
     "dependencies": {
-        "preact": "^10.28.4"
+        "preact": "^10.29.1"
     },
     "devDependencies": {
-        "@biomejs/biome": "2.4.6",
-        "@happy-dom/global-registrator": "^20.8.3",
-        "@playwright/test": "^1.58.2",
+        "@biomejs/biome": "2.4.10",
+        "@happy-dom/global-registrator": "^20.8.9",
+        "@playwright/test": "^1.59.1",
         "@semantic-release/changelog": "^6.0.3",
         "@semantic-release/git": "^10.0.1",
         "@semantic-release/github": "^12.0.6",
         "@semantic-release/npm": "^13.1.5",
-        "@types/bun": "^1.3.10",
+        "@types/bun": "^1.3.11",
         "@types/har-format": "^1.2.16",
-        "happy-dom": "^20.8.3",
+        "happy-dom": "^20.8.9",
         "semantic-release": "^25.0.3",
-        "typescript": "^5.9.3",
-        "wxt": "^0.20.18"
+        "typescript": "^6.0.2",
+        "wxt": "^0.20.20"
     }
 }
