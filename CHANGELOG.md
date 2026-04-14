@@ -1,3 +1,10 @@
+## [2.8.1](https://github.com/ragaeeb/blackiya/compare/v2.8.0...v2.8.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* **gemini:** Fix max export limit with gemini ([faaab25](https://github.com/ragaeeb/blackiya/commit/faaab25ae6b6d979eb7008b7e1299adbc768387b))
+
 # [2.8.0](https://github.com/ragaeeb/blackiya/compare/v2.7.0...v2.8.0) (2026-04-08)
 
 
