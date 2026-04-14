@@ -6,7 +6,7 @@ import type { ConversationData } from '@/utils/types';
  * singleton caches between cases.
  */
 export class GeminiAdapterState {
-    readonly conversationTitles = new LRUCache<string, string>(50);
+    readonly conversationTitles = new LRUCache<string, string>(500);
     readonly activeConversations = new LRUCache<string, ConversationData>(50);
 
     reset() {

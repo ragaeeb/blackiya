@@ -36,13 +36,14 @@ export class ProactiveFetchRunner {
         private readonly resolveAttemptIdForConversation: (conversationId?: string, platformName?: string) => string,
         private readonly emitter: EmitterDeps,
         private readonly maxDedupeEntries: number,
+        private readonly isExtensionEnabled: () => boolean = () => true,
     ) {
         this.fetcher = new ProactiveFetcher();
     }
 
     /** Triggers a proactive fetch for the conversation associated with `triggerUrl`, if eligible. */
     readonly trigger = async (adapter: LLMPlatform, triggerUrl: string, requestHeaders?: HeaderRecord) => {
-        if (!isFetchReady(adapter)) {
+        if (!this.isExtensionEnabled() || !isFetchReady(adapter)) {
             return;
         }
         const conversationId = adapter.extractConversationIdFromUrl?.(triggerUrl);
@@ -82,7 +83,7 @@ export class ProactiveFetchRunner {
         attemptId: string,
     ) => {
         for (let attempt = 0; attempt < BACKOFF_SCHEDULE_MS.length; attempt++) {
-            if (this.emitter.isAttemptDisposed(attemptId)) {
+            if (!this.isExtensionEnabled() || this.emitter.isAttemptDisposed(attemptId)) {
                 return false;
             }
             await delay(BACKOFF_SCHEDULE_MS[attempt]);

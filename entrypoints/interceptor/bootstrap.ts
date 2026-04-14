@@ -208,6 +208,7 @@ export default defineContentScript({
             resolveAttemptIdForConversation,
             emitter,
             MAX_INTERCEPTOR_DEDUPE_CACHE_ENTRIES,
+            () => extensionEnabled,
         );
         const streamMonitorEmitter = emitter.createStreamMonitorEmitter();
 

@@ -439,6 +439,52 @@ describe('bulk-chat-export', () => {
         }
     });
 
+    it('should export more than 50 gemini conversations when cache holds more than 50 entries', async () => {
+        resetGeminiAdapterState();
+        const ids = Array.from({ length: 51 }, (_, i) => `gem-many-${String(i).padStart(3, '0')}`);
+        for (const id of ids) {
+            geminiState.conversationTitles.set(id, `Title ${id}`);
+        }
+        const conversations = Object.fromEntries(ids.map((id) => [id, buildConversation(id, `Title ${id}`)]));
+
+        try {
+            const result = await runBulkChatExport(
+                {
+                    type: 'BLACKIYA_BULK_EXPORT_CHATS',
+                    limit: 0,
+                    delayMs: 1,
+                    timeoutMs: 5000,
+                },
+                {
+                    getAdapter: () => buildGeminiAdapter(),
+                    getAuthHeaders: () => undefined,
+                    locationHref: () => 'https://gemini.google.com/app',
+                    sleepImpl: async () => {},
+                    downloadImpl: () => {},
+                    fetchImpl: (async (input) => {
+                        const url = String(input);
+                        if (url.includes('rpcids=MaZiqc')) {
+                            return new Response(`)]}'\n\n[["wrb.fr","MaZiqc","[null,null,[]]",null]]`, {
+                                status: 200,
+                            });
+                        }
+                        for (const id of ids) {
+                            if (url.includes(`conversation_id=${id}`) || url.includes(`/app/${id}`)) {
+                                return new Response(JSON.stringify(conversations[id]), { status: 200 });
+                            }
+                        }
+                        return new Response('not found', { status: 404 });
+                    }) as typeof fetch,
+                },
+            );
+
+            expect(result.discovered).toBe(51);
+            expect(result.exported).toBe(51);
+        } finally {
+            resetGeminiAdapterState();
+        }
+    });
+
     it('should use Gemini hNvQHb POST detail request with captured batchexecute context', async () => {
         resetGeminiAdapterState();
         geminiState.conversationTitles.set('gem-post-1', 'Cached One');

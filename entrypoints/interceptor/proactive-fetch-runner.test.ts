@@ -188,6 +188,51 @@ describe('ProactiveFetchRunner', () => {
         expect(emitter.emitCapturePayload).toHaveBeenCalledTimes(1);
     });
 
+    it('should not trigger when isExtensionEnabled returns false', async () => {
+        const adapter = createAdapter();
+        const emitter = createEmitterDeps();
+        const originalFetch = mock(async () => new Response('{"conversation_id":"conv-1"}', { status: 200 }));
+        const resolveAttemptIdForConversation = mock(() => 'attempt-1');
+        const runner = new ProactiveFetchRunner(
+            originalFetch as unknown as typeof fetch,
+            resolveAttemptIdForConversation,
+            emitter,
+            100,
+            () => false,
+        );
+
+        await runner.trigger(adapter, 'https://example.com/complete/conv-1');
+
+        expect(originalFetch).not.toHaveBeenCalled();
+        expect(emitter.emitCapturePayload).not.toHaveBeenCalled();
+    });
+
+    it('should abort backoff loop when isExtensionEnabled becomes false mid-loop', async () => {
+        const adapter = createAdapter();
+        const emitter = createEmitterDeps();
+        let enabled = true;
+        let callCount = 0;
+        const originalFetch = mock(async () => {
+            callCount++;
+            if (callCount === 1) {
+                enabled = false;
+            }
+            return new Response('Server Error', { status: 500 });
+        });
+        const resolveAttemptIdForConversation = mock(() => 'attempt-1');
+        const runner = new ProactiveFetchRunner(
+            originalFetch as unknown as typeof fetch,
+            resolveAttemptIdForConversation,
+            emitter,
+            100,
+            () => enabled,
+        );
+
+        await runner.trigger(adapter, 'https://example.com/complete/conv-1');
+
+        expect(originalFetch).toHaveBeenCalledTimes(1);
+    });
+
     it('should retry on non-404 errors (e.g. 500)', async () => {
         const adapter = createAdapter();
         const emitter = createEmitterDeps();
