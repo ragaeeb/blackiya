@@ -17,7 +17,7 @@ const baseConversation = (mapping: any, overrides: any = {}) => ({
     create_time: 1,
     update_time: 2,
     conversation_id: VALID_ID,
-    current_node: 'assistant',
+    current_node: Object.keys(mapping).at(-1) ?? 'root',
     mapping,
     moderation_results: [],
     plugin_ids: null,
@@ -51,6 +51,26 @@ describe('ChatGPT evaluateReadiness', () => {
     beforeAll(async () => {
         const module = await import('@/platforms/chatgpt');
         adapter = module.createChatGPTAdapter();
+    });
+
+    it('should fail closed when current_node does not reference the mapping', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['a1'] },
+                a1: {
+                    id: 'a1',
+                    parent: 'root',
+                    children: [],
+                    message: assistantMessage('a1'),
+                },
+            },
+            { current_node: 'missing' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeFalse();
+        expect(r.reason).toBe('assistant-missing');
     });
 
     it('should return assistant-missing when mapping has no assistant messages', () => {
@@ -134,7 +154,7 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(r.terminal).toBeTrue();
     });
 
-    it('should return assistant-latest-text-not-terminal-turn when latest text message has end_turn false', () => {
+    it('should accept a finished latest text message without relying on end_turn', () => {
         const data = baseConversation({
             root: { id: 'root', message: null, parent: null, children: ['a1'] },
             a1: {
@@ -156,9 +176,9 @@ describe('ChatGPT evaluateReadiness', () => {
             },
         });
         const r = adapter.evaluateReadiness(data);
-        expect(r.ready).toBeFalse();
+        expect(r.ready).toBeTrue();
         expect(r.terminal).toBeTrue();
-        expect(r.reason).toBe('assistant-latest-text-not-terminal-turn');
+        expect(r.reason).toBe('terminal');
     });
 
     it('should return ready/terminal for a finished text message with end_turn true', () => {
@@ -211,5 +231,206 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(r.ready).toBeTrue();
         expect(r.reason).toBe('terminal');
         expect(r.contentHash).not.toBeNull();
+    });
+
+    it('should ignore an in-progress assistant message on an inactive branch', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['active-final', 'inactive-progress'] },
+                'active-final': {
+                    id: 'active-final',
+                    parent: 'root',
+                    children: [],
+                    message: assistantMessage('active-final', {
+                        create_time: 2,
+                        update_time: 2,
+                        content: { content_type: 'text', parts: ['Active branch final answer'] },
+                    }),
+                },
+                'inactive-progress': {
+                    id: 'inactive-progress',
+                    parent: 'root',
+                    children: [],
+                    message: assistantMessage('inactive-progress', {
+                        create_time: 3,
+                        update_time: 3,
+                        status: 'in_progress',
+                        end_turn: false,
+                        content: { content_type: 'text', parts: ['Abandoned branch'] },
+                    }),
+                },
+            },
+            { current_node: 'active-final' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeTrue();
+        expect(r.terminal).toBeTrue();
+        expect(r.reason).toBe('terminal');
+        expect(r.latestAssistantTextLength).toBe('Active branch final answer'.length);
+    });
+
+    it('should remain blocked when the active branch assistant message is in progress', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['finished-sibling', 'active-progress'] },
+                'finished-sibling': {
+                    id: 'finished-sibling',
+                    parent: 'root',
+                    children: [],
+                    message: assistantMessage('finished-sibling'),
+                },
+                'active-progress': {
+                    id: 'active-progress',
+                    parent: 'root',
+                    children: [],
+                    message: assistantMessage('active-progress', {
+                        status: 'in_progress',
+                        end_turn: false,
+                    }),
+                },
+            },
+            { current_node: 'active-progress' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeFalse();
+        expect(r.terminal).toBeFalse();
+        expect(r.reason).toBe('assistant-in-progress');
+    });
+
+    it('should ignore an unfinished assistant message from an earlier turn on the active branch', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-old'] },
+                'user-old': {
+                    id: 'user-old',
+                    parent: 'root',
+                    children: ['assistant-old'],
+                    message: {
+                        ...assistantMessage('user-old'),
+                        author: { role: 'user', name: null, metadata: {} },
+                        content: { content_type: 'text', parts: ['Old prompt'] },
+                    },
+                },
+                'assistant-old': {
+                    id: 'assistant-old',
+                    parent: 'user-old',
+                    children: ['user-latest'],
+                    message: assistantMessage('assistant-old', {
+                        status: 'in_progress',
+                        end_turn: false,
+                        content: { content_type: 'text', parts: ['Abandoned old response'] },
+                    }),
+                },
+                'user-latest': {
+                    id: 'user-latest',
+                    parent: 'assistant-old',
+                    children: ['assistant-latest'],
+                    message: {
+                        ...assistantMessage('user-latest'),
+                        author: { role: 'user', name: null, metadata: {} },
+                        content: { content_type: 'text', parts: ['Latest prompt'] },
+                    },
+                },
+                'assistant-latest': {
+                    id: 'assistant-latest',
+                    parent: 'user-latest',
+                    children: [],
+                    message: assistantMessage('assistant-latest', {
+                        content: { content_type: 'text', parts: ['Latest final answer'] },
+                    }),
+                },
+            },
+            { current_node: 'assistant-latest' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeTrue();
+        expect(r.terminal).toBeTrue();
+        expect(r.reason).toBe('terminal');
+        expect(r.latestAssistantTextLength).toBe('Latest final answer'.length);
+    });
+
+    it('should ignore an in-progress reasoning node followed by finished text in the same turn', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-latest'] },
+                'user-latest': {
+                    id: 'user-latest',
+                    parent: 'root',
+                    children: ['assistant-reasoning'],
+                    message: {
+                        ...assistantMessage('user-latest'),
+                        author: { role: 'user', name: null, metadata: {} },
+                        content: { content_type: 'text', parts: ['Latest prompt'] },
+                    },
+                },
+                'assistant-reasoning': {
+                    id: 'assistant-reasoning',
+                    parent: 'user-latest',
+                    children: ['assistant-final'],
+                    message: assistantMessage('assistant-reasoning', {
+                        status: 'in_progress',
+                        end_turn: false,
+                        content: {
+                            content_type: 'thoughts',
+                            thoughts: [{ summary: 'Reasoning', content: 'Draft', chunks: [], finished: true }],
+                        },
+                    }),
+                },
+                'assistant-final': {
+                    id: 'assistant-final',
+                    parent: 'assistant-reasoning',
+                    children: [],
+                    message: assistantMessage('assistant-final', {
+                        content: { content_type: 'text', parts: ['Finished answer'] },
+                    }),
+                },
+            },
+            { current_node: 'assistant-final' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeTrue();
+        expect(r.reason).toBe('terminal');
+        expect(r.latestAssistantTextLength).toBe('Finished answer'.length);
+    });
+
+    it('should remain blocked when an in-progress assistant node follows finished text', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['assistant-text'] },
+                'assistant-text': {
+                    id: 'assistant-text',
+                    parent: 'root',
+                    children: ['assistant-progress'],
+                    message: assistantMessage('assistant-text', {
+                        content: { content_type: 'text', parts: ['Earlier answer'] },
+                    }),
+                },
+                'assistant-progress': {
+                    id: 'assistant-progress',
+                    parent: 'assistant-text',
+                    children: [],
+                    message: assistantMessage('assistant-progress', {
+                        status: 'in_progress',
+                        end_turn: false,
+                        content: { content_type: 'thoughts' },
+                    }),
+                },
+            },
+            { current_node: 'assistant-progress' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeFalse();
+        expect(r.terminal).toBeFalse();
+        expect(r.reason).toBe('assistant-in-progress');
     });
 });

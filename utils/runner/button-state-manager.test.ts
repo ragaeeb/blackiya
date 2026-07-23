@@ -271,9 +271,28 @@ describe('button-state-manager', () => {
             expect(deps.setCalibrationState).toHaveBeenCalledWith('idle');
         });
 
-        it('should extract canonical sample if fully completed', () => {
+        it('should reingest a ready canonical sample while SFE awaits stabilization', () => {
+            deps.sfe.resolveByConversation = () =>
+                ({ ready: false, reason: 'awaiting_stabilization', blockingConditions: ['stability_window'] }) as any;
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.ingestSfeCanonicalSample).toHaveBeenCalledWith({ conversation_id: '123' }, 'attempt-1');
+        });
+
+        it('should not reingest a cached sample that adapter readiness rejects', () => {
+            deps.sfe.resolveByConversation = () =>
+                ({ ready: false, reason: 'captured_not_ready', blockingConditions: ['no_canonical_data'] }) as any;
+            deps.evaluateReadinessForData = () =>
+                ({ ready: false, terminal: false, reason: 'assistant-in-progress' }) as any;
+
+            refreshButtonState('123', deps, lastButtonStateLog);
+
+            expect(deps.ingestSfeCanonicalSample).not.toHaveBeenCalled();
+        });
+
+        it('should not reingest a cached sample after SFE is ready', () => {
+            refreshButtonState('123', deps, lastButtonStateLog);
+
+            expect(deps.ingestSfeCanonicalSample).not.toHaveBeenCalled();
         });
 
         it('should keep existing lifecycle/conversation binding when URL conversation ID is temporarily missing', () => {

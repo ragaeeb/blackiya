@@ -202,7 +202,15 @@ export const refreshButtonState = (
         fidelity: 'high' as const,
         completeness: 'complete' as const,
     };
-    if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
+    const cachedReadiness = cached ? deps.evaluateReadinessForData(cached) : null;
+    const sfeAlreadyReady = deps.sfe.resolveByConversation(conversationId)?.ready === true;
+    if (
+        cached &&
+        cachedReadiness?.ready === true &&
+        deps.sfeEnabled() &&
+        !sfeAlreadyReady &&
+        shouldIngestAsCanonicalSample(captureMeta)
+    ) {
         deps.ingestSfeCanonicalSample(cached, deps.attemptByConversation.get(conversationId));
     }
 

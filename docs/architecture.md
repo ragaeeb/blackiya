@@ -123,7 +123,7 @@ Critical invariant:
 - Completion hint alone never guarantees export readiness.
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
 - Every accepted `completed` lifecycle signal triggers one immediate canonical probe/pull attempt (ChatGPT skips this while DOM still reports generating; no additional backoff is introduced by the signal itself).
-- ChatGPT stabilization retries skip warm-fetch network pulls when a ready cached snapshot already exists, and also skip degraded snapshot retries (snapshot recovery only) to avoid repeated `/backend-api/conversation/{id}` 404 loops.
+- ChatGPT initial-load and conversation-switch recovery wait for the page-owned canonical response instead of issuing duplicate warm-fetch requests. Stabilization retries also skip network pulls when a ready cached snapshot already exists, and skip degraded snapshot retries (snapshot recovery only), avoiding duplicate `/backend-api/conversation/{id}` requests and 404s.
 - Network completion debounce is attempt-aware: same-conversation new attempts use a shorter debounce window than repeated same-attempt hints.
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
@@ -175,7 +175,8 @@ Flow:
 3. Emits lifecycle and deltas while streaming.
 4. Emits `TITLE_RESOLVED` from `title_generation` frames.
 5. Emits completion hint after stream done.
-6. Runner stabilizes canonical sample and enables Save when ready.
+6. Canonical readiness follows the active `current_node` parent chain and evaluates only the latest user turn. A later finished text supersedes earlier reasoning state, and `end_turn` is advisory for history payloads, so abandoned branches and stale message flags cannot block a completed history export.
+7. Runner stabilizes the ready canonical sample and enables Save. The exported mapping remains unchanged and includes reasoning, tool, and alternate-branch nodes.
 
 Primary code:
 - `entrypoints/interceptor/bootstrap.ts`
@@ -271,7 +272,7 @@ The runner applies lifecycle updates only for active attempt/conversation bindin
 For the same attempt/conversation, regressive lifecycle transitions are rejected (`completed` remains terminal).
 For ChatGPT, `BLACKIYA_RESPONSE_LIFECYCLE phase=completed` is ignored while `adapter.isPlatformGenerating()` is still true; terminal transition waits for a non-generating signal path (typically `BLACKIYA_RESPONSE_FINISHED`) to avoid premature `Completed` UI state during reasoning.
 When lifecycle signals arrive before conversation ID resolution (common for Gemini XHR and Grok `/conversations/new`), the runner caches them as pending by attempt and replays once `BLACKIYA_CONVERSATION_ID_RESOLVED` is received. **The UI badge is updated immediately** for pending `prompt-sent` and `streaming` signals — callers see the lifecycle phase even before the conversation ID resolves.
-For Grok specifically, the original lifecycle attempt may be disposed by SPA navigation before the conversation ID resolves. When canonical capture data arrives on a new attempt with ready data, `shouldPromoteGrokFromCanonicalCapture` promotes the lifecycle to `completed` — this promotion accepts `idle`, `prompt-sent`, and `streaming` states.
+For Grok specifically, the original lifecycle attempt may be disposed by SPA navigation before the conversation ID resolves. When canonical capture data arrives on a new attempt with ready data, `shouldPromoteFromCanonicalCapture` promotes the lifecycle to `completed` — this promotion accepts `idle`, `prompt-sent`, and `streaming` states.
 When Grok SPA navigates from a null conversation ID to the new conversation URL (e.g., `/` → `/c/<id>`), the runner **preserves the active lifecycle state** (`prompt-sent`/`streaming`) via `isLifecycleActiveGeneration()` guard. This guard protects three code paths that would otherwise reset lifecycle to `idle`:
 1. `handleConversationSwitch` — skips `setLifecycleState('idle')` and `buttonManager.remove()` when transitioning from null → new conversation during active generation.
 2. `resetButtonStateForNoConversation` — called by `refreshButtonState`/health-check when conversation ID is null; now skips the idle reset during active generation.
@@ -280,6 +281,7 @@ Additionally, `handleConversationSwitch` skips `disposeInFlightAttemptsOnNavigat
 Cross-conversation navigation (from one existing conversation to another) continues to reset lifecycle to `idle` and dispose attempts as expected.
 On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
+For ChatGPT history loads that have no live prompt/stream signals, a terminal canonical `/backend-api/conversation/{id}` capture is also an implicit completion signal: the runner promotes `idle` to `completed` and enables Save only after canonical readiness passes. Button health checks locally re-ingest only adapter-ready samples that still need SFE stabilization; rejected or already-ready samples are not repeatedly processed.
 
 Key methods:
 - `utils/runner/engine/platform-runner-engine.ts`:

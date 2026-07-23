@@ -68,12 +68,50 @@ describe('interception-capture', () => {
         });
 
         it('should process network source explicitly and trigger canonical flows', () => {
-            processInterceptionCapture('c-1', { data: 123 } as any, { source: 'network', attemptId: 'a-2' }, deps);
+            const data = {
+                data: 123,
+                current_node: 'assistant-final',
+                mapping: {
+                    'assistant-final': {
+                        message: {
+                            author: { role: 'assistant' },
+                            status: 'finished_successfully',
+                            end_turn: null,
+                            content: { content_type: 'text' },
+                        },
+                    },
+                },
+            } as any;
+            deps.evaluateReadinessForData = mock(() => ({
+                ready: true,
+                terminal: true,
+                reason: 'terminal',
+                contentHash: 'hash',
+                latestAssistantTextLength: 42,
+            }));
+
+            processInterceptionCapture('c-1', data, { source: 'network', attemptId: 'a-2' }, deps);
 
             expect(deps.markCanonicalCaptureMeta).toHaveBeenCalledWith('c-1');
-            expect(deps.ingestSfeCanonicalSample).toHaveBeenCalledWith({ data: 123 }, 'aliased-a-2');
+            expect(deps.ingestSfeCanonicalSample).toHaveBeenCalledWith(data, 'aliased-a-2');
             expect(deps.handleResponseFinished).toHaveBeenCalledWith('network', 'c-1');
             expect(deps.refreshButtonState).toHaveBeenCalledWith('c-1');
+            expect(deps.structuredLogger.emit).toHaveBeenCalledWith(
+                'aliased-a-2',
+                'info',
+                'network_canonical_readiness',
+                'Network canonical readiness evaluated',
+                expect.objectContaining({
+                    conversationId: 'c-1',
+                    ready: true,
+                    reason: 'terminal',
+                    currentNode: 'assistant-final',
+                    currentNodeStatus: 'finished_successfully',
+                    currentNodeEndTurn: null,
+                    currentNodeContentType: 'text',
+                }),
+                'network-readiness:c-1:terminal:true',
+            );
         });
     });
 });

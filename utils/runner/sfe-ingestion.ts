@@ -7,7 +7,6 @@
  */
 
 import type { PlatformReadiness } from '@/platforms/types';
-import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
 import type { ResponseLifecycleMessage } from '@/utils/protocol/messages';
 import { shouldIngestAsCanonicalSample } from '@/utils/sfe/capture-fidelity';
@@ -173,14 +172,6 @@ const processCanonicalSampleOutcome = (args: {
     contentHash: string;
 }) => {
     const { deps, data, resolution, shouldRetry, conversationId, attemptId, contentHash } = args;
-    if (!shouldRetry && !resolution.ready) {
-        logger.info('Canonical retry skipped', {
-            conversationId,
-            lifecycleState: deps.getLifecycleState(),
-            reason: resolution.reason,
-            blocking: resolution.blockingConditions,
-        });
-    }
     if (shouldRetry) {
         deps.scheduleCanonicalStabilizationRetry(conversationId, attemptId);
         const awaitingStabilization = resolution.reason === 'awaiting_stabilization';

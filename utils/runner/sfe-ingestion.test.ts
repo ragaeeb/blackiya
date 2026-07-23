@@ -89,6 +89,21 @@ describe('sfe-ingestion', () => {
             expect(deps.clearCanonicalStabilizationRetry).toHaveBeenCalledWith('explicit-attempt');
             expect(deps.syncStreamProbePanelFromCanonical).toHaveBeenCalled();
         });
+
+        it('should not flood the console when stabilization cannot schedule from idle', () => {
+            deps.getLifecycleState = () => 'idle';
+            deps.sfe.applyCanonicalSample = () => ({
+                phase: 'canonical_probing',
+                ready: false,
+                blockingConditions: ['stability_window'],
+                reason: 'awaiting_stabilization',
+            });
+
+            ingestSfeCanonicalSample({ conversation_id: 'conv-1' } as any, undefined, deps);
+
+            expect(logCalls.info).toHaveLength(0);
+            expect(deps.scheduleCanonicalStabilizationRetry).not.toHaveBeenCalled();
+        });
     });
 
     describe('logSfeMismatchIfNeeded', () => {

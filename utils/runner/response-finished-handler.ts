@@ -9,7 +9,7 @@
 import type { PlatformReadiness } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import type { AutoCaptureReason } from '@/utils/runner/auto-capture';
-import { resolveFinishedSignalDebounce, shouldPromoteGrokFromCanonicalCapture } from '@/utils/runner/finished-signal';
+import { resolveFinishedSignalDebounce, shouldPromoteFromCanonicalCapture } from '@/utils/runner/finished-signal';
 import type { RunnerCalibrationUiState, RunnerLifecycleUiState } from '@/utils/runner/state';
 import type { LifecyclePhase } from '@/utils/sfe/types';
 import type { ConversationData } from '@/utils/types';
@@ -103,7 +103,7 @@ export const processFinishedConversation = (
     const cached = deps.getConversation(conversationId);
     const cachedReady = !!cached && deps.evaluateReadiness(cached).ready;
 
-    if (shouldPromoteGrokFromCanonicalCapture(source, cachedReady, deps.getLifecycleState(), deps.adapterName())) {
+    if (shouldPromoteFromCanonicalCapture(source, cachedReady, deps.getLifecycleState(), deps.adapterName())) {
         deps.setCompletedLifecycleState(conversationId, attemptId);
     }
 

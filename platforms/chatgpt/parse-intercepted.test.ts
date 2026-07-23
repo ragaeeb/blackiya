@@ -17,6 +17,26 @@ const minimalMapping = () => ({
     root: { id: 'root', message: null, parent: null, children: [] },
 });
 
+const rawMessage = (
+    id: string,
+    role: 'user' | 'assistant',
+    content: Record<string, unknown>,
+    overrides: Record<string, unknown> = {},
+) => ({
+    id,
+    author: { role, name: null, metadata: {} },
+    create_time: 1,
+    update_time: 1,
+    content,
+    status: 'finished_successfully',
+    end_turn: role === 'assistant',
+    weight: 1,
+    metadata: {},
+    recipient: 'all',
+    channel: null,
+    ...overrides,
+});
+
 describe('ChatGPT parseInterceptedData', () => {
     let adapter: any;
 
@@ -99,6 +119,118 @@ describe('ChatGPT parseInterceptedData', () => {
                 'url',
             );
             expect(result?.title).toBe('');
+        });
+
+        it('should preserve a branched history with reasoning and report its active turn ready', () => {
+            const payload = {
+                title: 'Ushman handoff',
+                conversation_id: VALID_ID,
+                current_node: 'final-assistant',
+                mapping: {
+                    root: { id: 'root', message: null, parent: null, children: ['initial-user'] },
+                    'initial-user': {
+                        id: 'initial-user',
+                        parent: 'root',
+                        children: ['initial-assistant'],
+                        message: rawMessage('initial-user', 'user', {
+                            content_type: 'text',
+                            parts: ['You are taking over this chat from a previous session'],
+                        }),
+                    },
+                    'initial-assistant': {
+                        id: 'initial-assistant',
+                        parent: 'initial-user',
+                        children: ['latest-user'],
+                        message: rawMessage('initial-assistant', 'assistant', {
+                            content_type: 'text',
+                            parts: ['Ushman is a software recovery factory for difficult migrations.'],
+                        }),
+                    },
+                    'latest-user': {
+                        id: 'latest-user',
+                        parent: 'initial-assistant',
+                        children: ['reasoning-explain', 'abandoned-branch'],
+                        message: rawMessage('latest-user', 'user', {
+                            content_type: 'text',
+                            parts: ['Use citations but try to keep them minimal'],
+                        }),
+                    },
+                    'reasoning-explain': {
+                        id: 'reasoning-explain',
+                        parent: 'latest-user',
+                        children: ['reasoning-citations'],
+                        message: rawMessage(
+                            'reasoning-explain',
+                            'assistant',
+                            {
+                                content_type: 'thoughts',
+                                thoughts: [
+                                    {
+                                        summary: 'Evaluating how to explain Ushman to a non-technical audience',
+                                        content: 'Planning the explanation.',
+                                        chunks: [],
+                                        finished: true,
+                                    },
+                                ],
+                            },
+                            { end_turn: false },
+                        ),
+                    },
+                    'reasoning-citations': {
+                        id: 'reasoning-citations',
+                        parent: 'reasoning-explain',
+                        children: ['final-assistant'],
+                        message: rawMessage(
+                            'reasoning-citations',
+                            'assistant',
+                            {
+                                content_type: 'thoughts',
+                                thoughts: [
+                                    {
+                                        summary: 'Analyzing file output and citations',
+                                        content: 'Checking cited material.',
+                                        chunks: [],
+                                        finished: true,
+                                    },
+                                ],
+                            },
+                            { end_turn: false },
+                        ),
+                    },
+                    'final-assistant': {
+                        id: 'final-assistant',
+                        parent: 'reasoning-citations',
+                        children: [],
+                        message: rawMessage('final-assistant', 'assistant', {
+                            content_type: 'text',
+                            parts: ['Your Antigravity conclusion can be stronger with a clearer outcome.'],
+                        }),
+                    },
+                    'abandoned-branch': {
+                        id: 'abandoned-branch',
+                        parent: 'latest-user',
+                        children: [],
+                        message: rawMessage(
+                            'abandoned-branch',
+                            'assistant',
+                            { content_type: 'text', parts: ['Abandoned draft'] },
+                            { status: 'in_progress', end_turn: false },
+                        ),
+                    },
+                },
+            };
+
+            const result = adapter.parseInterceptedData(JSON.stringify(payload), BACKEND_API_URL);
+            const readiness = adapter.evaluateReadiness(result);
+            const exported = JSON.stringify(result);
+
+            expect(readiness).toMatchObject({ ready: true, terminal: true, reason: 'terminal' });
+            expect(exported).toContain('Your Antigravity conclusion can be stronger');
+            expect(exported).toContain('You are taking over this chat from a previous');
+            expect(exported).toContain('Ushman is a software recovery factory');
+            expect(exported).toContain('Evaluating how to explain Ushman to a non-technical');
+            expect(exported).toContain('Analyzing file output and citations');
+            expect(exported).toContain('citations but try to keep them minimal');
         });
     });
 

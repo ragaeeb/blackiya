@@ -425,7 +425,7 @@ describe('Platform Runner – generation guard', () => {
         expect(saveBtn?.title?.includes('Force Save')).toBeFalse();
     }, 12_000);
 
-    it('should keep Save disabled during active generation despite repeated network finished hints', async () => {
+    it('should keep Save disabled during a new active generation despite repeated network finished hints', async () => {
         const canonical = buildConversation('123', 'Ready canonical answer', {
             status: 'finished_successfully',
             endTurn: true,
@@ -471,12 +471,33 @@ describe('Platform Runner – generation guard', () => {
         stopButton.disabled = false;
         document.body.appendChild(stopButton);
 
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:gen-guard-live',
+                phase: 'prompt-sent',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+        postStampedMessage(
+            {
+                type: 'BLACKIYA_RESPONSE_LIFECYCLE',
+                platform: 'ChatGPT',
+                attemptId: 'attempt:gen-guard-live',
+                phase: 'streaming',
+                conversationId: '123',
+            },
+            window.location.origin,
+        );
+
         for (let i = 0; i < 5; i += 1) {
             postStampedMessage(
                 {
                     type: 'BLACKIYA_RESPONSE_FINISHED',
                     platform: 'ChatGPT',
-                    attemptId: 'attempt:gen-guard',
+                    attemptId: 'attempt:gen-guard-live',
                     conversationId: '123',
                 },
                 window.location.origin,
