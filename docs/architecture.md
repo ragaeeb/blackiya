@@ -1,6 +1,6 @@
 # Blackiya Architecture
 
-> Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + final JSON export)
+> Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + JSON/Markdown export)
 
 ## 1) System Overview
 
@@ -24,7 +24,7 @@ flowchart LR
     D --> E["InterceptionManager cache\n/utils/managers/interception-manager.ts"]
     D --> F["Signal Fusion Engine (SFE)\n/utils/sfe/*"]
     D --> G["ButtonManager UI\n/utils/ui/button-manager.ts"]
-    D --> H["Save/Copy export\n/utils/download.ts"]
+    D --> H["JSON/Markdown export\n/utils/download.ts"]
 ```
 
 ## 2) Core Runtime Components
@@ -291,22 +291,30 @@ Key methods:
   - `refreshButtonState`
   - `runStreamDoneProbe`
 
-## 8) How Final JSON Is Built
+## 8) Export Pipeline
 
 Save pipeline:
-1. `handleSaveClick` checks readiness (`canonical_ready` or explicit degraded force-save path).
+1. `handleSaveClick` or `handleSaveMarkdownClick` checks readiness (`canonical_ready` or explicit degraded force-save path).
 2. `getConversationData` fetches cached canonical conversation.
 3. Applies title fallback resolution if title is generic.
-4. Builds export payload:
-   - Original conversation JSON only.
-5. Attaches `capture_meta`:
+4. Selects an explicit format:
+   - JSON keeps the original complete conversation tree.
+   - Markdown walks the active `current_node` parent chain and emits only non-empty `text` messages authored by User or Assistant.
+   - Markdown excludes reasoning/thoughts, system messages, tool calls and results, attachments, metadata, and inactive branches.
+5. JSON attaches `capture_meta`:
    - `captureSource`
    - `fidelity`
    - `completeness`
-6. Downloads JSON via `downloadAsJSON`.
+6. Downloads via `downloadAsJSON` or `downloadAsMarkdown`.
+
+The JSON archive is the full-fidelity source of truth. Markdown is a deliberately reduced reading format and never includes reasoning logs.
+
+Existing JSON exports can use the same transcript serializer through `scripts/export-markdown.ts`, either one file at a time or recursively for a directory.
 
 Primary code:
 - `utils/runner/engine/platform-runner-engine.ts`
+- `utils/runner/save-pipeline.ts`
+- `utils/markdown-transcript.ts`
 - `utils/download.ts`
 
 ### 8.1 Title Consistency and Stickiness

@@ -6,10 +6,11 @@
  * @module utils/download
  */
 
-import { downloadStringAsJsonFile } from '@/utils/dom-download';
+import { downloadStringAsJsonFile, downloadStringAsMarkdownFile } from '@/utils/dom-download';
 import { logger } from '@/utils/logger';
 
 export type DownloadStringAsJsonFileFn = (jsonString: string, filename: string) => void;
+export type DownloadStringAsMarkdownFileFn = (markdown: string, filename: string) => void;
 
 /**
  * Sanitize a string for use as a filename
@@ -81,6 +82,18 @@ export const downloadAsJSON = (
     try {
         const jsonString = JSON.stringify(data, null, 2);
         downloadImpl(jsonString, `${filename}.json`);
+    } catch (error) {
+        logger.error('Download failed:', error);
+    }
+};
+
+export const downloadAsMarkdown = (
+    markdown: string,
+    filename: string,
+    downloadImpl: DownloadStringAsMarkdownFileFn = downloadStringAsMarkdownFile,
+) => {
+    try {
+        downloadImpl(markdown, `${filename}.md`);
     } catch (error) {
         logger.error('Download failed:', error);
     }

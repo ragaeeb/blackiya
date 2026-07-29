@@ -53,8 +53,28 @@ describe('ButtonManager', () => {
         (global as any).document = document;
     });
 
+    it('should inject a separately labeled Markdown export button', async () => {
+        const onMarkdownClick = mock(async () => {});
+        const manager = new ButtonManager(
+            async () => {},
+            onMarkdownClick,
+            async () => {},
+        );
+
+        manager.inject(document.body as any, '123');
+
+        const markdownButton = document.getElementById('blackiya-save-markdown-btn') as HTMLButtonElement | null;
+        expect(markdownButton?.title).toBe('Save Markdown');
+        expect(markdownButton?.getAttribute('aria-label')).toBe('Save Markdown');
+
+        markdownButton?.click();
+        await Promise.resolve();
+        expect(onMarkdownClick).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps calibrate enabled when action buttons are disabled', () => {
         const manager = new ButtonManager(
+            async () => {},
             async () => {},
             async () => {},
         );
@@ -75,6 +95,7 @@ describe('ButtonManager', () => {
         const manager = new ButtonManager(
             async () => {},
             async () => {},
+            async () => {},
         );
         manager.inject(document.body as any, '123');
 
@@ -90,6 +111,7 @@ describe('ButtonManager', () => {
 
     it('shows friendly calibration timestamp when provided in success state', () => {
         const manager = new ButtonManager(
+            async () => {},
             async () => {},
             async () => {},
         );
@@ -120,6 +142,7 @@ describe('ButtonManager', () => {
         const manager = new ButtonManager(
             async () => {},
             async () => {},
+            async () => {},
         );
         manager.inject(document.body as any, 'test-123');
 
@@ -139,6 +162,7 @@ describe('ButtonManager', () => {
         const manager = new ButtonManager(
             async () => {},
             async () => {},
+            async () => {},
         );
         manager.inject(document.body as any, 'test-standalone');
 
@@ -149,6 +173,7 @@ describe('ButtonManager', () => {
 
     it('does not re-inject when container already exists in DOM', () => {
         const manager = new ButtonManager(
+            async () => {},
             async () => {},
             async () => {},
         );
@@ -166,6 +191,7 @@ describe('ButtonManager', () => {
 
     it('cleans duplicate control IDs even when inject is a no-op', () => {
         const manager = new ButtonManager(
+            async () => {},
             async () => {},
             async () => {},
         );
@@ -189,6 +215,7 @@ describe('ButtonManager', () => {
 
     it('removes duplicate controls injected inside a shadow root', () => {
         const manager = new ButtonManager(
+            async () => {},
             async () => {},
             async () => {},
         );
@@ -221,6 +248,7 @@ describe('ButtonManager', () => {
 
     it('shows lifecycle badge and updates phases', () => {
         const manager = new ButtonManager(
+            async () => {},
             async () => {},
             async () => {},
         );

@@ -1,6 +1,6 @@
 {
   "name": "blackiya",
-  "description": "Chrome extension to capture and save conversation JSON from ChatGPT and other LLMs",
+  "description": "Chrome extension to capture and export conversations from ChatGPT and other LLMs",
   "private": true,
   "version": "2.9.0",
   "type": "module",
@@ -32,6 +32,7 @@
     "test:e2e": "playwright test",
     "test:watch": "bun test --watch",
     "har:analyze": "bun run scripts/analyze-har.ts",
+    "export:markdown": "bun run scripts/export-markdown.ts",
     "profile:parsers": "bun run scripts/profile-parsers.ts",
     "check": "biome check --write .",
     "lint": "biome lint .",

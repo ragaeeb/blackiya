@@ -3,6 +3,7 @@ import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/hel
 import {
     applyTitleDomFallbackIfNeeded,
     getConversationData,
+    handleSaveMarkdownClick,
     recoverCanonicalBeforeForceSave,
     resolveSaveReadiness,
 } from '@/utils/runner/save-pipeline';
@@ -25,7 +26,13 @@ describe('save-pipeline', () => {
         logCalls.error.length = 0;
 
         deps = {
-            getAdapter: mock(() => ({ name: 'ChatGPT' }) as any),
+            getAdapter: mock(
+                () =>
+                    ({
+                        name: 'ChatGPT',
+                        formatFilename: () => 'test-chat',
+                    }) as any,
+            ),
             resolveConversationIdForUserAction: mock(() => 'conv-1'),
             getConversation: mock(() => ({ title: 'test', conversation_id: 'conv-1' }) as any),
             resolveReadinessDecision: mock(() => ({ mode: 'canonical_ready', reason: null }) as any),
@@ -46,9 +53,10 @@ describe('save-pipeline', () => {
             ingestInterceptedData: mock(() => {}),
             getRawSnapshotReplayUrls: mock((_conversationId: string, snapshot: { url: string }) => [snapshot.url]),
             getPlatformName: mock(() => 'ChatGPT'),
-            buttonManagerExists: mock(() => true),
             buttonManagerSetLoading: mock(() => {}),
             buttonManagerSetSuccess: mock(() => {}),
+            downloadJson: mock(() => {}),
+            downloadMarkdown: mock(() => {}),
             structuredLogger: { emit: mock(() => {}) } as any,
         };
     });
@@ -172,6 +180,70 @@ describe('save-pipeline', () => {
 
             applyTitleDomFallbackIfNeeded('conv-1', data, deps);
             expect(data.title).toBe('Stream Title');
+        });
+    });
+
+    describe('handleSaveMarkdownClick', () => {
+        it('should download only active-branch user and assistant text', async () => {
+            deps.getConversation.mockImplementationOnce(
+                () =>
+                    ({
+                        title: 'Test Chat',
+                        conversation_id: 'conv-1',
+                        current_node: 'assistant',
+                        mapping: {
+                            system: {
+                                id: 'system',
+                                parent: null,
+                                children: ['user'],
+                                message: {
+                                    author: { role: 'system' },
+                                    content: { content_type: 'text', parts: ['hidden system prompt'] },
+                                },
+                            },
+                            user: {
+                                id: 'user',
+                                parent: 'system',
+                                children: ['reasoning'],
+                                message: {
+                                    author: { role: 'user' },
+                                    content: { content_type: 'text', parts: ['Hello'] },
+                                },
+                            },
+                            reasoning: {
+                                id: 'reasoning',
+                                parent: 'user',
+                                children: ['assistant'],
+                                message: {
+                                    author: { role: 'assistant' },
+                                    content: {
+                                        content_type: 'thoughts',
+                                        parts: ['Analyzing file output and citations'],
+                                    },
+                                },
+                            },
+                            assistant: {
+                                id: 'assistant',
+                                parent: 'reasoning',
+                                children: [],
+                                message: {
+                                    author: { role: 'assistant' },
+                                    content: { content_type: 'text', parts: ['Hi there'] },
+                                },
+                            },
+                        },
+                    }) as any,
+            );
+
+            await handleSaveMarkdownClick(deps);
+
+            expect(deps.downloadMarkdown).toHaveBeenCalledWith(
+                '# Test Chat\n\n## User\n\nHello\n\n## Assistant\n\nHi there\n',
+                'test-chat',
+            );
+            expect(deps.downloadJson).not.toHaveBeenCalled();
+            expect(deps.buttonManagerSetLoading).toHaveBeenCalledWith(true, 'markdown');
+            expect(deps.buttonManagerSetSuccess).toHaveBeenCalledWith('markdown');
         });
     });
 });

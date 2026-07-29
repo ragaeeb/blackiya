@@ -87,7 +87,6 @@ describe('button-state-manager', () => {
                 setSaveButtonMode: mock(() => {}),
                 setActionButtonsEnabled: mock(() => {}),
                 setOpacity: mock(() => {}),
-                setButtonEnabled: mock(() => {}),
                 setReadinessSource: mock(() => {}),
             },
 
@@ -230,7 +229,7 @@ describe('button-state-manager', () => {
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('0.6');
         });
 
-        it('should enable save button in degraded mode', () => {
+        it('should enable both export buttons in degraded mode', () => {
             // Configure deps so resolveReadinessDecision naturally returns degraded_manual_only:
             // sfe reports timeout via blockingConditions, data exists but not ready
             deps.sfe.resolveByConversation = mock(
@@ -246,7 +245,7 @@ describe('button-state-manager', () => {
             );
             refreshButtonState('123', deps, lastButtonStateLog);
             expect(deps.buttonManager.setSaveButtonMode).toHaveBeenCalledWith('force-degraded');
-            expect(deps.buttonManager.setButtonEnabled).toHaveBeenCalledWith('save', true);
+            expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(true);
             expect(deps.buttonManager.setOpacity).toHaveBeenCalledWith('1');
         });
 

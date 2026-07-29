@@ -59,7 +59,6 @@ export type ButtonStateManagerDeps = {
         setSaveButtonMode: (mode: 'default' | 'force-degraded') => void;
         setActionButtonsEnabled: (enabled: boolean) => void;
         setOpacity: (opacity: string) => void;
-        setButtonEnabled: (button: 'save', enabled: boolean) => void;
         setReadinessSource: (source: 'sfe' | 'legacy') => void;
     };
 
@@ -244,7 +243,7 @@ const applyActionStateFromDecision = (isCanonicalReady: boolean, isDegraded: boo
     deps.buttonManager.setReadinessSource(deps.sfeEnabled() ? 'sfe' : 'legacy');
     deps.buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
     if (isDegraded) {
-        deps.buttonManager.setButtonEnabled('save', true);
+        deps.buttonManager.setActionButtonsEnabled(true);
         return;
     }
     deps.buttonManager.setActionButtonsEnabled(isCanonicalReady);

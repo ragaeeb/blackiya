@@ -93,6 +93,7 @@ import {
 import {
     getConversationData as getConversationDataCore,
     handleSaveClick as handleSaveClickCore,
+    handleSaveMarkdownClick as handleSaveMarkdownClickCore,
 } from '@/utils/runner/save-pipeline';
 import { RunnerState } from '@/utils/runner/state';
 import { createStreamDoneCoordinator } from '@/utils/runner/stream/stream-done-coordinator';
@@ -226,6 +227,7 @@ export const runPlatform = (): void => {
         setLifecycleState: null!,
         handleResponseFinished: null!,
         handleSaveClick: null!,
+        handleSaveMarkdownClick: null!,
         handleCalibrationClick: null!,
         getConversationData: null!,
         warmFetchConversationSnapshot: null!,
@@ -298,6 +300,7 @@ export const runPlatform = (): void => {
 
     ctx.buttonManager = new ButtonManager(
         () => ctx.handleSaveClick(),
+        () => ctx.handleSaveMarkdownClick(),
         () => ctx.handleCalibrationClick(),
     );
     ctx.interceptionManager = new InterceptionManager((capturedId, data, meta) => {
@@ -324,6 +327,7 @@ export const runPlatform = (): void => {
         maybeRestartCanonicalRecoveryAfterTimeoutCore(cid, aid, buildCanonicalStabilizationTickDeps(ctx));
 
     ctx.handleSaveClick = async () => handleSaveClickCore(buildSavePipelineDeps(ctx));
+    ctx.handleSaveMarkdownClick = async () => handleSaveMarkdownClickCore(buildSavePipelineDeps(ctx));
     ctx.getConversationData = (opts = {}) => getConversationDataCore(opts, buildSavePipelineDeps(ctx));
 
     ctx.buildWarmFetchDeps = () => buildWarmFetchDeps(ctx);
