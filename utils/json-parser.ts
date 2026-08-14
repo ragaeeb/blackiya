@@ -37,7 +37,8 @@ function scanForClosingBracket(data: string, start: number): number {
     const state: ParserState = { balance: 0, insideString: false, isEscaped: false };
 
     for (let i = start; i < data.length; i++) {
-        if (processChar(data[i], state)) {
+        const char = data[i];
+        if (char !== undefined && processChar(char, state)) {
             return i;
         }
     }

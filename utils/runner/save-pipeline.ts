@@ -43,8 +43,8 @@ export type SavePipelineDeps = {
     ingestInterceptedData: (args: { url: string; data: string; platform: string }) => void;
     getRawSnapshotReplayUrls: (conversationId: string, snapshot: { url: string }) => string[];
     getPlatformName: () => string;
-    buttonManagerSetLoading: (loading: boolean, button: 'save' | 'markdown') => void;
-    buttonManagerSetSuccess: (button: 'save' | 'markdown') => void;
+    buttonManagerSetLoading: (loading: boolean, button: 'save' | 'markdown' | 'force-save') => void;
+    buttonManagerSetSuccess: (button: 'save' | 'markdown' | 'force-save') => void;
     downloadJson: (data: unknown, filename: string) => void;
     downloadMarkdown: (markdown: string, filename: string) => void;
     structuredLogger: StructuredAttemptLogger;
@@ -173,14 +173,14 @@ export const getConversationData = async (
 
 export const saveConversation = async (
     data: ConversationData,
-    options: { allowDegraded?: boolean; format: ExportFormat },
+    options: { allowDegraded?: boolean; format: ExportFormat; action?: 'save' | 'force-save' },
     deps: SavePipelineDeps,
 ): Promise<boolean> => {
     const adapter = deps.getAdapter();
     if (!adapter) {
         return false;
     }
-    const action = options.format === 'json' ? 'save' : 'markdown';
+    const action = options.action ?? (options.format === 'json' ? 'save' : 'markdown');
     deps.buttonManagerSetLoading(true, action);
     try {
         const cachedTitle = data.title ?? null;
@@ -309,6 +309,30 @@ const handleExportClick = async (format: ExportFormat, deps: SavePipelineDeps): 
 
 export const handleSaveClick = async (deps: SavePipelineDeps): Promise<void> => {
     await handleExportClick('json', deps);
+};
+
+const getForceSaveConversationData = (deps: SavePipelineDeps): ConversationData | null => {
+    if (!deps.getAdapter()) {
+        return null;
+    }
+    const conversationId = resolveConversationIdOrNotify(false, deps);
+    if (!conversationId) {
+        return null;
+    }
+    const data = resolveCapturedConversationOrNotify(conversationId, false, deps);
+    if (!data) {
+        return null;
+    }
+    applyTitleDomFallbackIfNeeded(conversationId, data, deps);
+    return data;
+};
+
+export const handleForceSaveJsonClick = async (deps: SavePipelineDeps): Promise<void> => {
+    const data = getForceSaveConversationData(deps);
+    if (!data || !confirmDegradedForceSave()) {
+        return;
+    }
+    await saveConversation(data, { allowDegraded: true, format: 'json', action: 'force-save' }, deps);
 };
 
 export const handleSaveMarkdownClick = async (deps: SavePipelineDeps): Promise<void> => {

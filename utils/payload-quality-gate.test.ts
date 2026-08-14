@@ -288,7 +288,7 @@ describe('payload-quality-gate', () => {
             expect(logger.info).toHaveBeenCalled();
 
             // Verify the warn call includes issue details
-            const warnCall = (logger.warn as ReturnType<typeof mock>).mock.calls[0];
+            const warnCall = (logger.warn as ReturnType<typeof mock>).mock.calls[0]!;
             expect(warnCall[0]).toContain('quality gate FAILED');
             expect(warnCall[1].issues).toContain('missing_model');
         });

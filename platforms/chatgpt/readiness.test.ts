@@ -6,6 +6,8 @@
 
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
 
+import { evaluateChatGPTReadiness } from './readiness';
+
 mock.module('@/utils/logger', () => ({
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, setLevel: () => {} },
 }));
@@ -99,6 +101,210 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(r.reason).toBe('assistant-missing');
         expect(r.ready).toBeFalse();
         expect(r.terminal).toBeFalse();
+    });
+
+    it('should accept a settled history whose active branch ends with a user message', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-old'] },
+                'user-old': {
+                    id: 'user-old',
+                    parent: 'root',
+                    children: ['assistant-old'],
+                    message: {
+                        id: 'user-old',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Earlier prompt'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-old': {
+                    id: 'assistant-old',
+                    parent: 'user-old',
+                    children: ['user-interrupted'],
+                    message: assistantMessage('assistant-old', {
+                        content: { content_type: 'text', parts: ['Earlier answer'] },
+                    }),
+                },
+                'user-interrupted': {
+                    id: 'user-interrupted',
+                    parent: 'assistant-old',
+                    children: ['assistant-interrupted'],
+                    message: {
+                        id: 'user-interrupted',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 2,
+                        update_time: 2,
+                        content: { content_type: 'text', parts: ['Interrupted prompt'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-interrupted': {
+                    id: 'assistant-interrupted',
+                    parent: 'user-interrupted',
+                    children: ['user-latest'],
+                    message: assistantMessage('assistant-interrupted', {
+                        status: 'in_progress',
+                        end_turn: false,
+                        content: { content_type: 'thoughts', thoughts: [{ summary: 'Stopped thinking' }] },
+                    }),
+                },
+                'user-latest': {
+                    id: 'user-latest',
+                    parent: 'assistant-interrupted',
+                    children: [],
+                    message: {
+                        id: 'user-latest',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 3,
+                        update_time: 3,
+                        content: { content_type: 'text', parts: ['Settled latest prompt'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+            },
+            { current_node: 'user-latest' },
+        );
+
+        const r = adapter.evaluateReadiness(data);
+
+        expect(r.ready).toBeTrue();
+        expect(r.terminal).toBeTrue();
+        expect(r.reason).toBe('terminal-user-only');
+        expect(r.contentHash).toBeString();
+        expect(r.latestAssistantTextLength).toBe('Settled latest prompt'.length);
+    });
+
+    it('should accept a settled active branch ending in an interrupted assistant node', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-old'] },
+                'user-old': {
+                    id: 'user-old',
+                    parent: 'root',
+                    children: ['assistant-old'],
+                    message: {
+                        id: 'user-old',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Earlier prompt'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-old': {
+                    id: 'assistant-old',
+                    parent: 'user-old',
+                    children: ['user-latest'],
+                    message: assistantMessage('assistant-old', {
+                        content: { content_type: 'text', parts: ['Earlier answer'] },
+                    }),
+                },
+                'user-latest': {
+                    id: 'user-latest',
+                    parent: 'assistant-old',
+                    children: ['assistant-stopped'],
+                    message: {
+                        id: 'user-latest',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 2,
+                        update_time: 2,
+                        content: { content_type: 'text', parts: ['Latest prompt'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-stopped': {
+                    id: 'assistant-stopped',
+                    parent: 'user-latest',
+                    children: [],
+                    message: assistantMessage('assistant-stopped', {
+                        status: 'in_progress',
+                        end_turn: false,
+                        content: { content_type: 'thoughts', thoughts: [{ summary: 'Stopped thinking' }] },
+                    }),
+                },
+            },
+            { current_node: 'assistant-stopped' },
+        );
+
+        const readiness = evaluateChatGPTReadiness(data, { allowInterruptedAssistant: true });
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-interrupted');
+        expect(readiness.contentHash).toBeString();
+        expect(readiness.latestAssistantTextLength).toBe(1);
+    });
+
+    it('should accept a terminal reasoning recap with no assistant text', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+                'user-1': {
+                    id: 'user-1',
+                    parent: 'root',
+                    children: ['assistant-recap'],
+                    message: {
+                        id: 'user-1',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Please finish the memo'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-recap': {
+                    id: 'assistant-recap',
+                    parent: 'user-1',
+                    children: [],
+                    message: assistantMessage('assistant-recap', {
+                        content: { content_type: 'reasoning_recap' },
+                        end_turn: true,
+                    }),
+                },
+            },
+            { current_node: 'assistant-recap' },
+        );
+
+        const readiness = evaluateChatGPTReadiness(data);
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-interrupted');
+        expect(readiness.contentHash).toBeString();
+        expect(readiness.latestAssistantTextLength).toBe(1);
     });
 
     it('should return assistant-in-progress when any assistant message is in_progress', () => {

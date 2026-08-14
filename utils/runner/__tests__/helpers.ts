@@ -171,7 +171,7 @@ const getLatestAssistantMessage = (data: unknown): AssistantMessageLike | null =
         }
         return [node.message];
     });
-    return assistants.length > 0 ? assistants[assistants.length - 1] : null;
+    return assistants.length > 0 ? (assistants[assistants.length - 1] ?? null) : null;
 };
 
 const extractAssistantText = (message: AssistantMessageLike): string => {

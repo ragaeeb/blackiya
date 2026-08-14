@@ -143,6 +143,7 @@ export type EngineCtx = {
     handleResponseFinished: (source: 'network' | 'dom', hintedCid?: string) => void;
     handleSaveClick: () => Promise<void>;
     handleSaveMarkdownClick: () => Promise<void>;
+    handleForceSaveJsonClick: () => Promise<void>;
     handleCalibrationClick: () => Promise<void>;
     getConversationData: (opts?: { silent?: boolean; allowDegraded?: boolean }) => Promise<ConversationData | null>;
     warmFetchConversationSnapshot: (cid: string, reason: WarmFetchReason) => Promise<boolean>;

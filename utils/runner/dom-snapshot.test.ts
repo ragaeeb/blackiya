@@ -30,9 +30,9 @@ describe('dom-snapshot', () => {
             expect(result!.mapping.root).toBeDefined();
             expect(result!.mapping['snapshot-0']).toBeDefined();
             expect(result!.mapping['snapshot-1']).toBeDefined();
-            expect(result!.mapping['snapshot-0'].message!.content!.parts![0]).toBe('hello');
-            expect(result!.mapping['snapshot-0'].message!.author.role).toBe('user');
-            expect(result!.mapping['snapshot-1'].message!.content!.parts![0]).toBe('hi there');
+            expect(result!.mapping['snapshot-0']!.message!.content!.parts![0]).toBe('hello');
+            expect(result!.mapping['snapshot-0']!.message!.author.role).toBe('user');
+            expect(result!.mapping['snapshot-1']!.message!.content!.parts![0]).toBe('hi there');
         });
     });
 
@@ -62,13 +62,13 @@ describe('dom-snapshot', () => {
             expect(map['snapshot-1']).toBeDefined();
             expect(map['snapshot-2']).toBeDefined();
 
-            expect(map['snapshot-1'].parent).toBeNull();
-            expect(map['snapshot-1'].children).toEqual(['snapshot-2']);
-            expect(map['snapshot-1'].message!.author.name).toBe('User');
+            expect(map['snapshot-1']!.parent).toBeNull();
+            expect(map['snapshot-1']!.children).toEqual(['snapshot-2']);
+            expect(map['snapshot-1']!.message!.author.name).toBe('User');
 
-            expect(map['snapshot-2'].parent).toBe('snapshot-1');
-            expect(map['snapshot-2'].children).toEqual([]);
-            expect(map['snapshot-2'].message!.author.name).toBe('Grok');
+            expect(map['snapshot-2']!.parent).toBe('snapshot-1');
+            expect(map['snapshot-2']!.children).toEqual([]);
+            expect(map['snapshot-2']!.message!.author.name).toBe('Grok');
         });
     });
 

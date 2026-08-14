@@ -54,9 +54,9 @@ describe('Google RPC Parser', () => {
             const input = `)]}'  \n\n${json}`;
             const result = parseBatchexecuteResponse(input);
             expect(result).toHaveLength(1);
-            expect(result[0].payload).toBe('{"conversation":"data"}');
+            expect(result[0]!.payload).toBe('{"conversation":"data"}');
             // rpcId should be a synthetic placeholder, not null
-            expect(typeof result[0].rpcId).toBe('string');
+            expect(typeof result[0]!.rpcId).toBe('string');
         });
 
         it('should extract conversation payload from multi-chunk null-rpcId response', () => {
@@ -70,10 +70,10 @@ describe('Google RPC Parser', () => {
             const result = parseBatchexecuteResponse(input);
             expect(result).toHaveLength(2);
             // Both should have valid payloads
-            expect(result[0].payload).toBe(metaPayload);
-            expect(result[1].payload).toBe(convPayload);
+            expect(result[0]!.payload).toBe(metaPayload);
+            expect(result[1]!.payload).toBe(convPayload);
             // The conversation chunk payload should contain the conversation ID
-            expect(result[1].payload).toContain('c_59f84576f1e364bb');
+            expect(result[1]!.payload).toContain('c_59f84576f1e364bb');
         });
 
         it('should parse array chunks even when prefixed with non-array noise', () => {

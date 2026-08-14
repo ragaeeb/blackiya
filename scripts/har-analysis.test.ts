@@ -80,7 +80,7 @@ describe('har-analysis', () => {
         expect(analysis.stats.entriesFilteredOut).toBe(1);
         expect(analysis.stats.bodyTruncationCount).toBe(0);
 
-        const firstEvent = analysis.timeline[0];
+        const firstEvent = analysis.timeline[0]!;
         expect(firstEvent.url).toContain('token=%5BREDACTED%5D');
         expect(firstEvent.requestHeaders.authorization).toBe('[REDACTED]');
         expect(firstEvent.streamLikely).toBe(true);

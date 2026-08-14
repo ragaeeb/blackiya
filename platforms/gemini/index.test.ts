@@ -164,9 +164,9 @@ describe('Gemini Adapter — integration', () => {
             const thoughts = assistantMsg.content.thoughts;
             expect(thoughts).toBeDefined();
             expect(thoughts!.length).toBe(7);
-            expect(thoughts![0].summary).toBe('Clarifying Key Parameters');
-            expect(thoughts![0].content.startsWith("I've established key parameters for the task. This")).toBeTrue();
-            expect(thoughts![0].content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBeTrue();
+            expect(thoughts![0]!.summary).toBe('Clarifying Key Parameters');
+            expect(thoughts![0]!.content.startsWith("I've established key parameters for the task. This")).toBeTrue();
+            expect(thoughts![0]!.content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBeTrue();
         });
     });
 

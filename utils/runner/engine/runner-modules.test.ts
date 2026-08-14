@@ -150,7 +150,7 @@ describe('runner helper modules', () => {
         expect(snapshot.conversation_id).toBe('conv-1');
         expect(snapshot.title).toBe('Sample title');
         expect(snapshot.current_node).toBe('snapshot-1');
-        expect(snapshot.mapping.root.children).toEqual(['snapshot-0']);
+        expect(snapshot.mapping.root!.children).toEqual(['snapshot-0']);
     });
 
     it('builds runner snapshot conversation payload with platform metadata fields', () => {

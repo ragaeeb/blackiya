@@ -375,6 +375,9 @@ export const captureFromRetries = async (
 
     for (let attempt = 0; attempt < CALIBRATION_RETRY_BACKOFF_MS.length; attempt++) {
         const waitMs = CALIBRATION_RETRY_BACKOFF_MS[attempt];
+        if (waitMs === undefined) {
+            break;
+        }
         if (waitMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, waitMs));
         }

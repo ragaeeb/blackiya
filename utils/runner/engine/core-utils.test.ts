@@ -1,5 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { ingestStabilizationRetrySnapshot } from '@/utils/runner/engine/core-utils';
+import {
+    ingestStabilizationRetrySnapshot,
+    shouldBlockActionsForGeneration,
+} from '@/utils/runner/engine/core-utils';
 import type { EngineCtx } from '@/utils/runner/engine/types';
 import type { ConversationData } from '@/utils/types';
 
@@ -51,5 +54,43 @@ describe('ingestStabilizationRetrySnapshot', () => {
             data: '{"conversation":{"id":"conv-1"}}',
             platform: 'ChatGPT',
         });
+    });
+});
+
+describe('shouldBlockActionsForGeneration', () => {
+    it('should allow terminal reasoning recap captures past a stale ChatGPT stop marker', () => {
+        const ctx = {
+            currentAdapter: { name: 'ChatGPT', isPlatformGenerating: () => true },
+            currentConversationId: 'conv-1',
+            lifecycleState: 'idle',
+            interceptionManager: {
+                getConversation: () => ({ conversation_id: 'conv-1' }),
+            },
+            evaluateReadinessForData: () => ({
+                ready: true,
+                terminal: true,
+                reason: 'terminal-interrupted',
+            }),
+        } as unknown as EngineCtx;
+
+        expect(shouldBlockActionsForGeneration(ctx, 'conv-1')).toBeFalse();
+    });
+
+    it('should keep actions blocked for a normal ready capture while ChatGPT is generating', () => {
+        const ctx = {
+            currentAdapter: { name: 'ChatGPT', isPlatformGenerating: () => true },
+            currentConversationId: 'conv-1',
+            lifecycleState: 'idle',
+            interceptionManager: {
+                getConversation: () => ({ conversation_id: 'conv-1' }),
+            },
+            evaluateReadinessForData: () => ({
+                ready: true,
+                terminal: true,
+                reason: 'terminal',
+            }),
+        } as unknown as EngineCtx;
+
+        expect(shouldBlockActionsForGeneration(ctx, 'conv-1')).toBeTrue();
     });
 });

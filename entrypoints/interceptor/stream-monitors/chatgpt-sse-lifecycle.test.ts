@@ -49,7 +49,7 @@ describe('chatgpt-sse-lifecycle buffer trimming', () => {
 
         await monitorChatGptSseLifecycle(new Response('seed'), 'attempt-1', emit as any);
 
-        const lastBuffer = capturedSseBuffers[capturedSseBuffers.length - 1];
+        const lastBuffer = capturedSseBuffers[capturedSseBuffers.length - 1]!;
         expect(lastBuffer.length).toBeGreaterThan(0);
         expect(lastBuffer.startsWith('data: ')).toBeTrue();
     });

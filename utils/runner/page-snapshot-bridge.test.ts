@@ -43,14 +43,14 @@ describe('page-snapshot-bridge', () => {
             'http://test',
         );
 
-        const listener = mockAddEventListener.mock.calls[0][1];
+        const listener = mockAddEventListener.mock.calls[0]![1];
 
         const evt = {
             source: globalThis.window,
             origin: 'http://test',
             data: {
                 type: 'BLACKIYA_PAGE_SNAPSHOT_RESPONSE',
-                requestId: mockPostMessage.mock.calls[0][0].requestId,
+                requestId: mockPostMessage.mock.calls[0]![0].requestId,
                 success: true,
                 data: 'snap',
                 __blackiyaToken: '123',
@@ -84,8 +84,8 @@ describe('page-snapshot-bridge', () => {
     it('should ignore foreign messages and wait for valid one', async () => {
         const promise = requestPageSnapshot('conv-1');
 
-        const listener = mockAddEventListener.mock.calls[0][1];
-        const requestId = mockPostMessage.mock.calls[0][0].requestId;
+        const listener = mockAddEventListener.mock.calls[0]![1];
+        const requestId = mockPostMessage.mock.calls[0]![0].requestId;
 
         // Wrong source
         listener({

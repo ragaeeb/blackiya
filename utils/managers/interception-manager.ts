@@ -506,7 +506,7 @@ export class InterceptionManager {
     private hasNonEmptyUserPrompt(data: ConversationData): boolean {
         for (const node of Object.values(data.mapping)) {
             const message = node.message;
-            if (!message || message.author.role !== 'user') {
+            if (message?.author.role !== 'user') {
                 continue;
             }
             if (this.extractMessageText(message).length > 0) {
@@ -542,7 +542,7 @@ export class InterceptionManager {
         let latestTimestamp = Number.NEGATIVE_INFINITY;
         for (const node of Object.values(data.mapping)) {
             const message = node.message;
-            if (!message || message.author.role !== 'assistant') {
+            if (message?.author.role !== 'assistant') {
                 continue;
             }
             const timestamp = message.update_time ?? message.create_time ?? Number.NEGATIVE_INFINITY;
@@ -633,6 +633,9 @@ export class InterceptionManager {
             }
         } else {
             const rootNode = data.mapping[rootId];
+            if (!rootNode) {
+                return;
+            }
             if (!rootNode.children.includes(hintNodeId)) {
                 rootNode.children.push(hintNodeId);
             }

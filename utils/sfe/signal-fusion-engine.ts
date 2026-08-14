@@ -267,6 +267,9 @@ export class SignalFusionEngine {
             return null;
         }
         const descriptor = active[0];
+        if (!descriptor) {
+            return null;
+        }
         const attemptId = descriptor.attemptId;
         const existingResolution = this.resolutions.get(attemptId);
         if (

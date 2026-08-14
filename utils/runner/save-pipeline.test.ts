@@ -3,6 +3,7 @@ import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/hel
 import {
     applyTitleDomFallbackIfNeeded,
     getConversationData,
+    handleForceSaveJsonClick,
     handleSaveMarkdownClick,
     recoverCanonicalBeforeForceSave,
     resolveSaveReadiness,
@@ -244,6 +245,23 @@ describe('save-pipeline', () => {
             expect(deps.downloadJson).not.toHaveBeenCalled();
             expect(deps.buttonManagerSetLoading).toHaveBeenCalledWith(true, 'markdown');
             expect(deps.buttonManagerSetSuccess).toHaveBeenCalledWith('markdown');
+        });
+    });
+
+    describe('handleForceSaveJsonClick', () => {
+        it('should export cached data without readiness or generation gating', async () => {
+            deps.resolveReadinessDecision.mockImplementation(() => ({ mode: 'awaiting_stabilization' }) as any);
+            deps.shouldBlockActionsForGeneration.mockImplementation(() => true);
+
+            await handleForceSaveJsonClick(deps);
+
+            expect(deps.downloadJson).toHaveBeenCalledWith(
+                expect.objectContaining({ conversation_id: 'conv-1' }),
+                'test-chat',
+            );
+            expect(deps.buttonManagerSetLoading).toHaveBeenCalledWith(true, 'force-save');
+            expect(deps.buttonManagerSetSuccess).toHaveBeenCalledWith('force-save');
+            expect(deps.warmFetchConversationSnapshot).not.toHaveBeenCalled();
         });
     });
 });

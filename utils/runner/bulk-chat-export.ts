@@ -17,7 +17,7 @@ import { attachExportMeta } from '@/utils/runner/export-helpers';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
 import type { ConversationData } from '@/utils/types';
 
-const CHATGPT_HOSTS = ['chatgpt.com', 'chat.openai.com'];
+const CHATGPT_HOSTS = ['chatgpt.com', 'chat.openai.com'] as const;
 const CHATGPT_CONVERSATION_ID_PATTERN = /^[a-f0-9-]{8,}$/i;
 const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const GEMINI_CONVERSATION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,}$/;
@@ -339,7 +339,7 @@ const extractGeminiConversationIdsFromBatchexecuteText = (text: string): string[
         const matcher = /\bc_([a-zA-Z0-9_-]{8,})\b/g;
         for (const match of source.matchAll(matcher)) {
             const conversationId = match[1];
-            if (GEMINI_CONVERSATION_ID_PATTERN.test(conversationId)) {
+            if (conversationId && GEMINI_CONVERSATION_ID_PATTERN.test(conversationId)) {
                 ids.push(conversationId);
             }
         }
@@ -533,8 +533,9 @@ const listConversationIdsChatGpt = async (context: RequestContext): Promise<Conv
     const pageSize = 100;
 
     while (limit === null || ids.length < limit) {
-        const currentHost = resolveHostFromLocation(context.locationHref(), CHATGPT_HOSTS[0]);
-        const host = CHATGPT_HOSTS.includes(currentHost) ? currentHost : CHATGPT_HOSTS[0];
+        const fallbackHost = CHATGPT_HOSTS[0];
+        const currentHost = resolveHostFromLocation(context.locationHref(), fallbackHost);
+        const host = CHATGPT_HOSTS.find((candidate) => candidate === currentHost) ?? fallbackHost;
         const response = await fetchFirstSuccessfulResponse(buildChatGptListUrls(host, offset, pageSize), context);
 
         if (!response?.ok) {

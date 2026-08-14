@@ -69,9 +69,11 @@ export const extractLatestAssistantText = (parsed: ConversationData): string | n
         return null;
     }
 
-    const text = (messages[messages.length - 1].content.parts ?? [])
-        .filter((p): p is string => typeof p === 'string')
-        .join('');
+    const latest = messages[messages.length - 1];
+    if (!latest) {
+        return null;
+    }
+    const text = (latest.content.parts ?? []).filter((p): p is string => typeof p === 'string').join('');
     const normalized = text.trim();
     return normalized.length === 0 || /^v\d+$/i.test(normalized) ? null : normalized;
 };

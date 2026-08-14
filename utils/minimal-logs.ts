@@ -82,7 +82,11 @@ const resolveBuildFingerprintFromEntry = (entry: LogEntry): BuildFingerprint | n
 
 const resolveBuildFingerprint = (logs: LogEntry[]): BuildFingerprint | null => {
     for (let index = logs.length - 1; index >= 0; index -= 1) {
-        const resolved = resolveBuildFingerprintFromEntry(logs[index]);
+        const entry = logs[index];
+        if (!entry) {
+            continue;
+        }
+        const resolved = resolveBuildFingerprintFromEntry(entry);
         if (resolved) {
             return resolved;
         }
@@ -532,6 +536,9 @@ const buildSessionSection = (groups: SessionGroup[]): string[] => {
 
     for (let i = 0; i < groups.length; i++) {
         const g = groups[i];
+        if (!g) {
+            continue;
+        }
         const title = g.convId ? `${g.platform} ${g.convId.slice(0, 8)}` : g.platform;
         lines.push(`## ${i + 1}. ${title}${g.count > 1 ? ` ×${g.count}` : ''}`);
         lines.push('');

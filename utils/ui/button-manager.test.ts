@@ -72,6 +72,29 @@ describe('ButtonManager', () => {
         expect(onMarkdownClick).toHaveBeenCalledTimes(1);
     });
 
+    it('should inject an always-available Force Save JSON button', async () => {
+        const onForceSaveClick = mock(async () => {});
+        const manager = new ButtonManager(
+            async () => {},
+            async () => {},
+            async () => {},
+            onForceSaveClick,
+        );
+
+        manager.inject(document.body as any, '123');
+
+        const forceButton = document.getElementById('blackiya-force-save-json-btn') as HTMLButtonElement | null;
+        expect(forceButton?.title).toBe('Force Save JSON (current data)');
+        expect(forceButton?.getAttribute('aria-label')).toBe('Force Save JSON (current data)');
+
+        manager.setActionButtonsEnabled(false);
+        expect(forceButton?.disabled).toBeFalse();
+
+        forceButton?.click();
+        await Promise.resolve();
+        expect(onForceSaveClick).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps calibrate enabled when action buttons are disabled', () => {
         const manager = new ButtonManager(
             async () => {},

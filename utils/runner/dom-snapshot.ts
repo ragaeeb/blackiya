@@ -98,6 +98,9 @@ export const buildRunnerSnapshotConversationData = (
 
     for (let index = 0; index < messages.length; index++) {
         const msg = messages[index];
+        if (!msg) {
+            continue;
+        }
         const id = `snapshot-${index + 1}`;
         mapping[id] = {
             id,

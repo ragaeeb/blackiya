@@ -130,8 +130,8 @@ describe('title-resolver', () => {
     it('falls back to update_time when create_time is null for sorting', () => {
         const base = buildConversation('New chat');
         // Override u1's create_time to null; update_time drives ordering
-        base.mapping.u1.message!.create_time = null;
-        base.mapping.u1.message!.update_time = 5;
+        base.mapping.u1!.message!.create_time = null;
+        base.mapping.u1!.message!.update_time = 5;
 
         base.mapping.u0 = {
             id: 'u0',
@@ -157,14 +157,14 @@ describe('title-resolver', () => {
 
     it('returns null from deriveConversationTitleFromFirstUserMessage when all user message parts are empty', () => {
         const base = buildConversation('New chat');
-        base.mapping.u1.message!.content.parts = ['   ', ''];
+        base.mapping.u1!.message!.content.parts = ['   ', ''];
         expect(deriveConversationTitleFromFirstUserMessage(base)).toBeNull();
     });
 
     it('truncates long first-user-message titles at maxLength', () => {
         const base = buildConversation('New chat');
         const longText = 'a'.repeat(200);
-        base.mapping.u1.message!.content.parts = [longText];
+        base.mapping.u1!.message!.content.parts = [longText];
         const result = deriveConversationTitleFromFirstUserMessage(base, 80);
         const expected = longText.slice(0, 80).trimEnd();
         expect(result).toBe(expected);

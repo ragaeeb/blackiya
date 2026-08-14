@@ -52,7 +52,11 @@ describe('shouldRemoveDisposedAttemptBinding', () => {
         const visited = new Set<string>();
         while (aliases[current] && !visited.has(current)) {
             visited.add(current);
-            current = aliases[current];
+            const next = aliases[current];
+            if (!next) {
+                break;
+            }
+            current = next;
         }
         return current;
     };

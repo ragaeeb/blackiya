@@ -141,7 +141,7 @@ blackiya/
 
 - ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT, Gemini, and Grok.
 - ✅ **Global Enable Toggle**: Turn Blackiya off from the popup so newly opened supported tabs stay inert until you re-enable it.
-- ✅ **Readiness-Gated Export**: JSON and Markdown exports are enabled only when canonical data is ready; degraded exports fall back to Force Save.
+- ✅ **Readiness-Gated Export**: JSON and Markdown exports are enabled only when canonical data is ready; an explicit Force Save JSON control can archive currently cached data when readiness is unresolved.
 - ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including thinking/reasoning logs and title recovery.
 - ✅ **Grok Support**: Full support for Grok's GraphQL/NDJSON flows, including conversation history and thinking traces.
 - ✅ **Smart Titles**: Automatic conversation title capture with retroactive updates for async title loads.
@@ -259,7 +259,7 @@ Build naming behavior:
 
 1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
 2. Use the popup toggle to enable or disable Blackiya globally for new tabs.
-3. When the capture state is ready, use 💾 for the complete JSON archive or 📝 for a Markdown transcript.
+3. When the capture state is ready, use 💾 for the complete JSON archive or 📝 for a Markdown transcript. If the lifecycle remains unresolved, use ⚡ Force Save JSON to export the currently cached conversation in the same JSON format.
 4. JSON preserves the full conversation tree, including reasoning data. Markdown contains only active-branch User and Assistant text.
 5. Downloads use `{conversation-title}_{timestamp}.json` or `{conversation-title}_{timestamp}.md`.
 

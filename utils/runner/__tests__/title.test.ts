@@ -238,8 +238,8 @@ describe('Platform Runner – export title resolution', () => {
         await new Promise((r) => setTimeout(r, 200));
 
         expect(downloadCalls.length).toBeGreaterThanOrEqual(1);
-        expect((downloadCalls[0].data as any).title).toBe('Translation of Maytah Prohibition');
-        expect(downloadCalls[0].filename).toContain('Translation');
+        expect((downloadCalls[0]!.data as any).title).toBe('Translation of Maytah Prohibition');
+        expect(downloadCalls[0]!.filename).toContain('Translation');
     }, 15_000);
 
     it('should use Gemini DOM title fallback on Save when cached title is generic', async () => {
@@ -309,7 +309,7 @@ describe('Platform Runner – export title resolution', () => {
         await new Promise((r) => setTimeout(r, 100));
 
         expect(downloadCalls.length).toBeGreaterThanOrEqual(1);
-        expect((downloadCalls.at(-1)?.data as any).title).toBe('Discussion on Quranic Verse Meanings');
+        expect((downloadCalls.at(-1)?.data as any)?.title).toBe('Discussion on Quranic Verse Meanings');
         expect(downloadCalls.at(-1)?.filename).toContain('Discussion_on_Quranic_Verse_Meanings');
     }, 10_000);
 
@@ -381,7 +381,7 @@ describe('Platform Runner – export title resolution', () => {
         await new Promise((r) => setTimeout(r, 100));
 
         expect(downloadCalls.length).toBeGreaterThanOrEqual(1);
-        expect((downloadCalls.at(-1)?.data as any).title).toBe("Discussion on Istinja' Rulings");
+        expect((downloadCalls.at(-1)?.data as any)?.title).toBe("Discussion on Istinja' Rulings");
         expect(downloadCalls.at(-1)?.filename).toContain('Discussion_on_Istinja__Rulings');
     }, 10_000);
 });

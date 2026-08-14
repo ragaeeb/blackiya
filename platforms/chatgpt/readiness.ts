@@ -12,6 +12,10 @@ import { hashText } from '@/utils/hash';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 import { normalizeText } from './utils';
 
+type ChatGPTReadinessOptions = {
+    allowInterruptedAssistant?: boolean;
+};
+
 const collectActiveBranchMessages = (data: ConversationData): Message[] => {
     if (!data.mapping[data.current_node]) {
         return [];
@@ -47,16 +51,14 @@ const collectCurrentTurnAssistantMessages = (data: ConversationData): Message[] 
         }
     }
 
-    return activeBranchMessages
-        .slice(latestUserIndex + 1)
-        .filter((message) => message.author.role === 'assistant');
+    return activeBranchMessages.slice(latestUserIndex + 1).filter((message) => message.author.role === 'assistant');
 };
 
 /**
  * Extracts the plaintext content from an assistant message by joining parts
  * and falling back to the `content` field if present.
  */
-export const extractAssistantText = (message: Message): string => {
+const extractMessageText = (message: Message): string => {
     const partsText = Array.isArray(message.content.parts)
         ? message.content.parts.filter((part): part is string => typeof part === 'string').join('')
         : '';
@@ -68,10 +70,74 @@ export const extractAssistantText = (message: Message): string => {
         .normalize('NFC');
 };
 
+export const extractAssistantText = (message: Message): string => extractMessageText(message);
+
 const hasFinishedAssistantText = (message: Message): boolean =>
     message.status === 'finished_successfully' &&
     message.content.content_type === 'text' &&
     extractAssistantText(message).length > 0;
+
+const isTerminalNonTextAssistant = (message: Message, text: string): boolean =>
+    message.status === 'finished_successfully' &&
+    message.end_turn === true &&
+    text.length === 0 &&
+    (message.content.content_type === 'reasoning_recap' || message.content.content_type === 'thoughts');
+
+const resolveTerminalUserOnlyReadiness = (
+    activeBranchMessages: Message[],
+    data: ConversationData,
+): PlatformReadiness | null => {
+    const latestMessage = activeBranchMessages.at(-1);
+    const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
+    const hasFinishedAssistantHistory = activeBranchMessages
+        .slice(0, latestUserIndex)
+        .some(hasFinishedAssistantText);
+    if (
+        latestMessage?.author.role !== 'user' ||
+        latestMessage.status === 'in_progress' ||
+        !hasFinishedAssistantHistory
+    ) {
+        return null;
+    }
+    const latestUserText = extractMessageText(latestMessage);
+    const stableText = latestUserText || latestMessage.id || data.current_node;
+    return {
+        ready: true,
+        terminal: true,
+        reason: 'terminal-user-only',
+        contentHash: hashText(stableText),
+        latestAssistantTextLength: latestUserText.length || 1,
+    };
+};
+
+const resolveTerminalAssistantReadiness = (
+    activeBranchMessages: Message[],
+    data: ConversationData,
+    options: ChatGPTReadinessOptions,
+): PlatformReadiness | null => {
+    const latestMessage = activeBranchMessages.at(-1);
+    const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
+    const latestMessageText = latestMessage ? extractMessageText(latestMessage) : '';
+    const isInterrupted =
+        options.allowInterruptedAssistant &&
+        latestMessage?.author.role === 'assistant' &&
+        latestMessage.status !== 'error' &&
+        latestMessageText.length === 0;
+    if (
+        latestMessage?.author.role !== 'assistant' ||
+        latestUserIndex < 0 ||
+        (!isTerminalNonTextAssistant(latestMessage, latestMessageText) && !isInterrupted)
+    ) {
+        return null;
+    }
+    return {
+        ready: true,
+        terminal: true,
+        reason: 'terminal-interrupted',
+        contentHash: hashText(latestMessage.id || data.current_node),
+        latestAssistantTextLength: 1,
+    };
+};
 
 /**
  * Evaluates whether a ChatGPT conversation snapshot is ready for canonical export.
@@ -84,10 +150,18 @@ const hasFinishedAssistantText = (message: Message): boolean =>
  * `end_turn` is advisory for history payloads. Modern ChatGPT responses can
  * leave it false or null even after a later text message is finished.
  */
-export const evaluateChatGPTReadiness = (data: ConversationData): PlatformReadiness => {
+export const evaluateChatGPTReadiness = (
+    data: ConversationData,
+    options: ChatGPTReadinessOptions = {},
+): PlatformReadiness => {
+    const activeBranchMessages = collectActiveBranchMessages(data);
     const assistantMessages = collectCurrentTurnAssistantMessages(data);
 
     if (assistantMessages.length === 0) {
+        const terminalUserOnlyReadiness = resolveTerminalUserOnlyReadiness(activeBranchMessages, data);
+        if (terminalUserOnlyReadiness) {
+            return terminalUserOnlyReadiness;
+        }
         return {
             ready: false,
             terminal: false,
@@ -95,6 +169,11 @@ export const evaluateChatGPTReadiness = (data: ConversationData): PlatformReadin
             contentHash: null,
             latestAssistantTextLength: 0,
         };
+    }
+
+    const terminalAssistantReadiness = resolveTerminalAssistantReadiness(activeBranchMessages, data, options);
+    if (terminalAssistantReadiness) {
+        return terminalAssistantReadiness;
     }
 
     const finishedTextMessages = assistantMessages.filter(hasFinishedAssistantText);

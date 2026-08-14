@@ -175,7 +175,7 @@ describe('isConversationReady', () => {
 
     it('returns false for assistant messages with empty content payloads', () => {
         const data = createBaseConversation();
-        data.mapping['assistant-node'].message!.content = {
+        data.mapping['assistant-node']!.message!.content = {
             content_type: 'model_editable_context' as any,
             parts: [],
         };
@@ -184,7 +184,7 @@ describe('isConversationReady', () => {
 
     it('returns false when assistant is still in progress', () => {
         const data = createBaseConversation();
-        data.mapping['assistant-node'].message!.status = 'in_progress';
+        data.mapping['assistant-node']!.message!.status = 'in_progress';
         expect(isConversationReady(data)).toBeFalse();
     });
 
@@ -196,7 +196,7 @@ describe('isConversationReady', () => {
 
     it('returns false when finished assistant messages have no meaningful content', () => {
         const data = createBaseConversation();
-        data.mapping['assistant-node'].message!.content = {
+        data.mapping['assistant-node']!.message!.content = {
             content_type: 'text',
             parts: [],
         };

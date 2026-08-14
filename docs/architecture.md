@@ -119,6 +119,11 @@ Readiness decision modes:
 - `awaiting_stabilization` (Save disabled)
 - `degraded_manual_only` (Force Save only)
 
+The UI also exposes an explicit `Force Save JSON` control independently of
+readiness. It exports the currently cached `ConversationData` through the same
+JSON serializer and filename policy as Save, with degraded export metadata, so
+an interrupted or otherwise unresolved lifecycle cannot prevent a local archive.
+
 Critical invariant:
 - Completion hint alone never guarantees export readiness.
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
@@ -158,6 +163,8 @@ sequenceDiagram
     R->>S: completed_hint + stabilization checks
     S-->>R: canonical_ready OR awaiting_stabilization OR degraded_manual_only
     R->>UI: Update status + Save/Force Save modes
+    U->>UI: Force Save JSON (cached data, readiness bypass)
+    UI->>R: Export cached ConversationData
 ```
 
 ## 6) Platform Flows
@@ -175,7 +182,7 @@ Flow:
 3. Emits lifecycle and deltas while streaming.
 4. Emits `TITLE_RESOLVED` from `title_generation` frames.
 5. Emits completion hint after stream done.
-6. Canonical readiness follows the active `current_node` parent chain and evaluates only the latest user turn. A later finished text supersedes earlier reasoning state, and `end_turn` is advisory for history payloads, so abandoned branches and stale message flags cannot block a completed history export.
+6. Canonical readiness follows the active `current_node` parent chain and evaluates only the latest user turn. A later finished text supersedes earlier reasoning state, and `end_turn` is advisory for history payloads, so abandoned branches and stale message flags cannot block a completed history export. A settled history whose active branch ends on a User message, a terminal reasoning recap, or an interrupted, textless Assistant node is also exportable when the page has no active generation marker (including before turns render on a hard refresh); a terminal reasoning recap remains authoritative even if a stale stop control is still present. This preserves archives for conversations that were left on a final prompt or stopped response.
 7. Runner stabilizes the ready canonical sample and enables Save. The exported mapping remains unchanged and includes reasoning, tool, and alternate-branch nodes.
 
 Primary code:

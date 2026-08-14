@@ -61,7 +61,7 @@ describe('runtime-observers', () => {
             const untrack = registerButtonHealthCheck(deps);
 
             // Invoke the callback that setInterval was called with
-            const cb = ((globalThis as any).window.setInterval as ReturnType<typeof mock>).mock.calls[0][0];
+            const cb = ((globalThis as any).window.setInterval as ReturnType<typeof mock>).mock.calls[0]![0];
 
             // First time: button does not exist, injects it
             cb();

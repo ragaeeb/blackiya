@@ -363,7 +363,7 @@ describe('button-state-manager', () => {
             injectSaveButton(deps, lastButtonStateLog);
             expect(deps.buttonManager.inject).not.toHaveBeenCalled();
             expect(logCalls.info).toHaveLength(1);
-            expect(logCalls.info[0].message).toContain('target missing');
+            expect(logCalls.info[0]!.message).toContain('target missing');
         });
 
         it('should handle no conversation ID correctly when no active conversation is bound', () => {

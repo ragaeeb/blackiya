@@ -92,6 +92,7 @@ import {
 } from '@/utils/runner/runtime/runtime-settings';
 import {
     getConversationData as getConversationDataCore,
+    handleForceSaveJsonClick as handleForceSaveJsonClickCore,
     handleSaveClick as handleSaveClickCore,
     handleSaveMarkdownClick as handleSaveMarkdownClickCore,
 } from '@/utils/runner/save-pipeline';
@@ -228,6 +229,7 @@ export const runPlatform = (): void => {
         handleResponseFinished: null!,
         handleSaveClick: null!,
         handleSaveMarkdownClick: null!,
+        handleForceSaveJsonClick: null!,
         handleCalibrationClick: null!,
         getConversationData: null!,
         warmFetchConversationSnapshot: null!,
@@ -302,6 +304,7 @@ export const runPlatform = (): void => {
         () => ctx.handleSaveClick(),
         () => ctx.handleSaveMarkdownClick(),
         () => ctx.handleCalibrationClick(),
+        () => ctx.handleForceSaveJsonClick(),
     );
     ctx.interceptionManager = new InterceptionManager((capturedId, data, meta) => {
         processInterceptionCaptureCore(capturedId, data, meta, buildInterceptionCaptureDeps(ctx));
@@ -328,6 +331,7 @@ export const runPlatform = (): void => {
 
     ctx.handleSaveClick = async () => handleSaveClickCore(buildSavePipelineDeps(ctx));
     ctx.handleSaveMarkdownClick = async () => handleSaveMarkdownClickCore(buildSavePipelineDeps(ctx));
+    ctx.handleForceSaveJsonClick = async () => handleForceSaveJsonClickCore(buildSavePipelineDeps(ctx));
     ctx.getConversationData = (opts = {}) => getConversationDataCore(opts, buildSavePipelineDeps(ctx));
 
     ctx.buildWarmFetchDeps = () => buildWarmFetchDeps(ctx);

@@ -80,8 +80,8 @@ describe('downloadStringAsJsonFile', () => {
             expect(revokedObjectUrls.length).toBe(1);
             expect(revokedObjectUrls[0]).toBe(createdObjectUrls[0]);
             expect(clickedLinks.length).toBe(1);
-            expect(clickedLinks[0].download).toBe('test.json');
-            expect(clickedLinks[0].href).toContain('blob:mock/');
+            expect(clickedLinks[0]!.download).toBe('test.json');
+            expect(clickedLinks[0]!.href).toContain('blob:mock/');
         } finally {
             document.body.appendChild = originalAppendChild;
         }
@@ -128,7 +128,7 @@ describe('downloadStringAsJsonFile', () => {
             downloadStringAsJsonFile('{}', 'out.json');
             // After the call completes the link must no longer be in the document body
             expect(captured.length).toBe(1);
-            expect(document.body.contains(captured[0])).toBeFalse();
+            expect(document.body.contains(captured[0]!)).toBeFalse();
         } finally {
             document.body.appendChild = originalAppendChild;
         }
@@ -152,8 +152,8 @@ describe('downloadStringAsJsonFile', () => {
         try {
             downloadStringAsJsonFile('{"a":1}', 'export.json');
             expect(blobs.length).toBe(1);
-            expect(blobs[0].type.toLowerCase()).toStartWith('application/json');
-            expect(blobs[0].size).toBeGreaterThan(0);
+            expect(blobs[0]!.type.toLowerCase()).toStartWith('application/json');
+            expect(blobs[0]!.size).toBeGreaterThan(0);
         } finally {
             document.body.appendChild = originalAppendChild;
         }
@@ -179,8 +179,8 @@ describe('downloadStringAsJsonFile', () => {
         try {
             downloadStringAsMarkdownFile('# Chat\n', 'chat.md');
             expect(blobs).toHaveLength(1);
-            expect(blobs[0].type.toLowerCase()).toStartWith('text/markdown');
-            expect(links[0].download).toBe('chat.md');
+            expect(blobs[0]!.type.toLowerCase()).toStartWith('text/markdown');
+            expect(links[0]!.download).toBe('chat.md');
         } finally {
             document.body.appendChild = originalAppendChild;
         }

@@ -86,12 +86,12 @@ describe('capture-queue', () => {
 
             const queue = (globalThis.window as any).__BLACKIYA_CAPTURE_QUEUE__;
             expect(queue.length).toBe(50); // MAX_CAPTURE_QUEUE_SIZE
-            expect(queue[0].data).toBe('10');
+            expect(queue[0]!.data).toBe('10');
 
             const history = getRawCaptureHistory();
             expect(history.length).toBe(30); // MAX_CAPTURE_HISTORY_SIZE
-            expect(history[0].data).toBe('30');
-            expect(history[29].data).toBe('59');
+            expect(history[0]!.data).toBe('30');
+            expect(history[29]!.data).toBe('59');
         });
 
         it('should track dropped capture/history entries in queue-drop stats', () => {
