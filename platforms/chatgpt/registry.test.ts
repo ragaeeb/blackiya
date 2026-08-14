@@ -42,6 +42,16 @@ describe('chatgpt registry', () => {
         expect(isChatGptGeneratingFromDom(doc)).toBeTrue();
     });
 
+    it('should ignore a disabled stale stop button when classifying generation state', () => {
+        const doc = {
+            querySelector: (selector: string) =>
+                selector === 'button[data-testid="stop-button"]'
+                    ? ({ disabled: true } as unknown as HTMLButtonElement)
+                    : null,
+        };
+        expect(isChatGptGeneratingFromDom(doc)).toBeFalse();
+    });
+
     it('should classify likely chatgpt api paths for endpoint-miss diagnostics', () => {
         expect(isLikelyChatGptApiPath('https://chatgpt.com/backend-api/textdocs/abc')).toBeTrue();
         expect(

@@ -5,6 +5,7 @@
  * modules to keep this file focused on wiring.
  */
 
+import { downloadAsJSON, downloadAsMarkdown } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import type { AttemptCoordinatorDeps } from '@/utils/runner/attempt-coordinator';
@@ -212,9 +213,10 @@ export const buildSavePipelineDeps = (ctx: EngineCtx): SavePipelineDeps => ({
     getRawSnapshotReplayUrls: (cid, snap) =>
         ctx.currentAdapter ? getRawSnapshotReplayUrls(ctx.currentAdapter, cid, snap) : [snap.url],
     getPlatformName: () => ctx.currentAdapter?.name ?? 'unknown',
-    buttonManagerExists: () => ctx.buttonManager.exists(),
     buttonManagerSetLoading: (loading, button) => ctx.buttonManager.setLoading(loading, button),
     buttonManagerSetSuccess: (button) => ctx.buttonManager.setSuccess(button),
+    downloadJson: downloadAsJSON,
+    downloadMarkdown: downloadAsMarkdown,
     structuredLogger: ctx.structuredLogger,
 });
 
@@ -328,7 +330,6 @@ export const buildButtonStateManagerDeps = (ctx: EngineCtx): ButtonStateManagerD
         setSaveButtonMode: (mode) => ctx.buttonManager.setSaveButtonMode(mode),
         setActionButtonsEnabled: (enabled) => ctx.buttonManager.setActionButtonsEnabled(enabled),
         setOpacity: (opacity) => ctx.buttonManager.setOpacity(opacity),
-        setButtonEnabled: (button, enabled) => ctx.buttonManager.setButtonEnabled(button, enabled),
         setReadinessSource: (source) => ctx.buttonManager.setReadinessSource(source),
     },
     structuredLogger: ctx.structuredLogger,

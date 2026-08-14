@@ -5,21 +5,70 @@
  */
 import { logger } from '@/utils/logger';
 
+type ExportAction = 'save' | 'markdown' | 'force-save';
+
+const getExportButtonLabel = (action: ExportAction): string => {
+    if (action === 'save') {
+        return '💾';
+    }
+    if (action === 'markdown') {
+        return '📝';
+    }
+    return '⚡';
+};
+
+const getExportButtonBackground = (action: ExportAction, saveButtonMode: 'default' | 'force-degraded'): string => {
+    if (action === 'force-save' || saveButtonMode === 'force-degraded') {
+        return 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+    }
+    if (action === 'save') {
+        return 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+    }
+    return 'linear-gradient(135deg, #475569 0%, #334155 100%)';
+};
+
+const getExportButtonTitle = (action: ExportAction, saveButtonMode: 'default' | 'force-degraded'): string => {
+    if (action === 'force-save') {
+        return 'Force Save JSON (current data)';
+    }
+    if (saveButtonMode === 'force-degraded') {
+        return `Force Save ${action === 'save' ? 'JSON' : 'Markdown'} (partial data possible)`;
+    }
+    return action === 'save' ? 'Save JSON' : 'Save Markdown';
+};
+
 export class ButtonManager {
-    private readonly controlIds = ['blackiya-lifecycle-badge', 'blackiya-save-btn', 'blackiya-calibrate-btn'];
+    private readonly controlIds = [
+        'blackiya-lifecycle-badge',
+        'blackiya-save-btn',
+        'blackiya-save-markdown-btn',
+        'blackiya-force-save-json-btn',
+        'blackiya-calibrate-btn',
+    ];
     private container: HTMLElement | null = null;
     private lifecycleBadge: HTMLElement | null = null;
     private saveStartButton: HTMLButtonElement | null = null;
+    private saveMarkdownButton: HTMLButtonElement | null = null;
+    private forceSaveJsonButton: HTMLButtonElement | null = null;
     private calibrateButton: HTMLButtonElement | null = null;
     private saveButtonMode: 'default' | 'force-degraded' = 'default';
     private isFixedPosition = false;
     private dedupeObserver: MutationObserver | null = null;
     private onSaveClick: () => Promise<void>;
+    private onSaveMarkdownClick: () => Promise<void>;
     private onCalibrateClick: () => Promise<void>;
+    private onForceSaveJsonClick: () => Promise<void>;
 
-    constructor(onSaveClick: () => Promise<void>, onCalibrateClick: () => Promise<void>) {
+    constructor(
+        onSaveClick: () => Promise<void>,
+        onSaveMarkdownClick: () => Promise<void>,
+        onCalibrateClick: () => Promise<void>,
+        onForceSaveJsonClick: () => Promise<void> = async () => {},
+    ) {
         this.onSaveClick = onSaveClick;
+        this.onSaveMarkdownClick = onSaveMarkdownClick;
         this.onCalibrateClick = onCalibrateClick;
+        this.onForceSaveJsonClick = onForceSaveJsonClick;
         this.injectStyles();
     }
 
@@ -34,11 +83,22 @@ export class ButtonManager {
         this.container = this.createContainer();
         this.lifecycleBadge = this.createLifecycleBadge();
         this.saveStartButton = this.createButton('save', '💾', this.onSaveClick);
+        this.saveMarkdownButton = this.createButton('markdown', '📝', this.onSaveMarkdownClick);
+        this.forceSaveJsonButton = this.createButton('force-save', '⚡', this.onForceSaveJsonClick);
         this.calibrateButton = this.createButton('calibrate', '🧪', this.onCalibrateClick);
 
-        if (this.container && this.lifecycleBadge && this.saveStartButton && this.calibrateButton) {
+        if (
+            this.container &&
+            this.lifecycleBadge &&
+            this.saveStartButton &&
+            this.saveMarkdownButton &&
+            this.forceSaveJsonButton &&
+            this.calibrateButton
+        ) {
             this.container.appendChild(this.lifecycleBadge);
             this.container.appendChild(this.saveStartButton);
+            this.container.appendChild(this.saveMarkdownButton);
+            this.container.appendChild(this.forceSaveJsonButton);
             this.container.appendChild(this.calibrateButton);
 
             // Fixed position fallback logic
@@ -53,7 +113,7 @@ export class ButtonManager {
             target.appendChild(this.container);
             this.cleanupDuplicateControlIds(this.container);
             this.ensureDedupeObserver();
-            logger.info(`Save/Calibrate buttons injected for conversation: ${conversationId}`);
+            logger.info(`Export/Calibrate buttons injected for conversation: ${conversationId}`);
         }
     }
 
@@ -65,6 +125,8 @@ export class ButtonManager {
         this.container = null;
         this.lifecycleBadge = null;
         this.saveStartButton = null;
+        this.saveMarkdownButton = null;
+        this.forceSaveJsonButton = null;
         this.calibrateButton = null;
     }
 
@@ -79,12 +141,16 @@ export class ButtonManager {
         this.container.setAttribute('data-readiness-source', source);
     }
 
-    public setLoading(loading: boolean, _action: 'save') {
-        if (!this.saveStartButton) {
+    public setLoading(loading: boolean, action: ExportAction) {
+        const activeBtn =
+            action === 'save'
+                ? this.saveStartButton
+                : action === 'markdown'
+                  ? this.saveMarkdownButton
+                  : this.forceSaveJsonButton;
+        if (!activeBtn) {
             return;
         }
-
-        const activeBtn = this.saveStartButton;
 
         activeBtn.disabled = loading;
 
@@ -92,10 +158,15 @@ export class ButtonManager {
 
         if (loading) {
             activeBtn.textContent = '⏳';
-            activeBtn.title = 'Saving...';
+            activeBtn.title =
+                action === 'save'
+                    ? 'Saving JSON...'
+                    : action === 'markdown'
+                      ? 'Saving Markdown...'
+                      : 'Force Saving JSON...';
             activeBtn.style.opacity = '0.8';
         } else {
-            this.renderDefaultButton('save');
+            this.renderDefaultButton(action);
         }
     }
 
@@ -103,25 +174,24 @@ export class ButtonManager {
         if (this.saveStartButton) {
             this.saveStartButton.style.opacity = opacity;
         }
+        if (this.saveMarkdownButton) {
+            this.saveMarkdownButton.style.opacity = opacity;
+        }
     }
 
     public setActionButtonsEnabled(enabled: boolean) {
         if (this.saveStartButton) {
             this.saveStartButton.disabled = !enabled;
         }
-    }
-
-    public setButtonEnabled(action: 'save', enabled: boolean) {
-        const target = action === 'save' ? this.saveStartButton : null;
-        if (!target) {
-            return;
+        if (this.saveMarkdownButton) {
+            this.saveMarkdownButton.disabled = !enabled;
         }
-        target.disabled = !enabled;
     }
 
     public setSaveButtonMode(mode: 'default' | 'force-degraded') {
         this.saveButtonMode = mode;
         this.renderDefaultButton('save');
+        this.renderDefaultButton('markdown');
     }
 
     public setCalibrationState(
@@ -195,6 +265,9 @@ export class ButtonManager {
         };
 
         const next = stylesByState[state];
+        if (!next) {
+            return;
+        }
         this.lifecycleBadge.textContent = next.label;
         this.lifecycleBadge.style.background = next.background;
         this.lifecycleBadge.style.borderColor = next.border;
@@ -483,11 +556,27 @@ export class ButtonManager {
         return badge;
     }
 
-    private createButton(type: 'save' | 'calibrate', label: string, onClick: () => Promise<void>): HTMLButtonElement {
+    private createButton(
+        type: 'save' | 'markdown' | 'force-save' | 'calibrate',
+        label: string,
+        onClick: () => Promise<void>,
+    ): HTMLButtonElement {
         const button = document.createElement('button');
-        button.id = `blackiya-${type}-btn`;
+        button.id =
+            type === 'markdown'
+                ? 'blackiya-save-markdown-btn'
+                : type === 'force-save'
+                  ? 'blackiya-force-save-json-btn'
+                  : `blackiya-${type}-btn`;
         button.textContent = label;
-        button.title = type === 'save' ? 'Save JSON' : 'Calibrate';
+        button.title =
+            type === 'save'
+                ? 'Save JSON'
+                : type === 'markdown'
+                  ? 'Save Markdown'
+                  : type === 'force-save'
+                    ? 'Force Save JSON (current data)'
+                    : 'Calibrate';
         button.setAttribute('aria-label', button.title);
 
         button.style.cssText = this.getButtonDefaultStyles(type);
@@ -544,11 +633,15 @@ export class ButtonManager {
         return css;
     }
 
-    private getButtonDefaultStyles(type: 'save' | 'calibrate'): string {
+    private getButtonDefaultStyles(type: 'save' | 'markdown' | 'force-save' | 'calibrate'): string {
         const bg =
             type === 'calibrate'
                 ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
-                : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+                : type === 'force-save'
+                  ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                  : type === 'markdown'
+                    ? 'linear-gradient(135deg, #475569 0%, #334155 100%)'
+                    : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
         return `
             display: inline-flex;
             align-items: center;
@@ -570,42 +663,46 @@ export class ButtonManager {
         `;
     }
 
-    public setSuccess(_action: 'save') {
-        const activeBtn = this.saveStartButton;
+    public setSuccess(action: ExportAction) {
+        const activeBtn =
+            action === 'save'
+                ? this.saveStartButton
+                : action === 'markdown'
+                  ? this.saveMarkdownButton
+                  : this.forceSaveJsonButton;
         if (!activeBtn) {
             return;
         }
 
         activeBtn.disabled = true;
         activeBtn.textContent = '✅';
-        activeBtn.title = 'Saved';
+        activeBtn.title =
+            action === 'save' ? 'JSON Saved' : action === 'markdown' ? 'Markdown Saved' : 'Force JSON Saved';
         activeBtn.style.opacity = '1';
 
         setTimeout(() => {
             if (activeBtn) {
                 activeBtn.disabled = false;
-                this.renderDefaultButton('save');
+                this.renderDefaultButton(action);
             }
         }, 2000);
     }
 
-    private getDefaultLabel(_action: 'save'): string {
-        return '💾';
-    }
-
-    private renderDefaultButton(action: 'save') {
-        const button = this.saveStartButton;
+    private renderDefaultButton(action: ExportAction) {
+        const button =
+            action === 'save'
+                ? this.saveStartButton
+                : action === 'markdown'
+                  ? this.saveMarkdownButton
+                  : this.forceSaveJsonButton;
         if (!button) {
             return;
         }
 
-        button.textContent = this.getDefaultLabel(action);
+        button.textContent = getExportButtonLabel(action);
         button.style.opacity = '1';
-        button.style.background =
-            this.saveButtonMode === 'force-degraded'
-                ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
-        button.title = this.saveButtonMode === 'force-degraded' ? 'Force Save (partial data possible)' : 'Save JSON';
+        button.style.background = getExportButtonBackground(action, this.saveButtonMode);
+        button.title = getExportButtonTitle(action, this.saveButtonMode);
         button.setAttribute('aria-label', button.title);
     }
 

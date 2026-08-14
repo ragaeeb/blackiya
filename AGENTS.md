@@ -12,7 +12,7 @@ Blackiya is a Chrome MV3 extension that captures conversation data from:
 Core goals:
 1. Detect response lifecycle (`idle -> prompt-sent -> streaming -> completed`)
 2. Capture canonical conversation JSON
-3. Gate export readiness correctly (`Save JSON` vs `Force Save`)
+3. Gate JSON and Markdown export readiness correctly (`Save` vs `Force Save`)
 4. Provide high-signal diagnostics (debug report + full logs)
 
 ## 2) Source of Truth Docs
@@ -181,10 +181,10 @@ Keep these docs synchronized:
 ## 11) Release Smoke Checklist
 
 Before shipping:
-1. ChatGPT: verify streaming updates are live, completion transitions to `completed`, and Save only enables at `canonical_ready`.
+1. ChatGPT: verify streaming updates are live, completion transitions to `completed`, and JSON/Markdown Save only enables at `canonical_ready`.
 2. Gemini: verify StreamGenerate lifecycle stability and correct title export without requiring refresh.
 3. Grok: verify long-thinking sessions do not regress `Completed -> Streaming` and Save stays readiness-gated.
-4. Export metadata: verify canonical vs degraded exports set `captureSource`, `fidelity`, and `completeness` correctly.
+4. Export formats: verify JSON retains reasoning/tree data and canonical vs degraded metadata, while Markdown contains only active-branch User and Assistant text.
 
 ## 12) PR Review Triage Rules
 

@@ -86,7 +86,7 @@ export class ProactiveFetchRunner {
             if (!this.isExtensionEnabled() || this.emitter.isAttemptDisposed(attemptId)) {
                 return false;
             }
-            await delay(BACKOFF_SCHEDULE_MS[attempt]);
+            await delay(BACKOFF_SCHEDULE_MS[attempt]!);
             const apiUrls = getApiUrlCandidates(adapter, conversationId);
             const requestHeaders = this.headersByKey.get(key);
             let allNotFound = true;

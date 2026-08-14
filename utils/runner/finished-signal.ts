@@ -37,18 +37,19 @@ export const resolveFinishedSignalDebounce = (
 };
 
 /**
- * Returns `true` when a Grok network capture that arrives while the lifecycle
- * is still active (not yet `completed`) should promote the lifecycle to
- * `completed`. Grok does not always emit a dedicated completion signal, so a
- * ready canonical capture serves as an implicit completion hint.
+ * Returns `true` when a terminal canonical network capture should promote the
+ * lifecycle to `completed`. This covers both Grok responses without a
+ * dedicated completion signal and completed ChatGPT history loaded without a
+ * live prompt/stream lifecycle.
  */
-export const shouldPromoteGrokFromCanonicalCapture = (
+export const shouldPromoteFromCanonicalCapture = (
     source: 'network' | 'dom',
     cachedReady: boolean,
     lifecycle: RunnerLifecycleUiState,
     adapterName: string | null,
 ): boolean => {
-    if (source !== 'network' || adapterName !== 'Grok' || !cachedReady) {
+    const supportsCanonicalCompletion = adapterName === 'ChatGPT' || adapterName === 'Grok';
+    if (source !== 'network' || !supportsCanonicalCompletion || !cachedReady) {
         return false;
     }
     return lifecycle === 'idle' || lifecycle === 'prompt-sent' || lifecycle === 'streaming';

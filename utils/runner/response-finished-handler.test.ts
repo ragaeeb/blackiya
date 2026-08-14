@@ -14,7 +14,6 @@ mock.module('@/utils/logger', () => buildLoggerMock(logCalls));
 describe('response-finished-handler', () => {
     let deps: ResponseFinishedDeps;
     let debounceSpy: ReturnType<typeof spyOn>;
-    let promoteSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         logCalls.debug.length = 0;
@@ -26,8 +25,6 @@ describe('response-finished-handler', () => {
             minIntervalMs: 1000,
             effectiveAttemptId: 'eff-id',
         });
-        promoteSpy = spyOn(finishedSignal, 'shouldPromoteGrokFromCanonicalCapture').mockReturnValue(false);
-
         deps = {
             extractConversationIdFromUrl: mock(() => null),
             getCurrentConversationId: mock(() => 'conv-1'),
@@ -61,7 +58,6 @@ describe('response-finished-handler', () => {
 
     afterEach(() => {
         debounceSpy.mockRestore();
-        promoteSpy.mockRestore();
     });
 
     describe('shouldProcessFinishedSignal', () => {
@@ -87,6 +83,17 @@ describe('response-finished-handler', () => {
     });
 
     describe('processFinishedConversation', () => {
+        it('should promote a ready ChatGPT history capture from idle to completed', () => {
+            deps.adapterName = () => 'ChatGPT';
+            deps.getLifecycleState = () => 'idle';
+
+            processFinishedConversation('c-1', 'a-1', 'network', deps);
+
+            expect(deps.setCompletedLifecycleState).toHaveBeenCalledWith('c-1', 'a-1');
+            expect(deps.runStreamDoneProbe).not.toHaveBeenCalled();
+            expect(deps.refreshButtonState).toHaveBeenCalledWith('c-1');
+        });
+
         it('should promote chatgpt dom generic completed and set state', () => {
             deps.adapterName = () => 'ChatGPT';
             processFinishedConversation('c-1', 'a-1', 'dom', deps);
@@ -121,7 +128,7 @@ describe('response-finished-handler', () => {
             expect(deps.ingestSfeLifecycle).toHaveBeenCalledWith('completed_hint', 'attempt-1', 'conv-1');
             expect(deps.setCurrentConversation).toHaveBeenCalledWith('conv-1');
             expect(deps.bindAttempt).toHaveBeenCalledWith('conv-1', 'attempt-1');
-            // implicit processFinishedConversation call since state is idle
+            expect(deps.setCompletedLifecycleState).toHaveBeenCalledWith('conv-1', 'attempt-1');
             expect(deps.maybeRunAutoCapture).toHaveBeenCalled();
         });
 

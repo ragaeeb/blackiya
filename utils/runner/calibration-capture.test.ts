@@ -373,7 +373,7 @@ describe('calibration-capture', () => {
             await captureFromRetries('123', 'auto', deps);
 
             expect(logCalls.error).toHaveLength(6);
-            expect(logCalls.error[0].message).toContain('Calibration fetch timeout');
+            expect(logCalls.error[0]!.message).toContain('Calibration fetch timeout');
         });
     });
 

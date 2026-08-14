@@ -184,6 +184,13 @@ export const warmFetchConversationSnapshot = (
         return Promise.resolve(true);
     }
 
+    const waitsForPageOwnedChatGptCapture =
+        deps.platformName === 'ChatGPT' && (reason === 'initial-load' || reason === 'conversation-switch');
+    if (waitsForPageOwnedChatGptCapture) {
+        logger.debug('Warm fetch skipped: ChatGPT page owns history capture', { conversationId, reason });
+        return Promise.resolve(false);
+    }
+
     const key = `${deps.platformName}:${conversationId}`;
     const existing = inFlight.get(key);
     if (existing) {

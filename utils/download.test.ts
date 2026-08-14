@@ -5,7 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { downloadAsJSON, generateTimestamp, sanitizeFilename } from '@/utils/download';
+import { downloadAsJSON, downloadAsMarkdown, generateTimestamp, sanitizeFilename } from '@/utils/download';
 
 describe('Download Utilities', () => {
     describe('sanitizeFilename', () => {
@@ -111,6 +111,18 @@ describe('Download Utilities', () => {
 
             expect(() => downloadAsJSON({ ok: true }, 'test', downloadImpl)).not.toThrow();
             expect(downloadCalls).toEqual([]);
+        });
+    });
+
+    describe('downloadAsMarkdown', () => {
+        it('should pass transcript text to a Markdown download with the md extension', () => {
+            const calls: Array<{ markdown: string; filename: string }> = [];
+
+            downloadAsMarkdown('# Conversation\n', 'test', (markdown, filename) => {
+                calls.push({ markdown, filename });
+            });
+
+            expect(calls).toEqual([{ markdown: '# Conversation\n', filename: 'test.md' }]);
         });
     });
 });

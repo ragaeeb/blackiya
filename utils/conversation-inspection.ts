@@ -80,7 +80,10 @@ const buildMessageChain = (mapping: Record<string, MessageNode>, startId: string
 
     while (currentId && mapping[currentId] && !visited.has(currentId)) {
         visited.add(currentId);
-        const node: MessageNode = mapping[currentId];
+        const node: MessageNode | undefined = mapping[currentId];
+        if (!node) {
+            break;
+        }
         if (node.message) {
             chain.unshift(node.message);
         }

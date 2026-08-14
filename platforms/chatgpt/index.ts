@@ -29,6 +29,14 @@ export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = CHATGPT_ENDPOINT_REGISTRY.pro
 
 const MAX_TITLE_LENGTH = 80;
 
+const canUseInterruptedReadiness = (): boolean => {
+    const doc = typeof document === 'undefined' ? null : document;
+    // The API snapshot can arrive before ChatGPT renders conversation turns on
+    // a hard refresh. Readiness is based on that canonical snapshot; only an
+    // active generation marker should prevent accepting an interrupted turn.
+    return !isChatGptGeneratingFromDom(doc);
+};
+
 /**
  * Creates a ChatGPT Platform Adapter instance.
  *
@@ -75,7 +83,7 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
             if (!match) {
                 return null;
             }
-            hostname = match[1];
+            hostname = match[1] ?? null;
             pathname = match[2] ?? '';
         }
 
@@ -88,7 +96,7 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
             return null;
         }
 
-        const potentialId = pathMatch[1];
+        const potentialId = pathMatch[1]!;
         return CONVERSATION_ID_PATTERN.test(potentialId) ? potentialId : null;
     },
 
@@ -156,7 +164,8 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
 
     getButtonInjectionTarget: () => resolveChatGptButtonInjectionTarget(),
 
-    evaluateReadiness: (data: ConversationData) => evaluateChatGPTReadiness(data),
+    evaluateReadiness: (data: ConversationData) =>
+        evaluateChatGPTReadiness(data, { allowInterruptedAssistant: canUseInterruptedReadiness() }),
 
     isPlatformGenerating: () => isChatGptGeneratingFromDom(),
 });

@@ -64,6 +64,19 @@ export const ingestStabilizationRetrySnapshot = (ctx: EngineCtx, conversationId:
 
 export const isPlatformGenerating = (adapter: LLMPlatform | null): boolean => detectPlatformGenerating(adapter);
 
+const hasTerminalInterruptedCapture = (ctx: EngineCtx, conversationId: string): boolean => {
+    const cached = ctx.interceptionManager.getConversation(conversationId);
+    if (!cached) {
+        return false;
+    }
+    const readiness = ctx.evaluateReadinessForData(cached);
+    return (
+        readiness.ready &&
+        readiness.terminal &&
+        (readiness.reason === 'terminal-interrupted' || readiness.reason === 'terminal-user-only')
+    );
+};
+
 export const isLifecycleGenerationPhase = (ctx: EngineCtx, conversationId: string): boolean => {
     if (ctx.lifecycleState !== 'prompt-sent' && ctx.lifecycleState !== 'streaming') {
         return false;
@@ -79,6 +92,9 @@ export const shouldBlockActionsForGeneration = (ctx: EngineCtx, conversationId: 
         return true;
     }
     if (ctx.currentAdapter?.name !== 'ChatGPT') {
+        return false;
+    }
+    if (hasTerminalInterruptedCapture(ctx, conversationId)) {
         return false;
     }
     return isPlatformGenerating(ctx.currentAdapter);

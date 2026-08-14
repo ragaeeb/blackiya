@@ -83,21 +83,51 @@ const handleNetworkSourceCapture = (
     meta: InterceptionCaptureMeta | undefined,
     data: ConversationData | undefined,
     deps: InterceptionCaptureDeps,
-) => {
+): PlatformReadiness | null => {
     if (!data) {
-        return;
+        return null;
     }
     const source = meta?.source ?? 'network';
     const effectiveAttemptId = deps.resolveAliasedAttemptId(meta?.attemptId ?? deps.resolveAttemptId(conversationId));
     deps.maybeRestartCanonicalRecoveryAfterTimeout(conversationId, effectiveAttemptId);
+    const readiness = deps.evaluateReadinessForData(data);
+    const currentMessage = data.mapping?.[data.current_node]?.message;
     logger.info('Network source: marking canonical fidelity', {
         conversationId,
         source,
         effectiveAttemptId,
-        readinessReady: deps.evaluateReadinessForData(data).ready,
+        readinessReady: readiness.ready,
+        readinessReason: readiness.reason,
+        readinessTerminal: readiness.terminal,
+        latestAssistantTextLength: readiness.latestAssistantTextLength,
+        currentNode: data.current_node ?? null,
+        currentNodeRole: currentMessage?.author.role ?? null,
+        currentNodeStatus: currentMessage?.status ?? null,
+        currentNodeEndTurn: currentMessage?.end_turn ?? null,
+        currentNodeContentType: currentMessage?.content.content_type ?? null,
     });
+    deps.structuredLogger.emit(
+        effectiveAttemptId,
+        'info',
+        'network_canonical_readiness',
+        'Network canonical readiness evaluated',
+        {
+            conversationId,
+            ready: readiness.ready,
+            terminal: readiness.terminal,
+            reason: readiness.reason,
+            latestAssistantTextLength: readiness.latestAssistantTextLength,
+            currentNode: data.current_node ?? null,
+            currentNodeRole: currentMessage?.author.role ?? null,
+            currentNodeStatus: currentMessage?.status ?? null,
+            currentNodeEndTurn: currentMessage?.end_turn ?? null,
+            currentNodeContentType: currentMessage?.content.content_type ?? null,
+        },
+        `network-readiness:${conversationId}:${readiness.reason}:${readiness.ready}`,
+    );
     deps.markCanonicalCaptureMeta(conversationId);
     deps.ingestSfeCanonicalSample(data, effectiveAttemptId);
+    return readiness;
 };
 
 export const processInterceptionCapture = (
@@ -111,14 +141,15 @@ export const processInterceptionCapture = (
     updateActiveAttemptFromMeta(capturedId, meta, deps);
 
     const source = meta?.source ?? 'network';
+    let readiness: PlatformReadiness | null = null;
     if (source.includes('snapshot') || source.includes('dom')) {
         handleSnapshotSourceCapture(capturedId, source, deps);
     } else {
-        handleNetworkSourceCapture(capturedId, meta, data, deps);
+        readiness = handleNetworkSourceCapture(capturedId, meta, data, deps);
     }
 
     deps.refreshButtonState(capturedId);
-    if (deps.evaluateReadinessForData(data).ready) {
+    if ((readiness ?? deps.evaluateReadinessForData(data)).ready) {
         deps.handleResponseFinished('network', capturedId);
     }
 };

@@ -8,16 +8,8 @@
  * @module utils/dom-download
  */
 
-/**
- * Create a Blob URL from a JSON string and trigger a file download via an
- * invisible anchor element.  Cleans up the anchor and revokes the object URL
- * in a `finally` block so resources are released even when an error occurs.
- *
- * @param jsonString - Pre-serialized JSON content
- * @param filename  - Full filename including extension (e.g. `"chat.json"`)
- */
-export const downloadStringAsJsonFile = (jsonString: string, filename: string) => {
-    const blob = new Blob([jsonString], { type: 'application/json' });
+const downloadStringAsFile = (content: string, filename: string, contentType: string) => {
+    const blob = new Blob([content], { type: contentType });
     const url = URL.createObjectURL(blob);
     let link: HTMLAnchorElement | null = null;
 
@@ -33,4 +25,12 @@ export const downloadStringAsJsonFile = (jsonString: string, filename: string) =
         }
         URL.revokeObjectURL(url);
     }
+};
+
+export const downloadStringAsJsonFile = (jsonString: string, filename: string) => {
+    downloadStringAsFile(jsonString, filename, 'application/json');
+};
+
+export const downloadStringAsMarkdownFile = (markdown: string, filename: string) => {
+    downloadStringAsFile(markdown, filename, 'text/markdown;charset=utf-8');
 };

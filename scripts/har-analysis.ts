@@ -613,7 +613,11 @@ const processHarEntry = (
 const scanHarEntries = (entries: HarEntry[], options: NormalizedHarAnalysisOptions): HarScanAccumulator => {
     const accumulator = createHarScanAccumulator();
     for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-        processHarEntry(entries[entryIndex], entryIndex, options, accumulator);
+        const entry = entries[entryIndex];
+        if (!entry) {
+            continue;
+        }
+        processHarEntry(entry, entryIndex, options, accumulator);
     }
     return accumulator;
 };

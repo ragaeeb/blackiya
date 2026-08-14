@@ -36,6 +36,15 @@ export const evaluateGrokReadiness = (data: ConversationData): PlatformReadiness
     }
 
     const latest = messages[messages.length - 1];
+    if (!latest) {
+        return {
+            ready: false,
+            terminal: false,
+            reason: 'assistant-missing',
+            contentHash: null,
+            latestAssistantTextLength: 0,
+        };
+    }
     const latestText = (latest.content.parts ?? []).filter((part): part is string => typeof part === 'string').join('');
     const normalized = latestText.trim().normalize('NFC');
 

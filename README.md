@@ -141,11 +141,11 @@ blackiya/
 
 - ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT, Gemini, and Grok.
 - ✅ **Global Enable Toggle**: Turn Blackiya off from the popup so newly opened supported tabs stay inert until you re-enable it.
-- ✅ **Readiness-Gated Export**: Save is only enabled when canonical data is ready; degraded exports fall back to Force Save.
+- ✅ **Readiness-Gated Export**: JSON and Markdown exports are enabled only when canonical data is ready; an explicit Force Save JSON control can archive currently cached data when readiness is unresolved.
 - ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including thinking/reasoning logs and title recovery.
 - ✅ **Grok Support**: Full support for Grok's GraphQL/NDJSON flows, including conversation history and thinking traces.
 - ✅ **Smart Titles**: Automatic conversation title capture with retroactive updates for async title loads.
-- ✅ **One-Click Download**: Instant download as formatted JSON file.
+- ✅ **One-Click Download**: Download full-fidelity JSON or a clean user/assistant Markdown transcript.
 - ✅ **Clipboard Copy**: One-click copy of conversation JSON directly to system clipboard.
 - ✅ **Popup Controls**: Log level, bulk export, debug export, and log clearing in one place.
 - ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
@@ -259,8 +259,18 @@ Build naming behavior:
 
 1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
 2. Use the popup toggle to enable or disable Blackiya globally for new tabs.
-3. The current conversation JSON will download or be copied automatically when the capture state is ready.
-3. Download format: `{conversation-title}_{timestamp}.json`
+3. When the capture state is ready, use 💾 for the complete JSON archive or 📝 for a Markdown transcript. If the lifecycle remains unresolved, use ⚡ Force Save JSON to export the currently cached conversation in the same JSON format.
+4. JSON preserves the full conversation tree, including reasoning data. Markdown contains only active-branch User and Assistant text.
+5. Downloads use `{conversation-title}_{timestamp}.json` or `{conversation-title}_{timestamp}.md`.
+
+To convert existing Blackiya JSON exports locally:
+
+```bash
+bun run export:markdown --input chat.json
+bun run export:markdown --input exports/ --output markdown/
+```
+
+A file input produces a sibling `.md` file by default. A directory input recursively converts every JSON export into an output `markdown/` directory while preserving subdirectories.
 
 ### Popup Tools
 

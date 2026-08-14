@@ -84,10 +84,9 @@ export const attachGrokComNodeToParent = (
     const parentKey = parentId || rootId;
     const node = ensureGrokComNode(conversation, nodeId, rootId);
 
-    if (node.parent && conversation.mapping[node.parent]) {
-        conversation.mapping[node.parent].children = conversation.mapping[node.parent].children.filter(
-            (child) => child !== nodeId,
-        );
+    const previousParent = node.parent ? conversation.mapping[node.parent] : undefined;
+    if (previousParent) {
+        previousParent.children = previousParent.children.filter((child) => child !== nodeId);
     }
 
     node.parent = parentKey;

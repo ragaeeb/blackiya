@@ -60,7 +60,7 @@ export const hydrateGeminiTitleCandidatesFromRpcResults = (
             continue;
         }
 
-        const title = titleCandidates[0];
+        const title = titleCandidates[0]!;
         const previousTitle = titlesCache.get(conversationId) ?? null;
         if (previousTitle === title) {
             continue;
@@ -176,6 +176,9 @@ const findHeuristicConversationRpc = (
 ): { rpcId: string; payload: unknown } | null => {
     for (let i = results.length - 1; i >= 0; i--) {
         const res = results[i];
+        if (!res) {
+            continue;
+        }
         if (!res.payload) {
             continue;
         }

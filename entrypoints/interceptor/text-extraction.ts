@@ -84,6 +84,9 @@ export const extractAssistantTextSnapshotFromSseBuffer = (sseBuffer: string): st
     }
 
     const latest = assistantMessages[assistantMessages.length - 1];
+    if (!latest) {
+        return null;
+    }
     const text = (latest.content.parts ?? []).filter((p): p is string => typeof p === 'string').join('');
     const normalized = text.trim();
     return normalized.length === 0 || /^v\d+$/i.test(normalized) ? null : normalized;

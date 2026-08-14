@@ -252,7 +252,11 @@ const parseXAddResponseNdjson = (parsedLines: any[], conversationId: string): Co
     ensureNode(conversation, parentId, rootId);
     attachGrokComNodeToParent(conversation, assistantNodeId, parentId, rootId);
 
-    conversation.mapping[assistantNodeId].message = buildAssistantMessageFromAddResponse(
+    const assistantNode = conversation.mapping[assistantNodeId];
+    if (!assistantNode) {
+        return conversation;
+    }
+    assistantNode.message = buildAssistantMessageFromAddResponse(
         assistantNodeId,
         finalText,
         state.reasoningChunks,

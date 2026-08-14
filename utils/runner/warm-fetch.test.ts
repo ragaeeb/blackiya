@@ -176,6 +176,26 @@ describe('warm-fetch', () => {
     });
 
     describe('warmFetchConversationSnapshot', () => {
+        it('should skip ChatGPT initial-load requests and wait for the page-owned canonical response', async () => {
+            const inFlight = new Map();
+
+            const result = await warmFetchConversationSnapshot('c-1', 'initial-load', deps, inFlight);
+
+            expect(result).toBeFalse();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should skip ChatGPT conversation-switch requests and wait for the page-owned canonical response', async () => {
+            const inFlight = new Map();
+
+            const result = await warmFetchConversationSnapshot('c-1', 'conversation-switch', deps, inFlight);
+
+            expect(result).toBeFalse();
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
         it('should skip if cached is already ready+canonical', async () => {
             deps.getConversation.mockImplementationOnce(() => ({ data: 'cached' }));
             deps.evaluateReadiness.mockImplementationOnce(() => ({ ready: true, terminal: true }));
@@ -251,6 +271,7 @@ describe('warm-fetch', () => {
         });
 
         it('should execute candidates and set/clear inFlight', async () => {
+            deps.platformName = 'Gemini';
             const inFlight = new Map();
             let mockCalled = false;
             deps.getConversation.mockImplementation(() => {
@@ -259,11 +280,11 @@ describe('warm-fetch', () => {
                 return res;
             });
             const p = warmFetchConversationSnapshot('c-1', 'initial-load', deps, inFlight);
-            expect(inFlight.has('ChatGPT:c-1')).toBeTrue();
+            expect(inFlight.has('Gemini:c-1')).toBeTrue();
 
             const result = await p;
             expect(result).toBeTrue();
-            expect(inFlight.has('ChatGPT:c-1')).toBeFalse();
+            expect(inFlight.has('Gemini:c-1')).toBeFalse();
         });
     });
 });

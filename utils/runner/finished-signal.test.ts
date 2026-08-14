@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveFinishedSignalDebounce, shouldPromoteGrokFromCanonicalCapture } from '@/utils/runner/finished-signal';
+import { resolveFinishedSignalDebounce, shouldPromoteFromCanonicalCapture } from '@/utils/runner/finished-signal';
 
 describe('finished-signal', () => {
     describe('resolveFinishedSignalDebounce', () => {
@@ -33,28 +33,32 @@ describe('finished-signal', () => {
         });
     });
 
-    describe('shouldPromoteGrokFromCanonicalCapture', () => {
+    describe('shouldPromoteFromCanonicalCapture', () => {
         it('should return true for network Grok with cached ready and active lifecycle', () => {
-            expect(shouldPromoteGrokFromCanonicalCapture('network', true, 'idle', 'Grok')).toBeTrue();
-            expect(shouldPromoteGrokFromCanonicalCapture('network', true, 'prompt-sent', 'Grok')).toBeTrue();
-            expect(shouldPromoteGrokFromCanonicalCapture('network', true, 'streaming', 'Grok')).toBeTrue();
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'idle', 'Grok')).toBeTrue();
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'prompt-sent', 'Grok')).toBeTrue();
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'streaming', 'Grok')).toBeTrue();
         });
 
         it('should return false if source is not network', () => {
-            expect(shouldPromoteGrokFromCanonicalCapture('dom', true, 'idle', 'Grok')).toBeFalse();
+            expect(shouldPromoteFromCanonicalCapture('dom', true, 'idle', 'Grok')).toBeFalse();
         });
 
-        it('should return false if adapter is not Grok', () => {
-            expect(shouldPromoteGrokFromCanonicalCapture('network', true, 'idle', 'ChatGPT')).toBeFalse();
+        it('should return true for a ready ChatGPT history capture while idle', () => {
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'idle', 'ChatGPT')).toBeTrue();
+        });
+
+        it('should return false for unsupported adapters', () => {
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'idle', 'Gemini')).toBeFalse();
         });
 
         it('should return false if not cached ready', () => {
-            expect(shouldPromoteGrokFromCanonicalCapture('network', false, 'idle', 'Grok')).toBeFalse();
+            expect(shouldPromoteFromCanonicalCapture('network', false, 'idle', 'Grok')).toBeFalse();
         });
 
         it('should return false if lifecycle is already completed or error', () => {
-            expect(shouldPromoteGrokFromCanonicalCapture('network', true, 'completed', 'Grok')).toBeFalse();
-            expect(shouldPromoteGrokFromCanonicalCapture('network', true, 'error' as any, 'Grok')).toBeFalse();
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'completed', 'Grok')).toBeFalse();
+            expect(shouldPromoteFromCanonicalCapture('network', true, 'error' as any, 'Grok')).toBeFalse();
         });
     });
 });

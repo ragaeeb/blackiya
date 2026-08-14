@@ -7,9 +7,9 @@
  */
 
 import type { LLMPlatform } from '@/platforms/types';
-import { downloadAsJSON } from '@/utils/download';
 import { logger } from '@/utils/logger';
 import type { StructuredAttemptLogger } from '@/utils/logging/structured-logger';
+import { conversationToMarkdown } from '@/utils/markdown-transcript';
 import type { RawCaptureSnapshot } from '@/utils/runner/calibration-capture';
 import { attachExportMeta } from '@/utils/runner/export-helpers';
 import { applyResolvedExportTitle } from '@/utils/runner/export-pipeline';
@@ -43,11 +43,14 @@ export type SavePipelineDeps = {
     ingestInterceptedData: (args: { url: string; data: string; platform: string }) => void;
     getRawSnapshotReplayUrls: (conversationId: string, snapshot: { url: string }) => string[];
     getPlatformName: () => string;
-    buttonManagerExists: () => boolean;
-    buttonManagerSetLoading: (loading: boolean, button: 'save') => void;
-    buttonManagerSetSuccess: (button: 'save') => void;
+    buttonManagerSetLoading: (loading: boolean, button: 'save' | 'markdown' | 'force-save') => void;
+    buttonManagerSetSuccess: (button: 'save' | 'markdown' | 'force-save') => void;
+    downloadJson: (data: unknown, filename: string) => void;
+    downloadMarkdown: (markdown: string, filename: string) => void;
     structuredLogger: StructuredAttemptLogger;
 };
+
+type ExportFormat = 'json' | 'markdown';
 
 const resolveConversationIdOrNotify = (silent: boolean | undefined, deps: SavePipelineDeps): string | null => {
     const conversationId = deps.resolveConversationIdForUserAction();
@@ -170,16 +173,15 @@ export const getConversationData = async (
 
 export const saveConversation = async (
     data: ConversationData,
-    options: { allowDegraded?: boolean },
+    options: { allowDegraded?: boolean; format: ExportFormat; action?: 'save' | 'force-save' },
     deps: SavePipelineDeps,
 ): Promise<boolean> => {
     const adapter = deps.getAdapter();
     if (!adapter) {
         return false;
     }
-    if (deps.buttonManagerExists()) {
-        deps.buttonManagerSetLoading(true, 'save');
-    }
+    const action = options.action ?? (options.format === 'json' ? 'save' : 'markdown');
+    deps.buttonManagerSetLoading(true, action);
     try {
         const cachedTitle = data.title ?? null;
         const titleDecision = applyResolvedExportTitle(data);
@@ -191,30 +193,29 @@ export const saveConversation = async (
             resolvedTitle: titleDecision.title,
         });
         const filename = adapter.formatFilename(data);
-        const exportMeta = buildExportMetaForSave(data.conversation_id, options.allowDegraded, deps.getCaptureMeta);
-        const exportPayload = attachExportMeta(data, exportMeta);
-        downloadAsJSON(exportPayload, filename);
-        logger.info(`Saved conversation: ${filename}.json`);
+        if (options.format === 'json') {
+            const exportMeta = buildExportMetaForSave(data.conversation_id, options.allowDegraded, deps.getCaptureMeta);
+            deps.downloadJson(attachExportMeta(data, exportMeta), filename);
+        } else {
+            deps.downloadMarkdown(conversationToMarkdown(data), filename);
+        }
+        logger.info(`Saved conversation: ${filename}.${options.format === 'json' ? 'json' : 'md'}`);
         if (options.allowDegraded === true) {
             deps.structuredLogger.emit(
                 deps.peekAttemptId(data.conversation_id) ?? 'unknown',
                 'warn',
                 'force_save_degraded_export',
                 'Degraded manual export forced by user',
-                { conversationId: data.conversation_id },
-                `force-save-degraded:${data.conversation_id}`,
+                { conversationId: data.conversation_id, format: options.format },
+                `force-save-degraded:${options.format}:${data.conversation_id}`,
             );
         }
-        if (deps.buttonManagerExists()) {
-            deps.buttonManagerSetSuccess('save');
-        }
+        deps.buttonManagerSetSuccess(action);
         return true;
     } catch (error) {
         logger.error('Failed to save conversation:', error);
         alert('Failed to save conversation. Check console for details.');
-        if (deps.buttonManagerExists()) {
-            deps.buttonManagerSetLoading(false, 'save');
-        }
+        deps.buttonManagerSetLoading(false, action);
         return false;
     }
 };
@@ -283,7 +284,7 @@ export const recoverCanonicalBeforeForceSave = async (
     return deps.resolveReadinessDecision(conversationId).mode !== 'degraded_manual_only';
 };
 
-export const handleSaveClick = async (deps: SavePipelineDeps): Promise<void> => {
+const handleExportClick = async (format: ExportFormat, deps: SavePipelineDeps): Promise<void> => {
     if (!deps.getAdapter()) {
         return;
     }
@@ -303,5 +304,37 @@ export const handleSaveClick = async (deps: SavePipelineDeps): Promise<void> => 
     if (!data) {
         return;
     }
-    await saveConversation(data, { allowDegraded }, deps);
+    await saveConversation(data, { allowDegraded, format }, deps);
+};
+
+export const handleSaveClick = async (deps: SavePipelineDeps): Promise<void> => {
+    await handleExportClick('json', deps);
+};
+
+const getForceSaveConversationData = (deps: SavePipelineDeps): ConversationData | null => {
+    if (!deps.getAdapter()) {
+        return null;
+    }
+    const conversationId = resolveConversationIdOrNotify(false, deps);
+    if (!conversationId) {
+        return null;
+    }
+    const data = resolveCapturedConversationOrNotify(conversationId, false, deps);
+    if (!data) {
+        return null;
+    }
+    applyTitleDomFallbackIfNeeded(conversationId, data, deps);
+    return data;
+};
+
+export const handleForceSaveJsonClick = async (deps: SavePipelineDeps): Promise<void> => {
+    const data = getForceSaveConversationData(deps);
+    if (!data || !confirmDegradedForceSave()) {
+        return;
+    }
+    await saveConversation(data, { allowDegraded: true, format: 'json', action: 'force-save' }, deps);
+};
+
+export const handleSaveMarkdownClick = async (deps: SavePipelineDeps): Promise<void> => {
+    await handleExportClick('markdown', deps);
 };

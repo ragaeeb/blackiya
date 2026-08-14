@@ -29,6 +29,7 @@ export const CHATGPT_SELECTOR_REGISTRY = {
         'button[data-testid="stop-button"]',
         'button[aria-label*="Stop generating"]',
         'button[aria-label*="Stop response"]',
+        'button[aria-label="Stop"]',
         '[data-is-streaming="true"]',
     ],
 } as const;
@@ -66,7 +67,14 @@ export const isChatGptGeneratingFromDom = (
     if (!doc) {
         return false;
     }
-    return CHATGPT_SELECTOR_REGISTRY.generationIndicators.some((selector) => !!doc.querySelector(selector));
+    return CHATGPT_SELECTOR_REGISTRY.generationIndicators.some((selector) => {
+        const indicator = doc.querySelector(selector) as { disabled?: boolean } | null;
+        if (!indicator) {
+            return false;
+        }
+
+        return indicator.disabled !== true;
+    });
 };
 
 export const isLikelyChatGptApiPath = (url: string) => {

@@ -113,7 +113,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     };
 
     for (let i = 0; i < argv.length; i += 1) {
-        const arg = argv[i];
+        const arg = argv[i]!;
         if (arg === '--help' || arg === '-h') {
             printUsage();
             process.exit(0);

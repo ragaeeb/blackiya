@@ -59,7 +59,6 @@ export type ButtonStateManagerDeps = {
         setSaveButtonMode: (mode: 'default' | 'force-degraded') => void;
         setActionButtonsEnabled: (enabled: boolean) => void;
         setOpacity: (opacity: string) => void;
-        setButtonEnabled: (button: 'save', enabled: boolean) => void;
         setReadinessSource: (source: 'sfe' | 'legacy') => void;
     };
 
@@ -202,7 +201,15 @@ export const refreshButtonState = (
         fidelity: 'high' as const,
         completeness: 'complete' as const,
     };
-    if (cached && shouldIngestAsCanonicalSample(captureMeta)) {
+    const cachedReadiness = cached ? deps.evaluateReadinessForData(cached) : null;
+    const sfeAlreadyReady = deps.sfe.resolveByConversation(conversationId)?.ready === true;
+    if (
+        cached &&
+        cachedReadiness?.ready === true &&
+        deps.sfeEnabled() &&
+        !sfeAlreadyReady &&
+        shouldIngestAsCanonicalSample(captureMeta)
+    ) {
         deps.ingestSfeCanonicalSample(cached, deps.attemptByConversation.get(conversationId));
     }
 
@@ -236,7 +243,7 @@ const applyActionStateFromDecision = (isCanonicalReady: boolean, isDegraded: boo
     deps.buttonManager.setReadinessSource(deps.sfeEnabled() ? 'sfe' : 'legacy');
     deps.buttonManager.setSaveButtonMode(isDegraded ? 'force-degraded' : 'default');
     if (isDegraded) {
-        deps.buttonManager.setButtonEnabled('save', true);
+        deps.buttonManager.setActionButtonsEnabled(true);
         return;
     }
     deps.buttonManager.setActionButtonsEnabled(isCanonicalReady);
