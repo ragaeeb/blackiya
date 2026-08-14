@@ -70,8 +70,11 @@ const hasTerminalInterruptedCapture = (ctx: EngineCtx, conversationId: string): 
         return false;
     }
     const readiness = ctx.evaluateReadinessForData(cached);
-    return readiness.ready && readiness.terminal &&
-        (readiness.reason === 'terminal-interrupted' || readiness.reason === 'terminal-user-only');
+    return (
+        readiness.ready &&
+        readiness.terminal &&
+        (readiness.reason === 'terminal-interrupted' || readiness.reason === 'terminal-user-only')
+    );
 };
 
 export const isLifecycleGenerationPhase = (ctx: EngineCtx, conversationId: string): boolean => {

@@ -89,9 +89,7 @@ const resolveTerminalUserOnlyReadiness = (
 ): PlatformReadiness | null => {
     const latestMessage = activeBranchMessages.at(-1);
     const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
-    const hasFinishedAssistantHistory = activeBranchMessages
-        .slice(0, latestUserIndex)
-        .some(hasFinishedAssistantText);
+    const hasFinishedAssistantHistory = activeBranchMessages.slice(0, latestUserIndex).some(hasFinishedAssistantText);
     if (
         latestMessage?.author.role !== 'user' ||
         latestMessage.status === 'in_progress' ||

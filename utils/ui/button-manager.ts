@@ -639,9 +639,9 @@ export class ButtonManager {
                 ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
                 : type === 'force-save'
                   ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                : type === 'markdown'
-                  ? 'linear-gradient(135deg, #475569 0%, #334155 100%)'
-                  : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+                  : type === 'markdown'
+                    ? 'linear-gradient(135deg, #475569 0%, #334155 100%)'
+                    : 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
         return `
             display: inline-flex;
             align-items: center;
@@ -676,7 +676,8 @@ export class ButtonManager {
 
         activeBtn.disabled = true;
         activeBtn.textContent = '✅';
-        activeBtn.title = action === 'save' ? 'JSON Saved' : action === 'markdown' ? 'Markdown Saved' : 'Force JSON Saved';
+        activeBtn.title =
+            action === 'save' ? 'JSON Saved' : action === 'markdown' ? 'Markdown Saved' : 'Force JSON Saved';
         activeBtn.style.opacity = '1';
 
         setTimeout(() => {

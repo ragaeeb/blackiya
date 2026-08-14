@@ -1,8 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import {
-    ingestStabilizationRetrySnapshot,
-    shouldBlockActionsForGeneration,
-} from '@/utils/runner/engine/core-utils';
+import { ingestStabilizationRetrySnapshot, shouldBlockActionsForGeneration } from '@/utils/runner/engine/core-utils';
 import type { EngineCtx } from '@/utils/runner/engine/types';
 import type { ConversationData } from '@/utils/types';
 
