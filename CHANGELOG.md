@@ -1,3 +1,10 @@
+# [2.9.0](https://github.com/ragaeeb/blackiya/compare/v2.8.1...v2.9.0) (2026-08-14)
+
+
+### Features
+
+* **markdown:** Add markdown export, force save JSON ([#47](https://github.com/ragaeeb/blackiya/issues/47)) ([2f1c21a](https://github.com/ragaeeb/blackiya/commit/2f1c21a334e29b985b00ce0d7ee89a99171cbafb)), closes [#48](https://github.com/ragaeeb/blackiya/issues/48)
+
 ## [2.8.1](https://github.com/ragaeeb/blackiya/compare/v2.8.0...v2.8.1) (2026-04-14)
 
 
