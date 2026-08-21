@@ -87,6 +87,24 @@ describe('Platform Runner – initialisation', () => {
         expect(saveBtn?.textContent).toContain('💾');
     });
 
+    it('should keep controls when a ChatGPT download triggers beforeunload', async () => {
+        currentAdapterMock.name = 'ChatGPT';
+        runPlatform();
+        await new Promise((r) => setTimeout(r, 100));
+
+        const downloadButton = document.createElement('button');
+        downloadButton.setAttribute('aria-label', 'Download file');
+        document.body.appendChild(downloadButton);
+        downloadButton.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        window.dispatchEvent(new (window as any).Event('beforeunload'));
+
+        expect(document.getElementById('blackiya-button-container')).not.toBeNull();
+        expect(document.getElementById('blackiya-save-btn')).not.toBeNull();
+
+        const runnerControl = (window as any).__BLACKIYA_RUNNER_CONTROL__ as { cleanup?: () => void } | undefined;
+        runnerControl?.cleanup?.();
+    });
+
     it('should NOT inject button if no adapter matches', async () => {
         currentAdapterMock = null;
         runPlatform();

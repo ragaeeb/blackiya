@@ -4,8 +4,8 @@
  * A generic Least Recently Used cache with a fixed size limit.
  * Used to managed memory usage for conversation caches in long-running sessions.
  */
-export class LRUCache<K, V> {
-    private cache = new Map<K, V>();
+export class LRUCache<K, Value> {
+    private cache = new Map<K, Value>();
     private readonly maxSize: number;
 
     constructor(maxSize: number) {
@@ -15,20 +15,20 @@ export class LRUCache<K, V> {
         this.maxSize = maxSize;
     }
 
-    get(key: K): V | undefined {
+    get(key: K): Value | undefined {
         if (!this.cache.has(key)) {
             return undefined;
         }
 
         // Refresh item position (delete and re-add)
-        const value = this.cache.get(key) as V;
+        const value = this.cache.get(key) as Value;
         this.cache.delete(key);
         this.cache.set(key, value);
 
         return value;
     }
 
-    set(key: K, value: V) {
+    set(key: K, value: Value) {
         if (this.cache.has(key)) {
             // If exists, refresh position
             this.cache.delete(key);
@@ -61,7 +61,7 @@ export class LRUCache<K, V> {
         return this.cache.keys();
     }
 
-    values(): IterableIterator<V> {
+    values(): IterableIterator<Value> {
         return this.cache.values();
     }
 }

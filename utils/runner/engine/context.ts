@@ -7,6 +7,7 @@
 
 import { downloadAsJSON, downloadAsMarkdown } from '@/utils/download';
 import { logger } from '@/utils/logger';
+import { readPlatformHeadersFromCache, writePlatformHeadersToCache } from '@/utils/platform-header-cache';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import type { AttemptCoordinatorDeps } from '@/utils/runner/attempt-coordinator';
 import { shouldRemoveDisposedAttemptBinding as shouldRemoveDisposedAttemptBindingFromRegistry } from '@/utils/runner/attempt-state';
@@ -45,6 +46,7 @@ import {
 import { extractResponseTextFromConversation } from '@/utils/runner/export-helpers';
 import type { InterceptionCaptureDeps } from '@/utils/runner/interception-capture';
 import { requestPageSnapshot } from '@/utils/runner/page-snapshot-bridge';
+import { requestPlatformHeadersFromMainWorld } from '@/utils/runner/platform-header-request';
 import type { ResponseFinishedDeps } from '@/utils/runner/response-finished-handler';
 import type { CalibrationRuntimeDeps } from '@/utils/runner/runtime/platform-runtime-calibration';
 import type { RuntimeWiringDeps } from '@/utils/runner/runtime/platform-runtime-wiring';
@@ -228,6 +230,30 @@ export const buildWarmFetchDeps = (ctx: EngineCtx): WarmFetchDeps => ({
     evaluateReadiness: (data) => evaluateReadinessForData(ctx, data),
     getCaptureMeta: (cid) => getCaptureMeta(ctx, cid),
     getAuthHeaders: () => platformHeaderStore.get(ctx.currentAdapter?.name ?? ''),
+    prepareAuthHeaders:
+        ctx.currentAdapter?.name === 'ChatGPT'
+            ? async () => {
+                  const platformName = ctx.currentAdapter?.name ?? '';
+                  const [cachedHeaders, bridgedHeaders] = await Promise.all([
+                      readPlatformHeadersFromCache(platformName),
+                      requestPlatformHeadersFromMainWorld(platformName),
+                  ]);
+                  const localHeaders = platformHeaderStore.get(platformName);
+                  const resolvedHeaders = {
+                      ...(cachedHeaders ?? {}),
+                      ...(localHeaders ?? {}),
+                      ...(bridgedHeaders ?? {}),
+                  };
+                  if (Object.keys(resolvedHeaders).length === 0) {
+                      return;
+                  }
+                  platformHeaderStore.update(platformName, resolvedHeaders);
+                  void writePlatformHeadersToCache(platformName, resolvedHeaders);
+              }
+            : undefined,
+    isConversationCurrent: (conversationId) =>
+        ctx.currentConversationId === conversationId &&
+        ctx.currentAdapter?.extractConversationId(window.location.href) === conversationId,
 });
 
 export const buildCalibrationCaptureDeps = (ctx: EngineCtx, _conversationId: string): CalibrationCaptureDeps => ({
@@ -437,6 +463,9 @@ export const buildRuntimeWiringDeps = (ctx: EngineCtx): RuntimeWiringDeps => ({
     extractConversationIdFromLocation: () => extractConversationIdFromLocation(ctx),
     buttonManagerExists: () => ctx.buttonManager.exists(),
     injectSaveButton: () => ctx.injectSaveButton(),
+    onDownloadInteraction: () => {
+        ctx.lastDownloadInteractionAt = Date.now();
+    },
     isLifecycleActiveGeneration: () => ctx.isLifecycleActiveGeneration(),
     updateAdapter: (adapter) => {
         ctx.currentAdapter = adapter;

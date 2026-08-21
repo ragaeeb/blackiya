@@ -43,6 +43,7 @@ See related docs:
 ```bash
 # Development
 bun run dev              # Start dev server with HMR (animal build names enabled)
+bun run browser:harness  # Serve the local ChatGPT lifecycle/save reproduction page
 
 # Code Quality
 bun run check            # Lint and format code (auto-fix)
@@ -141,7 +142,7 @@ blackiya/
 
 - ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT, Gemini, and Grok.
 - ✅ **Global Enable Toggle**: Turn Blackiya off from the popup so newly opened supported tabs stay inert until you re-enable it.
-- ✅ **Readiness-Gated Export**: JSON and Markdown exports are enabled only when canonical data is ready; an explicit Force Save JSON control can archive currently cached data when readiness is unresolved.
+- ✅ **Readiness-Gated Export**: JSON and Markdown exports are enabled only when canonical data is ready; an explicit Force Save JSON control can recover a missed page/API capture and archive available data when readiness is unresolved.
 - ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including thinking/reasoning logs and title recovery.
 - ✅ **Grok Support**: Full support for Grok's GraphQL/NDJSON flows, including conversation history and thinking traces.
 - ✅ **Smart Titles**: Automatic conversation title capture with retroactive updates for async title loads.
@@ -215,6 +216,16 @@ For the full legal disclosure, please refer to our [Privacy Policy](./PRIVACY_PO
 4. Reload the extension in Chrome if needed (background script changes)
 5. Refresh the target webpage (content script changes)
 
+### Local Browser Harness
+
+To exercise the ChatGPT missed-history path without loading the MV3 extension:
+
+```bash
+bun run browser:harness
+```
+
+Open the URL printed by the server in the Codex in-app browser. The fixture starts as a finished conversation with no cached capture, then runs the real page-capture grace period and canonical warm-fetch fallback. It exposes the actual Save and Force Save controls, plus a button to deliver a page-owned capture during the grace window.
+
 ### Adding a New Platform
 
 1. Create a platform folder and adapter entrypoint at `platforms/your-platform/index.ts`
@@ -259,7 +270,7 @@ Build naming behavior:
 
 1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
 2. Use the popup toggle to enable or disable Blackiya globally for new tabs.
-3. When the capture state is ready, use 💾 for the complete JSON archive or 📝 for a Markdown transcript. If the lifecycle remains unresolved, use ⚡ Force Save JSON to export the currently cached conversation in the same JSON format.
+3. When the capture state is ready, use 💾 for the complete JSON archive or 📝 for a Markdown transcript. If the lifecycle remains unresolved, use ⚡ Force Save JSON to recover a missed page/API capture when possible, then export the available conversation in the same JSON format.
 4. JSON preserves the full conversation tree, including reasoning data. Markdown contains only active-branch User and Assistant text.
 5. Downloads use `{conversation-title}_{timestamp}.json` or `{conversation-title}_{timestamp}.md`.
 

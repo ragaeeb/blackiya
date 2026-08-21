@@ -358,12 +358,19 @@ describe('button-state-manager', () => {
     });
 
     describe('injectSaveButton', () => {
-        it('should exit if button target is missing', () => {
+        it('should use the stable ChatGPT body layer when the page target is missing', () => {
+            const originalDocument = (globalThis as any).document;
+            const stableBody = { id: 'document-body' } as unknown as HTMLElement;
+            (globalThis as any).document = { body: stableBody };
             mockAdapter.getButtonInjectionTarget = () => null as any;
-            injectSaveButton(deps, lastButtonStateLog);
-            expect(deps.buttonManager.inject).not.toHaveBeenCalled();
-            expect(logCalls.info).toHaveLength(1);
-            expect(logCalls.info[0]!.message).toContain('target missing');
+
+            try {
+                injectSaveButton(deps, lastButtonStateLog);
+
+                expect(deps.buttonManager.inject).toHaveBeenCalledWith(stableBody, '123');
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
         });
 
         it('should handle no conversation ID correctly when no active conversation is bound', () => {
@@ -386,6 +393,21 @@ describe('button-state-manager', () => {
             expect(deps.setCurrentConversation).not.toHaveBeenCalledWith(null);
             expect(deps.setLifecycleState).not.toHaveBeenCalledWith('idle');
             expect(deps.buttonManager.setActionButtonsEnabled).toHaveBeenCalledWith(false);
+        });
+
+        it('should mount ChatGPT controls on the stable document body instead of a page-owned header', () => {
+            const originalDocument = (globalThis as any).document;
+            const stableBody = { id: 'document-body' } as unknown as HTMLElement;
+            (globalThis as any).document = { body: stableBody };
+            mockAdapter.getButtonInjectionTarget = () => ({ id: 'page-header' }) as unknown as HTMLElement;
+
+            try {
+                injectSaveButton(deps, lastButtonStateLog);
+
+                expect(deps.buttonManager.inject).toHaveBeenCalledWith(stableBody, '123');
+            } finally {
+                (globalThis as any).document = originalDocument;
+            }
         });
 
         it('should handle injection successfully if conversation present', () => {

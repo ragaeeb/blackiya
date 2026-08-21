@@ -85,6 +85,10 @@ import { createStreamProbeRuntime } from '@/utils/runner/runtime/platform-runtim
 import { createRuntimeWiring } from '@/utils/runner/runtime/platform-runtime-wiring';
 import { createCleanupRuntime } from '@/utils/runner/runtime/runtime-cleanup';
 import {
+    shouldDeferRunnerTeardownAfterDownload,
+    DOWNLOAD_TEARDOWN_GRACE_MS,
+} from '@/utils/runner/runtime/download-interaction-diagnostics';
+import {
     createStorageChangeListener as createStorageChangeListenerCore,
     createVisibilityChangeHandler as createVisibilityChangeHandlerCore,
     loadStreamProbeVisibilitySetting as loadStreamProbeVisibilitySettingCore,
@@ -155,6 +159,7 @@ export const runPlatform = (): void => {
         lastStreamProbeConversationId: null,
         lastInvalidSessionTokenLogAt: 0,
         lastPendingLifecycleCapacityWarnAt: 0,
+        lastDownloadInteractionAt: null,
         beforeUnloadHandler: null,
         cleanupWindowBridge: null,
         cleanupCompletionWatcher: null,
@@ -551,7 +556,29 @@ export const runPlatform = (): void => {
     cleanupDeps.cleanupRuntimeMessageListener = ctx.cleanupRuntimeMessageListener;
     const cleanupRuntime = createCleanupRuntime(cleanupDeps);
 
-    ctx.beforeUnloadHandler = cleanupRuntime;
-    window.addEventListener('beforeunload', cleanupRuntime);
+    const handleBeforeUnload = () => {
+        const now = Date.now();
+        const deferTeardown = shouldDeferRunnerTeardownAfterDownload(ctx.lastDownloadInteractionAt, now);
+        logger.info('Runner beforeunload observed', {
+            url: window.location.href,
+            readyState: document.readyState,
+            visibilityState: document.visibilityState,
+            buttonManagerExists: ctx.buttonManager.exists(),
+            lastDownloadInteractionAt: ctx.lastDownloadInteractionAt,
+            deferTeardown,
+            downloadGraceRemainingMs: deferTeardown
+                ? DOWNLOAD_TEARDOWN_GRACE_MS - (now - (ctx.lastDownloadInteractionAt ?? now))
+                : 0,
+        });
+        if (deferTeardown) {
+            logger.info('Runner teardown deferred after ChatGPT download interaction', {
+                graceMs: DOWNLOAD_TEARDOWN_GRACE_MS,
+            });
+            return;
+        }
+        cleanupRuntime();
+    };
+    ctx.beforeUnloadHandler = handleBeforeUnload;
+    window.addEventListener('beforeunload', handleBeforeUnload);
     runnerControl.cleanup = cleanupRuntime;
 };

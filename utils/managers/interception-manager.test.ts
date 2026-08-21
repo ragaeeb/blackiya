@@ -153,7 +153,35 @@ describe('InterceptionManager', () => {
         expect(metadataLogged).toBeTrue();
     });
 
-    it('should keep warning on non-aux parse misses', () => {
+    it('should treat the ChatGPT conversation list as metadata-only without warning noise', () => {
+        const manager = new InterceptionManager(() => {}, {
+            window: windowInstance as any,
+            global: globalThis,
+        });
+
+        manager.updateAdapter({
+            name: 'ChatGPT',
+            parseInterceptedData: () => null,
+        } as any);
+
+        manager.ingestInterceptedData({
+            url: 'https://chatgpt.com/backend-api/conversations?offset=0&limit=28&order=updated',
+            data: '{"items":[]}',
+            platform: 'ChatGPT',
+        } as any);
+
+        const parseMissWarned = loggerSpies.warn.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Failed to parse conversation ID from intercepted data',
+        );
+        expect(parseMissWarned).toBeFalse();
+
+        const metadataLogged = loggerSpies.debug.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Metadata-only response (no messages yet)',
+        );
+        expect(metadataLogged).toBeTrue();
+    });
+
+    it('should keep non-aux parse misses out of warning logs', () => {
         const manager = new InterceptionManager(() => {}, {
             window: windowInstance as any,
             global: globalThis,
@@ -173,7 +201,12 @@ describe('InterceptionManager', () => {
         const parseMissWarned = loggerSpies.warn.mock.calls.some(
             (call) => (call as unknown[])[0] === 'Failed to parse conversation ID from intercepted data',
         );
-        expect(parseMissWarned).toBeTrue();
+        expect(parseMissWarned).toBeFalse();
+
+        const metadataLogged = loggerSpies.debug.mock.calls.some(
+            (call) => (call as unknown[])[0] === 'Metadata-only response (no messages yet)',
+        );
+        expect(metadataLogged).toBeTrue();
     });
 
     it('should downgrade grok.x.com add_response parse misses to metadata-only debug logs', () => {

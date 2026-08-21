@@ -34,6 +34,21 @@ describe('chatgpt registry', () => {
         expect(resolveChatGptButtonInjectionTarget(doc)).toBe(parent);
     });
 
+    it('should prefer the main header over a sidebar model-switcher target', () => {
+        const sidebarTarget = { id: 'sidebar-model-switcher' } as unknown as HTMLElement;
+        const mainHeader = { id: 'main-header' } as unknown as HTMLElement;
+        const doc = {
+            querySelector: (selector: string) => {
+                if (selector === '[data-testid="model-switcher-dropdown-button"]') {
+                    return { parentElement: sidebarTarget } as unknown as Element;
+                }
+                return selector === 'header' ? (mainHeader as unknown as Element) : null;
+            },
+        };
+
+        expect(resolveChatGptButtonInjectionTarget(doc)).toBe(mainHeader);
+    });
+
     it('should detect generation state from configured selectors', () => {
         const doc = {
             querySelector: (selector: string) =>

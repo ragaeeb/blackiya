@@ -187,6 +187,9 @@ const isCriticalLine = (line: string): boolean => {
         line.includes('Button state') ||
         line.includes('Button target missing') ||
         line.includes('Button skipped') ||
+        line.includes('Download interaction observed') ||
+        line.includes('Runner beforeunload observed') ||
+        line.includes('Runner teardown deferred after ChatGPT download interaction') ||
         line.includes('Stabilization retry') ||
         line.includes('stabilization retry') ||
         line.includes('Warm fetch') ||
@@ -247,6 +250,9 @@ const pickFallbackDiagnosticLines = (logs: LogEntry[]): string[] => {
         'Button state',
         'Button target missing',
         'Button skipped',
+        'Download interaction observed',
+        'Runner beforeunload observed',
+        'Runner teardown deferred after ChatGPT download interaction',
         'Stream done probe start',
         'Stream done probe fetch HTTP error',
         'Stream done probe fetch error',

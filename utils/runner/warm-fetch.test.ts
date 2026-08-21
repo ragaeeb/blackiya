@@ -116,6 +116,16 @@ describe('warm-fetch', () => {
             expect(globalThis.fetch).toHaveBeenCalledTimes(1);
         });
 
+        it('should prepare auth headers before trying recovery candidates', async () => {
+            deps.prepareAuthHeaders = mock(async () => {});
+            deps.getConversation.mockImplementation(() => ({ data: 'cached' }));
+
+            const result = await executeWarmFetchCandidates('c-1', 'initial-load', deps);
+
+            expect(result).toBeTrue();
+            expect(deps.prepareAuthHeaders).toHaveBeenCalledTimes(1);
+        });
+
         it('should fallback and return true if second succeeds', async () => {
             (globalThis.fetch as any).mockImplementationOnce(() => Promise.resolve({ ok: false })); // fail first
             deps.getConversation.mockImplementation(() => ({ data: 'cached' })); // succeed next
@@ -176,22 +186,71 @@ describe('warm-fetch', () => {
     });
 
     describe('warmFetchConversationSnapshot', () => {
-        it('should skip ChatGPT initial-load requests and wait for the page-owned canonical response', async () => {
+        it('should wait for page-owned ChatGPT history capture before skipping the fallback fetch', async () => {
+            let pageCaptureReady = false;
+            deps.waitForPageOwnedCapture = mock(async () => {
+                pageCaptureReady = true;
+            });
+            deps.getConversation.mockImplementation(() => (pageCaptureReady ? { data: 'captured' } : null));
+            deps.getCaptureMeta.mockImplementation(() => ({ captureSource: 'canonical_api' }));
             const inFlight = new Map();
 
             const result = await warmFetchConversationSnapshot('c-1', 'initial-load', deps, inFlight);
 
-            expect(result).toBeFalse();
+            expect(result).toBeTrue();
+            expect(deps.waitForPageOwnedCapture).toHaveBeenCalledTimes(1);
             expect(globalThis.fetch).not.toHaveBeenCalled();
             expect(inFlight.size).toBe(0);
         });
 
-        it('should skip ChatGPT conversation-switch requests and wait for the page-owned canonical response', async () => {
+        it('should wait for page-owned ChatGPT conversation-switch capture before skipping the fallback fetch', async () => {
+            let pageCaptureReady = false;
+            deps.waitForPageOwnedCapture = mock(async () => {
+                pageCaptureReady = true;
+            });
+            deps.getConversation.mockImplementation(() => (pageCaptureReady ? { data: 'captured' } : null));
+            deps.getCaptureMeta.mockImplementation(() => ({ captureSource: 'canonical_api' }));
             const inFlight = new Map();
 
             const result = await warmFetchConversationSnapshot('c-1', 'conversation-switch', deps, inFlight);
 
+            expect(result).toBeTrue();
+            expect(deps.waitForPageOwnedCapture).toHaveBeenCalledTimes(1);
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should fetch ChatGPT history when page-owned capture is missed', async () => {
+            deps.waitForPageOwnedCapture = mock(async () => {});
+            let cached: unknown = null;
+            deps.getConversation.mockImplementation(() => cached);
+            deps.ingestInterceptedData.mockImplementation(() => {
+                cached = { data: 'captured' };
+            });
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'initial-load', deps, inFlight);
+
+            expect(result).toBeTrue();
+            expect(deps.waitForPageOwnedCapture).toHaveBeenCalledTimes(1);
+            expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+            expect(deps.ingestInterceptedData).toHaveBeenCalledWith({
+                url: 'url-1',
+                data: '{"data": "mock"}',
+                platform: 'ChatGPT',
+            });
+            expect(inFlight.size).toBe(0);
+        });
+
+        it('should not fetch a ChatGPT history request after navigating away during the grace period', async () => {
+            deps.waitForPageOwnedCapture = mock(async () => {});
+            deps.isConversationCurrent = mock(() => false);
+
+            const inFlight = new Map();
+            const result = await warmFetchConversationSnapshot('c-1', 'initial-load', deps, inFlight);
+
             expect(result).toBeFalse();
+            expect(deps.isConversationCurrent).toHaveBeenCalledWith('c-1');
             expect(globalThis.fetch).not.toHaveBeenCalled();
             expect(inFlight.size).toBe(0);
         });

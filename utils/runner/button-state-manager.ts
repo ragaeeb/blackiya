@@ -353,14 +353,17 @@ export const injectSaveButton = (deps: ButtonStateManagerDeps, lastButtonStateLo
     const adapter = deps.getAdapter();
     const conversationId = adapter?.extractConversationId(window.location.href) ?? null;
     const target = adapter?.getButtonInjectionTarget();
-    if (!target) {
+    const stableChatGptTarget =
+        adapter?.name === 'ChatGPT' && typeof document !== 'undefined' && document.body ? document.body : null;
+    const mountTarget = stableChatGptTarget ?? target;
+    if (!mountTarget) {
         logger.info('Button target missing; retry pending', {
             platform: adapter?.name ?? 'unknown',
             conversationId,
         });
         return;
     }
-    deps.buttonManager.inject(target, conversationId);
+    deps.buttonManager.inject(mountTarget, conversationId);
     deps.buttonManager.setLifecycleState(deps.getLifecycleState());
     const displayState = resolveCalibrationDisplayState(
         deps.getCalibrationState(),

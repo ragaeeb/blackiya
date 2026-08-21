@@ -311,7 +311,7 @@ export const handleSaveClick = async (deps: SavePipelineDeps): Promise<void> => 
     await handleExportClick('json', deps);
 };
 
-const getForceSaveConversationData = (deps: SavePipelineDeps): ConversationData | null => {
+const getForceSaveConversationData = async (deps: SavePipelineDeps): Promise<ConversationData | null> => {
     if (!deps.getAdapter()) {
         return null;
     }
@@ -319,8 +319,14 @@ const getForceSaveConversationData = (deps: SavePipelineDeps): ConversationData 
     if (!conversationId) {
         return null;
     }
-    const data = resolveCapturedConversationOrNotify(conversationId, false, deps);
+    let data = deps.getConversation(conversationId);
     if (!data) {
+        await recoverCanonicalBeforeForceSave(conversationId, deps);
+        data = deps.getConversation(conversationId);
+    }
+    if (!data) {
+        logger.warn('No data captured for this conversation after force-save recovery.');
+        alert('Conversation data not yet captured. Please refresh the page or wait for the conversation to load.');
         return null;
     }
     applyTitleDomFallbackIfNeeded(conversationId, data, deps);
@@ -328,7 +334,7 @@ const getForceSaveConversationData = (deps: SavePipelineDeps): ConversationData 
 };
 
 export const handleForceSaveJsonClick = async (deps: SavePipelineDeps): Promise<void> => {
-    const data = getForceSaveConversationData(deps);
+    const data = await getForceSaveConversationData(deps);
     if (!data || !confirmDegradedForceSave()) {
         return;
     }

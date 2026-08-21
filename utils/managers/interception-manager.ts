@@ -462,18 +462,13 @@ export class InterceptionManager {
                     attemptId: typeof message?.attemptId === 'string' ? message.attemptId : undefined,
                 });
             } else {
-                const level = this.getParseMissLevel(message.url);
                 const payload = {
                     adapter: this.currentAdapter.name,
                     url: message.url,
                     parsedTitle: data?.title ?? null,
                 };
 
-                if (level === 'info') {
-                    logger.debug('Metadata-only response (no messages yet)', payload);
-                } else {
-                    logger.warn('Failed to parse conversation ID from intercepted data', payload);
-                }
+                logger.debug('Metadata-only response (no messages yet)', payload);
             }
         } catch (error) {
             logger.error('Error parsing intercepted data:', error);
@@ -653,27 +648,6 @@ export class InterceptionManager {
             !!data.mapping &&
             typeof data.mapping === 'object'
         );
-    }
-
-    private getParseMissLevel(url: unknown): 'info' | 'warn' {
-        if (typeof url !== 'string') {
-            return 'warn';
-        }
-
-        const isGeminiAuxMiss =
-            url.includes('/_/BardChatUi/data/batchexecute') ||
-            url.includes('/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate');
-
-        const isExpectedAuxMiss =
-            isGeminiAuxMiss ||
-            url.includes('grok.x.com/2/grok/add_response.json') ||
-            url.includes('/rest/app-chat/conversations_v2/') ||
-            url.includes('/rest/app-chat/conversations/new') ||
-            url.includes('/rest/app-chat/conversations/reconnect-response-v2/') ||
-            (url.includes('/rest/app-chat/conversations/') &&
-                (url.includes('/response-node') || url.includes('/load-responses')));
-
-        return isExpectedAuxMiss ? 'info' : 'warn';
     }
 
     private rememberSpecificTitle(conversationId: string, title: string, source: string) {

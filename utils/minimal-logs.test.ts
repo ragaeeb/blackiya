@@ -525,4 +525,51 @@ describe('Minimal Debug Report', () => {
         expect(report).toContain('SFE lifecycle phase update');
         expect(report).toContain('Attempt disposed');
     });
+
+    it('should keep download teardown outcomes while omitting debug checkpoints', () => {
+        const logs: LogEntry[] = [
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: '[i] trigger ChatGPT 69902dd9-bfe4-832e-a81c-b1a386d07f67',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'Download interaction observed',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'debug',
+                context: 'content',
+                message: 'Download interaction DOM state',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'Runner beforeunload observed',
+                data: [],
+            },
+            {
+                timestamp: '',
+                level: 'info',
+                context: 'content',
+                message: 'Runner teardown deferred after ChatGPT download interaction',
+                data: [],
+            },
+        ];
+
+        const report = generateMinimalDebugReport(logs);
+
+        expect(report).toContain('Download interaction observed');
+        expect(report).toContain('Runner beforeunload observed');
+        expect(report).toContain('Runner teardown deferred after ChatGPT download interaction');
+        expect(report).not.toContain('Download interaction DOM state');
+    });
 });

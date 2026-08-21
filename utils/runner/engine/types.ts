@@ -60,6 +60,7 @@ export type EngineCtx = {
     lastStreamProbeConversationId: string | null;
     lastInvalidSessionTokenLogAt: number;
     lastPendingLifecycleCapacityWarnAt: number;
+    lastDownloadInteractionAt: number | null;
     beforeUnloadHandler: (() => void) | null;
     cleanupWindowBridge: (() => void) | null;
     cleanupCompletionWatcher: (() => void) | null;

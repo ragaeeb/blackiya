@@ -120,7 +120,8 @@ Readiness decision modes:
 - `degraded_manual_only` (Force Save only)
 
 The UI also exposes an explicit `Force Save JSON` control independently of
-readiness. It exports the currently cached `ConversationData` through the same
+readiness. When the cache is empty it first attempts page-snapshot and canonical
+fetch recovery, then exports the available `ConversationData` through the same
 JSON serializer and filename policy as Save, with degraded export metadata, so
 an interrupted or otherwise unresolved lifecycle cannot prevent a local archive.
 
@@ -128,7 +129,10 @@ Critical invariant:
 - Completion hint alone never guarantees export readiness.
 - Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
 - Every accepted `completed` lifecycle signal triggers one immediate canonical probe/pull attempt (ChatGPT skips this while DOM still reports generating; no additional backoff is introduced by the signal itself).
-- ChatGPT initial-load and conversation-switch recovery wait for the page-owned canonical response instead of issuing duplicate warm-fetch requests. Stabilization retries also skip network pulls when a ready cached snapshot already exists, and skip degraded snapshot retries (snapshot recovery only), avoiding duplicate `/backend-api/conversation/{id}` requests and 404s.
+- ChatGPT initial-load and conversation-switch recovery wait through a short grace period for the page-owned canonical response, then issue a bounded fallback warm fetch only when no ready canonical capture arrived. Before that fetch, the runner hydrates captured auth/client headers from the main-world interceptor bridge. Candidates include both `/backend-api/conversation/{id}` and the `/backend-api/f/conversation/{id}` stream-handoff variant. Stabilization retries also skip network pulls when a ready cached snapshot already exists, and skip degraded snapshot retries (snapshot recovery only).
+- ChatGPT controls mount in an extension-owned fixed body layer rather than page-owned header/sidebar nodes; a body mutation health observer immediately reinjects the controls if ChatGPT replaces that layer during artifact/file preview interactions.
+- Download diagnostics attach to the runner's document-level capture phase and record the clicked download control, ancestor chain, URL/conversation, control-container connectivity, and body identity. Follow-up DOM checkpoints at 0/50/250/1000/2000 ms are debug-level full-log details; the minimal report keeps only the click and teardown outcome.
+- If a ChatGPT download causes a transient `beforeunload`, the runner defers teardown for a short download grace window so controls and capture state are not removed while the document remains alive; an actual page navigation still destroys the old document normally.
 - Network completion debounce is attempt-aware: same-conversation new attempts use a shorter debounce window than repeated same-attempt hints.
 - Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
 - Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
@@ -163,7 +167,7 @@ sequenceDiagram
     R->>S: completed_hint + stabilization checks
     S-->>R: canonical_ready OR awaiting_stabilization OR degraded_manual_only
     R->>UI: Update status + Save/Force Save modes
-    U->>UI: Force Save JSON (cached data, readiness bypass)
+    U->>UI: Force Save JSON (recover if needed, readiness bypass)
     UI->>R: Export cached ConversationData
 ```
 
@@ -288,7 +292,7 @@ Additionally, `handleConversationSwitch` skips `disposeInFlightAttemptsOnNavigat
 Cross-conversation navigation (from one existing conversation to another) continues to reset lifecycle to `idle` and dispose attempts as expected.
 On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
 Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
-For ChatGPT history loads that have no live prompt/stream signals, a terminal canonical `/backend-api/conversation/{id}` capture is also an implicit completion signal: the runner promotes `idle` to `completed` and enables Save only after canonical readiness passes. Button health checks locally re-ingest only adapter-ready samples that still need SFE stabilization; rejected or already-ready samples are not repeatedly processed.
+For ChatGPT history loads that have no live prompt/stream signals, a terminal canonical `/backend-api/conversation/{id}` capture is also an implicit completion signal: the runner promotes `idle` to `completed` and enables Save only after canonical readiness passes. Initial-load recovery gives the page-owned request a short grace period and then falls back to a same-origin canonical fetch if that request was missed, so an already-finished thread cannot remain idle solely because the interceptor started late. Button health checks locally re-ingest only adapter-ready samples that still need SFE stabilization; rejected or already-ready samples are not repeatedly processed.
 
 Key methods:
 - `utils/runner/engine/platform-runner-engine.ts`:
@@ -392,7 +396,7 @@ Rate-limit behavior:
 - Detail URL candidate fallback continues on `404` (endpoint drift).
 
 Current platform coverage:
-- ChatGPT (`/backend-api/conversations` with query fallback variants + `/backend-api/conversation/{id}`)
+- ChatGPT (`/backend-api/conversations` with query fallback variants + `/backend-api/conversation/{id}` and `/backend-api/f/conversation/{id}`)
 - Grok.com (`/rest/app-chat/conversations` + conversation detail endpoints);
   bulk detail fallback now also derives reconnect IDs from `response-node` payloads and probes
   `/rest/app-chat/conversations/reconnect-response-v2/{responseId}` when `conversations_v2`/`response-node` are metadata-only.

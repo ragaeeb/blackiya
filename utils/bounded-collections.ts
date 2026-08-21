@@ -3,7 +3,7 @@
  * and evicts the oldest entry when size would exceed {`@link` maxEntries}.
  * No-op when maxEntries ≤ 0.
  */
-export const setBoundedMapValue = <K, V>(map: Map<K, V>, key: K, value: V, maxEntries: number) => {
+export const setBoundedMapValue = <K, MapValue>(map: Map<K, MapValue>, key: K, value: MapValue, maxEntries: number) => {
     if (maxEntries <= 0) {
         return;
     }
@@ -25,11 +25,11 @@ export const setBoundedMapValue = <K, V>(map: Map<K, V>, key: K, value: V, maxEn
  * Promotes an existing map key to most-recent without changing its value.
  * Useful for bounded maps that act as LRU read caches.
  */
-export const touchBoundedMapKey = <K, V>(map: Map<K, V>, key: K) => {
+export const touchBoundedMapKey = <K, MapValue>(map: Map<K, MapValue>, key: K) => {
     if (!map.has(key)) {
         return false;
     }
-    const value = map.get(key) as V;
+    const value = map.get(key) as MapValue;
     map.delete(key);
     map.set(key, value);
     return true;

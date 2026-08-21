@@ -20,6 +20,7 @@ export const CHATGPT_ENDPOINT_REGISTRY = {
 
 export const CHATGPT_SELECTOR_REGISTRY = {
     buttonInjectionTargets: [
+        'header',
         '[data-testid="model-switcher-dropdown-button"]',
         'header nav',
         '.flex.items-center.justify-between',

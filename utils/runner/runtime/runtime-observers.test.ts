@@ -31,21 +31,41 @@ describe('runtime-observers', () => {
 
     describe('registerButtonHealthCheck', () => {
         let originalWindow: any;
+        let originalDocument: any;
+        let originalMutationObserver: any;
         let originalClearInterval: any;
+        let observerInstances: Array<{ callback: () => void; disconnect: ReturnType<typeof mock> }>;
 
         beforeEach(() => {
             originalWindow = (globalThis as any).window;
+            originalDocument = (globalThis as any).document;
+            originalMutationObserver = (globalThis as any).MutationObserver;
             originalClearInterval = globalThis.clearInterval;
+            observerInstances = [];
 
             (globalThis as any).window = {
                 setInterval: mock(() => 123) as any,
                 clearInterval: mock(() => {}) as any,
+            };
+            (globalThis as any).document = { body: {} };
+            (globalThis as any).MutationObserver = class {
+                private readonly callback: () => void;
+                public readonly disconnect = mock(() => {});
+
+                constructor(callback: () => void) {
+                    this.callback = callback;
+                    observerInstances.push({ callback, disconnect: this.disconnect });
+                }
+
+                observe() {}
             };
             globalThis.clearInterval = mock(() => {}) as any;
         });
 
         afterEach(() => {
             (globalThis as any).window = originalWindow;
+            (globalThis as any).document = originalDocument;
+            (globalThis as any).MutationObserver = originalMutationObserver;
             globalThis.clearInterval = originalClearInterval;
         });
 
@@ -75,6 +95,25 @@ describe('runtime-observers', () => {
 
             untrack();
             expect(globalThis.clearInterval).toHaveBeenCalledWith(123);
+        });
+
+        it('should recover controls immediately after a download-triggered DOM replacement', () => {
+            const deps = {
+                getAdapter: mock(() => ({ name: 'ChatGPT' }) as any),
+                extractConversationIdFromLocation: mock(() => 'conv-1'),
+                buttonManagerExists: mock(() => false),
+                injectSaveButton: mock(() => {}),
+                refreshButtonState: mock(() => {}),
+            };
+
+            const untrack = registerButtonHealthCheck(deps);
+
+            expect(observerInstances).toHaveLength(1);
+            observerInstances[0]!.callback();
+            expect(deps.injectSaveButton).toHaveBeenCalledTimes(1);
+
+            untrack();
+            expect(observerInstances[0]!.disconnect).toHaveBeenCalledTimes(1);
         });
     });
 });

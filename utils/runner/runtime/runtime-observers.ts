@@ -2,6 +2,7 @@ import type { LLMPlatform } from '@/platforms/types';
 import { logger } from '@/utils/logger';
 import { resolveTokenValidationFailureReason } from '@/utils/protocol/session-token';
 import { dispatchRunnerMessage } from '@/utils/runner/message-bridge';
+import { registerDownloadInteractionDiagnostics } from '@/utils/runner/runtime/download-interaction-diagnostics';
 
 export type RunnerWindowBridgeDeps = {
     messageHandlers: Array<(message: unknown) => boolean>;
@@ -72,6 +73,7 @@ export type ButtonHealthCheckDeps = {
     buttonManagerExists: () => boolean;
     injectSaveButton: () => void;
     refreshButtonState: (conversationId?: string) => void;
+    onDownloadInteraction?: () => void;
 };
 
 const resolveHealthCheckIntervalMs = () => {
@@ -83,6 +85,12 @@ const resolveHealthCheckIntervalMs = () => {
 };
 
 export const registerButtonHealthCheck = (deps: ButtonHealthCheckDeps) => {
+    const recoverMissingButtons = () => {
+        if (deps.getAdapter() && !deps.buttonManagerExists()) {
+            deps.injectSaveButton();
+        }
+    };
+
     const intervalId = window.setInterval(() => {
         if (!deps.getAdapter()) {
             return;
@@ -98,5 +106,27 @@ export const registerButtonHealthCheck = (deps: ButtonHealthCheckDeps) => {
         }
         deps.refreshButtonState(activeConversationId);
     }, resolveHealthCheckIntervalMs());
-    return () => clearInterval(intervalId);
+
+    const observer =
+        typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body
+            ? new MutationObserver(recoverMissingButtons)
+            : null;
+    observer?.observe(document.body, { childList: true, subtree: true });
+
+    const cleanupDownloadDiagnostics = registerDownloadInteractionDiagnostics({
+        getAdapterName: () => deps.getAdapter()?.name ?? null,
+        getConversationId: deps.extractConversationIdFromLocation,
+        buttonManagerExists: deps.buttonManagerExists,
+        onDownloadInteraction: () => {
+            if (deps.getAdapter()?.name === 'ChatGPT') {
+                deps.onDownloadInteraction?.();
+            }
+        },
+    });
+
+    return () => {
+        clearInterval(intervalId);
+        observer?.disconnect();
+        cleanupDownloadDiagnostics();
+    };
 };

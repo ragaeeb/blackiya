@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { buildLoggerMock, createLoggerCalls } from '@/utils/runner/__tests__/helpers';
 import {
     applyTitleDomFallbackIfNeeded,
@@ -19,8 +19,11 @@ if (typeof globalThis.alert !== 'function') {
 
 describe('save-pipeline', () => {
     let deps: any;
+    let originalWindow: unknown;
 
     beforeEach(() => {
+        originalWindow = (globalThis as any).window;
+        (globalThis as any).window = { confirm: () => true };
         logCalls.debug.length = 0;
         logCalls.info.length = 0;
         logCalls.warn.length = 0;
@@ -60,6 +63,14 @@ describe('save-pipeline', () => {
             downloadMarkdown: mock(() => {}),
             structuredLogger: { emit: mock(() => {}) } as any,
         };
+    });
+
+    afterEach(() => {
+        if (originalWindow === undefined) {
+            delete (globalThis as any).window;
+        } else {
+            (globalThis as any).window = originalWindow;
+        }
     });
 
     describe('resolveSaveReadiness', () => {
@@ -249,6 +260,25 @@ describe('save-pipeline', () => {
     });
 
     describe('handleForceSaveJsonClick', () => {
+        it('should recover uncached data before reporting that the conversation was not loaded', async () => {
+            let cached: any = null;
+            const recovered = { title: 'Recovered', conversation_id: 'conv-1' };
+            deps.getConversation.mockImplementation(() => cached);
+            deps.requestPageSnapshot.mockImplementationOnce(() => Promise.resolve(recovered));
+            deps.ingestConversationData.mockImplementationOnce((data: any) => {
+                cached = data;
+            });
+
+            await handleForceSaveJsonClick(deps);
+
+            expect(deps.requestPageSnapshot).toHaveBeenCalledWith('conv-1');
+            expect(deps.downloadJson).toHaveBeenCalledWith(
+                expect.objectContaining({ conversation_id: 'conv-1' }),
+                'test-chat',
+            );
+            expect(deps.buttonManagerSetSuccess).toHaveBeenCalledWith('force-save');
+        });
+
         it('should export cached data without readiness or generation gating', async () => {
             deps.resolveReadinessDecision.mockImplementation(() => ({ mode: 'awaiting_stabilization' }) as any);
             deps.shouldBlockActionsForGeneration.mockImplementation(() => true);

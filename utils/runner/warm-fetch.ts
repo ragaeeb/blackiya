@@ -29,9 +29,16 @@ export type WarmFetchDeps = {
     getCaptureMeta: (conversationId: string) => ExportMeta;
     /** Returns captured auth/client headers for the platform, if any. */
     getAuthHeaders?: () => HeaderRecord | undefined;
+    /** Hydrates auth/client headers from the page-owned interceptor before fetching. */
+    prepareAuthHeaders?: () => Promise<void>;
+    /** Waits for a page-owned history response before fallback fetching. */
+    waitForPageOwnedCapture?: () => Promise<void>;
+    /** Returns false when navigation has made the requested conversation stale. */
+    isConversationCurrent?: (conversationId: string) => boolean;
 };
 
 const WARM_FETCH_TIMEOUT_MS = 15_000;
+const CHATGPT_PAGE_CAPTURE_GRACE_MS = 1_500;
 
 const toPathname = (url: string): string => {
     try {
@@ -40,6 +47,12 @@ const toPathname = (url: string): string => {
         return url;
     }
 };
+
+const waitForChatGptPageCapture = (deps: WarmFetchDeps): Promise<void> =>
+    deps.waitForPageOwnedCapture?.() ??
+    new Promise<void>((resolve) => {
+        window.setTimeout(resolve, CHATGPT_PAGE_CAPTURE_GRACE_MS);
+    });
 
 export type WarmFetchCandidateResult = {
     success: boolean;
@@ -110,6 +123,15 @@ export const executeWarmFetchCandidates = async (
     const candidates = deps.getFetchUrlCandidates(conversationId);
     if (candidates.length === 0) {
         return false;
+    }
+    try {
+        await deps.prepareAuthHeaders?.();
+    } catch (err) {
+        logger.debug('Warm fetch auth header preparation failed; continuing without hydrated headers', {
+            conversationId,
+            reason,
+            error: err instanceof Error ? err.message : String(err),
+        });
     }
     const triedCandidates = candidates.slice(0, 2);
     let allNotFound = true;
@@ -184,13 +206,6 @@ export const warmFetchConversationSnapshot = (
         return Promise.resolve(true);
     }
 
-    const waitsForPageOwnedChatGptCapture =
-        deps.platformName === 'ChatGPT' && (reason === 'initial-load' || reason === 'conversation-switch');
-    if (waitsForPageOwnedChatGptCapture) {
-        logger.debug('Warm fetch skipped: ChatGPT page owns history capture', { conversationId, reason });
-        return Promise.resolve(false);
-    }
-
     const key = `${deps.platformName}:${conversationId}`;
     const existing = inFlight.get(key);
     if (existing) {
@@ -198,7 +213,38 @@ export const warmFetchConversationSnapshot = (
         return existing;
     }
 
-    const run = executeWarmFetchCandidates(conversationId, reason, deps).finally(() => {
+    const waitsForPageOwnedChatGptCapture =
+        deps.platformName === 'ChatGPT' && (reason === 'initial-load' || reason === 'conversation-switch');
+    const run = (async () => {
+        if (waitsForPageOwnedChatGptCapture) {
+            await waitForChatGptPageCapture(deps);
+            if (deps.isConversationCurrent && !deps.isConversationCurrent(conversationId)) {
+                logger.debug('Warm fetch cancelled: ChatGPT conversation is no longer current', {
+                    conversationId,
+                    reason,
+                });
+                return false;
+            }
+            const pageCaptured = deps.getConversation(conversationId);
+            const pageCaptureReadiness = pageCaptured ? deps.evaluateReadiness(pageCaptured) : null;
+            if (
+                pageCaptured &&
+                pageCaptureReadiness &&
+                shouldUseCachedConversationForWarmFetch(pageCaptureReadiness, deps.getCaptureMeta(conversationId))
+            ) {
+                logger.debug('Warm fetch skipped: ChatGPT page-owned history capture arrived during grace period', {
+                    conversationId,
+                    reason,
+                });
+                return true;
+            }
+            logger.debug('Warm fetch fallback: ChatGPT page-owned history capture was not ready', {
+                conversationId,
+                reason,
+            });
+        }
+        return executeWarmFetchCandidates(conversationId, reason, deps);
+    })().finally(() => {
         inFlight.delete(key);
     });
     inFlight.set(key, run);

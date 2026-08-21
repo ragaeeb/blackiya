@@ -96,6 +96,7 @@ export type RuntimeWiringDeps = {
     extractConversationIdFromLocation: () => string | null;
     buttonManagerExists: () => boolean;
     injectSaveButton: () => void;
+    onDownloadInteraction?: () => void;
     isLifecycleActiveGeneration: () => boolean;
     updateAdapter: (adapter: LLMPlatform | null) => void;
     buttonManagerRemove: () => void;
@@ -241,6 +242,7 @@ export const createRuntimeWiring = (deps: RuntimeWiringDeps) => {
         extractConversationIdFromLocation: deps.extractConversationIdFromLocation,
         buttonManagerExists: deps.buttonManagerExists,
         injectSaveButton: deps.injectSaveButton,
+        onDownloadInteraction: deps.onDownloadInteraction,
         refreshButtonState: deps.refreshButtonState,
     });
 

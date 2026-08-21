@@ -48,6 +48,19 @@ These should usually be enough for first-pass triage:
 - UI state:
 - `Button state ...`
 - `Button target missing; retry pending`
+- `Download interaction observed`
+- `Runner beforeunload observed`
+- `Runner teardown deferred after ChatGPT download interaction`
+
+The detailed `Download interaction DOM state` checkpoints remain available at
+debug level in full logs, but are intentionally excluded from the token-lean
+report unless another diagnostic promotes them.
+
+For a disappearing-controls repro, click the ChatGPT-provided download control
+once and export the debug TXT plus full logs JSON. The first diagnostic record
+identifies the exact button and its ancestor chain; the five follow-up records
+show whether the Blackiya container was removed, detached from the document,
+or survived while the page/body changed.
 
 ## Known Gap: Grok Placeholder Titles
 On `grok.com`, generic export titles can occur if streaming data is captured before conversation metadata arrives.
@@ -120,7 +133,7 @@ Readiness tie-in:
 ## Expected Noise
 These are often benign:
 
-- parse misses on non-canonical/aux endpoints
+- parse misses on non-canonical/aux endpoints (recorded at debug level)
 - endpoint candidate filtering by origin
 - bounded retry/backoff logs
 

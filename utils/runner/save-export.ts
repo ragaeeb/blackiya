@@ -27,7 +27,7 @@ export const buildExportMetaForSave = (
  * `window.confirm` is unavailable in the current environment).
  */
 export const confirmDegradedForceSave = (): boolean => {
-    if (typeof window.confirm !== 'function') {
+    if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
         return true;
     }
     return window.confirm('Force Save may export partial data because canonical capture timed out. Continue?');
