@@ -106,6 +106,59 @@ describe('isolated MAIN-world command requester', () => {
         bridge.dispose();
     });
 
+    it('should wait for bulk completion beyond the single-command timeout without redispatching', async () => {
+        const windowLike = createWindow();
+        let commandCount = 0;
+        let simulatedDownloadCount = 0;
+        windowLike.postMessage = (data: unknown) => {
+            const message = data as Record<string, unknown>;
+            commandCount += 1;
+            setTimeout(() => {
+                simulatedDownloadCount += 1;
+                for (const listener of listenersFor(windowLike)) {
+                    listener({
+                        data: {
+                            type: MAIN_WORLD_RESULT_MESSAGE,
+                            requestId: message.requestId,
+                            operation: message.operation,
+                            ok: true,
+                            result: {
+                                operation: 'bulk_export',
+                                platform: 'ChatGPT',
+                                discovered: 1,
+                                attempted: 1,
+                                exported: 1,
+                                failed: 0,
+                                elapsedMs: 25,
+                                limit: 1,
+                                warnings: [],
+                            },
+                            __blackiyaToken: 'test-token',
+                        },
+                        origin: windowLike.location.origin,
+                        source: windowLike.self,
+                    });
+                }
+            }, 25);
+        };
+
+        const bridge = createMainWorldCommandBridge({
+            window: windowLike,
+            token: 'test-token',
+            timeoutMs: 5,
+            createRequestId: () => 'request-delayed-bulk',
+        });
+
+        await expect(
+            bridge.runBulkExport({ limit: 1, delayMs: 0, timeoutMs: 20_000 }),
+        ).resolves.toMatchObject({ operation: 'bulk_export', exported: 1 });
+        await new Promise((resolve) => setTimeout(resolve, 5));
+
+        expect(commandCount).toBe(1);
+        expect(simulatedDownloadCount).toBe(1);
+        bridge.dispose();
+    });
+
     it('should ignore a forged response that attempts to carry stream records', async () => {
         const windowLike = createWindow();
         windowLike.postMessage = (data: unknown) => {

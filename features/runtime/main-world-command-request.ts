@@ -59,6 +59,9 @@ const defaultRequestId = () => {
 const normalizeTimeout = (value: number | undefined) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 15_000;
 
+const timeoutForOperation = (operation: MainWorldCommandOperation, timeoutMs: number) =>
+    operation === 'bulk_export' ? undefined : timeoutMs;
+
 const isAllowedEvent = (windowLike: MainWorldCommandWindow, event: MainWorldMessageEvent) =>
     event.source === windowLike.self && event.origin === windowLike.location.origin;
 
@@ -116,6 +119,7 @@ export const createMainWorldCommandBridge = ({
     ): Promise<MainWorldCommandSummary> =>
         new Promise((resolve, reject) => {
             const requestId = createRequestId();
+            const operationTimeoutMs = timeoutForOperation(operation, timeoutMs);
             let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
             const cleanup = () => {
@@ -145,9 +149,11 @@ export const createMainWorldCommandBridge = ({
 
             pendingCleanups.add(cleanup);
             windowLike.addEventListener('message', handleMessage);
-            timeoutHandle = setTimeout(() => {
-                finish(() => reject(new MainWorldCommandError('MAIN-world command timed out.')));
-            }, timeoutMs);
+            if (operationTimeoutMs !== undefined) {
+                timeoutHandle = setTimeout(() => {
+                    finish(() => reject(new MainWorldCommandError('MAIN-world command timed out.')));
+                }, operationTimeoutMs);
+            }
             windowLike.postMessage(
                 {
                     type: MAIN_WORLD_COMMAND_MESSAGE,
