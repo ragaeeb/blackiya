@@ -669,7 +669,7 @@ describe('performSingleExport — request shape', () => {
             error: {
                 kind: 'timeout',
                 platformName: 'ChatGPT',
-                timeoutMs: 100,
+                timeoutMs: 1000,
             },
         });
     });
