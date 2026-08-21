@@ -97,10 +97,13 @@ const readRelayEvents = async () => {
 };
 
 test.describe('blackiya authenticated-browser debug relay', () => {
-    test.skip(!extension.valid, extension.reason ?? 'Unable to resolve extension path');
-    test.skip(!relayExtensionAvailable, 'The dev relay unpacked extension is missing');
-
     test.beforeAll(async () => {
+        if (!extension.valid) {
+            throw new Error(extension.reason ?? 'Unable to resolve extension path');
+        }
+        if (!relayExtensionAvailable) {
+            throw new Error('The dev relay unpacked extension is missing');
+        }
         harnessProcess = spawn('bun', ['run', 'scripts/browser-harness.ts', '--relay'], {
             cwd: process.cwd(),
             env: { ...process.env, BLACKIYA_HARNESS_PORT: String(port) },

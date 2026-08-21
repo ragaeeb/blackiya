@@ -8,7 +8,11 @@ import { closeExtensionContext, launchExtensionContext } from './extension-test-
 const extension = resolveExtensionPath();
 
 test.describe('blackiya smoke harness', () => {
-    test.skip(!extension.valid, extension.reason ?? 'Unable to resolve extension path');
+    test.beforeAll(() => {
+        if (!extension.valid) {
+            throw new Error(extension.reason ?? 'Unable to resolve extension path');
+        }
+    });
 
     const resolveExtensionWorker = async (context: Awaited<ReturnType<typeof launchExtensionContext>>['context']) => {
         return (

@@ -71,9 +71,10 @@ const pageRoute = async (route: Route) => {
 };
 
 test.describe('blackiya extension boundary harness', () => {
-    test.skip(!extension.valid, extension.reason ?? 'Unable to resolve extension path');
-
     test.beforeAll(async () => {
+        if (!extension.valid) {
+            throw new Error(extension.reason ?? 'Unable to resolve extension path');
+        }
         harnessProcess = spawn('bun', ['run', 'scripts/browser-harness.ts'], {
             cwd: process.cwd(),
             env: { ...process.env, BLACKIYA_HARNESS_PORT: String(port) },
