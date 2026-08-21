@@ -103,6 +103,10 @@ export const createHarnessConversationPayload = (
     };
 };
 
+export const createHarnessConversationListPayload = (conversationId: string = HARNESS_CONVERSATION_ID) => ({
+    items: [{ id: conversationId, title: 'Bootstrap Mewzimen Evaluator' }],
+});
+
 export const simulateChatGPTArtifactDownload = (document: Document) => {
     const pageOwnedHost = document.querySelector('#harness-model-switcher');
     if (!pageOwnedHost) {

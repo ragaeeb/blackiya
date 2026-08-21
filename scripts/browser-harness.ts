@@ -1,5 +1,6 @@
 import {
     createHarnessConversationPayload,
+    createHarnessConversationListPayload,
     HARNESS_CONVERSATION_ID,
     isValidHarnessAuthorization,
     type HarnessResponseMode,
@@ -107,7 +108,7 @@ const handleProviderRequest = (request: Request, url: URL): Response | null => {
         });
     }
     if (url.pathname === '/backend-api/conversations') {
-        return requireFixtureAuth(request, () => Response.json({ items: [] }));
+        return requireFixtureAuth(request, () => Response.json(createHarnessConversationListPayload()));
     }
     if (url.pathname === '/backend-api/f/conversation') {
         return requireFixtureAuth(

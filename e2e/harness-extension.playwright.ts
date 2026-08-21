@@ -125,4 +125,39 @@ test.describe('blackiya extension boundary harness', () => {
             await closeExtensionContext(extensionContext);
         }
     });
+
+    test('exports the fixture conversation through the real popup bulk boundary', async () => {
+        const extensionContext = await launchExtensionContext(extension.extensionPath);
+        try {
+            const page = await extensionContext.context.newPage();
+            await page.route(`${providerBaseUrl}/**`, pageRoute);
+            const authSeedRequest = page.waitForRequest('**/backend-api/conversations*');
+
+            await page.goto(`${providerBaseUrl}/c/${HARNESS_CONVERSATION_ID}?mode=success`, {
+                waitUntil: 'domcontentloaded',
+            });
+            expect((await authSeedRequest).headers().authorization).toBe(HARNESS_AUTHORIZATION);
+            await expect(page.locator('#blackiya-v3-export-chat-btn')).toBeVisible();
+
+            const background = extensionContext.context.serviceWorkers().find((worker) =>
+                worker.url().endsWith('/background.js'),
+            );
+            const worker = background ?? (await extensionContext.context.waitForEvent('serviceworker'));
+            const extensionId = new URL(worker.url()).host;
+            const popup = await extensionContext.context.newPage();
+            await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+            await expect(popup.getByRole('button', { name: 'Export Chats' })).toBeVisible();
+            await popup.locator('#bulkExportLimit').fill('1');
+
+            await page.bringToFront();
+            const downloadPromise = page.waitForEvent('download');
+            await popup.getByRole('button', { name: 'Export Chats' }).click();
+            const download = await downloadPromise;
+
+            expect(download.suggestedFilename()).toMatch(/\.json$/);
+            await expect(popup.locator('[role="status"]')).toHaveText('Exported 1/1 chats on ChatGPT.');
+        } finally {
+            await closeExtensionContext(extensionContext);
+        }
+    });
 });

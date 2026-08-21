@@ -3,6 +3,7 @@ import { Window } from 'happy-dom';
 import { createChatGPTAdapter } from '@/platforms/chatgpt';
 import {
     createHarnessConversationPayload,
+    createHarnessConversationListPayload,
     HARNESS_CONVERSATION_ID,
     HARNESS_AUTHORIZATION,
     isValidHarnessAuthorization,
@@ -27,6 +28,12 @@ describe('browser harness fixture', () => {
         expect(parsed?.conversation_id).toBe(HARNESS_CONVERSATION_ID);
         expect(parsed?.current_node).toBe(payload.current_node);
         expect(adapter.evaluateReadiness?.(parsed!)).toMatchObject({ ready: true, terminal: true });
+    });
+
+    it('should provide one conversation for the popup bulk-export boundary', () => {
+        expect(createHarnessConversationListPayload()).toEqual({
+            items: [{ id: HARNESS_CONVERSATION_ID, title: 'Bootstrap Mewzimen Evaluator' }],
+        });
     });
 
     it('should provide a non-terminal payload for deterministic failure coverage', () => {
