@@ -11,7 +11,9 @@ type ExtensionTestContext = {
 export const launchExtensionContext = async (extensionPath: string): Promise<ExtensionTestContext> => {
     const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'blackiya-e2e-'));
     const context = await chromium.launchPersistentContext(userDataDir, {
-        headless: true,
+        // Chromium does not load MV3 extensions in headless mode. The headed
+        // context is required for the service worker and popup smoke tests.
+        headless: false,
         args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
     });
     return { context, userDataDir };

@@ -2,7 +2,7 @@
  * Gemini Platform Adapter
  *
  * Intercepts batchexecute RPC and StreamGenerate responses to capture
- * conversation data, titles, and lifecycle readiness signals.
+ * conversation data, titles, and terminal readiness evaluation.
  */
 
 import type { LLMPlatform } from '@/platforms/types';
@@ -16,7 +16,6 @@ import {
     hasGeminiStreamGenerateConversationShape,
     parseConversationPayload,
 } from './conversation-parser';
-import { GEMINI_ENDPOINT_REGISTRY, resolveGeminiButtonInjectionTarget } from './registry';
 import {
     findConversationRpc,
     hydrateGeminiTitleCandidatesFromRpcResults,
@@ -24,7 +23,6 @@ import {
     parseTitlesResponse,
 } from './rpc-parser';
 import { GeminiAdapterState, geminiState } from './state';
-import { extractTitleFromGeminiDom, GEMINI_DEFAULT_TITLES } from './title-utils';
 
 export { resetGeminiAdapterState } from './state';
 export { GeminiAdapterState };
@@ -44,9 +42,6 @@ export const geminiAdapter: LLMPlatform = {
     name: 'Gemini',
     urlMatchPattern: 'https://gemini.google.com/*',
 
-    apiEndpointPattern: GEMINI_ENDPOINT_REGISTRY.apiEndpointPattern,
-    completionTriggerPattern: GEMINI_ENDPOINT_REGISTRY.completionTriggerPattern,
-
     isPlatformUrl: (url: string) => url.includes('gemini.google.com'),
 
     extractConversationId(url: string): string | null {
@@ -54,11 +49,6 @@ export const geminiAdapter: LLMPlatform = {
             return null;
         }
         return url.match(/\/app\/([a-zA-Z0-9_-]+)/i)?.[1] ?? url.match(/\/share\/([a-zA-Z0-9_-]+)/i)?.[1] ?? null;
-    },
-
-    extractConversationIdFromUrl(_url: string): string | null {
-        // Gemini batchexecute URLs do not reliably contain the conversation ID.
-        return null;
     },
 
     parseInterceptedData(data: string, url: string): ConversationData | null {
@@ -127,20 +117,8 @@ export const geminiAdapter: LLMPlatform = {
         return `${sanitizedTitle}_${timestamp}`;
     },
 
-    getButtonInjectionTarget: () => resolveGeminiButtonInjectionTarget(),
-
     evaluateReadiness(data: ConversationData) {
         return evaluateGeminiReadiness(data);
     },
 
-    isPlatformGenerating() {
-        // Gemini generation gating is driven by network lifecycle/SFE signals.
-        return false;
-    },
-
-    defaultTitles: GEMINI_DEFAULT_TITLES,
-
-    extractTitleFromDom() {
-        return extractTitleFromGeminiDom();
-    },
 };

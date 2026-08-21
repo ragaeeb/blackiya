@@ -1,3 +1,17 @@
+## Unreleased (v3 hard cut)
+
+### Breaking Changes
+
+* **v3:** Replace the reactive lifecycle pipeline with an explicit, fail-fast ready-terminal JSON export.
+
+### What changed
+
+* **single-export:** Add an on-demand single-chat `Save JSON` export. Each click performs one canonical detail request, validates the server response is ready and terminal, and downloads the complete JSON archive. Fails fast with a typed error — no retries, no warm fetch, no snapshot replay, no stabilization, no degraded export.
+* **bulk-export:** Rework popup `Export Chats` to discover conversation IDs from the platform list endpoint and download one JSON file per conversation, with pacing, per-request timeout, and bounded `429` retry handling.
+* **stream-debug:** Add bounded, in-memory, ordered stream-debug capture (SSE/NDJSON/raw) with explicit export and clear; generation endpoints are classified per platform; request URLs are sanitized to paths.
+* **request-context:** Resolve platform auth headers and Gemini batchexecute context at export time. Context is in-memory for a single request and never persisted or written into exports.
+* **removed:** Remove lifecycle state machine, Signal Fusion Engine, probe leases, calibration, canonical stabilization, Markdown export, snapshot recovery, and compatibility mode. The legacy lifecycle wire protocol and external extension API are out of scope.
+
 # [2.9.0](https://github.com/ragaeeb/blackiya/compare/v2.8.1...v2.9.0) (2026-08-14)
 
 

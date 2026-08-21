@@ -52,7 +52,6 @@ const adapter: LLMPlatform = {
     extractConversationId: () => null,
     parseInterceptedData: () => null,
     formatFilename: (conversation) => conversation.title,
-    getButtonInjectionTarget: () => null,
 };
 
 describe('bulk export downloads', () => {

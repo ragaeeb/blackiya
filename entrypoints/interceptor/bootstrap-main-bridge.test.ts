@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
 import { setupMainWorldBridge, shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import {
@@ -11,7 +11,6 @@ import {
 } from '@/utils/gemini-batchexecute-bridge';
 import { PLATFORM_HEADERS_REQUEST_MESSAGE, PLATFORM_HEADERS_RESPONSE_MESSAGE } from '@/utils/platform-header-bridge';
 import { platformHeaderStore } from '@/utils/platform-header-store';
-import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 
 describe('bootstrap-main-bridge', () => {
@@ -39,65 +38,13 @@ describe('bootstrap-main-bridge', () => {
     });
 
     it('should not expose window.__blackiya', () => {
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
-        });
+        setupMainWorldBridge();
 
         expect((windowInstance as any).__blackiya).toBeUndefined();
     });
 
-    it('should process ATTEMPT_DISPOSED for matching session token', () => {
-        const cleanupDisposedAttempt = mock(() => {});
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt,
-        });
-
-        windowInstance.postMessage(
-            {
-                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
-                attemptId: 'attempt-1',
-                __blackiyaToken: getSessionToken(),
-            },
-            windowInstance.location.origin,
-        );
-        return new Promise<void>((resolve) => {
-            windowInstance.setTimeout(() => {
-                expect(cleanupDisposedAttempt).toHaveBeenCalledWith('attempt-1');
-                resolve();
-            }, 0);
-        });
-    });
-
-    it('should ignore ATTEMPT_DISPOSED when session token is mismatched', () => {
-        const cleanupDisposedAttempt = mock(() => {});
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt,
-        });
-
-        windowInstance.postMessage(
-            {
-                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
-                attemptId: 'attempt-1',
-                __blackiyaToken: 'bk:wrong-token',
-            },
-            windowInstance.location.origin,
-        );
-        return new Promise<void>((resolve) => {
-            windowInstance.setTimeout(() => {
-                expect(cleanupDisposedAttempt).not.toHaveBeenCalled();
-                resolve();
-            }, 0);
-        });
-    });
-
     it('should respond to platform headers requests with captured headers', () => {
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
-        });
+        setupMainWorldBridge();
 
         platformHeaderStore.update('ChatGPT', {
             authorization: 'Bearer test',
@@ -141,10 +88,7 @@ describe('bootstrap-main-bridge', () => {
             'f.req=%5B%5D&at=AJvToken%3A1&',
         );
 
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
-        });
+        setupMainWorldBridge();
 
         return new Promise<void>((resolve) => {
             const requestId = 'gemini-context-1';

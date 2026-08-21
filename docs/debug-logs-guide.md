@@ -1,167 +1,90 @@
 # Debug Logs Guide
 
 ## Purpose
-Use the smallest log artifact that still explains the failure. Default to token-lean debug reports, escalate to full logs only when needed.
 
-## Readiness Model (Current)
-Save/Copy are controlled by SFE readiness, not by a single lifecycle event:
+Use the smallest artifact that still explains the failure. In the v3 runtime there is no reactive lifecycle state; readiness is evaluated only during an explicit save, so diagnostics reduce to:
 
-1. Lifecycle hint observed: `prompt-sent` / `streaming` / `completed`.
-2. Canonical capture ingested and parseable.
-3. Readiness gate confirms terminal + stabilized payload.
-4. Final state:
-- `canonical_ready`: Save enabled.
-- `degraded_manual_only`: Force Save enabled (manual confirm required).
+1. **Stream-debug records** — raw ordered stream frames for transport/parse triage.
+2. **Fail-fast export errors** — typed, metadata-only error results from the single-chat kernel.
+3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
 
-Important:
-- `completed` means stream hint ended.
-- `canonical_ready` means export is safe/complete.
-- `degraded_manual_only` means canonical capture timed out; export may be partial.
+## Artifacts at a Glance
 
-## High-Signal Events (Debug TXT)
-These should usually be enough for first-pass triage:
+| Artifact | When to export | Contents |
+| :--- | :--- | :--- |
+| Stream-debug record(s) | Endpoint drift, framing/parse problems, malformed or truncated stream payloads | Ordered frames with byte accounting |
+| HAR analysis (JSON/MD) | Changed endpoints or unclear payload paths | Redacted endpoint/timeline summary from a `.har` |
 
-- Capture/readiness:
-- `Successfully captured/cached data for conversation: ...`
-- `Capture reached ready state ... eventCode:"captured_ready"`
-- `readiness_timeout_manual_only`
-- `force_save_degraded_export`
-- `snapshot_degraded_mode_used`
+## Stream-Debug Records
 
-- Lifecycle/stream:
-- `Lifecycle phase ...`
-- `Response finished signal ...`
-- `Stream done probe start`
-- `Stream done probe success`
-- `Stream done probe has no URL candidates`
-- Toast states like:
-  - `stream-done: canonical capture ready`
-  - `stream-done: degraded snapshot captured`
-  - `stream-done: awaiting canonical capture`
-  - `stream-done: no api url candidates`
+Stream-debug capture is bounded, in-memory, and exported **explicitly** (it is not written into conversation JSON). Generation endpoints are recognized per platform:
 
-- Race/disposal hygiene:
-- `attempt_alias_forwarded`
-- `late_signal_dropped_after_dispose`
-- `Probe lease claim transport failed; failing open`
+- ChatGPT: `POST /backend-api/f/conversation`
+- Gemini: `POST /_/BardChatUi/data/assistant.lamda.bardfrontendservice/streamgenerate`
+- Grok: `POST /2/grok/add_response.json`, `POST /rest/app-chat/conversations/new`
 
-- UI state:
-- `Button state ...`
-- `Button target missing; retry pending`
-- `Download interaction observed`
-- `Runner beforeunload observed`
-- `Runner teardown deferred after ChatGPT download interaction`
+Each record captures:
 
-The detailed `Download interaction DOM state` checkpoints remain available at
-debug level in full logs, but are intentionally excluded from the token-lean
-report unless another diagnostic promotes them.
+- identity: `streamId`, `platform`, `endpoint`, `method`, sanitized `path`
+- timing: `startedAt`, `lastActivityAt`, optional `endedAt`
+- ordered `frames` with `sequence`, `frameId`, `kind`, optional event metadata (`done`/`refusal`/`replacement`/`erase`/`close`/`abort`/`error`), text, timestamps, byte accounting, and `truncated`
+- termination: `termination` (`close`/`abort`/`error`) with timestamp
+- accounting: raw byte/frame totals, retained byte totals, dropped byte/frame totals, and `truncated`
 
-For a disappearing-controls repro, click the ChatGPT-provided download control
-once and export the debug TXT plus full logs JSON. The first diagnostic record
-identifies the exact button and its ancestor chain; the five follow-up records
-show whether the Blackiya container was removed, detached from the document,
-or survived while the page/body changed.
+Framing is `sse`, `line` (NDJSON), or `raw`. A `[DONE]` marker in an SSE stream is emitted as a `done` event frame.
 
-## Known Gap: Grok Placeholder Titles
-On `grok.com`, generic export titles can occur if streaming data is captured before conversation metadata arrives.
+### Reading truncation
 
-Typical signal pattern:
-1. `Successfully captured/cached data for conversation: ...` appears.
-2. `Title fallback check` shows `cachedTitle: "Grok Conversation"` with `resolvedSource: "fallback"`.
-3. No prior `conversations_v2` metadata was captured for that conversation.
+The recorder is capped (max concurrent streams, max frames per stream, max bytes per stream, TTL). When a stream hits a cap:
 
-Why this happens:
-- Streaming on `grok.x.com/2/grok/add_response.json` does not include conversation title metadata.
-- Title metadata usually arrives via `conversations_v2` or another metadata fetch after the stream starts.
+- byte overflow is clamped and counted in the dropped/truncated byte and frame counters;
+- ordinary frames are evicted before transport and terminal/refusal/replacement/erase frames when a count or byte cap is hit;
+- the record `truncated` flag is set.
 
-Current workaround:
-1. Refresh the conversation or trigger a metadata fetch on the page.
-2. Re-export.
-3. Confirm logs show:
-   - `Successfully captured/cached data for conversation: ...`
-   - a subsequent `Title fallback check` with `resolvedSource: "cache"` or `resolvedSource: "dom"`
+This priority-aware eviction preserves late refusal, replacement, and erase signals when a platform streams a large body. The monitor also bounds incomplete framing buffers, so it does not retain an unbounded response body outside the recorder.
 
-## Bottom-Left Toast / Probe Panel Statuses
-These statuses are expected during normal capture retries unless noted otherwise.
+A `truncated` stream does **not** mean the export failed — it means the debug trace was bounded. Treat a truncated trace as expected only when the source stream genuinely exceeds the bounded budget.
 
-1. `stream: awaiting delta`
-- Meaning: lifecycle moved to streaming and Blackiya is waiting for first text chunk.
-- Concern if: it stays here after response visibly finished and never transitions to any `stream-done:*` status.
+### When to use
 
-2. `stream: live mirror`
-- Meaning: token/chunk deltas are being mirrored live.
-- Concern if: the model is visibly streaming but this never appears (possible stream monitor regression).
+Use a stream-debug record when:
 
-3. `stream-done: fetching conversation`
-- Meaning: stream ended; Blackiya is probing canonical API/snapshot paths.
-- Concern if: it persists for a long time and Save/Force Save never resolves.
+1. The platform changed endpoints or payload framing (no frames captured, or a generation request is absent).
+2. A payload is malformed or does not parse on the expected platform path.
+3. A stream terminates unexpectedly (`abort`/`error`) and you need the raw ordered trace to see where it stopped.
 
-4. `stream-done: fetched full text`
-- Meaning: stream-done probe fetched a complete response body candidate.
-- Concern if: this appears but readiness never converges to `canonical_ready` or `degraded_manual_only`.
+## Metadata-Only Errors (Fail-Fast)
 
-5. `stream-done: using captured cache`
-- Meaning: canonical-ready data already exists in cache; probe used that immediately.
-- Concern if: Save stays disabled despite this status.
+The single-chat kernel returns a typed, fail-fast result and never writes a partial export. Each error variant is metadata-only — it carries enough context to triage without exposing body contents or credentials.
 
-6. `stream-done: canonical capture ready`
-- Meaning: canonical capture is ready and stabilized enough for normal Save flow.
-- Concern if: Save is still disabled.
+| Error (`kind`) | Meaning | Next step |
+| :--- | :--- | :--- |
+| `unsupported_platform` | Adapter does not match the active page origin | Confirm you are on a supported host |
+| `missing_conversation_id` | No conversation id in the page URL | Open a real conversation URL |
+| `missing_endpoint` | Adapter has no detail URL for the platform | Adapter/path drift — verify against HAR |
+| `missing_auth` | No auth header / Gemini `at` context captured (or HTTP `401/403`) | Trigger one normal platform request, then retry |
+| `http_failure` | Unexpected HTTP status (non-2xx, non-auth) | Inspect status + endpoint via HAR |
+| `timeout` | Request exceeded the hard timeout | Confirm the conversation is terminal, then retry explicitly; flag latency if persistent |
+| `parse_failure` | Empty body, parser returned null, or parser threw | Check payload shape via stream-debug/HAR |
+| `id_mismatch` | Response `conversation_id` differs from the URL id | Stale/redirected id — reopen and retry |
+| `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete |
 
-7. `stream-done: awaiting canonical capture`
-- Meaning: completion was detected, but canonical data is still being stabilized/retried.
-- Concern if: it never resolves and no `degraded_manual_only` path appears.
+There is no `degraded_manual_only` or partial/downgraded export path in v3. If `Save JSON` fails, the error variant tells you exactly which gate rejected it.
 
-8. `stream-done: degraded snapshot captured`
-- Meaning: fallback snapshot was captured; canonical capture is still pending.
-- Concern if: this is frequent on stable sessions (indicates canonical probe misses or parser drift).
+## HAR Analysis
 
-9. `stream-done: no api url candidates`
-- Meaning: no direct canonical fetch URL was available for that adapter path; fallback logic is used.
-- Concern if: repeated on a platform where canonical URL probing is expected to work.
+When endpoint families changed or stream payload paths are unclear:
 
-10. `stream-done: lease held by another tab`
-- Meaning: another tab currently owns probe arbitration for this conversation.
-- Concern if: it never clears after lease expiry/retry window.
-- Note: if you instead see repeated `Probe lease claim transport failed; failing open`, arbitration transport is degraded and multiple tabs may probe concurrently.
+```bash
+bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"
+```
 
-Readiness tie-in:
-- `canonical_ready`: expected healthy end state; Save enabled.
-- `degraded_manual_only`: fallback end state after stabilization timeout; Force Save only.
-- Treat `degraded_manual_only` as occasional fallback, not automatic bug. Treat it as a bug when it becomes frequent/reproducible on otherwise healthy sessions.
-
-## Expected Noise
-These are often benign:
-
-- parse misses on non-canonical/aux endpoints (recorded at debug level)
-- endpoint candidate filtering by origin
-- bounded retry/backoff logs
-
-## Which Artifact To Export
-1. Debug report (TXT):
-- First choice for most bugs.
-- Fastest to review, best signal-to-noise.
-
-2. Full logs (JSON):
-- Use for race/order issues, especially multi-tab.
-- Use when debug TXT appears incomplete for background-tab behavior.
-
-
-4. HAR + HAR analysis (JSON/MD):
-- Use when endpoint families changed or stream payload paths are unclear.
-- Export `.har` from DevTools, then run:
-- `bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"`
-- Analyzer writes redacted endpoint/timeline summaries plus hint matches for faster adapter updates.
-
-## Multi-Tab Note
-In multi-tab runs, one debug TXT may not represent all tabs equally. For cross-tab bugs, include:
-
-1. One debug TXT from a failing tab.
-2. One full logs JSON from the overall run.
+The analyzer writes redacted endpoint/timeline summaries plus hint matches for faster parser/classifier updates.
 
 ## Recommended Bug Report Bundle
-1. Platform + exact URL(s).
-2. Repro steps and timing (foreground/background tab, number of tabs).
-3. Debug report TXT.
-4. Full logs JSON (required for multi-tab/race bugs).
-5. Screenshot of final UI (status, Save/Force Save, Calibrate, toast).
+
+1. Platform + exact URL(s) and extension version.
+2. Repro steps and timing.
+3. The fail-fast error result shown by `Save JSON` (if export failed).
+4. A stream-debug export if the issue is framing/parse/transport related.
+5. Screenshot of the final UI state.

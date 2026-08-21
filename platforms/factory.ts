@@ -26,23 +26,3 @@ const getPlatforms = () => {
 export const getPlatformAdapter = (url: string): LLMPlatform | null => {
     return getPlatforms().find((p) => p.isPlatformUrl(url)) || null;
 };
-
-/**
- * Get the platform adapter that matches an API endpoint URL
- *
- * @param url - The intercepted API endpoint URL
- * @returns The matching platform adapter or null if not found
- */
-export const getPlatformAdapterByApiUrl = (url: string): LLMPlatform | null => {
-    return getPlatforms().find((p) => p.apiEndpointPattern.test(url)) || null;
-};
-
-/**
- * Get the platform adapter that matches a completion trigger URL.
- *
- * @param url - The intercepted completion-trigger URL
- * @returns The matching platform adapter or null if not found
- */
-export const getPlatformAdapterByCompletionUrl = (url: string): LLMPlatform | null => {
-    return getPlatforms().find((p) => p.completionTriggerPattern?.test(url)) || null;
-};

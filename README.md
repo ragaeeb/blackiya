@@ -13,37 +13,37 @@
 [![Biome](https://img.shields.io/badge/Biome-%2360a5fa.svg?style=flat&logo=biome&logoColor=white)](https://biomejs.dev)
 [![WXT](https://img.shields.io/badge/WXT-%235d2fbf.svg?style=flat&logo=wxt&logoColor=white)](https://wxt.dev)
 
-A high-performance Chrome extension for capturing and saving conversation JSON from popular LLM platforms (ChatGPT, Gemini, Grok).
+A high-performance Chrome extension for exporting conversation JSON from ChatGPT, Gemini, and Grok — as verbatim terminal archives, on demand.
 
 ## 📚 Architecture Docs
 
 - Architecture source of truth: `docs/architecture.md`
 - Debug logs guide: `docs/debug-logs-guide.md`
-- Discovery mode guide: `docs/discovery-mode.md`
-- Current PR summary (this branch): `docs/PR.md`
 
-## 🔎 HAR Discovery Triage
+## 🎯 Features
 
-When platform network behavior drifts (new endpoints, changed payloads), run HAR analysis on a DevTools export:
+- ✅ **Single-Chat Ready-Terminal Export**: An explicit `Save JSON` control resolves the adapter's deterministic detail-request candidates, validates the server response is ready and terminal, and downloads the complete JSON archive (full message tree, reasoning data preserved verbatim). ChatGPT advances to its fallback candidate only after a `404`.
+- ✅ **Fail-Fast**: Every non-happy path returns a typed error — no retries, no degraded/partial export, no silent data loss. A failed export tells you exactly which gate rejected it (`missing_auth`, `id_mismatch`, `not_terminal`, `timeout`, …).
+- ✅ **Bulk `Export Chats`**: From the popup, export a list of conversations from the active platform tab (`Max chats`, where `0 = all`). One JSON file per conversation, with pacing, per-request timeout, and bounded `429` retry handling.
+- ✅ **Stream-Debug Capture**: Raw ordered stream frames (SSE/NDJSON/raw) are recorded in memory, bounded, sanitized, and exported or cleared explicitly — never written into conversation JSON.
+- ✅ **Request-Context Without Credential Persistence**: Platform auth headers and Gemini batchexecute context are resolved in memory at export time, expire from page-local stores, and are never written into exports.
+- ✅ **Smart Titles**: Automatic conversation title resolution and export-time filename generation.
+- ✅ **Popup Controls**: Bulk export, stream-debug export, and stream-debug clearing in one place.
+- ✅ **Message Tree**: Preserves the complete nested message structure (the `mapping` tree) verbatim.
+- ✅ **Extensive Testing**: Regression-focused unit/integration coverage for adapters, single-export, bulk-export, and stream-debug.
+- ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 
-```bash
-bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"
-```
+## 🔒 Privacy & Compliance
 
-Outputs are written to `logs/har-analysis/` by default:
-- `*.analysis.json` for machine/agent workflows
-- `*.analysis.md` for human triage
-
-See related docs:
-- `docs/discovery-mode.md` for end-to-end discovery workflow
-- `docs/debug-logs-guide.md` for artifact selection and log interpretation
+- **Local-first and explicit.** Export happens only when you click `Save JSON` or `Export Chats`; nothing is uploaded.
+- **No credential persistence.** Request-context is captured in page-local memory with a short expiry and never written into exports.
+- See [`docs/architecture.md`](docs/architecture.md) and [`PRIVACY_POLICY.md`](PRIVACY_POLICY.md).
 
 ## 📦 Available Scripts
 
 ```bash
 # Development
 bun run dev              # Start dev server with HMR (animal build names enabled)
-bun run browser:harness  # Serve the local ChatGPT lifecycle/save reproduction page
 
 # Code Quality
 bun run check            # Lint and format code (auto-fix)
@@ -55,14 +55,9 @@ bun run build            # Build for production (stable extension name: "Blackiy
 bun run zip              # Create distributable ZIP file
 
 # Testing
-bun test                 # Run tests (when added)
-bun run test:e2e         # Run Playwright smoke harness (requires BLACKIYA_EXTENSION_PATH)
-bun test utils/har-analysis.integration.test.ts
-```
-
-Playwright smoke usage:
-```bash
-BLACKIYA_EXTENSION_PATH="$(pwd)/dist/chrome-mv3" bun run test:e2e
+bun test                 # Run unit/integration tests
+bun run test:e2e         # Run Playwright smoke harness
+bun run compile          # Type-check
 ```
 
 ## 🏗️ Project Structure
@@ -72,273 +67,118 @@ blackiya/
 ├── dist/                    # Build output (git-ignored)
 │   └── chrome-mv3/            # Chrome extension build
 ├── entrypoints/
-│   ├── background.ts          # Service worker for API interception
-│   ├── main.content.ts        # Unified content script for all LLMs
-│   ├── interceptor.content.ts # Thin MAIN-world entrypoint
+│   ├── main.content.ts        # v3 content runtime entry (bulk export + stream-debug bridge)
+│   ├── interceptor.content.ts # Thin MAIN-world entrypoint (request-context + stream capture)
 │   ├── interceptor/
-│   │   ├── bootstrap.ts       # MAIN-world interceptor implementation
-│   │   ├── bootstrap-main-bridge.ts
-│   │   ├── attempt-registry.ts
-│   │   ├── fetch-pipeline.ts
-│   │   ├── xhr-pipeline.ts
-│   │   ├── state.ts
-│   │   ├── signal-emitter.ts
-│   │   ├── discovery.ts
-│   │   ├── fetch-wrapper.ts
-│   │   ├── xhr-wrapper.ts
-│   │   ├── proactive-fetcher.ts
-│   │   └── stream-monitors/
-│   │       ├── chatgpt-sse-monitor.ts
-│   │       ├── gemini-stream-monitor.ts
-│   │       └── grok-stream-monitor.ts
+│   │   └── bootstrap.ts       # MAIN-world interceptor implementation
 │   └── popup/
-│       ├── index.html        # Extension popup UI (optional)
-│       └── App.tsx           # Popup logic (optional)
+│       ├── index.html         # Extension popup UI
+│       └── App.tsx            # Popup logic (Export Chats, stream-debug tools)
+├── features/
+│   ├── runtime/               # v3 content runtime, message types, request-context bridges
+│   ├── single-export/         # On-demand terminal single-chat export (fail-fast)
+│   ├── bulk-export/           # Bulk Export Chats orchestrator + platform providers
+│   ├── export-controls/       # Save JSON button (UI)
+│   └── stream-debug/          # Ordered stream capture + explicit export/clear
 ├── platforms/
-│   ├── chatgpt/              # ChatGPT adapter + parsing/readiness modules
-│   ├── gemini/               # Gemini adapter + RPC/title/conversation modules
-│   ├── grok/                 # Grok adapter + NDJSON/GraphQL/title modules
+│   ├── chatgpt/               # ChatGPT adapter + parsing/readiness modules
+│   ├── gemini/                # Gemini adapter + RPC/title/conversation modules
+│   ├── grok/                  # Grok adapter + NDJSON/title modules
 │   ├── constants.ts
-│   ├── factory.ts            # Adapter factory
-│   └── types.ts              # Platform interface definitions
+│   ├── factory.ts             # Adapter factory
+│   └── types.ts               # Platform interface definitions
 ├── utils/
-│   ├── runner/
-│   │   ├── engine/                    # Core runner engine, context, SFE wrappers, emission
-│   │   ├── runtime/                   # Runtime bootstrapping, wiring, cleanup, settings
-│   │   ├── stream/                    # Stream probe UI/runtime/coordinator helpers
-│   │   ├── attempt-registry.ts
-│   │   ├── calibration-policy.ts
-│   │   ├── canonical-stabilization.ts
-│   │   ├── export-pipeline.ts
-│   │   ├── readiness.ts
-│   │   └── state.ts
-│   ├── managers/             # Interception/navigation managers
-│   ├── sfe/                  # Signal Fusion Engine
-│   ├── download.ts           # File download utilities
-│   ├── protocol/             # Cross-world message protocol
-│   ├── minimal-logs.ts       # Debug report generator
-│   └── logger.ts             # Runtime logging utilities
+│   ├── protocol/              # Cross-world message protocol + session token
+│   ├── download.ts            # File download utilities
+│   └── logger.ts              # Runtime logging utilities
 ├── docs/
 │   ├── architecture.md
-│   ├── PR.md
-│   ├── debug-logs-guide.md
-│   └── discovery-mode.md
+│   └── debug-logs-guide.md
 ├── public/
-│   └── icon/                 # Extension icons
-│       ├── 16.png
-│       ├── 48.png
-│       └── 128.png
-├── .gitignore
-├── biome.json                # Biome configuration
-├── bun.lock                  # Bun lock file
-├── package.json              # Project dependencies
-├── tsconfig.json             # TypeScript configuration
-├── wxt.config.ts             # WXT framework configuration
-├── AGENTS.md                 # AI agent documentation
-└── README.md                 # This file
+│   └── icon/                  # Extension icons
+├── AGENTS.md                  # AI agent documentation
+└── README.md                  # This file
 ```
-
-## 🎯 Features
-
-- ✅ **Full Capture**: Capture complete conversation JSON from ChatGPT, Gemini, and Grok.
-- ✅ **Global Enable Toggle**: Turn Blackiya off from the popup so newly opened supported tabs stay inert until you re-enable it.
-- ✅ **Readiness-Gated Export**: JSON and Markdown exports are enabled only when canonical data is ready; an explicit Force Save JSON control can recover a missed page/API capture and archive available data when readiness is unresolved.
-- ✅ **Gemini Advanced**: Support for Gemini's `batchexecute` protocol, including thinking/reasoning logs and title recovery.
-- ✅ **Grok Support**: Full support for Grok's GraphQL/NDJSON flows, including conversation history and thinking traces.
-- ✅ **Smart Titles**: Automatic conversation title capture with retroactive updates for async title loads.
-- ✅ **One-Click Download**: Download full-fidelity JSON or a clean user/assistant Markdown transcript.
-- ✅ **Clipboard Copy**: One-click copy of conversation JSON directly to system clipboard.
-- ✅ **Popup Controls**: Log level, bulk export, debug export, and log clearing in one place.
-- ✅ **Automatic Naming**: Filenames generated from conversation titles and timestamps.
-- ✅ **Robust UI**: Seamless button injection into ChatGPT, Gemini, and Grok interfaces.
-- ✅ **Message Tree**: Preserves complete nested message structure.
-- ✅ **Extensive Testing**: Regression-focused unit/integration coverage for adapters and runtime orchestration.
-- ✅ **Advanced Logging**: Structured, exportable debug logs with privacy-focused persistent storage.
-- ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 
 ## 🔧 Configuration
 
-### Manifest V3 Permissions
+### Permissions
 
-The extension requires the following permissions:
+The extension requires the following host permissions:
 
-- **`storage`** - Save user preferences and temporary data
-- **`webRequest`** - Intercept API requests (optional, for auto-capture)
+- `https://chatgpt.com/*` — ChatGPT platform
+- `https://chat.openai.com/*` — Legacy ChatGPT platform
+- `https://gemini.google.com/*` — Gemini platform
+- `https://grok.com/*` — Grok platform
 
-### Host Permissions
-
-- `https://chatgpt.com/*` - ChatGPT platform
-- `https://chat.openai.com/*` - Legacy ChatGPT platform
-- `https://gemini.google.com/*` - Gemini platform
-- `https://grok.com/*` - Grok platform
-
-`https://grok.x.com/*` is intentionally not listed. Grok streaming requests to `grok.x.com` are initiated by page JavaScript while you are on `grok.com`, and the MAIN-world interceptor captures those cross-origin fetch/XHR calls from the `grok.com` page context.
-
-### External Extension API
-
-External extension messaging is currently disabled and not part of the shipped runtime flow.
-
-## 🔒 Privacy & Compliance
-
-### Single Purpose
-Blackiya has a single, narrow purpose: to provide users with a tool to capture and export their conversation data from specific AI platforms (ChatGPT, Gemini, and Grok) as JSON files for personal archiving and analysis.
-
-### Remote Code Disclosure
-- **No Remote Code:** Blackiya does NOT use any remote code. All logic (JavaScript and Wasm) is included directly in the extension's package. We do not use external `<script>` tags, external modules, or `eval()` for executing remote strings.
-
-### Data Usage & Collection
-In accordance with the Chrome Web Store Developer Program Policies, we declare the following regarding data collection:
-
-| Data Category | Status | Justification |
-| :--- | :--- | :--- |
-| **Personally identifiable information** | ❌ Not Collected | None required for functionality. |
-| **Health information** | ❌ Not Collected | None required for functionality. |
-| **Financial and payment information** | ❌ Not Collected | No payments or financial processing within the extension. |
-| **Authentication information** | ❌ Not Collected | No passwords or credentials are stored or transmitted. |
-| **Personal communications** | ❌ Not Collected | Conversations are processed locally and only exported at the user's request. |
-| **Location** | ❌ Not Collected | No GPS or IP-based location tracking. |
-| **Web history** | ❌ Not Collected | We do not track browsing history outside of the supported AI platforms. |
-| **User activity** | ❌ Not Collected | No network monitoring or keystroke logging. |
-| **Website content** | ❌ Not Collected | Content is only read from supported platforms to facilitate the export feature. |
-
-*All processed data remains strictly local to the user's device.*
-
-### Privacy Policy
-For the full legal disclosure, please refer to our [Privacy Policy](./PRIVACY_POLICY.md).
-
-## 🧪 Development Workflow
-
-### Making Changes
-
-1. Edit source files in `entrypoints/`, `utils/`, or `platforms/`
-2. Save the file
-3. WXT will automatically rebuild (watch mode)
-4. Reload the extension in Chrome if needed (background script changes)
-5. Refresh the target webpage (content script changes)
-
-### Local Browser Harness
-
-To exercise the ChatGPT missed-history path without loading the MV3 extension:
-
-```bash
-bun run browser:harness
-```
-
-Open the URL printed by the server in the Codex in-app browser. The fixture starts as a finished conversation with no cached capture, then runs the real page-capture grace period and canonical warm-fetch fallback. It exposes the actual Save and Force Save controls, plus a button to deliver a page-owned capture during the grace window.
-
-### Adding a New Platform
-
-1. Create a platform folder and adapter entrypoint at `platforms/your-platform/index.ts`
-2. Implement the `LLMPlatform` interface
-3. Register adapter in `platforms/factory.ts`
-4. Add host URL pattern in `platforms/constants.ts`
-5. Update `wxt.config.ts` host permissions if needed
-6. Add parser/readiness tests under `platforms/your-platform/*.test.ts`
-
-### Code Quality
-
-Before committing:
-
-```bash
-# Format and lint all files
-bun run check
-
-# Or separately
-bun run format  # Format code
-bun run lint    # Check for issues
-```
-
-### Building for Production
-
-```bash
-# Create optimized build
-bun run build
-
-# Create ZIP for Chrome Web Store submission
-bun run zip
-```
-
-The ZIP file will be in `dist/` directory.
-
-Build naming behavior:
-- `bun run dev` uses a per-build animal codename in the extension display name (for easy stale-build detection).
-- `bun run build` uses the stable production display name (`Blackiya`) without animal codenames.
+`https://grok.x.com/*` is intentionally not listed. Grok streaming requests to `grok.x.com` are initiated by page JavaScript from the `grok.com` page context and are captured by the MAIN-world interceptor.
 
 ## 📝 Usage
 
-### Basic Usage
+### Single-Chat Export
 
 1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
-2. Use the popup toggle to enable or disable Blackiya globally for new tabs.
-3. When the capture state is ready, use 💾 for the complete JSON archive or 📝 for a Markdown transcript. If the lifecycle remains unresolved, use ⚡ Force Save JSON to recover a missed page/API capture when possible, then export the available conversation in the same JSON format.
-4. JSON preserves the full conversation tree, including reasoning data. Markdown contains only active-branch User and Assistant text.
-5. Downloads use `{conversation-title}_{timestamp}.json` or `{conversation-title}_{timestamp}.md`.
+2. Click the **Save JSON** button (the `✓ Saved` state confirms the download).
+3. The export resolves the adapter's deterministic detail candidates, validates the response is terminal, and downloads the complete JSON archive. A candidate fallback is used only for a `404`; there are no retries or time-based recovery paths.
 
-To convert existing Blackiya JSON exports locally:
+Downloads use `{conversation-title}_{timestamp}.json`.
 
-```bash
-bun run export:markdown --input chat.json
-bun run export:markdown --input exports/ --output markdown/
-```
+The exported JSON is the full-fidelity source of truth: complete conversation metadata, the entire message tree (`mapping`), all message content and metadata, model information, and reasoning data — preserved verbatim from the server's terminal response.
 
-A file input produces a sibling `.md` file by default. A directory input recursively converts every JSON export into an output `markdown/` directory while preserving subdirectories.
+### Fail-Fast Errors
+
+`Save JSON` never writes a partial archive. When export fails, the button shows `⚠ Failed` and the runtime returns a typed error for diagnostics. The common cases:
+
+- **missing auth** — retry after triggering one normal platform request so auth headers / Gemini `at` context are captured.
+- **not terminal** — the response was not final; retry once the conversation is complete.
+- **id mismatch / timeout / parse failure / HTTP failure** — see `docs/debug-logs-guide.md`.
+
+### Bulk Export Chats
+
+From the extension popup:
+
+1. Set **Max chats** (`0 = all`; default `0`).
+2. Click **Export Chats**.
+
+The extension discovers conversation IDs from the platform list endpoint, fetches each detail payload (paced, with a per-request timeout and bounded `429` handling), and downloads one JSON file per conversation. The popup reports `Exported X/Y chats on <platform>` plus any warnings.
 
 ### Popup Tools
 
 From the extension popup you can:
-1. Set log level (`Debug`, `Info`, `Warn`, `Error`)
-2. Run `Export Chats` from the active platform tab (`Max chats`, where `0 = all`; default `0`; pacing uses fixed internal delay/timeout)
-3. Export full logs JSON
-4. Export a token-lean debug report TXT
-5. Clear logs
 
-### Viewing Saved Conversations
-
-The JSON file contains:
-- Full conversation metadata (title, timestamps)
-- Complete message tree structure
-- All message content and metadata
-- Model information
-- Plugin IDs (if any)
+1. Set **Max chats** and run `Export Chats` from the active platform tab.
+2. Export the bounded in-memory stream-debug records.
+3. Clear the stream-debug records.
 
 ### Exporting Debug Logs
 
 1. Click the extension icon to open the Popup UI.
-2. View current log count and adjust the **Log Level** (Debug/Info/Warn/Error).
-3. Click **Export Full Logs (JSON)** to download the raw extension log buffer.
-4. Click **Export Debug Report (TXT)** for a token-lean troubleshooting summary.
+2. Click **Export Stream Debug** to download the raw ordered stream frames.
+3. Click **Clear Stream Debug** after the artifact is no longer needed.
 
-Debugging references:
-- `docs/debug-logs-guide.md`
-- `docs/discovery-mode.md`
-
-For bottom-left stream/probe toast meanings (`stream-done:*`, canonical vs degraded states), see `docs/debug-logs-guide.md` section **Bottom-Left Toast / Probe Panel Statuses**.
+For stream/framing issues, export the **stream-debug record(s)** through the explicit stream-debug export path. Interpretation guidance lives in `docs/debug-logs-guide.md`.
 
 ## 🤝 Contributing
 
 ### Setup for Contributors
 
-1. Fork the repository
-2. Clone your fork: `git clone <your-fork-url>`
-3. Create a branch: `git checkout -b feature/your-feature`
-4. Make changes and commit
-5. Run code quality checks: `bun run check`
-6. Push and create Pull Request
+1. Fork the repository.
+2. Clone your fork: `git clone <your-fork-url>`.
+3. Create a branch: `git checkout -b feature/your-feature`.
+4. Make changes and commit.
+5. Run code quality checks: `bun run check`.
+6. Push and create a Pull Request.
 
 ### Commit Guidelines
 
-We follow **Semantic Versioning** rules. The extension version is automatically bumped based on your commit messages.
+We follow **Semantic Versioning**. The extension version is automatically bumped based on your commit messages.
 
 Use **[Conventional Commits](https://www.conventionalcommits.org/)**:
 
-- **`feat:`** -> **Minor** version bump (e.g., `1.1.0` -> `1.2.0`)
-  - Example: `feat: add grok platform support`
-- **`fix:`** -> **Patch** version bump (e.g., `1.1.0` -> `1.1.1`)
-  - Example: `fix: resolve button injection timing issue`
-- **`BREAKING CHANGE:`** -> **Major** version bump (e.g., `1.1.0` -> `2.0.0`)
-  - Example in footer: `BREAKING CHANGE: api structure has completely changed`
-- **`docs:`, `chore:`, `refactor:`, `test:`** -> **No** version bump (unless specified otherwise)
-  - Example: `docs: update README with troubleshooting`
+- **`feat:`** → **Minor** version bump (e.g., `1.1.0` → `1.2.0`).
+- **`fix:`** → **Patch** version bump (e.g., `1.1.0` → `1.1.1`).
+- **`BREAKING CHANGE:`** → **Major** version bump (e.g., `1.1.0` → `2.0.0`).
+- **`docs:`, `chore:`, `refactor:`, `test:`** → **No** version bump.
 
 > **Note:** Pull Requests must be squashed or use these conventions in the merge commit message to trigger the release workflow properly.
 

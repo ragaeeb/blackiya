@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
-import { downloadStringAsJsonFile, downloadStringAsMarkdownFile } from './dom-download';
+import { downloadStringAsJsonFile } from './dom-download';
 
 // Ensure happy-dom globals are available (test-setup.ts registers at preload,
 // but some isolated runs may not have it registered yet)
@@ -159,30 +159,4 @@ describe('downloadStringAsJsonFile', () => {
         }
     });
 
-    it('should create a text/markdown blob for Markdown downloads', () => {
-        const blobs: Blob[] = [];
-        URL.createObjectURL = mock((blob: Blob) => {
-            blobs.push(blob);
-            return 'blob:mock/markdown';
-        }) as typeof URL.createObjectURL;
-
-        const originalAppendChild = document.body.appendChild.bind(document.body);
-        const links: HTMLAnchorElement[] = [];
-        document.body.appendChild = mock((node: Node) => {
-            if (isAnchorElement(node)) {
-                links.push(node);
-                node.click = mock(() => {}) as () => void;
-            }
-            return originalAppendChild(node);
-        }) as typeof document.body.appendChild;
-
-        try {
-            downloadStringAsMarkdownFile('# Chat\n', 'chat.md');
-            expect(blobs).toHaveLength(1);
-            expect(blobs[0]!.type.toLowerCase()).toStartWith('text/markdown');
-            expect(links[0]!.download).toBe('chat.md');
-        } finally {
-            document.body.appendChild = originalAppendChild;
-        }
-    });
 });

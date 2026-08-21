@@ -56,7 +56,7 @@ const createNode = (id: string, message: Message | null, parent: string | null, 
 /**
  * Returns a deliberately small, finished ChatGPT history payload.
  * The browser harness serves this through a local backend-api route so the
- * real adapter parser and warm-fetch path can consume it.
+ * real adapter parser and click-time detail export path can consume it.
  */
 export const createHarnessConversationPayload = (
     conversationId: string = HARNESS_CONVERSATION_ID,

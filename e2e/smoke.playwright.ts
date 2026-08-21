@@ -51,13 +51,16 @@ test.describe('blackiya smoke harness', () => {
             const page = await extensionContext.context.newPage();
             await page.goto(`chrome-extension://${extensionId}/popup.html`);
 
-            await expect(page.locator('text=Blackiya Settings')).toBeVisible();
-            await expect(page.locator('#logLevel')).toBeVisible();
-            await expect(page.locator('#exportFormat')).toBeVisible();
+            await expect(page.locator('.title')).toContainText('Blackiya');
+            await expect(page.locator('text=Blackiya v3.0.0')).toBeVisible();
             await expect(page.locator('#bulkExportLimit')).toBeVisible();
-            await expect(page.locator('text=Export Chats')).toBeVisible();
-            await expect(page.locator('text=Export Full Logs (JSON)')).toBeVisible();
-            await expect(page.locator('text=Export Debug Report (TXT)')).toBeVisible();
+            await expect(page.getByRole('button', { name: 'Export Chats' })).toBeVisible();
+            await expect(page.locator('#popup-export-stream-debug')).toBeVisible();
+            await expect(page.locator('#popup-clear-stream-debug')).toBeVisible();
+            await expect(page.locator('#logLevel')).toHaveCount(0);
+            await expect(page.locator('#exportFormat')).toHaveCount(0);
+            await expect(page.locator('text=Export Full Logs (JSON)')).toHaveCount(0);
+            await expect(page.locator('text=Export Debug Report (TXT)')).toHaveCount(0);
             await expect(page.locator('#bulkExportDelayMs')).toHaveCount(0);
             await expect(page.locator('#bulkExportTimeoutMs')).toHaveCount(0);
             await expect(page.locator('#streamProbeVisible')).toHaveCount(0);

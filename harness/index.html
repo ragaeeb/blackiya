@@ -355,29 +355,29 @@
                     <p class="eyebrow">Local browser harness</p>
                     <h1>Missed history capture</h1>
                     <p class="status-copy">
-                        This page intentionally starts with no cached conversation. The real warm-fetch path gets a
-                        short page-capture grace period, then recovers the finished canonical payload.
+                        This page exercises the v3 click-time canonical JSON export. It also replaces the page-owned
+                        artifact host when you click Download so the control survival regression stays visible.
                     </p>
                     <div class="harness-actions">
                         <button id="harness-reset" type="button">Simulate extension reload</button>
-                        <button id="harness-page-capture" type="button">Deliver page-owned capture</button>
+                        <button id="harness-force-save" type="button">Run Force Save</button>
                     </div>
                     <div class="state-grid">
                         <div class="state-cell">
-                            <span class="state-label">Lifecycle</span>
-                            <span class="state-value" id="harness-lifecycle">Idle</span>
+                            <span class="state-label">Control</span>
+                            <span class="state-value">Force Save</span>
                         </div>
                         <div class="state-cell">
-                            <span class="state-label">Save</span>
-                            <span class="state-value" id="harness-save-state">Disabled</span>
+                            <span class="state-label">Readiness</span>
+                            <span class="state-value">Click-time</span>
                         </div>
                         <div class="state-cell">
-                            <span class="state-label">Force Save</span>
-                            <span class="state-value" id="harness-force-state">Enabled</span>
+                            <span class="state-label">Stream lane</span>
+                            <span class="state-value">Raw capture</span>
                         </div>
                         <div class="state-cell">
-                            <span class="state-label">Cache</span>
-                            <span class="state-value" id="harness-cache-state">Empty</span>
+                            <span class="state-label">Download</span>
+                            <span class="state-value">Host replacement safe</span>
                         </div>
                     </div>
                     <div id="harness-event-log" class="log" aria-live="polite"></div>

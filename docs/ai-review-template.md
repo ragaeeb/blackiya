@@ -23,7 +23,7 @@ If another agent is asked to continue this workflow, instruct them:
 3. Synthesize all reviews into `docs/<topic>-review/synthesis.md`.
 4. Produce revised plan (`docs/<topic>-final-plan.md`).
 5. Implement in staged TDD slices.
-6. Track post-plan regressions in retro tracker (`docs/post-v2.1-regressions.md`).
+6. Track post-plan regressions in retro tracker (`docs/regressions.md`).
 7. Run another review cycle only when meaningful deltas accumulate.
 
 ---
@@ -35,7 +35,7 @@ Always include:
 2. The latest synthesis doc (if this is a second-pass review).
 3. Any retrospective/regression log relevant to failure history.
 4. Explicit scope boundaries (in-scope / out-of-scope).
-5. Locked decisions and preferences (for example: ChatGPT-first, no timeout auto-ready).
+5. Locked decisions and preferences (for example: explicit terminal JSON export only, no degraded/partial export).
 
 For repo-aware reviewers (preferred when possible), provide:
 - access to current codebase,
@@ -57,7 +57,7 @@ Use this at the top of proposal/plan docs.
 ```md
 # Reviewer Instructions (Read First)
 
-You are reviewing a production architecture/implementation proposal for a browser extension that captures LLM conversations and triggers reactive actions after response completion.
+You are reviewing a production architecture/implementation proposal for a browser extension that exports LLM conversations as explicit terminal JSON archives.
 
 Your objectives:
 1. Find brittle assumptions, race conditions, and maintainability risks.
@@ -180,7 +180,7 @@ Never skip:
 ## 8) Regression Tracking Protocol
 
 After implementation, append to:
-- `docs/post-v2.1-regressions.md`
+- `docs/regressions.md`
 
 Required entry fields:
 1. Date/time

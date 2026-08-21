@@ -290,10 +290,5 @@ describe('Grok Adapter — NDJSON streaming parsing', () => {
             ).toBeTrue();
         });
 
-        it('should match add_response.json in both apiEndpointPattern and completionTriggerPattern', () => {
-            const url = 'https://grok.x.com/2/grok/add_response.json';
-            expect(grokAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(grokAdapter.completionTriggerPattern.test(url)).toBeTrue();
-        });
     });
 });

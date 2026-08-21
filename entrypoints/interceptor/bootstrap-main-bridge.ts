@@ -1,5 +1,6 @@
+import { setupStreamDebugBridge } from '@/features/stream-debug/bridge';
+import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import { getGeminiBatchexecuteContext } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
-import { getPageConversationSnapshot } from '@/entrypoints/interceptor/page-snapshot';
 import {
     GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
     type GeminiBatchexecuteContextResponseMessage,
@@ -12,121 +13,55 @@ import {
 } from '@/utils/platform-header-bridge';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import type { AttemptDisposedMessage, CaptureInterceptedMessage, SessionInitMessage } from '@/utils/protocol/messages';
-import {
-    getSessionToken,
-    resolveTokenValidationFailureReason,
-    setSessionToken,
-    stampToken,
-} from '@/utils/protocol/session-token';
-
-type PageSnapshotRequest = {
-    type: typeof MESSAGE_TYPES.PAGE_SNAPSHOT_REQUEST;
-    requestId: string;
-    conversationId: string;
-    __blackiyaToken?: string;
-};
-
-type PageSnapshotResponse = {
-    type: typeof MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE;
-    requestId: string;
-    success: boolean;
-    data?: unknown;
-    error?: string;
-    __blackiyaToken?: string;
-};
+import { getSessionToken, resolveTokenValidationFailureReason, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 
 const MAIN_BRIDGE_INSTALLED_KEY = '__BLACKIYA_MAIN_BRIDGE_INSTALLED__';
 
 export const shouldApplySessionInitToken = (existingToken: string | undefined, incomingToken: string): boolean => {
-    if (typeof incomingToken !== 'string' || incomingToken.length === 0) {
-        return false;
-    }
-    return !(typeof existingToken === 'string' && existingToken.length > 0);
+    return typeof incomingToken === 'string' && incomingToken.length > 0 && !existingToken;
 };
 
-const isSameWindowOriginEvent = (event: MessageEvent) =>
-    event.source === window && event.origin === window.location.origin;
-
-const isSnapshotRequestEvent = (event: MessageEvent) => {
-    if (!isSameWindowOriginEvent(event)) {
-        return null;
-    }
-    const message = event.data as PageSnapshotRequest;
-    if (message?.type !== MESSAGE_TYPES.PAGE_SNAPSHOT_REQUEST || typeof message.requestId !== 'string') {
-        return null;
-    }
-    return message;
+type SessionInitMessage = {
+    type: typeof MESSAGE_TYPES.SESSION_INIT;
+    token: string;
 };
 
-const buildSnapshotResponse = (requestId: string, snapshot: unknown | null): PageSnapshotResponse =>
-    snapshot
-        ? { type: MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE, requestId, success: true, data: snapshot }
-        : { type: MESSAGE_TYPES.PAGE_SNAPSHOT_RESPONSE, requestId, success: false, error: 'NOT_FOUND' };
+const isSameWindowOriginEvent = (event: MessageEvent): boolean =>
+    event.source === window &&
+    (!event.origin || event.origin === window.location.origin || event.origin === 'null');
 
-export type MainWorldBridgeDeps = {
-    getRawCaptureHistory: () => CaptureInterceptedMessage[];
-    cleanupDisposedAttempt: (attemptId: string) => void;
-};
-
-export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
+export const setupMainWorldBridge = () => {
     if ((window as any)[MAIN_BRIDGE_INSTALLED_KEY] === true) {
         return;
     }
     (window as any)[MAIN_BRIDGE_INSTALLED_KEY] = true;
 
-    const handleSnapshotRequest = (snapshotRequest: PageSnapshotRequest) => {
-        if (resolveTokenValidationFailureReason(snapshotRequest) !== null) {
-            return;
-        }
-        const conversationId = typeof snapshotRequest.conversationId === 'string' ? snapshotRequest.conversationId : '';
-        const snapshot = conversationId ? getPageConversationSnapshot(conversationId, deps.getRawCaptureHistory) : null;
-        window.postMessage(
-            stampToken(buildSnapshotResponse(snapshotRequest.requestId, snapshot)),
-            window.location.origin,
-        );
-    };
+    setupStreamDebugBridge({ window: window as any, recorder: streamDebugRecorder });
 
-    const handleAttemptDisposedMessage = (message: unknown) => {
-        const attemptDisposedMessage = message as AttemptDisposedMessage & { __blackiyaToken?: string };
-        if (typeof attemptDisposedMessage.attemptId !== 'string') {
-            return;
-        }
-        if (resolveTokenValidationFailureReason(attemptDisposedMessage) !== null) {
-            return;
-        }
-        deps.cleanupDisposedAttempt(attemptDisposedMessage.attemptId);
-    };
-
-    const handleSessionInitMessage = (message: unknown) => {
-        const sessionInitMessage = message as SessionInitMessage;
-        if (typeof sessionInitMessage.token !== 'string') {
-            return;
-        }
-        if (shouldApplySessionInitToken(getSessionToken(), sessionInitMessage.token)) {
-            setSessionToken(sessionInitMessage.token);
+    const handleSessionInit = (message: SessionInitMessage) => {
+        if (shouldApplySessionInitToken(getSessionToken(), message.token)) {
+            setSessionToken(message.token);
         }
     };
 
-    const handlePlatformHeadersRequest = (message: unknown) => {
+    const handleHeadersRequest = (message: unknown): boolean => {
         if (!isPlatformHeadersRequestMessage(message)) {
             return false;
         }
         if (resolveTokenValidationFailureReason(message) !== null) {
             return true;
         }
-        const headers = platformHeaderStore.get(message.platformName);
         const response: PlatformHeadersResponseMessage = {
             type: PLATFORM_HEADERS_RESPONSE_MESSAGE,
             requestId: message.requestId,
             platformName: message.platformName,
-            headers,
+            headers: platformHeaderStore.get(message.platformName),
         };
         window.postMessage(stampToken(response), window.location.origin);
         return true;
     };
 
-    const handleGeminiBatchexecuteContextRequest = (message: unknown) => {
+    const handleGeminiContextRequest = (message: unknown): boolean => {
         if (!isGeminiBatchexecuteContextRequestMessage(message)) {
             return false;
         }
@@ -142,36 +77,16 @@ export const setupMainWorldBridge = (deps: MainWorldBridgeDeps) => {
         return true;
     };
 
-    const handleTypedMessage = (message: unknown) => {
-        if (handlePlatformHeadersRequest(message)) {
-            return;
-        }
-        if (handleGeminiBatchexecuteContextRequest(message)) {
-            return;
-        }
-        const type = (message as { type?: unknown })?.type;
-        if (type === MESSAGE_TYPES.ATTEMPT_DISPOSED) {
-            handleAttemptDisposedMessage(message);
-            return;
-        }
-        if (type === MESSAGE_TYPES.SESSION_INIT) {
-            handleSessionInitMessage(message);
-        }
-    };
-
     window.addEventListener('message', (event: MessageEvent) => {
-        const snapshotRequest = isSnapshotRequestEvent(event);
-        if (snapshotRequest) {
-            handleSnapshotRequest(snapshotRequest);
+        if (!isSameWindowOriginEvent(event) || !event.data || typeof event.data !== 'object') {
             return;
         }
-        if (!isSameWindowOriginEvent(event)) {
+        if (handleHeadersRequest(event.data) || handleGeminiContextRequest(event.data)) {
             return;
         }
-        const message = event.data;
-        if (!message || typeof message !== 'object') {
-            return;
+        const message = event.data as Partial<SessionInitMessage>;
+        if (message.type === MESSAGE_TYPES.SESSION_INIT && typeof message.token === 'string') {
+            handleSessionInit(message as SessionInitMessage);
         }
-        handleTypedMessage(message);
     });
 };
