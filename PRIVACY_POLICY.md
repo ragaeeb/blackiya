@@ -30,6 +30,8 @@ To make a successful export, the extension must authenticate to the platform on 
 
 This request-context is held in the MAIN-world page-local stores with a short expiry and consumed there by the explicit export handler. It is **not** returned to the isolated UI, placed in `window.postMessage` messages, written into exported JSON, or persisted across sessions or to disk. If the request-context is missing, the extension fails fast rather than guessing or storing credentials.
 
+The MAIN-world command bridge requires the exact same window and origin and rejects absent, `null`, synthetic, or cross-origin event values. Because it uses page-visible `window.postMessage`, same-page scripts can still observe and replay token-stamped safe commands; a MAIN-world bridge cannot provide extension-private command integrity. Hostile-page replay is outside v3's threat model. Credentials and conversation or stream payloads are never carried in those messages.
+
 ## 5. Bounded, In-Memory Stream-Debug Capture
 
 For troubleshooting, the extension may record an ordered, in-memory trace of raw stream frames (SSE, NDJSON/line, or raw) for recognized generation endpoints. This capture is:

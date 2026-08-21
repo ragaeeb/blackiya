@@ -26,9 +26,12 @@ type SessionInitMessage = {
     token: string;
 };
 
-const isSameWindowOriginEvent = (event: MessageEvent): boolean =>
-    event.source === window &&
-    (!event.origin || event.origin === window.location.origin || event.origin === 'null');
+type WindowOriginTarget = { location: { origin: string } };
+
+export const isSameWindowOriginEvent = (
+    event: Pick<MessageEvent, 'origin' | 'source'>,
+    targetWindow: WindowOriginTarget,
+): boolean => event.source === targetWindow && event.origin === targetWindow.location.origin;
 
 export const setupMainWorldBridge = () => {
     if ((window as any)[MAIN_BRIDGE_INSTALLED_KEY] === true) {
@@ -122,7 +125,7 @@ export const setupMainWorldBridge = () => {
     setupMainWorldCommandHandler({ window: window as any, operations });
 
     window.addEventListener('message', (event: MessageEvent) => {
-        if (!isSameWindowOriginEvent(event) || !event.data || typeof event.data !== 'object') {
+        if (!isSameWindowOriginEvent(event, window) || !event.data || typeof event.data !== 'object') {
             return;
         }
         const message = event.data as Partial<SessionInitMessage>;

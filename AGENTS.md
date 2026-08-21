@@ -38,7 +38,7 @@ The v3 runtime keeps sensitive export work in the MAIN world, with an isolated U
    - Hooks page `fetch` + `XMLHttpRequest`.
   - Captures provider-allowlisted request-context (platform auth headers, Gemini batchexecute context) and raw stream frames for stream-debug.
   - Performs single export, bulk export, stream-debug export/clear, and explicit downloads from the MAIN world.
-  - Cross-world messages are exchanged via `window.postMessage` under a session token, carrying commands and typed summaries only.
+  - Cross-world messages are exchanged via `window.postMessage` under a session token, carrying commands and typed summaries only. MAIN handlers must require `event.source === window.self` and `event.origin === window.location.origin`; never accept missing, `null`, or synthetic source/origin values. Same-page scripts can still observe/replay safe commands because this bridge cannot be extension-private; that hostile-page threat is outside v3's model, while credentials and payloads never cross.
 
 2. ISOLATED v3 content runtime:
    - `entrypoints/main.content.ts` (entry point; boots a `V3ContentRuntime` against the browser message host)
@@ -154,7 +154,7 @@ When changing stream-debug capture:
 1. Preserve ordered frames and byte accounting (original vs stored, dropped counts).
 2. Keep the recorder bounded (max streams, max frames/bytes per stream, TTL) and in-memory only.
 3. Sanitize request URLs to paths (strip query strings and hashes) before storing.
-4. Keep export and clear explicit through the token-validated MAIN-world command handler; return only counts/status, never frame text.
+4. Keep export and clear explicit through the token-validated MAIN-world command handler; require exact same-window/same-origin events, return only counts/status, and never transfer frame text. Treat same-page replay of safe commands as the documented, out-of-model MAIN-world limitation.
 
 When changing title handling:
 

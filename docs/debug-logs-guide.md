@@ -9,6 +9,10 @@ Use the smallest artifact that still explains the failure. In the v3 runtime the
 3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
 4. **Live authenticated-browser relay** — opt-in, localhost-only transport and `Save JSON` state diagnostics while reproducing in a real ChatGPT tab.
 
+### MAIN-world bridge note
+
+The command bridge accepts only events from the exact page window and exact page origin; absent, `null`, synthetic, and cross-origin source/origin values are rejected. Same-page scripts can nevertheless observe and replay the token-stamped safe commands because `window.postMessage` in MAIN cannot be extension-private. This hostile-page scenario is outside v3's threat model, and the bridge never carries credentials, conversation payloads, stream records, or frame text.
+
 ## Artifacts at a Glance
 
 | Artifact | When to export | Contents |

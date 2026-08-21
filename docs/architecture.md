@@ -57,7 +57,7 @@ The world command channel uses:
 - `BLACKIYA_MAIN_WORLD_PROGRESS` — bulk counts and sanitized progress messages.
 - `BLACKIYA_MAIN_WORLD_RESULT` — typed success or error summary.
 
-The channel is token-stamped and same-origin checked. It is an authorization gate for the extension command path, not a page confidentiality boundary; the confidentiality guarantee comes from never placing credentials or payloads in its messages.
+The channel requires the exact page window (`event.source === window.self`) and exact page origin (`event.origin === window.location.origin`); absent, `null`, synthetic, and cross-origin values are rejected. This is an authorization gate for the extension command path, not a page confidentiality or command-integrity boundary: same-page scripts can observe and replay the token-stamped safe commands because a MAIN-world `window.postMessage` bridge cannot be extension-private. That hostile-page replay scenario is outside v3's threat model. Credentials, conversation payloads, stream records, and frame text never cross the channel.
 
 Bulk export progress is emitted as `BLACKIYA_BULK_EXPORT_PROGRESS` messages with stages `started`, `progress`, `completed`, `failed`.
 

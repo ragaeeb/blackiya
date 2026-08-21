@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
-import { setupMainWorldBridge, shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
+import {
+    isSameWindowOriginEvent,
+    setupMainWorldBridge,
+    shouldApplySessionInitToken,
+} from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import {
     maybeCaptureGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
@@ -33,6 +37,53 @@ describe('bootstrap-main-bridge', () => {
         expect(shouldApplySessionInitToken('bk:first', 'bk:second')).toBeFalse();
         expect(shouldApplySessionInitToken('', 'bk:first')).toBeTrue();
         expect(shouldApplySessionInitToken(undefined, '')).toBeFalse();
+    });
+
+    it('should require the exact MAIN-world window and origin for session init', () => {
+        const pageWindow = { location: { origin: 'https://chatgpt.com' } };
+
+        expect(
+            isSameWindowOriginEvent(
+                { source: pageWindow, origin: 'https://chatgpt.com' } as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeTrue();
+        expect(
+            isSameWindowOriginEvent(
+                { source: undefined, origin: 'https://chatgpt.com' } as unknown as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent(
+                { source: null, origin: 'https://chatgpt.com' } as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent(
+                { source: pageWindow, origin: undefined } as unknown as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent(
+                { source: pageWindow, origin: 'null' } as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent(
+                { source: {}, origin: 'https://chatgpt.com' } as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent(
+                { source: pageWindow, origin: 'https://evil.example' } as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
     });
 
     it('should not expose window.__blackiya', () => {

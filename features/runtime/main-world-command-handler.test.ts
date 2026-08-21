@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
 import {
+    isValidMainWorldMessageEvent,
     type MainWorldCommandOperations,
     setupMainWorldCommandHandler,
 } from '@/features/runtime/main-world-command-handler';
@@ -29,6 +30,64 @@ describe('MAIN-world command handler', () => {
         } else {
             globalRecord.window = previousWindow;
         }
+    });
+
+    it('should require the exact MAIN-world window and origin for commands', () => {
+        const pageWindow = {};
+        const commandWindow = {
+            self: pageWindow,
+            location: { origin: 'https://chatgpt.com' },
+        };
+
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: pageWindow,
+                origin: 'https://chatgpt.com',
+            }),
+        ).toBeTrue();
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: undefined,
+                origin: 'https://chatgpt.com',
+            }),
+        ).toBeFalse();
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: null,
+                origin: 'https://chatgpt.com',
+            }),
+        ).toBeFalse();
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: pageWindow,
+                origin: undefined,
+            }),
+        ).toBeFalse();
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: pageWindow,
+                origin: 'null',
+            }),
+        ).toBeFalse();
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: {},
+                origin: 'https://chatgpt.com',
+            }),
+        ).toBeFalse();
+        expect(
+            isValidMainWorldMessageEvent(commandWindow, {
+                data: {},
+                source: pageWindow,
+                origin: 'https://evil.example',
+            }),
+        ).toBeFalse();
     });
 
     const postCommand = (operation: string, requestId: string, options?: Record<string, unknown>, token = getSessionToken()) => {

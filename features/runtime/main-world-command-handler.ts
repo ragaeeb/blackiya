@@ -34,13 +34,10 @@ export type MainWorldCommandOperations = {
     clearStreamDebug: () => Promise<MainWorldCommandSummary>;
 };
 
-const isAllowedSource = (win: MainWorldCommandWindow, source: unknown): boolean =>
-    source === win.self || source === win || source === undefined || source === null;
-
-const isAllowedOrigin = (win: MainWorldCommandWindow, origin: string | undefined): boolean => {
-    const winOrigin = win.location.origin;
-    return !origin || !winOrigin || origin === winOrigin || origin === 'null' || winOrigin === 'null';
-};
+export const isValidMainWorldMessageEvent = (
+    win: Pick<MainWorldCommandWindow, 'location' | 'self'>,
+    event: MainWorldMessageEvent,
+): boolean => event.source === win.self && event.origin === win.location.origin;
 
 const post = (win: MainWorldCommandWindow, payload: Record<string, unknown>) => {
     win.postMessage(stampToken(payload), win.location.origin);
@@ -93,7 +90,7 @@ export const setupMainWorldCommandHandler = ({
     operations: MainWorldCommandOperations;
 }) => {
     const handleMessage = (event: MainWorldMessageEvent) => {
-        if (!isAllowedSource(win, event.source) || !isAllowedOrigin(win, event.origin)) {
+        if (!isValidMainWorldMessageEvent(win, event)) {
             return;
         }
         if (!isMainWorldCommandMessage(event.data) || resolveTokenValidationFailureReason(event.data) !== null) {
