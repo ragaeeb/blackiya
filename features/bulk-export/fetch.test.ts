@@ -59,7 +59,9 @@ describe('fetchText', () => {
                 fetchImpl: mock(() => Promise.resolve(new Response('', { status }))),
             });
 
-            await fetchText(`https://${platformName.toLowerCase()}.example/auth`, context);
+            await expect(fetchText(`https://${platformName.toLowerCase()}.example/auth`, context)).rejects.toThrow(
+                `Bulk export stopped after HTTP ${status} authentication failure.`,
+            );
 
             expect(invalidateAuthContext).toHaveBeenCalledWith(platformName);
         }

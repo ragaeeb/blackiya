@@ -112,7 +112,7 @@ Primary module: `features/bulk-export/orchestrator.ts` (`runBulkExport`).
   5. Attaches canonical export metadata (`captureSource`, `fidelity`, `completeness`).
   6. Downloads one JSON file per conversation.
 - Options normalization (`features/bulk-export/options.ts`): default pacing delay `1200ms`, default timeout `20000ms`. `Max chats` of `0` equals all (default). Delay is clamped to `[250, 20000]`, timeout to `[5000, 60000]`.
-- Fetch (`features/bulk-export/fetch.ts`): `429` is retried up to `MAX_429_RETRIES = 3` with `retry-after` / `x-rate-limit-reset` awareness, bounded by the remaining request deadline; `401/403` clears the platform headers cache; detail URL candidates fall through on failure.
+- Fetch (`features/bulk-export/fetch.ts`): `429` is retried up to `MAX_429_RETRIES = 3` with `retry-after` / `x-rate-limit-reset` awareness, bounded by the remaining request deadline; `401/403` clears the platform headers cache and fails the active run before any candidate or later conversation can reuse its rejected request context; non-auth detail failures retain candidate fallback behavior.
 - Progress (`features/bulk-export/progress.ts`): `started` / `progress` / `completed` / `failed` messages with `discovered`, `attempted`, `exported`, `failed`, `remaining`.
 - Result summary: `{ platform, discovered, attempted, exported, failed, elapsedMs, limit, warnings }`.
 

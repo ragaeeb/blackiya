@@ -11,6 +11,16 @@ export type FetchTextResult =
           message: string;
       };
 
+export class BulkAuthContextRejectedError extends Error {
+    readonly status: 401 | 403;
+
+    constructor(status: 401 | 403) {
+        super(`Bulk export stopped after HTTP ${status} authentication failure.`);
+        this.name = 'BulkAuthContextRejectedError';
+        this.status = status;
+    }
+}
+
 export type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 type FetchTextRequestInit = {
@@ -30,6 +40,8 @@ export type FetchContext = {
     platformName: string;
     requestCount: number;
     invalidateAuthContext?: (platformName: string) => void;
+    authContextInvalidated?: boolean;
+    authContextInvalidatedStatus?: 401 | 403;
     signal?: AbortSignal;
 };
 
@@ -208,6 +220,8 @@ const processFetchResponse = async (
     signal: AbortSignal,
 ): Promise<AttemptOutcome> => {
     if (response.status === 401 || response.status === 403) {
+        context.authContextInvalidated = true;
+        context.authContextInvalidatedStatus = response.status;
         try {
             context.invalidateAuthContext?.(context.platformName);
         } catch {
@@ -273,11 +287,19 @@ const failureForWaitOutcome = (outcome: WaitOutcome, phase: 'slot' | 'retry'): F
     );
 };
 
+const throwIfAuthContextInvalidated = (context: FetchContext): void => {
+    if (context.authContextInvalidated) {
+        throw new BulkAuthContextRejectedError(context.authContextInvalidatedStatus ?? 401);
+    }
+};
+
 export const fetchText = async (
     url: string,
     context: FetchContext,
     init?: FetchTextRequestInit,
 ): Promise<FetchTextResult> => {
+    throwIfAuthContextInvalidated(context);
+
     const externalSignal = init?.signal ?? context.signal;
     const deadlineAt = context.nowImpl() + context.timeoutMs;
     let attempt = 0;
@@ -293,6 +315,7 @@ export const fetchText = async (
 
         const outcome = await executeFetchAttempt(url, context, init, attempt, deadlineAt, externalSignal);
         if ('result' in outcome) {
+            throwIfAuthContextInvalidated(context);
             return outcome.result;
         }
 

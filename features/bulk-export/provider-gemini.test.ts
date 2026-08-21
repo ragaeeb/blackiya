@@ -69,20 +69,19 @@ describe('fetchConversationByIdGemini', () => {
         expect(requestCount).toBe(0);
     });
 
-    it('should not reuse unbound Gemini title-cache IDs when the list request fails', async () => {
+    it('should stop the bulk run when the Gemini list request is unauthorized', async () => {
         geminiState.reset();
         geminiState.conversationTitles.set('stale-account-id', 'Stale account conversation');
 
         try {
-            const result = await listConversationIdsGemini(
-                { maxItems: null, delayMs: 0, timeoutMs: 5_000 },
-                buildContext((async () => new Response('unauthorized', { status: 401 })) as unknown as typeof fetch),
-                'https://gemini.google.com/app',
-                { extractConversationId: () => null } as any,
-            );
-
-            expect(result.ids).toEqual([]);
-            expect(result.warnings.join(' ')).not.toContain('falling back to cached');
+            await expect(
+                listConversationIdsGemini(
+                    { maxItems: null, delayMs: 0, timeoutMs: 5_000 },
+                    buildContext((async () => new Response('unauthorized', { status: 401 })) as unknown as typeof fetch),
+                    'https://gemini.google.com/app',
+                    { extractConversationId: () => null } as any,
+                ),
+            ).rejects.toThrow('Bulk export stopped after HTTP 401 authentication failure.');
         } finally {
             geminiState.reset();
         }

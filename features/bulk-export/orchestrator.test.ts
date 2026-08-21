@@ -150,20 +150,58 @@ describe('runBulkExport', () => {
         ] as const) {
             const invalidateAuthContext = mock();
 
-            await runBulkExport(
-                { limit: 1, delayMs: 0, timeoutMs: 5_000 },
-                {
-                    getAdapter: () => adapter,
-                    getAuthHeaders: () => authHeaders,
-                    getGeminiBatchexecuteContext: () => geminiContext,
-                    invalidateAuthContext,
-                    locationHref: () => locationHref,
-                    fetchImpl: (async () => new Response('', { status })) as unknown as typeof fetch,
-                },
-            );
+            await expect(
+                runBulkExport(
+                    { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+                    {
+                        getAdapter: () => adapter,
+                        getAuthHeaders: () => authHeaders,
+                        getGeminiBatchexecuteContext: () => geminiContext,
+                        invalidateAuthContext,
+                        locationHref: () => locationHref,
+                        fetchImpl: (async () => new Response('', { status })) as unknown as typeof fetch,
+                    },
+                ),
+            ).rejects.toThrow(`Bulk export stopped after HTTP ${status} authentication failure.`);
 
             expect(invalidateAuthContext).toHaveBeenCalledWith(platformName);
         }
+    });
+
+    it('should fail fast after auth rejection without reusing the per-run headers', async () => {
+        const firstId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        const secondId = '69a85cf1-4bcc-832b-b221-d582b0c9910b';
+        const requests: Array<{ url: string; headers: HeadersInit | undefined }> = [];
+        const invalidateAuthContext = mock();
+
+        await expect(
+            runBulkExport(
+                { limit: 2, delayMs: 0, timeoutMs: 5_000 },
+                {
+                    getAdapter: () => buildAdapter(),
+                    getAuthHeaders: () => ({ authorization: 'Bearer rejected-token' }),
+                    invalidateAuthContext,
+                    locationHref: () => 'https://chatgpt.com/c/current',
+                    fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+                        const url = String(input);
+                        requests.push({ url, headers: init?.headers });
+                        if (url.includes('/backend-api/conversations?')) {
+                            return new Response(JSON.stringify({ items: [{ id: firstId }, { id: secondId }] }), {
+                                status: 200,
+                            });
+                        }
+                        return new Response('unauthorized', { status: 401 });
+                    }) as unknown as typeof fetch,
+                },
+            ),
+        ).rejects.toThrow('Bulk export stopped after HTTP 401 authentication failure.');
+
+        expect(requests).toHaveLength(2);
+        expect(requests[0]?.url).toContain('/backend-api/conversations?');
+        expect(requests[1]?.url).toContain(`${firstId}?candidate=1`);
+        expect(requests[1]?.headers).toEqual({ authorization: 'Bearer rejected-token' });
+        expect(invalidateAuthContext).toHaveBeenCalledTimes(1);
+        expect(invalidateAuthContext).toHaveBeenCalledWith('ChatGPT');
     });
 
     it('should list, fetch, annotate, download, and report canonical exports', async () => {

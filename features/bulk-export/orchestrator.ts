@@ -219,6 +219,7 @@ const createBulkExportContext = (
         platformName: adapter.name,
         requestCount: 0,
         invalidateAuthContext: deps.invalidateAuthContext,
+        authContextInvalidated: false,
     };
 
     return {
