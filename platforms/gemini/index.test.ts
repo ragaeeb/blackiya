@@ -1,7 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { join } from 'node:path';
 
-import type { Message, MessageNode } from '@/utils/types';
+import type { Message, MessageNode, RawConversationPayload } from '@/utils/types';
+import { parseConversationPayload } from '@/platforms/gemini/conversation-parser';
+import { LRUCache } from '@/utils/lru-cache';
 
 const loggerSpies = {
     info: mock(() => {}),
@@ -167,6 +169,53 @@ describe('Gemini Adapter — integration', () => {
             expect(thoughts![0]!.summary).toBe('Clarifying Key Parameters');
             expect(thoughts![0]!.content.startsWith("I've established key parameters for the task. This")).toBeTrue();
             expect(thoughts![0]!.content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBeTrue();
+        });
+
+        it('should preserve the complete multi-turn and branch payload in raw_payload', () => {
+            const conversationId = 'gemini-multi-turn-branch';
+            const assistantCandidate: RawConversationPayload[] = [
+                null,
+                ['first answer'],
+                {
+                    branchId: 'branch-a',
+                    followUp: { user: 'second question', assistant: 'second answer' },
+                },
+            ];
+            const conversationRoot: RawConversationPayload[] = [
+                [`c_${conversationId}`, { canonical: 'root-metadata' }],
+                null,
+                [[null, null, 'first question']],
+                [[assistantCandidate]],
+                null,
+                {
+                    turns: [
+                        { id: 'turn-1', role: 'user', text: 'first question' },
+                        { id: 'turn-2', role: 'user', text: 'second question' },
+                    ],
+                    branches: [
+                        { id: 'branch-a', answer: 'second answer' },
+                        { id: 'branch-b', answer: 'alternate answer' },
+                    ],
+                },
+            ];
+            const canonicalPayload: RawConversationPayload = [[conversationRoot]];
+
+            const result = parseConversationPayload(
+                canonicalPayload,
+                new LRUCache<string, string>(4),
+                new LRUCache<string, import('@/utils/types').ConversationData>(4),
+            );
+
+            expect(result).not.toBeNull();
+            if (!result) {
+                return;
+            }
+            expect(result.conversation_id).toBe(conversationId);
+            expect(result.raw_payload).toEqual(canonicalPayload);
+            expect(JSON.parse(JSON.stringify(result.raw_payload))).toEqual(canonicalPayload);
+            const rawLevel1 = (result.raw_payload as RawConversationPayload[])[0] as RawConversationPayload[];
+            const rawRoot = rawLevel1[0] as RawConversationPayload[];
+            expect(rawRoot[5]).toEqual(conversationRoot[5]);
         });
     });
 

@@ -49,6 +49,15 @@ export type MessageNode = {
     children: string[];
 };
 
+/** JSON-compatible provider payload retained for verbatim single-chat exports. */
+export type RawConversationPayload =
+    | null
+    | boolean
+    | number
+    | string
+    | RawConversationPayload[]
+    | { [key: string]: RawConversationPayload };
+
 /**
  * Full conversation data structure from ChatGPT API
  */
@@ -67,4 +76,5 @@ export type ConversationData = {
     default_model_slug: string;
     safe_urls: string[];
     blocked_urls: string[];
+    raw_payload?: RawConversationPayload;
 };

@@ -46,6 +46,11 @@ const safeLogger = (deps: SingleExportDeps): SingleExportLogger => deps.logger ?
 
 const failure = (error: SingleExportError): SingleExportResult => ({ kind: 'failure', error });
 
+const hasAuthorizationHeader = (headers: Record<string, string> | undefined): boolean =>
+    Object.entries(headers ?? {}).some(
+        ([name, value]) => name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
+    );
+
 const extractConversationId = (adapter: LLMPlatform, pageUrl: string): string | null => {
     try {
         return adapter.extractConversationId(pageUrl) ?? null;
@@ -104,13 +109,18 @@ const resolveRequest = (
     }
 
     const authHeaders = deps.getAuthHeaders?.();
+    const authSnapshot = authHeaders ? { ...authHeaders } : undefined;
+    if (platformKind === 'chatgpt' && !hasAuthorizationHeader(authSnapshot)) {
+        return { ok: false, result: failure({ kind: 'missing_auth', platformName: adapter.name }) };
+    }
+
     return {
         ok: true,
         resolved: {
             adapter,
             conversationId,
             requests: detail.requests,
-            authHeaders: authHeaders ? { ...authHeaders } : undefined,
+            authHeaders: authSnapshot,
         },
     };
 };
@@ -426,10 +436,9 @@ const deliverDownload = (
         return {
             ok: false,
             result: failure({
-                kind: 'http_failure',
+                kind: 'download_failure',
                 platformName: parsed.adapter.name,
-                status: 0,
-                statusText: err instanceof Error ? err.message : 'Download injection failed',
+                reason: err instanceof Error ? err.message : 'Download injection failed',
             }),
         };
     }

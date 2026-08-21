@@ -2,7 +2,7 @@ import type { PlatformReadiness } from '@/platforms/types';
 import { hashText } from '@/utils/hash';
 import { logger } from '@/utils/logger';
 import type { LRUCache } from '@/utils/lru-cache';
-import type { ConversationData, MessageNode } from '@/utils/types';
+import type { ConversationData, MessageNode, RawConversationPayload } from '@/utils/types';
 
 const isConversationIdCandidate = (value: unknown): value is string =>
     typeof value === 'string' && (value.startsWith('c_') || /^[a-f0-9]+$/i.test(value));
@@ -340,10 +340,10 @@ export const parseConversationPayload = (
 
     logger.info('[Blackiya/Gemini] Successfully parsed conversation with', Object.keys(mapping).length, 'messages');
 
-    const conversationData = {
+    const conversationData: ConversationData = {
         ...buildGeminiConversationData(conversationId, conversationTitle, mapping, modelName, now),
-        raw_payload: payload,
-    } as ConversationData;
+        raw_payload: payload as RawConversationPayload,
+    };
     if (conversationId) {
         activeConvos.set(conversationId, conversationData);
     }

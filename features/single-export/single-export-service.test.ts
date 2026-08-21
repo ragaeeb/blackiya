@@ -136,7 +136,10 @@ type Harness = {
 const createHarness = (initial: { pageUrl: string; adapter: LLMPlatform | null }): Harness => {
     let pageUrl = initial.pageUrl;
     let adapter: LLMPlatform | null = initial.adapter;
-    let authHeaders: Record<string, string> | undefined = { 'x-test': '1' };
+    let authHeaders: Record<string, string> | undefined = {
+        authorization: 'Bearer test-token',
+        'x-test': '1',
+    };
     let geminiContext: GeminiBatchexecuteContext | undefined = {
         at: 'AT-TOKEN',
         bl: 'boq_test',
@@ -309,6 +312,40 @@ describe('performSingleExport — resolution and validation', () => {
         }
         expect(result.error.kind).toBe('missing_auth');
     });
+
+    it('should fail with missing_auth before dispatch when ChatGPT authorization is unavailable', async () => {
+        const harness = createHarness({
+            pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
+            adapter: chatGPTAdapter,
+        });
+        harness.setAuthHeaders({ 'x-test': 'client-context-only' });
+        harness.setFetchResponse({ ok: true, status: 200, text: '{}' });
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+
+        expect(result).toEqual({
+            kind: 'failure',
+            error: { kind: 'missing_auth', platformName: 'ChatGPT' },
+        });
+        expect(harness.fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('should accept an authorization header regardless of casing', async () => {
+        const harness = createHarness({
+            pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
+            adapter: chatGPTAdapter,
+        });
+        const payload = buildTerminalChatGptConversation(CHATGPT_ID);
+        harness.setAuthHeaders({ Authorization: 'Bearer case-insensitive-token' });
+        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+
+        expect(result.kind).toBe('success');
+        expect(harness.fetchImpl.mock.calls[0]?.[1]?.headers).toEqual({
+            Authorization: 'Bearer case-insensitive-token',
+        });
+    });
 });
 
 describe('performSingleExport — HTTP/parse/ID/terminal', () => {
@@ -369,6 +406,25 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
             return;
         }
         expect(result.error.kind).toBe('parse_failure');
+    });
+
+    it('should return download_failure when browser download injection throws', async () => {
+        const payload = buildTerminalChatGptConversation(CHATGPT_ID);
+        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        harness.deps.downloadJson = () => {
+            throw new Error('download permission denied');
+        };
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+
+        expect(result).toEqual({
+            kind: 'failure',
+            error: {
+                kind: 'download_failure',
+                platformName: 'ChatGPT',
+                reason: 'download permission denied',
+            },
+        });
     });
 
     it('should fail with id_mismatch when the response carries a different conversation_id', async () => {
@@ -631,7 +687,7 @@ describe('performSingleExport — request shape', () => {
         expect(harness.fetchImpl).toHaveBeenCalledTimes(1);
         const init = harness.fetchImpl.mock.calls[0]![1];
         expect(init?.credentials).toBe('include');
-        expect(init?.headers).toEqual({ 'x-test': '1' });
+        expect(init?.headers).toEqual({ authorization: 'Bearer test-token', 'x-test': '1' });
     });
 
     it('should POST the Gemini batchexecute body with content-type', async () => {

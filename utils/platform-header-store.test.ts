@@ -36,6 +36,28 @@ describe('PlatformHeaderStore', () => {
         expect(store.get('ChatGPT')).toEqual({ authorization: 'Bearer new' });
     });
 
+    it('should discard unrelated old headers when a partial identity snapshot changes', () => {
+        const store = new PlatformHeaderStore();
+        store.update('ChatGPT', {
+            authorization: 'Bearer old',
+            'oai-device-id': 'device-old',
+            'x-private-context': 'old-secret',
+        });
+        store.update('ChatGPT', { 'OAI-DEVICE-ID': 'device-new' });
+
+        expect(store.get('ChatGPT')).toEqual({ 'oai-device-id': 'device-new' });
+    });
+
+    it('should return a defensive header snapshot', () => {
+        const store = new PlatformHeaderStore();
+        store.update('ChatGPT', { authorization: 'Bearer original' });
+
+        const snapshot = store.get('ChatGPT');
+        snapshot!.authorization = 'Bearer mutated';
+
+        expect(store.get('ChatGPT')).toEqual({ authorization: 'Bearer original' });
+    });
+
     it('should expire snapshots after the configured lifetime', () => {
         let now = 1_000;
         const store = new PlatformHeaderStore({ maxAgeMs: 100, now: () => now });

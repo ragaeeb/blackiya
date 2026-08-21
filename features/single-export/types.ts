@@ -26,6 +26,7 @@ export type SingleExportError =
     | { kind: 'missing_endpoint'; platformName: string }
     | { kind: 'missing_auth'; platformName: string }
     | { kind: 'http_failure'; platformName: string; status: number; statusText: string }
+    | { kind: 'download_failure'; platformName: string; reason: string }
     | { kind: 'timeout'; platformName: string; timeoutMs: number }
     | { kind: 'parse_failure'; platformName: string; reason: string }
     | { kind: 'id_mismatch'; platformName: string; expected: string; actual: string | null }

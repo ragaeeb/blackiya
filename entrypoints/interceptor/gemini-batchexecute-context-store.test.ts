@@ -52,6 +52,27 @@ describe('gemini-batchexecute-context-store', () => {
         });
     });
 
+    it('should invalidate a prior token when the newest context has no usable token', () => {
+        resetGeminiBatchexecuteContext();
+        maybeCaptureGeminiBatchexecuteContext(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?bl=old&f.sid=old&_reqid=1&rt=c',
+            'at=OLD-TOKEN',
+            1_000,
+        );
+        maybeCaptureGeminiBatchexecuteContext(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?bl=new&_reqid=2&rt=c',
+            'at=%20%20%20',
+            2_000,
+        );
+
+        expect(getGeminiBatchexecuteContext(2_000)).toEqual({
+            bl: 'new',
+            rt: 'c',
+            reqid: 2,
+            updatedAt: 2_000,
+        });
+    });
+
     it('should reject an expired context and return defensive snapshots', () => {
         resetGeminiBatchexecuteContext();
         maybeCaptureGeminiBatchexecuteContext(

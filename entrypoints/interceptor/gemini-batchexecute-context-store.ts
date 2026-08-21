@@ -35,7 +35,8 @@ const readOptionalString = (value: string | null): string | undefined => {
     if (!value) {
         return undefined;
     }
-    return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
 };
 
 const isGeminiBatchexecuteUrl = (parsed: URL) => parsed.pathname.toLowerCase().includes(GEMINI_BATCHEXECUTE_PATH);

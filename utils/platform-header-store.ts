@@ -57,9 +57,15 @@ export class PlatformHeaderStore {
             return;
         }
         const normalizedIncoming = Object.fromEntries(
-            Object.entries(incoming).map(([name, value]) => [name.toLowerCase(), value]),
+            Object.entries(incoming)
+                .map(([name, value]) => [name.toLowerCase(), value.trim()] as const)
+                .filter(([, value]) => value.length > 0),
         );
-        const existing = this.getEntry(platformName, this.now());
+        if (Object.keys(normalizedIncoming).length === 0) {
+            return;
+        }
+        const updatedAt = this.now();
+        const existing = this.getEntry(platformName, updatedAt);
         const identityChanged = existing
             ? IDENTITY_HEADER_NAMES.some((name) => {
                   const previous = existing.headers[name];
@@ -71,7 +77,7 @@ export class PlatformHeaderStore {
             ? normalizedIncoming
             : mergeHeaderRecords(existing?.headers, normalizedIncoming);
         if (merged) {
-            this.headers.set(platformName, { headers: merged, updatedAt: this.now() });
+            this.headers.set(platformName, { headers: merged, updatedAt });
             this.enforceCapacity();
         }
     }
