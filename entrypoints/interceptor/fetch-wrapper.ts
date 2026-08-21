@@ -3,6 +3,26 @@ export type FetchInterceptor = (input: RequestInfo | URL, init?: RequestInit) =>
 const FETCH_INTERCEPTOR_LOG_TTL_MS = 10_000;
 const FETCH_INTERCEPTOR_MAX_ERROR_LOG_ENTRIES = 256;
 const fetchInterceptorErrorLogTimestamps = new Map<string, number>();
+const forwardedFetchFailures = new WeakSet<object>();
+
+const asWeakSetKey = (error: unknown): object | undefined => {
+    if ((typeof error === 'object' && error !== null) || typeof error === 'function') {
+        return error as object;
+    }
+    return undefined;
+};
+
+export const markFetchFailureAsForwarded = (error: unknown): void => {
+    const key = asWeakSetKey(error);
+    if (key) {
+        forwardedFetchFailures.add(key);
+    }
+};
+
+export const isFetchFailureAlreadyForwarded = (error: unknown): boolean => {
+    const key = asWeakSetKey(error);
+    return key ? forwardedFetchFailures.has(key) : false;
+};
 
 export type FetchInterceptorOptions = Readonly<{
     now?: () => number;
@@ -96,6 +116,9 @@ export const createFetchInterceptor = (
                     requestMethod,
                     error: error instanceof Error ? error.message : String(error),
                 });
+            }
+            if (isFetchFailureAlreadyForwarded(error)) {
+                throw error;
             }
             return originalFetch(input, init);
         }

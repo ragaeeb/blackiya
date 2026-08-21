@@ -151,6 +151,31 @@ describe('MAIN-world bootstrap request capture', () => {
         });
     });
 
+    it('does not retry a rejected non-idempotent POST after the page fetch was invoked', async () => {
+        const windowInstance = new Window();
+        const rejection = new Error('generation request failed after forwarding');
+        let originalFetchCalls = 0;
+        windowInstance.fetch = async () => {
+            originalFetchCalls += 1;
+            throw rejection;
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+
+        await expect(
+            windowInstance.fetch('https://chatgpt.com/backend-api/f/conversation', {
+                method: 'POST',
+                body: JSON.stringify({ prompt: 'non-idempotent request' }),
+            }),
+        ).rejects.toBe(rejection);
+        expect(originalFetchCalls).toBe(1);
+    });
+
     it('clears captured ChatGPT auth context after an unauthorized response', async () => {
         const windowInstance = new Window();
         windowInstance.fetch = async () => new windowInstance.Response('unauthorized', { status: 401 });

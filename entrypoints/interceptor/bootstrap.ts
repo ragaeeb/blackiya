@@ -3,7 +3,10 @@ import { monitorFetchResponse } from '@/features/stream-debug/stream-monitor';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import { createXhrStreamCapture } from '@/features/stream-debug/xhr-monitor';
 import { setupMainWorldBridge } from '@/entrypoints/interceptor/bootstrap-main-bridge';
-import { createFetchInterceptor } from '@/entrypoints/interceptor/fetch-wrapper';
+import {
+    createFetchInterceptor,
+    markFetchFailureAsForwarded,
+} from '@/entrypoints/interceptor/fetch-wrapper';
 import {
     maybeCaptureGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
@@ -186,6 +189,7 @@ export default defineScript({
             try {
                 response = await originalFetch(...args);
             } catch (error) {
+                markFetchFailureAsForwarded(error);
                 if (streamId) {
                     streamDebugRecorder.terminateStream(streamId, 'error');
                 }
