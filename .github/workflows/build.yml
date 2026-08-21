@@ -44,6 +44,9 @@ jobs:
       - name: Run authenticated browser relay harness
         run: xvfb-run -a bun run test:e2e -- e2e/relay.playwright.ts
 
+      - name: Run popup smoke harness
+        run: xvfb-run -a bun run test:e2e -- e2e/smoke.playwright.ts
+
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
