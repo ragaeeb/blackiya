@@ -7,6 +7,7 @@ Use the smallest artifact that still explains the failure. In the v3 runtime the
 1. **Stream-debug records** — raw ordered stream frames for transport/parse triage.
 2. **Fail-fast export errors** — typed, metadata-only error results from the single-chat kernel.
 3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
+4. **Live authenticated-browser relay** — opt-in, localhost-only transport and `Save JSON` state diagnostics while reproducing in a real ChatGPT tab.
 
 ## Artifacts at a Glance
 
@@ -14,6 +15,7 @@ Use the smallest artifact that still explains the failure. In the v3 runtime the
 | :--- | :--- | :--- |
 | Stream-debug record(s) | Endpoint drift, framing/parse problems, malformed or truncated stream payloads | Ordered frames with byte accounting |
 | HAR analysis (JSON/MD) | Changed endpoints or unclear payload paths | Redacted endpoint/timeline summary from a `.har` |
+| Live relay NDJSON | A failure only reproducible in the authenticated browser | Sanitized generation paths, status/byte/signal metadata, and `Save JSON` state/error kind; no credentials or payload bodies |
 
 ## Stream-Debug Records
 
@@ -44,6 +46,18 @@ The recorder is capped (max concurrent streams, max frames per stream, max bytes
 This priority-aware eviction preserves late refusal, replacement, and erase signals when a platform streams a large body. The monitor also bounds incomplete framing buffers, so it does not retain an unbounded response body outside the recorder.
 
 A `truncated` stream does **not** mean the export failed — it means the debug trace was bounded. Treat a truncated trace as expected only when the source stream genuinely exceeds the bounded budget.
+
+### Live authenticated-browser relay
+
+Run the local collector:
+
+```bash
+bun run browser:harness -- --relay --output ./blackiya-relay.ndjson
+```
+
+Load `harness/relay-extension` as a separate unpacked development extension, open its popup, enable the relay, and use `http://127.0.0.1:4177/events` (or the collector's printed port). Then reproduce the issue in the real ChatGPT tab with the built Blackiya extension loaded. The sidecar observes generation transport metadata and the Blackiya `Save JSON` control, including the typed error kind exposed on a failed save. It strips query strings/hashes and never forwards cookies, authorization headers, Gemini `at` context, request bodies, response text, or exported conversation JSON. Events remain in memory unless `--output` is supplied.
+
+This relay is a diagnostic sidecar, not part of the production Blackiya bundle. It is intentionally not proof against ChatGPT's production backend; its MV3 boundary test uses the strict local fixture.
 
 ### When to use
 
