@@ -379,6 +379,8 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
     });
 
     it('should fail with missing_auth on a 401 response', async () => {
+        const invalidateAuthContext = mock();
+        harness.deps.invalidateAuthContext = invalidateAuthContext;
         harness.setFetchResponse({ ok: false, status: 401, statusText: 'Unauthorized' });
         const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
         expect(result.kind).toBe('failure');
@@ -386,9 +388,12 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
             return;
         }
         expect(result.error.kind).toBe('missing_auth');
+        expect(invalidateAuthContext).toHaveBeenCalledWith('ChatGPT');
     });
 
     it('should fail with missing_auth on a 403 response', async () => {
+        const invalidateAuthContext = mock();
+        harness.deps.invalidateAuthContext = invalidateAuthContext;
         harness.setFetchResponse({ ok: false, status: 403, statusText: 'Forbidden' });
         const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
         expect(result.kind).toBe('failure');
@@ -396,6 +401,22 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
             return;
         }
         expect(result.error.kind).toBe('missing_auth');
+        expect(invalidateAuthContext).toHaveBeenCalledWith('ChatGPT');
+    });
+
+    it('should invalidate Gemini context when a single export receives an auth failure', async () => {
+        const geminiHarness = createHarness({
+            pageUrl: `https://gemini.google.com/app/${GEMINI_ID}`,
+            adapter: geminiAdapter,
+        });
+        const invalidateAuthContext = mock();
+        geminiHarness.deps.invalidateAuthContext = invalidateAuthContext;
+        geminiHarness.setFetchResponse({ ok: false, status: 403, statusText: 'Forbidden' });
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, geminiHarness.deps);
+
+        expect(result).toMatchObject({ kind: 'failure', error: { kind: 'missing_auth' } });
+        expect(invalidateAuthContext).toHaveBeenCalledWith('Gemini');
     });
 
     it('should fail with parse_failure when the parser returns null', async () => {

@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser';
 import { createV3ContentRuntime } from '@/features/runtime/v3-content-runtime';
 import { requestGeminiBatchexecuteContextFromMainWorld } from '@/features/runtime/gemini-context-request';
 import { requestPlatformHeadersFromMainWorld } from '@/features/runtime/platform-header-request';
+import { invalidateRequestContextInMainWorld } from '@/features/runtime/request-context-invalidation';
 import { createExportControls } from '@/features/export-controls/export-controls';
 import { performSingleExport } from '@/features/single-export/single-export-service';
 import { runBulkExport } from '@/features/bulk-export/orchestrator';
@@ -80,6 +81,7 @@ export default defineScript({
                 getPageUrl: () => window.location.href,
                 getAuthHeaders: () => headers,
                 getGeminiBatchexecuteContext: () => geminiContext,
+                invalidateAuthContext: invalidateRequestContextInMainWorld,
                 downloadJson: downloadStringAsJsonFile,
             });
             if (result.kind === 'failure') {
@@ -117,6 +119,7 @@ export default defineScript({
                     getAdapter: () => adapter,
                     getAuthHeaders: () => headers,
                     getGeminiBatchexecuteContext: () => geminiContext,
+                    invalidateAuthContext: invalidateRequestContextInMainWorld,
                     onProgress: (message) => {
                         void browser.runtime.sendMessage(message);
                     },

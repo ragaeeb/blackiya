@@ -83,6 +83,8 @@ export type SingleExportDeps = {
      * captured from the page. Required to make a Gemini detail POST.
      */
     getGeminiBatchexecuteContext?: () => GeminiBatchexecuteContext | undefined;
+    /** Invalidates the provider's captured request context after a 401/403 response. */
+    invalidateAuthContext?: (platformName: string) => void;
     /** The fetch implementation. Defaults to the global `fetch`. */
     fetchImpl?: typeof fetch;
     /** The download function invoked with the serialized JSON. Required. */

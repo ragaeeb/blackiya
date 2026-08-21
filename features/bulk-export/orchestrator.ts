@@ -21,6 +21,7 @@ export type BulkExportDependencies = {
     getAdapter: () => LLMPlatform | null;
     getAuthHeaders: () => HeaderRecord | undefined;
     getGeminiBatchexecuteContext?: () => GeminiBatchexecuteContext | undefined;
+    invalidateAuthContext?: (platformName: string) => void;
     fetchImpl?: FetchImplementation;
     downloadImpl?: BulkDownloadImpl;
     sleepImpl?: (milliseconds: number) => Promise<void>;
@@ -175,6 +176,14 @@ type BulkExportContext = {
     startedAt: number;
 };
 
+const hasAuthorizationHeader = (headers: HeaderRecord | undefined): boolean =>
+    Object.entries(headers ?? {}).some(
+        ([name, value]) => name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
+    );
+
+const hasGeminiAtContext = (context: GeminiBatchexecuteContext | undefined): boolean =>
+    typeof context?.at === 'string' && context.at.trim().length > 0;
+
 const createBulkExportContext = (
     optionsInput: V3BulkExportOptions,
     deps: BulkExportDependencies,
@@ -192,15 +201,24 @@ const createBulkExportContext = (
     }
 
     const options = normalizeOptions(optionsInput);
+    const authHeaders = deps.getAuthHeaders();
+    const geminiContext = platform === 'gemini' ? deps.getGeminiBatchexecuteContext?.() : undefined;
+    if (platform === 'chatgpt' && !hasAuthorizationHeader(authHeaders)) {
+        throw new Error('ChatGPT bulk export requires captured authorization.');
+    }
+    if (platform === 'gemini' && !hasGeminiAtContext(geminiContext)) {
+        throw new Error('Gemini bulk export requires captured batchexecute at context.');
+    }
     const fetchContext: FetchContext = {
         fetchImpl: deps.fetchImpl ?? fetch,
         sleepImpl: deps.sleepImpl ?? sleep,
         nowImpl: deps.nowImpl ?? Date.now,
-        authHeaders: deps.getAuthHeaders(),
+        authHeaders,
         timeoutMs: options.timeoutMs,
         delayMs: options.delayMs,
         platformName: adapter.name,
         requestCount: 0,
+        invalidateAuthContext: deps.invalidateAuthContext,
     };
 
     return {
@@ -209,7 +227,7 @@ const createBulkExportContext = (
         href,
         options,
         fetchContext,
-        geminiContext: deps.getGeminiBatchexecuteContext?.(),
+        geminiContext,
         startedAt: fetchContext.nowImpl(),
     };
 };

@@ -47,6 +47,24 @@ describe('fetchText', () => {
         expect(result).toEqual({ ok: false, status: 500, message: 'Internal Server Error' });
     });
 
+    it('should notify the provider context invalidator on 401 and 403 responses', async () => {
+        for (const [platformName, status] of [
+            ['ChatGPT', 401],
+            ['Gemini', 403],
+        ] as const) {
+            const invalidateAuthContext = mock();
+            const context = createMockContext({
+                platformName,
+                invalidateAuthContext,
+                fetchImpl: mock(() => Promise.resolve(new Response('', { status }))),
+            });
+
+            await fetchText(`https://${platformName.toLowerCase()}.example/auth`, context);
+
+            expect(invalidateAuthContext).toHaveBeenCalledWith(platformName);
+        }
+    });
+
     it('should retry 429 response with exponential backoff', async () => {
         let callCount = 0;
         const context = createMockContext({

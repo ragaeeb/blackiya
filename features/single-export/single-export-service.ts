@@ -51,6 +51,14 @@ const hasAuthorizationHeader = (headers: Record<string, string> | undefined): bo
         ([name, value]) => name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
     );
 
+const notifyAuthFailure = (deps: SingleExportDeps, platformName: string): void => {
+    try {
+        deps.invalidateAuthContext?.(platformName);
+    } catch {
+        // Request-context invalidation is defensive and must not mask the typed export failure.
+    }
+};
+
 const extractConversationId = (adapter: LLMPlatform, pageUrl: string): string | null => {
     try {
         return adapter.extractConversationId(pageUrl) ?? null;
@@ -481,6 +489,9 @@ export const performSingleExport = async (
 
     const httpClass = classifyHttpResponse(resolved, fetchOutcome.response);
     if (!httpClass.ok) {
+        if (fetchOutcome.response.status === 401 || fetchOutcome.response.status === 403) {
+            notifyAuthFailure(deps, resolved.adapter.name);
+        }
         log.error('[Blackiya/v3] Save JSON: HTTP classification failed', {
             platform: resolved.adapter.name,
             conversationId: resolved.conversationId,

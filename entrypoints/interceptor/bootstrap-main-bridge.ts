@@ -1,6 +1,12 @@
 import { setupStreamDebugBridge } from '@/features/stream-debug/bridge';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
-import { getGeminiBatchexecuteContext } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
+import {
+    isRequestContextInvalidationMessage,
+} from '@/features/runtime/request-context-invalidation';
+import {
+    getGeminiBatchexecuteContext,
+    resetGeminiBatchexecuteContext,
+} from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
 import {
     GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
     type GeminiBatchexecuteContextResponseMessage,
@@ -77,11 +83,29 @@ export const setupMainWorldBridge = () => {
         return true;
     };
 
+    const handleRequestContextInvalidation = (message: unknown): boolean => {
+        if (!isRequestContextInvalidationMessage(message)) {
+            return false;
+        }
+        if (resolveTokenValidationFailureReason(message) !== null) {
+            return true;
+        }
+        platformHeaderStore.clear(message.platformName);
+        if (message.platformName === 'Gemini') {
+            resetGeminiBatchexecuteContext();
+        }
+        return true;
+    };
+
     window.addEventListener('message', (event: MessageEvent) => {
         if (!isSameWindowOriginEvent(event) || !event.data || typeof event.data !== 'object') {
             return;
         }
-        if (handleHeadersRequest(event.data) || handleGeminiContextRequest(event.data)) {
+        if (
+            handleHeadersRequest(event.data) ||
+            handleGeminiContextRequest(event.data) ||
+            handleRequestContextInvalidation(event.data)
+        ) {
             return;
         }
         const message = event.data as Partial<SessionInitMessage>;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
 import type { ConversationData } from '@/utils/types';
 import { runBulkExport } from './orchestrator';
@@ -85,6 +85,87 @@ const terminalReadiness: PlatformReadiness = {
 };
 
 describe('runBulkExport', () => {
+    it('should fail before the ChatGPT list request when authorization is absent', async () => {
+        let requestCount = 0;
+
+        await expect(
+            runBulkExport(
+                { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+                {
+                    getAdapter: () => buildAdapter(),
+                    getAuthHeaders: () => ({ 'x-client-context': 'present' }),
+                    locationHref: () => 'https://chatgpt.com/c/current',
+                    fetchImpl: (async () => {
+                        requestCount += 1;
+                        return new Response('', { status: 500 });
+                    }) as unknown as typeof fetch,
+                },
+            ),
+        ).rejects.toThrow('ChatGPT bulk export requires captured authorization.');
+
+        expect(requestCount).toBe(0);
+    });
+
+    it('should fail before Gemini list or detail requests when the at context is absent', async () => {
+        let requestCount = 0;
+        const adapter = { name: 'Gemini', extractConversationId: () => null } as unknown as LLMPlatform;
+
+        await expect(
+            runBulkExport(
+                { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+                {
+                    getAdapter: () => adapter,
+                    getAuthHeaders: () => ({ authorization: 'Bearer test' }),
+                    getGeminiBatchexecuteContext: () => ({ updatedAt: 1 }),
+                    locationHref: () => 'https://gemini.google.com/app/current',
+                    fetchImpl: (async () => {
+                        requestCount += 1;
+                        return new Response('', { status: 500 });
+                    }) as unknown as typeof fetch,
+                },
+            ),
+        ).rejects.toThrow('Gemini bulk export requires captured batchexecute at context.');
+
+        expect(requestCount).toBe(0);
+    });
+
+    it('should invalidate the provider context when a bulk request receives 401 or 403', async () => {
+        for (const [platformName, status, adapter, locationHref, authHeaders, geminiContext] of [
+            [
+                'ChatGPT',
+                401,
+                buildAdapter(),
+                'https://chatgpt.com/c/current',
+                { authorization: 'Bearer stale' },
+                undefined,
+            ],
+            [
+                'Gemini',
+                403,
+                { name: 'Gemini', extractConversationId: () => null } as unknown as LLMPlatform,
+                'https://gemini.google.com/app/current',
+                undefined,
+                { at: 'valid-at', updatedAt: 1 },
+            ],
+        ] as const) {
+            const invalidateAuthContext = mock();
+
+            await runBulkExport(
+                { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+                {
+                    getAdapter: () => adapter,
+                    getAuthHeaders: () => authHeaders,
+                    getGeminiBatchexecuteContext: () => geminiContext,
+                    invalidateAuthContext,
+                    locationHref: () => locationHref,
+                    fetchImpl: (async () => new Response('', { status })) as unknown as typeof fetch,
+                },
+            );
+
+            expect(invalidateAuthContext).toHaveBeenCalledWith(platformName);
+        }
+    });
+
     it('should list, fetch, annotate, download, and report canonical exports', async () => {
         const conversationId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
         const conversation = buildConversation(conversationId, 'Export title');
@@ -145,7 +226,7 @@ describe('runBulkExport', () => {
             { limit: 1, delayMs: 300, timeoutMs: 5_000 },
             {
                 getAdapter: () => buildAdapter(),
-                getAuthHeaders: () => undefined,
+                getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/current',
                 sleepImpl: async () => {},
                 downloadImpl: () => {},
@@ -177,7 +258,7 @@ describe('runBulkExport', () => {
             { limit: 2, delayMs: 0, timeoutMs: 5_000 },
             {
                 getAdapter: () => buildAdapter(),
-                getAuthHeaders: () => undefined,
+                getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/current',
                 downloadImpl: (_payload, filename) => filename !== firstId,
                 onProgress: (message) => progress.push(message),
@@ -211,7 +292,7 @@ describe('runBulkExport', () => {
             { limit: 1, delayMs: 0, timeoutMs: 5_000 },
             {
                 getAdapter: () => adapter,
-                getAuthHeaders: () => undefined,
+                getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/current',
                 downloadImpl: () => {
                     downloadCount += 1;
@@ -249,7 +330,7 @@ describe('runBulkExport', () => {
             { limit: 1, delayMs: 0, timeoutMs: 5_000 },
             {
                 getAdapter: () => adapter,
-                getAuthHeaders: () => undefined,
+                getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/current',
                 downloadImpl: () => {
                     downloadCount += 1;
@@ -278,7 +359,7 @@ describe('runBulkExport', () => {
             { limit: 2, delayMs: 0, timeoutMs: 5_000 },
             {
                 getAdapter: () => buildAdapter(),
-                getAuthHeaders: () => undefined,
+                getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                 locationHref: () => 'https://chatgpt.com/c/current',
                 downloadImpl: () => true,
                 fetchImpl: (async (input: RequestInfo | URL) => {
@@ -318,7 +399,7 @@ describe('runBulkExport', () => {
                 { limit: 1, delayMs: 0, timeoutMs: 5_000 },
                 {
                     getAdapter: () => ({ ...buildAdapter(), parseInterceptedData }),
-                    getAuthHeaders: () => undefined,
+                    getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                     locationHref: () => 'https://chatgpt.com/c/current',
                     onProgress: (message) => progress.push(message),
                     fetchImpl: (async (input: RequestInfo | URL) => {
@@ -355,7 +436,7 @@ describe('runBulkExport', () => {
                 { limit: 2, delayMs: 0, timeoutMs: 5_000 },
                 {
                     getAdapter: () => buildAdapter(),
-                    getAuthHeaders: () => undefined,
+                    getAuthHeaders: () => ({ authorization: 'Bearer test' }),
                     locationHref: () => 'https://chatgpt.com/c/current',
                     onProgress: (message) => progress.push(message),
                     downloadImpl: () => {

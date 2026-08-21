@@ -29,6 +29,7 @@ export type FetchContext = {
     delayMs?: number;
     platformName: string;
     requestCount: number;
+    invalidateAuthContext?: (platformName: string) => void;
     signal?: AbortSignal;
 };
 
@@ -206,6 +207,13 @@ const processFetchResponse = async (
     attempt: number,
     signal: AbortSignal,
 ): Promise<AttemptOutcome> => {
+    if (response.status === 401 || response.status === 403) {
+        try {
+            context.invalidateAuthContext?.(context.platformName);
+        } catch {
+            // Context invalidation is defensive and must not mask the fetch result.
+        }
+    }
     if (response.status === 429 && attempt >= MAX_429_RETRIES) {
         return { result: buildFailedFetchResult(429, 'Rate limit retries exhausted') };
     }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
 import { setupMainWorldBridge, shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import {
+    getGeminiBatchexecuteContext,
     maybeCaptureGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
 } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
@@ -9,6 +10,7 @@ import {
     GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
     GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
 } from '@/utils/gemini-batchexecute-bridge';
+import { REQUEST_CONTEXT_INVALIDATION_MESSAGE } from '@/features/runtime/request-context-invalidation';
 import { PLATFORM_HEADERS_REQUEST_MESSAGE, PLATFORM_HEADERS_RESPONSE_MESSAGE } from '@/utils/platform-header-bridge';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
@@ -115,5 +117,65 @@ describe('bootstrap-main-bridge', () => {
                 windowInstance.location.origin,
             );
         });
+    });
+
+    it('should clear only the requested provider after a token-validated invalidation request', async () => {
+        platformHeaderStore.update('ChatGPT', { authorization: 'Bearer chatgpt-stale' });
+        platformHeaderStore.update('Gemini', { authorization: 'Bearer gemini-stale' });
+        setupMainWorldBridge();
+
+        windowInstance.postMessage(
+            {
+                type: REQUEST_CONTEXT_INVALIDATION_MESSAGE,
+                platformName: 'ChatGPT',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(platformHeaderStore.get('ChatGPT')).toBeUndefined();
+        expect(platformHeaderStore.get('Gemini')).toEqual({ authorization: 'Bearer gemini-stale' });
+    });
+
+    it('should reject invalidation requests with a missing or mismatched token', async () => {
+        platformHeaderStore.update('ChatGPT', { authorization: 'Bearer chatgpt-stale' });
+        setupMainWorldBridge();
+
+        for (const token of [undefined, 'bk:wrong-token']) {
+            windowInstance.postMessage(
+                {
+                    type: REQUEST_CONTEXT_INVALIDATION_MESSAGE,
+                    platformName: 'ChatGPT',
+                    ...(token ? { __blackiyaToken: token } : {}),
+                },
+                windowInstance.location.origin,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        expect(platformHeaderStore.get('ChatGPT')).toEqual({ authorization: 'Bearer chatgpt-stale' });
+    });
+
+    it('should clear Gemini batchexecute context with the provider headers', async () => {
+        platformHeaderStore.update('Gemini', { authorization: 'Bearer gemini-stale' });
+        maybeCaptureGeminiBatchexecuteContext(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc&at=ignored',
+            'f.req=%5B%5D&at=STALE-AT&',
+        );
+        setupMainWorldBridge();
+
+        windowInstance.postMessage(
+            {
+                type: REQUEST_CONTEXT_INVALIDATION_MESSAGE,
+                platformName: 'Gemini',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(platformHeaderStore.get('Gemini')).toBeUndefined();
+        expect(getGeminiBatchexecuteContext()).toBeUndefined();
     });
 });
