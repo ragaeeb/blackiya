@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Blackiya browser harness</title>
+        <title>Blackiya v3 browser harness</title>
         <style>
             :root {
                 color-scheme: light;
@@ -21,370 +21,163 @@
                 min-width: 320px;
             }
 
-            .app-shell {
-                min-height: 100vh;
-                display: grid;
-                grid-template-rows: 58px 1fr;
-            }
-
-            .topbar {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 16px;
-                padding: 0 24px;
-                border-bottom: 1px solid #e5e5e5;
-                background: #fff;
-            }
-
-            .brand {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                font-weight: 700;
-            }
-
-            .brand-mark {
-                display: grid;
-                place-items: center;
-                width: 28px;
-                height: 28px;
-                border-radius: 8px;
-                background: #10a37f;
-                color: #fff;
-                font-size: 14px;
-            }
-
-            .thread-title {
-                color: #6b7280;
-                font-size: 13px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-
-            .page-owned-header-host {
-                min-width: 120px;
-                min-height: 32px;
-            }
-
-            .workspace {
-                display: grid;
-                grid-template-columns: minmax(0, 1fr) 360px;
-                gap: 24px;
-                width: min(1240px, calc(100% - 48px));
+            .shell {
+                width: min(900px, calc(100% - 32px));
                 margin: 0 auto;
-                padding: 32px 0 48px;
+                padding: 48px 0;
             }
 
-            .conversation {
-                min-width: 0;
-                padding: 16px 0 0;
-            }
-
-            .message {
-                display: grid;
-                grid-template-columns: 36px minmax(0, 1fr);
-                gap: 14px;
-                padding: 24px 28px;
-                border: 1px solid #e5e5e5;
-                background: #fff;
-            }
-
-            .message + .message {
-                border-top: 0;
-            }
-
-            .message:first-of-type {
-                border-radius: 14px 14px 0 0;
-            }
-
-            .message:last-of-type {
-                border-radius: 0 0 14px 14px;
-            }
-
-            .avatar {
-                display: grid;
-                place-items: center;
-                width: 32px;
-                height: 32px;
-                border-radius: 9px;
-                font-size: 13px;
-                font-weight: 700;
-            }
-
-            .avatar.user {
-                background: #ececf1;
-                color: #343541;
-            }
-
-            .avatar.assistant {
-                background: #10a37f;
-                color: #fff;
-            }
-
-            .message-role {
-                margin: 0 0 6px;
-                font-size: 12px;
-                font-weight: 700;
-                color: #6b7280;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-            }
-
-            .message p {
-                margin: 0;
-                line-height: 1.65;
-            }
-
-            .file-card {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 16px;
-                margin-top: 18px;
-                padding: 14px 16px;
-                border: 1px solid #d9e7e1;
-                border-radius: 12px;
-                background: #f3fbf7;
-            }
-
-            .file-name {
-                display: block;
-                font-weight: 700;
-            }
-
-            .file-kind {
-                display: block;
-                margin-top: 3px;
-                color: #6b7280;
-                font-size: 12px;
-            }
-
-            .file-download {
-                min-height: 34px;
-                padding: 0 12px;
-                border: 1px solid #10a37f;
-                border-radius: 8px;
-                background: #fff;
-                color: #0d8a6a;
-                font: inherit;
-                font-size: 12px;
-                font-weight: 700;
-                cursor: pointer;
-            }
-
-            .file-download:hover {
-                background: #e8f8f1;
-            }
-
-            .artifact-preview {
-                margin-top: 16px;
-                padding: 18px;
-                border: 1px solid #cfd8e3;
-                border-radius: 14px;
-                background: #fff;
-            }
-
-            .artifact-preview h2 {
-                margin: 0 0 12px;
-                font-size: 16px;
-            }
-
-            .artifact-preview pre {
-                max-height: 180px;
-                overflow: auto;
-                margin: 0;
-                padding: 12px;
-                border-radius: 8px;
-                background: #202123;
-                color: #d1fae5;
-                font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-            }
-
-            .status-card {
-                align-self: start;
-                position: sticky;
-                top: 24px;
-                padding: 20px;
+            .card {
+                padding: 28px;
                 border: 1px solid #dedede;
-                border-radius: 16px;
+                border-radius: 18px;
                 background: #fff;
-                box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
             }
 
-            .status-card h1 {
+            h1 {
                 margin: 0;
-                font-size: 17px;
+                font-size: 28px;
             }
 
             .eyebrow {
-                margin: 0 0 6px;
-                color: #10a37f;
-                font-size: 11px;
+                margin: 0 0 8px;
+                color: #0d8a6a;
+                font-size: 12px;
                 font-weight: 800;
                 letter-spacing: 0.1em;
                 text-transform: uppercase;
             }
 
-            .status-copy {
-                margin: 10px 0 18px;
-                color: #6b7280;
-                font-size: 13px;
-                line-height: 1.5;
+            .copy {
+                color: #5f6368;
+                line-height: 1.6;
             }
 
-            .harness-actions {
+            .facts {
                 display: grid;
-                gap: 8px;
-                margin-bottom: 18px;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 12px;
+                margin: 24px 0;
             }
 
-            .harness-actions button {
-                min-height: 36px;
-                padding: 0 12px;
-                border: 1px solid #d1d5db;
-                border-radius: 8px;
-                background: #fff;
-                color: #374151;
-                font: inherit;
-                font-size: 13px;
-                cursor: pointer;
-            }
-
-            .harness-actions button:hover {
-                border-color: #10a37f;
-                color: #0d8a6a;
-            }
-
-            .state-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-                margin-bottom: 18px;
-            }
-
-            .state-cell {
-                padding: 10px;
-                border-radius: 9px;
+            .fact {
+                padding: 12px;
+                border-radius: 10px;
                 background: #f7f7f8;
             }
 
-            .state-label {
+            .fact-label {
                 display: block;
                 margin-bottom: 4px;
                 color: #6b7280;
-                font-size: 11px;
+                font-size: 12px;
             }
 
-            .state-value {
-                font-size: 13px;
+            .fact-value {
+                display: block;
+                overflow-wrap: anywhere;
+                font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+            }
+
+            button {
+                min-height: 42px;
+                padding: 0 18px;
+                border: 0;
+                border-radius: 9px;
+                background: #10a37f;
+                color: #fff;
+                font: inherit;
+                font-weight: 700;
+                cursor: pointer;
+            }
+
+            button:disabled {
+                cursor: wait;
+                opacity: 0.65;
+            }
+
+            .status {
+                min-height: 24px;
+                margin: 18px 0 0;
+                color: #0d8a6a;
                 font-weight: 700;
             }
 
-            .log {
-                max-height: 230px;
+            .download-count {
+                color: #5f6368;
+                font-size: 13px;
+            }
+
+            pre {
+                max-height: 260px;
                 overflow: auto;
-                padding: 10px;
-                border-radius: 9px;
+                margin: 18px 0 0;
+                padding: 14px;
+                border-radius: 10px;
                 background: #202123;
                 color: #d1fae5;
-                font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+                font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
                 white-space: pre-wrap;
+                overflow-wrap: anywhere;
             }
 
-            .download-output {
-                margin: 12px 0 0;
-                color: #0d8a6a;
+            .log {
+                min-height: 24px;
+                margin-top: 18px;
+                color: #6b7280;
                 font-size: 12px;
-                line-height: 1.45;
             }
 
-            @media (max-width: 860px) {
-                .workspace {
-                    grid-template-columns: 1fr;
+            @media (max-width: 600px) {
+                .shell {
+                    padding: 20px 0;
                 }
 
-                .status-card {
-                    position: static;
+                .card {
+                    padding: 20px;
+                }
+
+                .facts {
+                    grid-template-columns: 1fr;
                 }
             }
         </style>
     </head>
     <body>
-        <div class="app-shell">
-            <header class="topbar">
-                <div class="brand"><span class="brand-mark">B</span><span>ChatGPT</span></div>
-                <div class="thread-title">Bootstrap Mewzimen Evaluator</div>
-                <div id="harness-model-switcher" class="page-owned-header-host"></div>
-            </header>
-            <main class="workspace">
-                <section class="conversation" aria-label="Finished conversation">
-                    <article class="message">
-                        <div class="avatar user">U</div>
-                        <div>
-                            <p class="message-role">User</p>
-                            <p>Please summarize the completed evaluation and explain the result.</p>
-                        </div>
-                    </article>
-                    <article class="message">
-                        <div class="avatar assistant">B</div>
-                        <div>
-                            <p class="message-role">Assistant</p>
-                            <p>The evaluation is complete. The final result is ready to save.</p>
-                            <div class="file-card" id="harness-file-card">
-                                <div>
-                                    <span class="file-name">review-ledger.json</span>
-                                    <span class="file-kind">Generated file</span>
-                                </div>
-                                <button id="harness-download-file" class="file-download" type="button">
-                                    Download review-ledger.json
-                                </button>
-                            </div>
-                        </div>
-                    </article>
-                    <section id="harness-artifact-preview" class="artifact-preview" hidden aria-live="polite">
-                        <h2>Library / review-ledger.json</h2>
-                        <pre>{
-  "status": "complete",
-  "source": "browser harness"
-}</pre>
-                    </section>
+        <main class="shell">
+            <section class="card" aria-labelledby="harness-title">
+                <p class="eyebrow">Deterministic v3 browser harness</p>
+                <h1 id="harness-title">Terminal conversation export</h1>
+                <p class="copy">
+                    This page calls the v3 single-export kernel only after an explicit click. It does not simulate
+                    lifecycle state, cached captures, warm-fetch recovery, or a real provider session.
+                </p>
+                <div class="facts">
+                    <div class="fact">
+                        <span class="fact-label">Response mode</span>
+                        <span class="fact-value" data-testid="harness-mode"></span>
+                    </div>
+                    <div class="fact">
+                        <span class="fact-label">Conversation ID</span>
+                        <span class="fact-value" data-testid="harness-conversation-id"></span>
+                    </div>
+                    <div class="fact">
+                        <span class="fact-label">Downloads</span>
+                        <span class="fact-value" data-testid="harness-download-count">0</span>
+                    </div>
+                </div>
+                <div id="harness-model-switcher" hidden></div>
+                <button id="harness-save-json" type="button">Save JSON</button>
+                <button id="harness-download-file" type="button">Download review-ledger.json</button>
+                <p class="status" data-testid="harness-status" role="status"></p>
+                <section id="harness-artifact-preview" hidden aria-live="polite">
+                    <p>Artifact preview opened.</p>
                 </section>
-                <aside class="status-card">
-                    <p class="eyebrow">Local browser harness</p>
-                    <h1>Missed history capture</h1>
-                    <p class="status-copy">
-                        This page exercises the v3 click-time canonical JSON export. It also replaces the page-owned
-                        artifact host when you click Download so the control survival regression stays visible.
-                    </p>
-                    <div class="harness-actions">
-                        <button id="harness-reset" type="button">Simulate extension reload</button>
-                        <button id="harness-force-save" type="button">Run Force Save</button>
-                    </div>
-                    <div class="state-grid">
-                        <div class="state-cell">
-                            <span class="state-label">Control</span>
-                            <span class="state-value">Force Save</span>
-                        </div>
-                        <div class="state-cell">
-                            <span class="state-label">Readiness</span>
-                            <span class="state-value">Click-time</span>
-                        </div>
-                        <div class="state-cell">
-                            <span class="state-label">Stream lane</span>
-                            <span class="state-value">Raw capture</span>
-                        </div>
-                        <div class="state-cell">
-                            <span class="state-label">Download</span>
-                            <span class="state-value">Host replacement safe</span>
-                        </div>
-                    </div>
-                    <div id="harness-event-log" class="log" aria-live="polite"></div>
-                    <p id="harness-download-output" class="download-output"></p>
-                </aside>
-            </main>
-        </div>
+                <pre data-testid="harness-download-output" hidden></pre>
+                <div class="log" data-testid="harness-log" aria-live="polite"></div>
+            </section>
+        </main>
         <script type="module" src="/harness.js"></script>
     </body>
 </html>

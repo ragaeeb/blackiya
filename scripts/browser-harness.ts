@@ -1,4 +1,8 @@
-import { createHarnessConversationPayload, HARNESS_CONVERSATION_ID } from '../harness/fixture';
+import {
+    createHarnessConversationPayload,
+    HARNESS_CONVERSATION_ID,
+    type HarnessResponseMode,
+} from '../harness/fixture';
 
 const htmlFile = new URL('../harness/index.html', import.meta.url);
 const clientEntry = new URL('../harness/main.ts', import.meta.url);
@@ -33,7 +37,9 @@ const server = Bun.serve({
 
         if (url.pathname.startsWith('/backend-api/conversation/')) {
             const conversationId = url.pathname.split('/').at(-1) ?? HARNESS_CONVERSATION_ID;
-            return Response.json(createHarnessConversationPayload(conversationId));
+            const mode: HarnessResponseMode =
+                url.searchParams.get('mode') === 'not-terminal' ? 'not-terminal' : 'success';
+            return Response.json(createHarnessConversationPayload(conversationId, mode));
         }
 
         return new Response(await Bun.file(htmlFile).text(), {
@@ -43,6 +49,6 @@ const server = Bun.serve({
 });
 
 console.log(`Blackiya browser harness: http://127.0.0.1:${server.port}/c/${HARNESS_CONVERSATION_ID}`);
-console.log('The page starts with a missed page-owned capture and exercises the real warm-fetch recovery path.');
+console.log('The harness uses a local terminal/non-terminal fixture and the v3 single-export kernel.');
 
 await new Promise(() => {});

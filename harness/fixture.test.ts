@@ -21,13 +21,26 @@ describe('browser harness fixture', () => {
         expect(adapter.evaluateReadiness?.(parsed!)).toMatchObject({ ready: true, terminal: true });
     });
 
+    it('should provide a non-terminal payload for deterministic failure coverage', () => {
+        const adapter = createChatGPTAdapter();
+        const payload = createHarnessConversationPayload(HARNESS_CONVERSATION_ID, 'not-terminal');
+        const parsed = adapter.parseInterceptedData(
+            JSON.stringify(payload),
+            `http://127.0.0.1:4177/backend-api/conversation/${HARNESS_CONVERSATION_ID}`,
+        );
+
+        expect(adapter.evaluateReadiness?.(parsed!)).toMatchObject({
+            ready: false,
+            terminal: false,
+            reason: 'assistant-in-progress',
+        });
+    });
+
     it('should model ChatGPT replacing the page host when a file download opens the artifact preview', () => {
         const windowInstance = new Window();
         const { document } = windowInstance;
-        document.body.innerHTML = `
-            <header><div id="harness-model-switcher"></div></header>
-            <section id="harness-artifact-preview" hidden></section>
-        `;
+        document.body.innerHTML =
+            '<header><div id="harness-model-switcher"></div></header><section id="harness-artifact-preview" hidden></section>';
         const originalHost = document.querySelector('#harness-model-switcher');
 
         simulateChatGPTArtifactDownload(document as unknown as Document);

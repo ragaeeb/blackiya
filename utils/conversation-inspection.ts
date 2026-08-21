@@ -1,3 +1,7 @@
+/**
+ * Legacy export-metadata dependency retained by the active runner.
+ * It is not part of the v3 single-export kernel's JSON path.
+ */
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 const MODEL_PLACEHOLDERS = new Set(['auto', 'unknown', 'snapshot']);

@@ -58,3 +58,7 @@ export const addBoundedSetValue = <T>(set: Set<T>, value: T, maxEntries: number)
         set.delete(oldest);
     }
 };
+/**
+ * Legacy runtime cache primitive retained by the active interceptor/runner.
+ * It is not a v3 stream-debug or single-export data store.
+ */

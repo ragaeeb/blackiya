@@ -1,3 +1,8 @@
+/**
+ * Legacy runner dependency retained for the active interceptor/runtime.
+ * The v3 single-export kernel uses adapter readiness instead; this helper is
+ * not a standalone v3 export surface.
+ */
 import type { ConversationData, Message } from '@/utils/types';
 
 const trimmedString = (value: unknown) => {

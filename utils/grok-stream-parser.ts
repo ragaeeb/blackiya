@@ -1,3 +1,7 @@
+/**
+ * Legacy Grok lifecycle parser retained by the active interceptor.
+ * v3 stream-debug capture records raw frames and does not use this parser.
+ */
 import { collectLikelyTextCandidates } from '@/utils/text-candidate-collector';
 import { dedupePreserveOrder } from '@/utils/text-utils';
 

@@ -2,29 +2,7 @@ import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 export const HARNESS_CONVERSATION_ID = '6a875695-fe84-83ea-a27e-632934e225b7';
 
-/**
- * Reproduces the ChatGPT artifact preview transition used by the browser
- * harness. Opening a downloadable file replaces page-owned header controls
- * while keeping the conversation document alive.
- */
-export const simulateChatGPTArtifactDownload = (document: Document) => {
-    const pageOwnedHost = document.querySelector<HTMLElement>('#harness-model-switcher');
-    if (!pageOwnedHost) {
-        throw new Error('Harness page-owned host is missing');
-    }
-
-    const replacementHost = document.createElement('div');
-    replacementHost.id = 'harness-model-switcher';
-    replacementHost.setAttribute('data-harness-replaced', 'true');
-    pageOwnedHost.replaceWith(replacementHost);
-
-    const artifactPreview = document.querySelector<HTMLElement>('#harness-artifact-preview');
-    if (!artifactPreview) {
-        throw new Error('Harness artifact preview is missing');
-    }
-    artifactPreview.hidden = false;
-    artifactPreview.setAttribute('data-harness-open', 'true');
-};
+export type HarnessResponseMode = 'success' | 'not-terminal';
 
 const createMessage = (
     id: string,
@@ -32,13 +10,14 @@ const createMessage = (
     text: string,
     endTurn: boolean,
     timestamp: number,
+    status: Message['status'] = 'finished_successfully',
 ): Message => ({
     id,
     author: { role, name: null, metadata: {} },
     create_time: timestamp,
     update_time: timestamp,
     content: { content_type: 'text', parts: [text] },
-    status: 'finished_successfully',
+    status,
     end_turn: endTurn,
     weight: 1,
     metadata: {},
@@ -54,16 +33,17 @@ const createNode = (id: string, message: Message | null, parent: string | null, 
 });
 
 /**
- * Returns a deliberately small, finished ChatGPT history payload.
- * The browser harness serves this through a local backend-api route so the
- * real adapter parser and click-time detail export path can consume it.
+ * Returns a deliberately small ChatGPT history payload. The non-terminal
+ * variant is used by the browser test to prove that Save JSON fails closed.
  */
 export const createHarnessConversationPayload = (
     conversationId: string = HARNESS_CONVERSATION_ID,
+    mode: HarnessResponseMode = 'success',
 ): ConversationData => {
     const rootId = `harness-root-${conversationId}`;
     const userId = `harness-user-${conversationId}`;
     const assistantId = `harness-assistant-${conversationId}`;
+    const terminal = mode === 'success';
 
     return {
         title: 'Bootstrap Mewzimen Evaluator',
@@ -89,8 +69,9 @@ export const createHarnessConversationPayload = (
                     assistantId,
                     'assistant',
                     'The evaluation is complete. The final result is ready to save.',
-                    true,
+                    terminal,
                     1760000060,
+                    terminal ? 'finished_successfully' : 'in_progress',
                 ),
                 userId,
                 [],
@@ -107,4 +88,23 @@ export const createHarnessConversationPayload = (
         safe_urls: [],
         blocked_urls: [],
     };
+};
+
+export const simulateChatGPTArtifactDownload = (document: Document) => {
+    const pageOwnedHost = document.querySelector('#harness-model-switcher');
+    if (!pageOwnedHost) {
+        throw new Error('Harness page-owned host is missing');
+    }
+
+    const replacementHost = document.createElement('div');
+    replacementHost.id = 'harness-model-switcher';
+    replacementHost.setAttribute('data-harness-replaced', 'true');
+    pageOwnedHost.replaceWith(replacementHost);
+
+    const artifactPreview = document.querySelector<HTMLElement>('#harness-artifact-preview');
+    if (!artifactPreview) {
+        throw new Error('Harness artifact preview is missing');
+    }
+    artifactPreview.hidden = false;
+    artifactPreview.setAttribute('data-harness-open', 'true');
 };
