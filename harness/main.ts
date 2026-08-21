@@ -1,6 +1,10 @@
 import { performSingleExport } from '@/features/single-export/single-export-service';
 import { createChatGPTAdapter } from '@/platforms/chatgpt';
-import { HARNESS_CONVERSATION_ID, simulateChatGPTArtifactDownload } from './fixture';
+import {
+    HARNESS_AUTHORIZATION,
+    HARNESS_CONVERSATION_ID,
+    simulateChatGPTArtifactDownload,
+} from './fixture';
 
 const target = <T extends Element>(selector: string): T => {
     const element = document.querySelector<T>(selector);
@@ -14,6 +18,8 @@ const resolveMode = (): 'success' | 'not-terminal' | 'multimodal' => {
     const mode = new URL(window.location.href).searchParams.get('mode');
     return mode === 'not-terminal' || mode === 'multimodal' ? mode : 'success';
 };
+
+const shouldExerciseRelay = (): boolean => new URL(window.location.href).searchParams.get('relay') === '1';
 
 const parseConversationId = (url: string): string | null => {
     try {
@@ -58,13 +64,51 @@ class BrowserHarness {
         });
         this.artifactDownload.addEventListener('click', () => {
             simulateChatGPTArtifactDownload(document);
+            const extensionControls = document.querySelector('[data-blackiya-export-controls="1"]');
             this.writeLog(
-                this.saveButton.isConnected
+                extensionControls?.isConnected
                     ? 'Download review-ledger.json replaced the page host; Save JSON remained connected.'
+                    : this.saveButton.isConnected
+                      ? 'Download review-ledger.json replaced the page host; page Save JSON remained connected.'
                     : 'Download review-ledger.json removed Save JSON unexpectedly.',
             );
         });
         this.writeStatus('Ready for an explicit Save JSON click.');
+        void this.seedAuthenticatedContext();
+        if (shouldExerciseRelay()) {
+            void this.seedGenerationStream();
+        }
+    }
+
+    private async seedAuthenticatedContext() {
+        try {
+            const response = await fetch('/backend-api/conversations?limit=1', {
+                credentials: 'include',
+                headers: { authorization: HARNESS_AUTHORIZATION },
+            });
+            if (!response.ok) {
+                this.writeLog(`Authenticated fixture seed failed (${response.status}).`);
+            }
+        } catch {
+            this.writeLog('Authenticated fixture seed failed before a response.');
+        }
+    }
+
+    private async seedGenerationStream() {
+        try {
+            const response = await fetch('/backend-api/f/conversation', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    authorization: HARNESS_AUTHORIZATION,
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({ harness: 'stream-debug' }),
+            });
+            await response.text();
+        } catch {
+            this.writeLog('Fixture stream seed failed before a response.');
+        }
     }
 
     private async saveJson() {
@@ -78,7 +122,7 @@ class BrowserHarness {
             const result = await performSingleExport(undefined, {
                 resolveAdapter: () => this.adapter,
                 getPageUrl: () => window.location.href,
-                getAuthHeaders: () => ({ authorization: 'Bearer harness-test-token' }),
+                getAuthHeaders: () => ({ authorization: HARNESS_AUTHORIZATION }),
                 fetchImpl: fetch,
                 downloadJson: (jsonString, filename) => this.downloadJson(jsonString, filename),
             });

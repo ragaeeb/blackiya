@@ -1,0 +1,34 @@
+{
+    "manifest_version": 3,
+    "name": "Blackiya Dev Debug Relay",
+    "version": "0.1.0",
+    "description": "Opt-in localhost-only diagnostics relay for Blackiya development.",
+    "permissions": ["storage"],
+    "host_permissions": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+    ],
+    "background": {
+        "service_worker": "relay-background.js"
+    },
+    "action": {
+        "default_title": "Blackiya Dev Relay",
+        "default_popup": "relay-enable.html"
+    },
+    "content_scripts": [
+        {
+            "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+            "run_at": "document_start",
+            "js": ["relay-page-hook.js"],
+            "world": "MAIN"
+        },
+        {
+            "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+            "run_at": "document_start",
+            "js": ["relay-content.js"],
+            "world": "ISOLATED"
+        }
+    ]
+}

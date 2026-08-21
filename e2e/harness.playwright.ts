@@ -2,7 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
-import { HARNESS_CONVERSATION_ID } from '../harness/fixture';
+import { HARNESS_AUTHORIZATION, HARNESS_CONVERSATION_ID } from '../harness/fixture';
 
 const port = 4178 + (process.pid % 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -51,6 +51,15 @@ test.afterAll(() => {
     harnessProcess = undefined;
 });
 
+test('requires the deterministic authorization header for provider fixtures', async () => {
+    const unauthenticated = await fetch(`${baseUrl}/backend-api/conversation/${HARNESS_CONVERSATION_ID}`);
+    expect(unauthenticated.status).toBe(401);
+    const authenticated = await fetch(`${baseUrl}/backend-api/conversation/${HARNESS_CONVERSATION_ID}`, {
+        headers: { authorization: HARNESS_AUTHORIZATION },
+    });
+    expect(authenticated.status).toBe(200);
+});
+
 test('saves the finished harness conversation through the v3 single-export path', async ({ page }) => {
     await page.goto(`${baseUrl}/c/${HARNESS_CONVERSATION_ID}?mode=success`);
 
@@ -85,7 +94,12 @@ test('saves a finished multimodal harness conversation', async ({ page }) => {
 
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Save JSON' }).click();
-    await downloadPromise;
+    const download = await downloadPromise;
     await expect(page.locator('[data-testid="harness-status"]')).toHaveText('Saved terminal conversation');
     await expect(page.locator('[data-testid="harness-download-count"]')).toHaveText('1');
+    const downloadPath = await download.path();
+    expect(downloadPath).not.toBeNull();
+    if (downloadPath) {
+        expect((await readFile(downloadPath)).toString()).toContain('"content_type": "multimodal_text"');
+    }
 });

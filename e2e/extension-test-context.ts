@@ -8,13 +8,18 @@ type ExtensionTestContext = {
     userDataDir: string;
 };
 
-export const launchExtensionContext = async (extensionPath: string): Promise<ExtensionTestContext> => {
+export const launchExtensionContext = async (
+    extensionPath: string,
+    additionalExtensionPaths: string[] = [],
+): Promise<ExtensionTestContext> => {
     const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'blackiya-e2e-'));
+    const extensionPaths = [extensionPath, ...additionalExtensionPaths];
+    const extensionArgument = extensionPaths.join(',');
     const context = await chromium.launchPersistentContext(userDataDir, {
         // Chromium does not load MV3 extensions in headless mode. The headed
         // context is required for the service worker and popup smoke tests.
         headless: false,
-        args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
+        args: [`--disable-extensions-except=${extensionArgument}`, `--load-extension=${extensionArgument}`],
     });
     return { context, userDataDir };
 };

@@ -176,7 +176,13 @@ Debug artifacts:
 
 - Stream-debug record(s) — raw ordered stream frames, exported explicitly.
 - HAR analysis — `bun run har:analyze --input <file.har> ...` for endpoint drift.
-- Deterministic browser harness — `bun run test:e2e -- e2e/harness.playwright.ts` covers terminal success, non-terminal fail-closed behavior, JSON download contents, and artifact-host replacement survival.
+- Deterministic kernel harness — `bun run test:e2e -- e2e/harness.playwright.ts` covers terminal success, non-terminal fail-closed behavior, multimodal terminal JSON, JSON download contents, and the fixture's artifact-host replacement model.
+- MV3 boundary harness — `bun run build && bun run test:e2e -- e2e/harness-extension.playwright.ts` loads the built Blackiya MV3 extension into Chromium, serves the document and provider endpoints from a strict local ChatGPT-origin fixture, captures a fake authorization header through the real interceptor bridge, and verifies the real `Save JSON` control survives the fixture's artifact-host replacement and downloads JSON. This is not a production ChatGPT backend or authenticated-session proof.
+- Development authenticated-browser relay — `bun run browser:harness -- --relay` starts a collector on `http://127.0.0.1:4177/events`. Load `harness/relay-extension` as a separate unpacked development extension, open its popup, enable the relay, and set the collector URL if the port differs. The relay remains disabled by default and is localhost-only. `bun run browser:harness -- --relay --output ./blackiya-relay.ndjson` additionally writes the sanitized event stream to the explicitly selected local file.
+
+The development relay is a sidecar for operating the real ChatGPT tab with the built extension. Its MAIN-world page hook observes only ChatGPT generation transport metadata and the `Save JSON` DOM state; it can also summarize records when the v3 stream-debug export response is explicitly emitted. It forwards sanitized paths, methods, status, frame/byte counts, bounded signal classifications (`done`, `refusal`, `replacement`, `erase`), and Save JSON state transitions. It never reads or forwards cookies, authorization headers, Gemini `at` tokens, request bodies, response text, or exported conversation JSON. The collector applies the same allowlist and query/hash stripping again before accepting an event. The relay extension stores only its enabled flag and localhost endpoint in extension storage; events are kept in collector memory unless `--output` is supplied.
+
+Relay limitations are intentional: it is dev-only and local-only, it does not change the production Blackiya bundle, it does not access the private stream recorder directly, and it does not prove behavior against ChatGPT's production backend. The two-extension Playwright test verifies the sidecar path against the local fixture and asserts that the collector receives no fake auth token, request body, headers, or query string.
 
 Docs:
 

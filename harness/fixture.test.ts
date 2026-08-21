@@ -4,10 +4,18 @@ import { createChatGPTAdapter } from '@/platforms/chatgpt';
 import {
     createHarnessConversationPayload,
     HARNESS_CONVERSATION_ID,
+    HARNESS_AUTHORIZATION,
+    isValidHarnessAuthorization,
     simulateChatGPTArtifactDownload,
 } from './fixture';
 
 describe('browser harness fixture', () => {
+    it('should require the exact fixture authorization value', () => {
+        expect(isValidHarnessAuthorization(HARNESS_AUTHORIZATION)).toBe(true);
+        expect(isValidHarnessAuthorization('Bearer another-token')).toBe(false);
+        expect(isValidHarnessAuthorization(undefined)).toBe(false);
+    });
+
     it('should provide a finished canonical ChatGPT payload', () => {
         const adapter = createChatGPTAdapter();
         const payload = createHarnessConversationPayload();
@@ -54,11 +62,17 @@ describe('browser harness fixture', () => {
         document.body.innerHTML =
             '<header><div id="harness-model-switcher"></div></header><section id="harness-artifact-preview" hidden></section>';
         const originalHost = document.querySelector('#harness-model-switcher');
+        const extensionControls = document.createElement('div');
+        extensionControls.id = 'blackiya-v3-export-controls';
+        extensionControls.setAttribute('data-blackiya-export-controls', '1');
+        document.body.appendChild(extensionControls);
 
         simulateChatGPTArtifactDownload(document as unknown as Document);
 
         expect(document.querySelector('#harness-model-switcher')).not.toBe(originalHost);
         expect(document.querySelector('#harness-model-switcher')?.getAttribute('data-harness-replaced')).toBe('true');
+        expect(document.querySelector('#harness-model-switcher')?.contains(extensionControls)).toBe(true);
+        expect(extensionControls.isConnected).toBe(true);
         const artifactPreview = document.querySelector('#harness-artifact-preview') as unknown as {
             hidden: boolean;
         } | null;

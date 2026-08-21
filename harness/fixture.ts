@@ -1,8 +1,12 @@
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 export const HARNESS_CONVERSATION_ID = '6a875695-fe84-83ea-a27e-632934e225b7';
+export const HARNESS_AUTHORIZATION = 'Bearer harness-test-token';
 
 export type HarnessResponseMode = 'success' | 'not-terminal' | 'multimodal';
+
+export const isValidHarnessAuthorization = (authorization: string | null | undefined): boolean =>
+    authorization === HARNESS_AUTHORIZATION;
 
 const createMessage = (
     id: string,
@@ -108,6 +112,11 @@ export const simulateChatGPTArtifactDownload = (document: Document) => {
     const replacementHost = document.createElement('div');
     replacementHost.id = 'harness-model-switcher';
     replacementHost.setAttribute('data-harness-replaced', 'true');
+
+    const extensionControls = document.querySelector<HTMLElement>('[data-blackiya-export-controls="1"]');
+    if (extensionControls) {
+        replacementHost.appendChild(extensionControls);
+    }
     pageOwnedHost.replaceWith(replacementHost);
 
     const artifactPreview = document.querySelector<HTMLElement>('#harness-artifact-preview');
