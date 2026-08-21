@@ -77,7 +77,8 @@ const isTerminalNonTextAssistant = (message: Message, text: string): boolean =>
     message.status === 'finished_successfully' &&
     message.end_turn === true &&
     text.length === 0 &&
-    (message.content.content_type === 'reasoning_recap' || message.content.content_type === 'thoughts');
+    message.content.content_type !== 'text' &&
+    message.content.content_type !== 'thoughts';
 
 const resolveTerminalAssistantReadiness = (
     activeBranchMessages: Message[],

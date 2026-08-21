@@ -7,12 +7,20 @@ export type Author = {
     metadata: Record<string, unknown>;
 };
 
-/**
- * Content of a message - can be text, thoughts, or other content types
- */
+/** A text or structured artifact part in a provider message. */
+export type MessagePart = string | Record<string, unknown>;
+
+/** Content of a message - can be text, thoughts, or other content types. */
 export type MessageContent = {
-    content_type: 'text' | 'thoughts' | 'reasoning_recap' | 'code' | 'execution_output';
-    parts?: string[];
+    content_type:
+        | 'text'
+        | 'thoughts'
+        | 'reasoning_recap'
+        | 'code'
+        | 'execution_output'
+        | 'multimodal_text'
+        | 'image_asset_pointer';
+    parts?: MessagePart[];
     thoughts?: Array<{
         summary: string;
         content: string;

@@ -79,3 +79,13 @@ test('fails without a download when the harness response is not terminal', async
     await expect(page.locator('[data-testid="harness-status"]')).toHaveText('Failed: not_terminal');
     await expect(page.locator('[data-testid="harness-download-count"]')).toHaveText('0');
 });
+
+test('saves a finished multimodal harness conversation', async ({ page }) => {
+    await page.goto(`${baseUrl}/c/${HARNESS_CONVERSATION_ID}?mode=multimodal`);
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save JSON' }).click();
+    await downloadPromise;
+    await expect(page.locator('[data-testid="harness-status"]')).toHaveText('Saved terminal conversation');
+    await expect(page.locator('[data-testid="harness-download-count"]')).toHaveText('1');
+});

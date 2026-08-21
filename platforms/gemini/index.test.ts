@@ -85,13 +85,13 @@ describe('Conversation data parsing', () => {
 
             const userMsg = messages.find((m) => m.author.role === 'user')!;
             expect(userMsg).toBeDefined();
-            const userText = userMsg.content.parts?.[0] || '';
+            const userText = typeof userMsg.content.parts?.[0] === 'string' ? userMsg.content.parts[0] : '';
             expect(userText.startsWith('ROLE: Expert academic translator')).toBeTrue();
             expect(userText.endsWith('دبر الصلوات يُؤتى بها ما يستطيع الإنسان وليس إلا.')).toBeTrue();
 
             const assistantMsg = messages.find((m) => m.author.role === 'assistant')!;
             expect(assistantMsg).toBeDefined();
-            const assistantText = assistantMsg.content.parts?.[0] || '';
+            const assistantText = typeof assistantMsg.content.parts?.[0] === 'string' ? assistantMsg.content.parts[0] : '';
             expect(assistantText.startsWith('P258071 - The Shaykh: Yes.')).toBeTrue();
             expect(assistantText.endsWith('rforms of them what man is able, and nothing else.')).toBeTrue();
 

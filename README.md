@@ -119,7 +119,7 @@ The extension requires the following host permissions:
 
 1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
 2. Click the **Save JSON** button (the `✓ Saved` state confirms the download).
-3. The export resolves the adapter's deterministic detail candidates, validates the response is terminal, and downloads the complete JSON archive. A candidate fallback is used only for a `404`; there are no retries or time-based recovery paths.
+3. The export resolves the adapter's deterministic detail candidates, validates the response is terminal, and downloads the complete JSON archive. ChatGPT accepts completed multimodal/image artifacts as terminal responses even when they contain no text. A candidate fallback is used only for a `404`; there are no retries or time-based recovery paths.
 
 Downloads use `{conversation-title}_{timestamp}.json`.
 

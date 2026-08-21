@@ -70,7 +70,7 @@ Primary module: `features/single-export/single-export-service.ts`.
    - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
    - Empty/bad body or parse failure → `parse_failure`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
-   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`.
+   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text; in-progress and non-terminal thoughts remain rejected.
 5. On success, serializes the complete platform payload (including the full `mapping` tree and platform-specific raw payload fields, preserved verbatim) and injects the download via `deps.downloadJson(jsonString, filename)`.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:

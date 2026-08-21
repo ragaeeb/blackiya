@@ -36,6 +36,18 @@ describe('browser harness fixture', () => {
         });
     });
 
+    it('should provide a finished multimodal payload for artifact-response coverage', () => {
+        const adapter = createChatGPTAdapter();
+        const payload = createHarnessConversationPayload(HARNESS_CONVERSATION_ID, 'multimodal');
+        const parsed = adapter.parseInterceptedData(
+            JSON.stringify(payload),
+            `http://127.0.0.1:4177/backend-api/conversation/${HARNESS_CONVERSATION_ID}`,
+        );
+
+        expect(parsed?.mapping[payload.current_node]?.message?.content.content_type).toBe('multimodal_text');
+        expect(adapter.evaluateReadiness?.(parsed!)).toMatchObject({ ready: true, terminal: true });
+    });
+
     it('should model ChatGPT replacing the page host when a file download opens the artifact preview', () => {
         const windowInstance = new Window();
         const { document } = windowInstance;

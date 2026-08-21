@@ -10,8 +10,10 @@ const target = <T extends Element>(selector: string): T => {
     return element;
 };
 
-const resolveMode = (): 'success' | 'not-terminal' =>
-    new URL(window.location.href).searchParams.get('mode') === 'not-terminal' ? 'not-terminal' : 'success';
+const resolveMode = (): 'success' | 'not-terminal' | 'multimodal' => {
+    const mode = new URL(window.location.href).searchParams.get('mode');
+    return mode === 'not-terminal' || mode === 'multimodal' ? mode : 'success';
+};
 
 const parseConversationId = (url: string): string | null => {
     try {

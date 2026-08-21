@@ -303,6 +303,52 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(readiness.latestAssistantTextLength).toBe(1);
     });
 
+    it('should accept a finished terminal multimodal response with no assistant text', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+                'user-1': {
+                    id: 'user-1',
+                    parent: 'root',
+                    children: ['assistant-image'],
+                    message: {
+                        id: 'user-1',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Generate a logo'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-image': {
+                    id: 'assistant-image',
+                    parent: 'user-1',
+                    children: [],
+                    message: assistantMessage('assistant-image', {
+                        content: {
+                            content_type: 'multimodal_text',
+                            parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'file-placeholder' }],
+                        },
+                        end_turn: true,
+                    }),
+                },
+            },
+            { current_node: 'assistant-image' },
+        );
+
+        const readiness = evaluateChatGPTReadiness(data);
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-marker');
+        expect(readiness.contentHash).toBeString();
+    });
+
     it('should return assistant-in-progress when any assistant message is in_progress', () => {
         const data = baseConversation({
             root: { id: 'root', message: null, parent: null, children: ['a1'] },

@@ -2,7 +2,7 @@ import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 export const HARNESS_CONVERSATION_ID = '6a875695-fe84-83ea-a27e-632934e225b7';
 
-export type HarnessResponseMode = 'success' | 'not-terminal';
+export type HarnessResponseMode = 'success' | 'not-terminal' | 'multimodal';
 
 const createMessage = (
     id: string,
@@ -11,12 +11,13 @@ const createMessage = (
     endTurn: boolean,
     timestamp: number,
     status: Message['status'] = 'finished_successfully',
+    content: Message['content'] = { content_type: 'text', parts: [text] },
 ): Message => ({
     id,
     author: { role, name: null, metadata: {} },
     create_time: timestamp,
     update_time: timestamp,
-    content: { content_type: 'text', parts: [text] },
+    content,
     status,
     end_turn: endTurn,
     weight: 1,
@@ -43,7 +44,14 @@ export const createHarnessConversationPayload = (
     const rootId = `harness-root-${conversationId}`;
     const userId = `harness-user-${conversationId}`;
     const assistantId = `harness-assistant-${conversationId}`;
-    const terminal = mode === 'success';
+    const terminal = mode !== 'not-terminal';
+    const assistantContent: Message['content'] =
+        mode === 'multimodal'
+            ? ({
+                  content_type: 'multimodal_text',
+                  parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'harness-image' }],
+              })
+            : { content_type: 'text', parts: ['The evaluation is complete. The final result is ready to save.'] };
 
     return {
         title: 'Bootstrap Mewzimen Evaluator',
@@ -72,6 +80,7 @@ export const createHarnessConversationPayload = (
                     terminal,
                     1760000060,
                     terminal ? 'finished_successfully' : 'in_progress',
+                    assistantContent,
                 ),
                 userId,
                 [],
