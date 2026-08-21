@@ -12,10 +12,6 @@ import { hashText } from '@/utils/hash';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 import { normalizeText } from './utils';
 
-type ChatGPTReadinessOptions = {
-    allowInterruptedAssistant?: boolean;
-};
-
 const collectActiveBranchMessages = (data: ConversationData): Message[] => {
     if (!data.mapping[data.current_node]) {
         return [];
@@ -83,55 +79,24 @@ const isTerminalNonTextAssistant = (message: Message, text: string): boolean =>
     text.length === 0 &&
     (message.content.content_type === 'reasoning_recap' || message.content.content_type === 'thoughts');
 
-const resolveTerminalUserOnlyReadiness = (
-    activeBranchMessages: Message[],
-    data: ConversationData,
-): PlatformReadiness | null => {
-    const latestMessage = activeBranchMessages.at(-1);
-    const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
-    const hasFinishedAssistantHistory = activeBranchMessages.slice(0, latestUserIndex).some(hasFinishedAssistantText);
-    if (
-        latestMessage?.author.role !== 'user' ||
-        latestMessage.status === 'in_progress' ||
-        !hasFinishedAssistantHistory
-    ) {
-        return null;
-    }
-    const latestUserText = extractMessageText(latestMessage);
-    const stableText = latestUserText || latestMessage.id || data.current_node;
-    return {
-        ready: true,
-        terminal: true,
-        reason: 'terminal-user-only',
-        contentHash: hashText(stableText),
-        latestAssistantTextLength: latestUserText.length || 1,
-    };
-};
-
 const resolveTerminalAssistantReadiness = (
     activeBranchMessages: Message[],
     data: ConversationData,
-    options: ChatGPTReadinessOptions,
 ): PlatformReadiness | null => {
     const latestMessage = activeBranchMessages.at(-1);
     const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
     const latestMessageText = latestMessage ? extractMessageText(latestMessage) : '';
-    const isInterrupted =
-        options.allowInterruptedAssistant &&
-        latestMessage?.author.role === 'assistant' &&
-        latestMessage.status !== 'error' &&
-        latestMessageText.length === 0;
     if (
         latestMessage?.author.role !== 'assistant' ||
         latestUserIndex < 0 ||
-        (!isTerminalNonTextAssistant(latestMessage, latestMessageText) && !isInterrupted)
+        !isTerminalNonTextAssistant(latestMessage, latestMessageText)
     ) {
         return null;
     }
     return {
         ready: true,
         terminal: true,
-        reason: 'terminal-interrupted',
+        reason: 'terminal-marker',
         contentHash: hashText(latestMessage.id || data.current_node),
         latestAssistantTextLength: 1,
     };
@@ -141,8 +106,8 @@ const resolveTerminalAssistantReadiness = (
  * Evaluates whether a ChatGPT conversation snapshot is ready for canonical export.
  *
  * Readiness requires:
- * - At least one assistant message exists in the current turn on the active branch
- * - A finished assistant text message exists
+ * - The active branch ends in a finished assistant text message or an
+ *   explicit terminal non-text marker
  * - No later assistant message is still `in_progress`
  *
  * `end_turn` is advisory for history payloads. Modern ChatGPT responses can
@@ -150,16 +115,11 @@ const resolveTerminalAssistantReadiness = (
  */
 export const evaluateChatGPTReadiness = (
     data: ConversationData,
-    options: ChatGPTReadinessOptions = {},
 ): PlatformReadiness => {
     const activeBranchMessages = collectActiveBranchMessages(data);
     const assistantMessages = collectCurrentTurnAssistantMessages(data);
 
     if (assistantMessages.length === 0) {
-        const terminalUserOnlyReadiness = resolveTerminalUserOnlyReadiness(activeBranchMessages, data);
-        if (terminalUserOnlyReadiness) {
-            return terminalUserOnlyReadiness;
-        }
         return {
             ready: false,
             terminal: false,
@@ -169,7 +129,7 @@ export const evaluateChatGPTReadiness = (
         };
     }
 
-    const terminalAssistantReadiness = resolveTerminalAssistantReadiness(activeBranchMessages, data, options);
+    const terminalAssistantReadiness = resolveTerminalAssistantReadiness(activeBranchMessages, data);
     if (terminalAssistantReadiness) {
         return terminalAssistantReadiness;
     }
@@ -194,7 +154,7 @@ export const evaluateChatGPTReadiness = (
     if (!latestFinishedText) {
         return {
             ready: false,
-            terminal: true,
+            terminal: false,
             reason: 'assistant-text-missing',
             contentHash: null,
             latestAssistantTextLength: 0,

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { MessageNode } from '@/utils/types';
-import { deriveTitleFromFirstUserMessage, extractMappingModelSlug } from './conversation-normalizer';
+import {
+    deriveTitleFromFirstUserMessage,
+    extractMappingModelSlug,
+    normalizeConversationCandidate,
+} from './conversation-normalizer';
 
 const createMessageNode = (
     id: string,
@@ -29,6 +33,51 @@ const createMessageNode = (
 });
 
 describe('chatgpt conversation normalizer helpers', () => {
+    it('should preserve unknown top-level fields and every canonical mapping branch', () => {
+        const raw = {
+            conversation_id: '696bc3d5-fa84-8328-b209-4d65cb229e59',
+            title: 'Canonical title',
+            create_time: 100,
+            update_time: 200,
+            current_node: 'branch-a',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['user'] },
+                user: {
+                    id: 'user',
+                    message: null,
+                    parent: 'root',
+                    children: ['branch-a', 'branch-b'],
+                    providerNodeField: { source: 'chatgpt' },
+                },
+                'branch-a': {
+                    id: 'branch-a',
+                    message: null,
+                    parent: 'user',
+                    children: [],
+                },
+                'branch-b': {
+                    id: 'branch-b',
+                    message: null,
+                    parent: 'user',
+                    children: [],
+                },
+            },
+            providerTopLevelField: { retained: true },
+        };
+
+        const normalized = normalizeConversationCandidate(raw);
+
+        expect(normalized).not.toBeNull();
+        if (!normalized) {
+            return;
+        }
+        expect((normalized as unknown as Record<string, unknown>).providerTopLevelField).toEqual({ retained: true });
+        expect(normalized.mapping).toEqual(raw.mapping);
+        expect((normalized.mapping.user as unknown as Record<string, unknown>).providerNodeField).toEqual({
+            source: 'chatgpt',
+        });
+    });
+
     it('should prioritize resolved_model_slug globally over model_slug/model', () => {
         const mapping: Record<string, MessageNode> = {
             first: createMessageNode('first', 'assistant', 'a', 100, { model_slug: 'gpt-4o-mini' }),

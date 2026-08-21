@@ -343,13 +343,16 @@ export const parseGrokComConversationV2Payload = (data: unknown, conversationId:
             return null;
         }
 
-        return (
+        const conversation = (
             parseGrokComConversationV2Ndjson(dataStr, conversationId) ??
             parseGrokComConversationV2SinglePayload(dataStr, conversationId)
         );
+        const rawPayload = tryParseJsonIfNeeded(data) ?? data;
+        return conversation ? ({ ...conversation, raw_payload: rawPayload } as ConversationData) : null;
     }
 
-    return parseGrokComConversationV2Chunk(data, conversationId);
+    const conversation = parseGrokComConversationV2Chunk(data, conversationId);
+    return conversation ? ({ ...conversation, raw_payload: data } as ConversationData) : null;
 };
 
 export const parseGrokComResponseNodes = (data: any, conversationId: string): ConversationData | null => {

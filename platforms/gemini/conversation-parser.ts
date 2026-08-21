@@ -340,7 +340,10 @@ export const parseConversationPayload = (
 
     logger.info('[Blackiya/Gemini] Successfully parsed conversation with', Object.keys(mapping).length, 'messages');
 
-    const conversationData = buildGeminiConversationData(conversationId, conversationTitle, mapping, modelName, now);
+    const conversationData = {
+        ...buildGeminiConversationData(conversationId, conversationTitle, mapping, modelName, now),
+        raw_payload: payload,
+    } as ConversationData;
     if (conversationId) {
         activeConvos.set(conversationId, conversationData);
     }

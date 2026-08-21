@@ -103,7 +103,7 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(r.terminal).toBeFalse();
     });
 
-    it('should accept a settled history whose active branch ends with a user message', () => {
+    it('should reject a settled history whose active branch ends with a user message', () => {
         const data = baseConversation(
             {
                 root: { id: 'root', message: null, parent: null, children: ['user-old'] },
@@ -185,14 +185,12 @@ describe('ChatGPT evaluateReadiness', () => {
 
         const r = adapter.evaluateReadiness(data);
 
-        expect(r.ready).toBeTrue();
-        expect(r.terminal).toBeTrue();
-        expect(r.reason).toBe('terminal-user-only');
-        expect(r.contentHash).toBeString();
-        expect(r.latestAssistantTextLength).toBe('Settled latest prompt'.length);
+        expect(r.ready).toBeFalse();
+        expect(r.terminal).toBeFalse();
+        expect(r.reason).toBe('assistant-missing');
     });
 
-    it('should accept a settled active branch ending in an interrupted assistant node', () => {
+    it('should reject an interrupted assistant node without a terminal marker', () => {
         const data = baseConversation(
             {
                 root: { id: 'root', message: null, parent: null, children: ['user-old'] },
@@ -254,13 +252,11 @@ describe('ChatGPT evaluateReadiness', () => {
             { current_node: 'assistant-stopped' },
         );
 
-        const readiness = evaluateChatGPTReadiness(data, { allowInterruptedAssistant: true });
+        const readiness = evaluateChatGPTReadiness(data);
 
-        expect(readiness.ready).toBeTrue();
-        expect(readiness.terminal).toBeTrue();
-        expect(readiness.reason).toBe('terminal-interrupted');
-        expect(readiness.contentHash).toBeString();
-        expect(readiness.latestAssistantTextLength).toBe(1);
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
+        expect(readiness.reason).toBe('assistant-in-progress');
     });
 
     it('should accept a terminal reasoning recap with no assistant text', () => {
@@ -302,7 +298,7 @@ describe('ChatGPT evaluateReadiness', () => {
 
         expect(readiness.ready).toBeTrue();
         expect(readiness.terminal).toBeTrue();
-        expect(readiness.reason).toBe('terminal-interrupted');
+        expect(readiness.reason).toBe('terminal-marker');
         expect(readiness.contentHash).toBeString();
         expect(readiness.latestAssistantTextLength).toBe(1);
     });
@@ -341,7 +337,7 @@ describe('ChatGPT evaluateReadiness', () => {
         });
         const r = adapter.evaluateReadiness(data);
         expect(r.ready).toBeFalse();
-        expect(r.terminal).toBeTrue();
+        expect(r.terminal).toBeFalse();
         expect(r.reason).toBe('assistant-text-missing');
     });
 
@@ -357,7 +353,7 @@ describe('ChatGPT evaluateReadiness', () => {
         });
         const r = adapter.evaluateReadiness(data);
         expect(r.reason).toBe('assistant-text-missing');
-        expect(r.terminal).toBeTrue();
+        expect(r.terminal).toBeFalse();
     });
 
     it('should accept a finished latest text message without relying on end_turn', () => {

@@ -33,6 +33,50 @@ const RESPONSE_NODE_URL = `https://grok.com/rest/app-chat/conversations/${CONV_I
 const LOAD_RESPONSES_URL = `https://grok.com/rest/app-chat/conversations/${CONV_ID}/load-responses`;
 
 describe('Grok Adapter — grok.com REST parsing', () => {
+    it('should preserve all canonical response branches and the raw provider payload', () => {
+        const payload = {
+            conversation: {
+                conversationId: CONV_ID,
+                title: 'Canonical Grok conversation',
+                providerMetadata: { region: 'us' },
+            },
+            responses: [
+                {
+                    responseId: 'user-turn',
+                    message: 'Question',
+                    sender: 'human',
+                    createTime: '2026-01-01T00:00:00.000Z',
+                    partial: false,
+                    providerBranch: 'main',
+                },
+                {
+                    responseId: 'assistant-main',
+                    parentResponseId: 'user-turn',
+                    message: 'Main answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:01.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-alt',
+                    parentResponseId: 'user-turn',
+                    message: 'Alternative answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:02.000Z',
+                    partial: false,
+                },
+            ],
+            providerTopLevelField: { retained: true },
+        };
+
+        const result = grokAdapter.parseInterceptedData(JSON.stringify(payload), META_URL);
+
+        expect(result).not.toBeNull();
+        expect(result?.mapping['assistant-main']?.parent).toBe('user-turn');
+        expect(result?.mapping['assistant-alt']?.parent).toBe('user-turn');
+        expect((result as unknown as Record<string, unknown>).raw_payload).toEqual(payload);
+    });
+
     describe('out-of-order API responses (response-node → load-responses → meta)', () => {
         it('should handle out-of-order grok.com responses and build the correct tree', () => {
             const responseNodes = {

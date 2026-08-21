@@ -17,25 +17,10 @@ import {
     normalizeConversationCandidate,
 } from './conversation-normalizer';
 import { evaluateChatGPTReadiness } from './readiness';
-import { CHATGPT_ENDPOINT_REGISTRY, isChatGptGeneratingFromDom, resolveChatGptButtonInjectionTarget } from './registry';
 import { buildConversationFromSsePayloads, extractSsePayloads } from './sse-parser';
 import { CONVERSATION_ID_PATTERN, HOST_CANDIDATES, isPlaceholderTitle, tryParseJson } from './utils';
 
-// Exported constants used by the interceptor / runner layers
-
-export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = CHATGPT_ENDPOINT_REGISTRY.promptRequestPathPattern;
-
-// Adapter factory
-
 const MAX_TITLE_LENGTH = 80;
-
-const canUseInterruptedReadiness = (): boolean => {
-    const doc = typeof document === 'undefined' ? null : document;
-    // The API snapshot can arrive before ChatGPT renders conversation turns on
-    // a hard refresh. Readiness is based on that canonical snapshot; only an
-    // active generation marker should prevent accepting an interrupted turn.
-    return !isChatGptGeneratingFromDom(doc);
-};
 
 /**
  * Creates a ChatGPT Platform Adapter instance.
@@ -47,14 +32,6 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
     name: 'ChatGPT',
 
     urlMatchPattern: 'https://chatgpt.com/*',
-
-    /**
-     * Matches the GET endpoint for fetching full conversation JSON.
-     * Format: backend-api/conversation/{uuid}
-     */
-    apiEndpointPattern: CHATGPT_ENDPOINT_REGISTRY.apiEndpointPattern,
-
-    completionTriggerPattern: CHATGPT_ENDPOINT_REGISTRY.completionTriggerPattern,
 
     isPlatformUrl: (url: string) => url.includes('chatgpt.com') || url.includes('chat.openai.com'),
 
@@ -98,15 +75,6 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
 
         const potentialId = pathMatch[1]!;
         return CONVERSATION_ID_PATTERN.test(potentialId) ? potentialId : null;
-    },
-
-    /** Extracts conversation ID from a stream_status completion trigger URL. */
-    extractConversationIdFromUrl(url: string): string | null {
-        const match = url.match(/\/backend-api\/(?:f\/)?conversation\/([a-f0-9-]+)\/stream_status/i);
-        if (!match?.[1]) {
-            return null;
-        }
-        return CONVERSATION_ID_PATTERN.test(match[1]) ? match[1] : null;
     },
 
     buildApiUrl: (conversationId: string) => `https://chatgpt.com/backend-api/conversation/${conversationId}`,
@@ -165,12 +133,8 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
         return `${sanitizedTitle}_${timestamp}`;
     },
 
-    getButtonInjectionTarget: () => resolveChatGptButtonInjectionTarget(),
+    evaluateReadiness: (data: ConversationData) => evaluateChatGPTReadiness(data),
 
-    evaluateReadiness: (data: ConversationData) =>
-        evaluateChatGPTReadiness(data, { allowInterruptedAssistant: canUseInterruptedReadiness() }),
-
-    isPlatformGenerating: () => isChatGptGeneratingFromDom(),
 });
 
 /** ChatGPT Platform Adapter singleton. */

@@ -28,6 +28,23 @@ describe('PlatformHeaderStore', () => {
         expect(store.get('ChatGPT')).toEqual({ authorization: 'Bearer new' });
     });
 
+    it('should discard stale identity headers when an account authorization changes', () => {
+        const store = new PlatformHeaderStore();
+        store.update('ChatGPT', { authorization: 'Bearer old', 'oai-device-id': 'device-old' });
+        store.update('ChatGPT', { authorization: 'Bearer new' });
+
+        expect(store.get('ChatGPT')).toEqual({ authorization: 'Bearer new' });
+    });
+
+    it('should expire snapshots after the configured lifetime', () => {
+        let now = 1_000;
+        const store = new PlatformHeaderStore({ maxAgeMs: 100, now: () => now });
+        store.update('ChatGPT', { authorization: 'Bearer abc' });
+
+        now = 1_101;
+        expect(store.get('ChatGPT')).toBeUndefined();
+    });
+
     it('should ignore empty or undefined incoming headers', () => {
         const store = new PlatformHeaderStore();
         store.update('ChatGPT', { authorization: 'Bearer abc' });
