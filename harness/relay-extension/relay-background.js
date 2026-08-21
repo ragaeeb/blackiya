@@ -101,6 +101,9 @@
         if (saveStates.has(value.state)) {
             event.state = value.state;
         }
+        if (typeof value.errorKind === 'string' && /^[a-z_]{1,64}$/.test(value.errorKind)) {
+            event.errorKind = value.errorKind;
+        }
         if (typeof value.disabled === 'boolean') {
             event.disabled = value.disabled;
         }

@@ -4,6 +4,7 @@ import {
     EXPORT_CHAT_BUTTON_ID,
     EXPORT_CONTROLS_CONTAINER_ATTR,
     EXPORT_CONTROLS_CONTAINER_ID,
+    EXPORT_ERROR_KIND_ATTR,
     type ExportActionContext,
     type ExportControls,
     type ExportControlsDependencies,
@@ -124,6 +125,17 @@ export const createExportControls = (
     const setState = (next: ExportControlsState) => {
         state = next;
         render();
+        if (next !== 'error') {
+            button?.removeAttribute(EXPORT_ERROR_KIND_ATTR);
+        }
+    };
+
+    const setErrorKind = (error: unknown) => {
+        const kind =
+            error && typeof error === 'object' && 'kind' in error && typeof error.kind === 'string'
+                ? error.kind
+                : 'unknown';
+        button?.setAttribute(EXPORT_ERROR_KIND_ATTR, kind);
     };
 
     const scheduleIdleReset = (delayMs: number) => {
@@ -171,6 +183,7 @@ export const createExportControls = (
         } catch (error) {
             logger.warn('Failed to resolve export action context', error);
             setState('error');
+            setErrorKind(error);
             scheduleIdleReset(resolvedTimings.errorResetMs);
             return;
         }
@@ -185,6 +198,7 @@ export const createExportControls = (
             .catch((error) => {
                 logger.warn('Single-chat export failed', error);
                 setState('error');
+                setErrorKind(error);
                 scheduleIdleReset(resolvedTimings.errorResetMs);
             });
     };

@@ -39,6 +39,7 @@ export type RelayEvent = {
     totalBytes?: number;
     status?: number;
     state?: SaveState;
+    errorKind?: string;
     disabled?: boolean;
     streamCount?: number;
     truncated?: boolean;
@@ -154,6 +155,10 @@ const assignSaveFields = (event: RelayEvent, value: Record<string, unknown>) => 
     }
     if (isOneOf(value.state, SAVE_STATES)) {
         event.state = value.state;
+    }
+    const errorKind = boundedString(value.errorKind, 64);
+    if (errorKind && /^[a-z_]+$/.test(errorKind)) {
+        event.errorKind = errorKind;
     }
     if (typeof value.disabled === 'boolean') {
         event.disabled = value.disabled;

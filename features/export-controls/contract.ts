@@ -1,6 +1,7 @@
 export const EXPORT_CONTROLS_CONTAINER_ID = 'blackiya-v3-export-controls';
 export const EXPORT_CONTROLS_CONTAINER_ATTR = 'data-blackiya-export-controls';
 export const EXPORT_CHAT_BUTTON_ID = 'blackiya-v3-export-chat-btn';
+export const EXPORT_ERROR_KIND_ATTR = 'data-blackiya-error-kind';
 
 export const EXPORT_SUCCESS_RESET_MS = 2000;
 export const EXPORT_ERROR_RESET_MS = 2500;

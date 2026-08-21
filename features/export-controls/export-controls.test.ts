@@ -17,6 +17,7 @@ import {
     EXPORT_CHAT_BUTTON_ID,
     EXPORT_CONTROLS_CONTAINER_ATTR,
     EXPORT_CONTROLS_CONTAINER_ID,
+    EXPORT_ERROR_KIND_ATTR,
     type ExportControlsDependencies,
 } from './contract';
 import { createExportControls } from './export-controls';
@@ -194,7 +195,7 @@ describe('v3 export controls', () => {
         const { controls } = mount({
             resolveActionContext: mock(() => ({ platform: 'gemini', conversationId: 'g-1' })),
             onExport: mock(async () => {
-                throw new Error('boom');
+                throw Object.assign(new Error('boom'), { kind: 'not_terminal' });
             }),
         });
         const button = controls.getButton() as HTMLButtonElement;
@@ -205,6 +206,7 @@ describe('v3 export controls', () => {
         expect(controls.getState()).toBe('error');
         expect(button.textContent).toBe('⚠ Failed');
         expect(button.disabled).toBe(true);
+        expect(button.getAttribute(EXPORT_ERROR_KIND_ATTR)).toBe('not_terminal');
 
         await new Promise((resolve) => setTimeout(resolve, 30));
 

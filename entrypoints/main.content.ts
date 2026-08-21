@@ -85,7 +85,9 @@ export default defineScript({
                 downloadJson: downloadStringAsJsonFile,
             });
             if (result.kind === 'failure') {
-                throw new Error(formatSingleExportError(result.error));
+                const error = new Error(formatSingleExportError(result.error)) as Error & { kind?: string };
+                error.kind = result.error.kind;
+                throw error;
             }
         };
 

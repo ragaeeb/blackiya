@@ -144,16 +144,18 @@
         return 'idle';
     };
 
-    let lastSaveState = '';
+    let lastSaveSignature = '';
     const scanSaveButton = () => {
         const button = document.querySelector('#blackiya-v3-export-chat-btn');
         if (!(button instanceof HTMLButtonElement)) {
             return;
         }
         const state = saveStateOf(button);
-        if (state !== lastSaveState) {
-            lastSaveState = state;
-            post({ kind: 'save-state', platform: 'ChatGPT', state, disabled: button.disabled });
+        const errorKind = state === 'error' ? button.getAttribute('data-blackiya-error-kind') ?? undefined : undefined;
+        const signature = `${state}:${errorKind ?? ''}:${button.disabled ? 'disabled' : 'enabled'}`;
+        if (signature !== lastSaveSignature) {
+            lastSaveSignature = signature;
+            post({ kind: 'save-state', platform: 'ChatGPT', state, errorKind, disabled: button.disabled });
         }
         if (button.dataset.blackiyaDevRelayObserved !== '1') {
             button.dataset.blackiyaDevRelayObserved = '1';

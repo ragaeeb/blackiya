@@ -52,6 +52,11 @@ describe('development relay contract', () => {
             state: 'success',
             disabled: false,
         });
+        const saveError = sanitizeRelayEvent({
+            kind: 'save-state',
+            state: 'error',
+            errorKind: 'not_terminal',
+        });
 
         expect(event).toMatchObject({
             kind: 'stream-frame',
@@ -63,6 +68,7 @@ describe('development relay contract', () => {
             bytes: 120,
         });
         expect(saveState).toMatchObject({ kind: 'save-state', state: 'success', disabled: false });
+        expect(saveError).toMatchObject({ kind: 'save-state', state: 'error', errorKind: 'not_terminal' });
         expect(JSON.stringify(event)).not.toContain('private response text');
     });
 
