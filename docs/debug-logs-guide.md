@@ -62,8 +62,9 @@ The single-chat kernel returns a typed, fail-fast result and never writes a part
 | `unsupported_platform` | Adapter does not match the active page origin | Confirm you are on a supported host |
 | `missing_conversation_id` | No conversation id in the page URL | Open a real conversation URL |
 | `missing_endpoint` | Adapter has no detail URL for the platform | Adapter/path drift — verify against HAR |
-| `missing_auth` | No auth header / Gemini `at` context captured (or HTTP `401/403`) | Trigger one normal platform request, then retry |
+| `missing_auth` | No auth header / Gemini `at` context captured (or HTTP `401/403`; the stale provider snapshot is cleared) | Trigger one normal platform request, then retry |
 | `http_failure` | Unexpected HTTP status (non-2xx, non-auth) | Inspect status + endpoint via HAR |
+| `download_failure` | The validated payload could not be handed to the browser download path | Retry the explicit save and inspect browser download permissions |
 | `timeout` | Request exceeded the hard timeout | Confirm the conversation is terminal, then retry explicitly; flag latency if persistent |
 | `parse_failure` | Empty body, parser returned null, or parser threw | Check payload shape via stream-debug/HAR |
 | `id_mismatch` | Response `conversation_id` differs from the URL id | Stale/redirected id — reopen and retry |

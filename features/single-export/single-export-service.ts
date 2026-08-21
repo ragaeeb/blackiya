@@ -1,5 +1,5 @@
 /**
- * v3 single-export (on-demand Force Save) kernel.
+ * v3 single-export (on-demand Save JSON) kernel.
  *
  * Resolves the platform adapter and conversation id only when invoked,
  * fetches the canonical detail endpoint, validates the response is
@@ -463,7 +463,7 @@ export const performSingleExport = async (
 
     const resolvedReq = resolveRequest(deps);
     if (!resolvedReq.ok) {
-        log.error('[Blackiya/v3] Force Save: resolution failed', {
+        log.error('[Blackiya/v3] Save JSON: resolution failed', {
             kind: resolvedReq.result.kind === 'failure' ? resolvedReq.result.error.kind : 'unknown',
         });
         return resolvedReq.result;
@@ -472,7 +472,7 @@ export const performSingleExport = async (
 
     const fetchOutcome = await dispatchRequest(resolved, deps, normalizedTimeout);
     if (!fetchOutcome.ok) {
-        log.error('[Blackiya/v3] Force Save: fetch failed', {
+        log.error('[Blackiya/v3] Save JSON: fetch failed', {
             platform: resolved.adapter.name,
             conversationId: resolved.conversationId,
         });
@@ -481,7 +481,7 @@ export const performSingleExport = async (
 
     const httpClass = classifyHttpResponse(resolved, fetchOutcome.response);
     if (!httpClass.ok) {
-        log.error('[Blackiya/v3] Force Save: HTTP classification failed', {
+        log.error('[Blackiya/v3] Save JSON: HTTP classification failed', {
             platform: resolved.adapter.name,
             conversationId: resolved.conversationId,
         });
@@ -490,7 +490,7 @@ export const performSingleExport = async (
 
     const parsedOutcome = parseAndValidate(resolved, fetchOutcome.request, fetchOutcome.body);
     if (!parsedOutcome.ok) {
-        log.error('[Blackiya/v3] Force Save: parse/validate failed', {
+        log.error('[Blackiya/v3] Save JSON: parse/validate failed', {
             platform: resolved.adapter.name,
             conversationId: resolved.conversationId,
         });
@@ -499,14 +499,14 @@ export const performSingleExport = async (
 
     const deliver = deliverDownload(parsedOutcome.parsed, deps);
     if (!deliver.ok) {
-        log.error('[Blackiya/v3] Force Save: download failed', {
+        log.error('[Blackiya/v3] Save JSON: download failed', {
             platform: resolved.adapter.name,
             conversationId: resolved.conversationId,
         });
         return deliver.result;
     }
 
-    log.info('[Blackiya/v3] Force Save: success', {
+    log.info('[Blackiya/v3] Save JSON: success', {
         platform: parsedOutcome.parsed.adapter.name,
         conversationId: parsedOutcome.parsed.conversationId,
         mappingNodes: Object.keys(parsedOutcome.parsed.data.mapping).length,

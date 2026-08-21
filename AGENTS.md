@@ -35,7 +35,7 @@ The v3 runtime is single-world for export, with a thin MAIN-world interceptor fo
    - `entrypoints/interceptor.content.ts`
    - `entrypoints/interceptor/bootstrap.ts`
    - Hooks page `fetch` + `XMLHttpRequest`.
-   - Captures request-context (platform auth headers, Gemini batchexecute context) and raw stream frames for stream-debug.
+  - Captures provider-allowlisted request-context (platform auth headers, Gemini batchexecute context) and raw stream frames for stream-debug.
    - Cross-world messages are exchanged via `window.postMessage` under a session token.
 
 2. ISOLATED v3 content runtime:
@@ -112,6 +112,7 @@ bun test features/stream-debug/stream-monitor.test.ts --bail
 bun test features/runtime/v3-content-runtime.test.ts --bail
 bun test features/export-controls/export-controls.test.ts --bail
 bun run test:e2e
+bun run test:e2e -- e2e/harness.playwright.ts
 ```
 
 Test isolation rules (avoid cross-module pollution):
@@ -143,7 +144,7 @@ When changing single-chat export behavior:
 1. Keep the kernel fail-fast: one explicit action, typed errors, deterministic adapter-declared candidate fallback only after `404`, and no fallback-on-timeout or retry/backoff.
 2. Preserve the ready-terminal validation gates: response `conversation_id` must match the URL id, and both `evaluateReadiness.ready` and `evaluateReadiness.terminal` must be true before download.
 3. Keep the complete `mapping` tree verbatim; never synthesize or degrade it.
-4. Do not persist request-context (auth headers, Gemini batchexecute context) — resolve it for the explicit action, use expiring defensive snapshots, and clear stale identity-bound values.
+4. Do not persist request-context (auth headers, Gemini batchexecute context) — resolve it for the explicit action, use expiring defensive snapshots, clear stale identity-bound values, and invalidate the provider snapshot after a 401/403 response.
 
 When changing stream-debug capture:
 
@@ -187,7 +188,7 @@ Before shipping:
 1. ChatGPT: `Save JSON` performs one explicit detail export, requires auth headers, advances to the declared fallback only after `404`, and downloads a terminal JSON archive. A missing `authorization` fails fast with a typed error.
 2. Gemini: single-chat export builds a valid batchexecute `POST` and correctly fails with `missing_auth` when the context is absent.
 3. Grok: detail fetch resolves through the candidate URL list; generation endpoints are classified correctly for stream-debug.
-4. Bulk export: `Export Chats` enumerates the conversation list, applies pacing/timeout, respects `Max chats` (`0 = all`), retries `429` a bounded number of times, and writes one JSON per conversation.
+4. Bulk export: `Export Chats` enumerates the conversation list, applies pacing/timeout, respects `Max chats` (`0 = all`), validates requested ids and ready-terminal payloads, retries `429` within the deadline a bounded number of times, and writes one JSON per conversation.
 5. Stream-debug: frames are captured in order, bounded, sanitized, and explicitly exportable/clearable without credential leakage.
 
 ## 12) PR Review Triage Rules

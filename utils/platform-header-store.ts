@@ -88,8 +88,12 @@ export class PlatformHeaderStore {
         return entry ? { ...entry.headers } : undefined;
     }
 
-    /** Clears all stored headers (e.g. on cleanup). */
-    clear(): void {
+    /** Clears one provider snapshot, or all snapshots when no provider is supplied. */
+    clear(platformName?: string): void {
+        if (platformName) {
+            this.headers.delete(platformName);
+            return;
+        }
         this.headers.clear();
     }
 

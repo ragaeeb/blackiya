@@ -1,5 +1,5 @@
 /**
- * Public types for the v3 single-export (on-demand Force Save) kernel.
+ * Public types for the v3 single-export (on-demand Save JSON) kernel.
  *
  * The service is dependency-injected and returns a typed fail-fast result so
  * callers can pattern-match on `kind`. It never throws on the failure paths

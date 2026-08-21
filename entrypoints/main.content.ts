@@ -137,6 +137,10 @@ const formatSingleExportError = (error: { kind: string; reason?: string; status?
             return 'The page did not provide the authentication context needed to save this conversation.';
         case 'http_failure':
             return `Conversation request failed${error.status ? ` (${error.status})` : ''}.`;
+        case 'download_failure':
+            return error.reason
+                ? `Could not download the conversation (${error.reason}).`
+                : 'Could not download the conversation.';
         default:
             return error.reason ? `${error.kind}: ${error.reason}` : error.kind;
     }

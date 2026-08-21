@@ -64,9 +64,10 @@ Primary module: `features/single-export/single-export-service.ts`.
 
 1. Resolves the platform adapter and conversation id **only at click time** from the active page URL (`deps.resolveAdapter(pageUrl)`, `deps.getPageUrl()`).
 2. Maps platform + conversation id to a deterministic detail-request candidate list via `features/single-export/endpoint-resolver.ts` (URL, method, headers, body).
-3. Dispatches the candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). ChatGPT advances only when a candidate returns `404`; the timeout covers both headers and body reads.
+3. Dispatches the candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). ChatGPT advances only when a candidate returns `404`; the timeout covers both headers and body reads. ChatGPT also requires a non-empty, case-insensitive `authorization` header before dispatch.
 4. Validates the response:
-   - Non-2xx → `http_failure`; `401/403` → `missing_auth`.
+   - Missing ChatGPT `authorization` → `missing_auth` before dispatch.
+   - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
    - Empty/bad body or parse failure → `parse_failure`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
    - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`.
@@ -74,7 +75,7 @@ Primary module: `features/single-export/single-export-service.ts`.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
 
-`unsupported_platform`, `missing_conversation_id`, `missing_endpoint`, `missing_auth`, `http_failure`, `timeout`, `parse_failure`, `id_mismatch`, `not_terminal`.
+`unsupported_platform`, `missing_conversation_id`, `missing_endpoint`, `missing_auth`, `http_failure`, `download_failure`, `timeout`, `parse_failure`, `id_mismatch`, `not_terminal`.
 
 Invariants: one explicit action per call, deterministic `404` candidate fallback only, no retries/backoff, no fallback-on-timeout, no warm fetch, no snapshot replay, no stabilization, no degraded export.
 
@@ -107,18 +108,19 @@ Primary module: `features/bulk-export/orchestrator.ts` (`runBulkExport`).
   1. Discovers conversation IDs from the platform list endpoint.
   2. Fetches each detail payload (paced, per-request timeout).
   3. Parses via the active adapter.
-  4. Attaches canonical export metadata (`captureSource`, `fidelity`, `completeness`).
-  5. Downloads one JSON file per conversation.
+  4. Validates the returned `conversation_id` matches the requested id and requires adapter readiness to be both ready and terminal before download; rejected payloads count as failures.
+  5. Attaches canonical export metadata (`captureSource`, `fidelity`, `completeness`).
+  6. Downloads one JSON file per conversation.
 - Options normalization (`features/bulk-export/options.ts`): default pacing delay `1200ms`, default timeout `20000ms`. `Max chats` of `0` equals all (default). Delay is clamped to `[250, 20000]`, timeout to `[5000, 60000]`.
-- Fetch (`features/bulk-export/fetch.ts`): `429` is retried up to `MAX_429_RETRIES = 3` with `retry-after` / `x-rate-limit-reset` awareness; `401/403` clears the platform headers cache; detail URL candidates fall through on failure.
+- Fetch (`features/bulk-export/fetch.ts`): `429` is retried up to `MAX_429_RETRIES = 3` with `retry-after` / `x-rate-limit-reset` awareness, bounded by the remaining request deadline; `401/403` clears the platform headers cache; detail URL candidates fall through on failure.
 - Progress (`features/bulk-export/progress.ts`): `started` / `progress` / `completed` / `failed` messages with `discovered`, `attempted`, `exported`, `failed`, `remaining`.
 - Result summary: `{ platform, discovered, attempted, exported, failed, elapsedMs, limit, warnings }`.
 
 Platform coverage:
 
-- ChatGPT: list endpoint + detail endpoints; requires captured auth headers.
+- ChatGPT: list endpoint + detail endpoints; requires a captured non-empty `authorization` header and validates each detail payload before download.
 - Grok (`grok.com`): `/rest/app-chat/conversations` list + detail variants.
-- Gemini: best-effort via batchexecute RPC (title list + conversation), using intercepted batchexecute request context.
+- Gemini: best-effort via batchexecute RPC (title list + conversation), using intercepted batchexecute request context; missing `at` fails fast rather than falling back to cookie-only detail GET.
 
 ## 7) Stream-Debug Capture
 
@@ -166,7 +168,7 @@ At explicit export time the runtime requests:
   - captured platform auth headers (`features/runtime/platform-header-request.ts`),
   - the Gemini batchexecute context (`at`, `bl`, `f.sid`, `hl`, `_reqid`, `rt` — `features/runtime/gemini-context-request.ts`).
 
-The interceptor stores defensive snapshots in memory with a five-minute expiry; header identity changes replace the prior platform snapshot. The snapshots are never written into the exported JSON and are not persisted across sessions. If request-context is missing (`missing_auth`), the kernel fails fast rather than guessing credentials. Conversation JSON reflects the server's terminal response, including the complete mapping and preserved platform payload fields.
+The interceptor stores defensive snapshots in memory with a five-minute expiry and forwards only provider allowlisted headers. Header identity changes replace the prior platform snapshot; a provider's 401/403 response clears that provider's headers, and Gemini also clears its batchexecute context. The snapshots are never written into the exported JSON and are not persisted across sessions. If request-context is missing (`missing_auth`), the kernel fails fast rather than guessing credentials. Conversation JSON reflects the server's terminal response, including the complete mapping and preserved platform payload fields.
 
 ## 9) Diagnostics and Debugging
 
@@ -174,6 +176,7 @@ Debug artifacts:
 
 - Stream-debug record(s) — raw ordered stream frames, exported explicitly.
 - HAR analysis — `bun run har:analyze --input <file.har> ...` for endpoint drift.
+- Deterministic browser harness — `bun run test:e2e -- e2e/harness.playwright.ts` covers terminal success, non-terminal fail-closed behavior, JSON download contents, and artifact-host replacement survival.
 
 Docs:
 

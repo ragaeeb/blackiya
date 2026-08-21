@@ -4,7 +4,10 @@ import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import { createXhrStreamCapture } from '@/features/stream-debug/xhr-monitor';
 import { setupMainWorldBridge } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import { createFetchInterceptor } from '@/entrypoints/interceptor/fetch-wrapper';
-import { maybeCaptureGeminiBatchexecuteContext } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
+import {
+    maybeCaptureGeminiBatchexecuteContext,
+    resetGeminiBatchexecuteContext,
+} from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import {
@@ -70,6 +73,21 @@ const captureHeaders = (url: string, headers: ReturnType<typeof toForwardableHea
     if (platform && headers) {
         platformHeaderStore.update(platform, headers);
     }
+};
+
+export const invalidateCapturedRequestContext = (url: string, status: number): boolean => {
+    if (status !== 401 && status !== 403) {
+        return false;
+    }
+    const platform = resolvePlatformName(url);
+    if (!platform) {
+        return false;
+    }
+    platformHeaderStore.clear(platform);
+    if (platform === 'Gemini') {
+        resetGeminiBatchexecuteContext();
+    }
+    return true;
 };
 
 const extractRequestUrl = (input: RequestInfo | URL): string => {
@@ -174,6 +192,8 @@ export default defineScript({
                 throw error;
             }
 
+            invalidateCapturedRequestContext(url, response.status);
+
             if (!classification || !streamId) {
                 return response;
             }
@@ -211,6 +231,9 @@ export default defineScript({
             const xhr = this as XMLHttpRequest;
             const url = String((xhr as any).__blackiyaRequestUrl ?? '');
             const method = String((xhr as any).__blackiyaRequestMethod ?? 'GET').toUpperCase();
+            xhr.addEventListener('load', () => {
+                invalidateCapturedRequestContext(url, xhr.status);
+            });
             captureHeaders(
                 url,
                 toForwardableHeaderRecord(

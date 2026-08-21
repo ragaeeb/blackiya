@@ -23,8 +23,8 @@ A high-performance Chrome extension for exporting conversation JSON from ChatGPT
 ## 🎯 Features
 
 - ✅ **Single-Chat Ready-Terminal Export**: An explicit `Save JSON` control resolves the adapter's deterministic detail-request candidates, validates the server response is ready and terminal, and downloads the complete JSON archive (full message tree, reasoning data preserved verbatim). ChatGPT advances to its fallback candidate only after a `404`.
-- ✅ **Fail-Fast**: Every non-happy path returns a typed error — no retries, no degraded/partial export, no silent data loss. A failed export tells you exactly which gate rejected it (`missing_auth`, `id_mismatch`, `not_terminal`, `timeout`, …).
-- ✅ **Bulk `Export Chats`**: From the popup, export a list of conversations from the active platform tab (`Max chats`, where `0 = all`). One JSON file per conversation, with pacing, per-request timeout, and bounded `429` retry handling.
+- ✅ **Fail-Fast**: Every non-happy path returns a typed error — no retries, no degraded/partial export, no silent data loss. A failed export tells you exactly which gate rejected it (`missing_auth`, `id_mismatch`, `not_terminal`, `download_failure`, `timeout`, …).
+- ✅ **Bulk `Export Chats`**: From the popup, export a list of conversations from the active platform tab (`Max chats`, where `0 = all`). Each detail payload must match its requested id and be ready-terminal before download; requests use pacing, per-request timeout, and bounded `429` retry handling.
 - ✅ **Stream-Debug Capture**: Raw ordered stream frames (SSE/NDJSON/raw) are recorded in memory, bounded, sanitized, and exported or cleared explicitly — never written into conversation JSON.
 - ✅ **Request-Context Without Credential Persistence**: Platform auth headers and Gemini batchexecute context are resolved in memory at export time, expire from page-local stores, and are never written into exports.
 - ✅ **Smart Titles**: Automatic conversation title resolution and export-time filename generation.
@@ -129,9 +129,9 @@ The exported JSON is the full-fidelity source of truth: complete conversation me
 
 `Save JSON` never writes a partial archive. When export fails, the button shows `⚠ Failed` and the runtime returns a typed error for diagnostics. The common cases:
 
-- **missing auth** — retry after triggering one normal platform request so auth headers / Gemini `at` context are captured.
+- **missing auth** — retry after triggering one normal platform request so fresh provider auth headers / Gemini `at` context are captured; a 401/403 response clears the stale provider snapshot.
 - **not terminal** — the response was not final; retry once the conversation is complete.
-- **id mismatch / timeout / parse failure / HTTP failure** — see `docs/debug-logs-guide.md`.
+- **id mismatch / timeout / parse failure / HTTP failure / download failure** — see `docs/debug-logs-guide.md`.
 
 ### Bulk Export Chats
 

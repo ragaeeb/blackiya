@@ -83,6 +83,17 @@ describe('PlatformHeaderStore', () => {
         expect(store.get('Gemini')).toEqual({ 'x-gemini-key': 'gemini-key' });
     });
 
+    it('should clear only the provider snapshot requested', () => {
+        const store = new PlatformHeaderStore();
+        store.update('ChatGPT', { authorization: 'Bearer chatgpt' });
+        store.update('Gemini', { authorization: 'Bearer gemini' });
+
+        store.clear('ChatGPT');
+
+        expect(store.get('ChatGPT')).toBeUndefined();
+        expect(store.get('Gemini')).toEqual({ authorization: 'Bearer gemini' });
+    });
+
     it('should clear all stored headers', () => {
         const store = new PlatformHeaderStore();
         store.update('ChatGPT', { authorization: 'Bearer abc' });

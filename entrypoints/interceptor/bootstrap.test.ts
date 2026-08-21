@@ -150,4 +150,51 @@ describe('MAIN-world bootstrap request capture', () => {
             'oai-client-version': 'client-version',
         });
     });
+
+    it('clears captured ChatGPT auth context after an unauthorized response', async () => {
+        const windowInstance = new Window();
+        windowInstance.fetch = async () => new windowInstance.Response('unauthorized', { status: 401 });
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+        platformHeaderStore.update('ChatGPT', {
+            authorization: 'Bearer stale-token',
+            'oai-device-id': 'stale-device',
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+
+        const response = await windowInstance.fetch('https://chatgpt.com/backend-api/conversation/stale', {
+            headers: { authorization: 'Bearer stale-token' },
+        });
+
+        expect(response.status).toBe(401);
+        expect(platformHeaderStore.get('ChatGPT')).toBeUndefined();
+    });
+
+    it('clears Gemini auth headers and batchexecute context after a forbidden response', async () => {
+        const windowInstance = new Window();
+        windowInstance.fetch = async () => new windowInstance.Response('forbidden', { status: 403 });
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+
+        await windowInstance.fetch(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&bl=boq&_reqid=42',
+            {
+                method: 'POST',
+                headers: { authorization: 'Bearer stale-gemini-token' },
+                body: 'f.req=%5B%5D&at=STALE-AT',
+            },
+        );
+
+        expect(platformHeaderStore.get('Gemini')).toBeUndefined();
+        expect(getGeminiBatchexecuteContext()).toBeUndefined();
+    });
 });
