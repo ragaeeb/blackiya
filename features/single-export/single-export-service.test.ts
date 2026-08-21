@@ -6,7 +6,7 @@ import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
-import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
+import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 const CHATGPT_ID = '67f0a0b3-1234-4abc-8def-1234567890ab';

@@ -10,7 +10,7 @@
 
 import { GEMINI_RPC_IDS } from '@/platforms/constants';
 import type { LLMPlatform } from '@/platforms/types';
-import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
+import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 
 const GEMINI_BATCHEXECUTE_PATH = '/_/BardChatUi/data/batchexecute';
 const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;

@@ -1,0 +1,129 @@
+import {
+    isMainWorldCommandMessage,
+    MAIN_WORLD_PROGRESS_MESSAGE,
+    MAIN_WORLD_RESULT_MESSAGE,
+    type MainWorldCommandOperation,
+    type MainWorldBulkExportSummary,
+    type MainWorldCommandSummary,
+} from '@/features/runtime/main-world-command-contract';
+import type { BulkExportProgressMessage } from '@/features/bulk-export/contract';
+import { sanitizeProgressError } from '@/features/bulk-export/progress';
+import { resolveTokenValidationFailureReason, stampToken } from '@/utils/protocol/session-token';
+
+export type MainWorldCommandWindow = {
+    location: { origin: string };
+    self: unknown;
+    postMessage: (data: unknown, targetOrigin: string) => void;
+    addEventListener: (type: 'message', listener: (event: MainWorldMessageEvent) => void) => void;
+    removeEventListener: (type: 'message', listener: (event: MainWorldMessageEvent) => void) => void;
+};
+
+export type MainWorldMessageEvent = {
+    data: unknown;
+    origin?: string;
+    source?: unknown;
+};
+
+export type MainWorldCommandOperations = {
+    singleExport: () => Promise<MainWorldCommandSummary>;
+    bulkExport: (
+        options: { limit: number; delayMs: number; timeoutMs: number },
+        onProgress: (message: BulkExportProgressMessage) => void,
+    ) => Promise<MainWorldBulkExportSummary>;
+    exportStreamDebug: () => Promise<MainWorldCommandSummary>;
+    clearStreamDebug: () => Promise<MainWorldCommandSummary>;
+};
+
+const isAllowedSource = (win: MainWorldCommandWindow, source: unknown): boolean =>
+    source === win.self || source === win || source === undefined || source === null;
+
+const isAllowedOrigin = (win: MainWorldCommandWindow, origin: string | undefined): boolean => {
+    const winOrigin = win.location.origin;
+    return !origin || !winOrigin || origin === winOrigin || origin === 'null' || winOrigin === 'null';
+};
+
+const post = (win: MainWorldCommandWindow, payload: Record<string, unknown>) => {
+    win.postMessage(stampToken(payload), win.location.origin);
+};
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const errorKind = (error: unknown): string | undefined => {
+    const candidate = error as { kind?: unknown };
+    return typeof candidate?.kind === 'string' && candidate.kind.length > 0 ? candidate.kind : undefined;
+};
+
+const postProgress = (
+    win: MainWorldCommandWindow,
+    requestId: string,
+    progress: BulkExportProgressMessage,
+) => {
+    const { type: _progressType, ...safeProgress } = progress;
+    post(win, {
+        type: MAIN_WORLD_PROGRESS_MESSAGE,
+        requestId,
+        operation: 'bulk_export',
+        ...safeProgress,
+        platform: progress.platform ?? 'unknown',
+    });
+};
+
+const executeOperation = (
+    operation: MainWorldCommandOperation,
+    options: { limit: number; delayMs: number; timeoutMs: number } | undefined,
+    operations: MainWorldCommandOperations,
+    onProgress: (message: BulkExportProgressMessage) => void,
+): Promise<MainWorldCommandSummary> | undefined => {
+    if (operation === 'bulk_export') {
+        return options ? operations.bulkExport(options, onProgress) : undefined;
+    }
+    const handlers: Record<Exclude<MainWorldCommandOperation, 'bulk_export'>, () => Promise<MainWorldCommandSummary>> = {
+        single_export: operations.singleExport,
+        stream_debug_export: operations.exportStreamDebug,
+        stream_debug_clear: operations.clearStreamDebug,
+    };
+    return handlers[operation]();
+};
+
+export const setupMainWorldCommandHandler = ({
+    window: win,
+    operations,
+}: {
+    window: MainWorldCommandWindow;
+    operations: MainWorldCommandOperations;
+}) => {
+    const handleMessage = (event: MainWorldMessageEvent) => {
+        if (!isAllowedSource(win, event.source) || !isAllowedOrigin(win, event.origin)) {
+            return;
+        }
+        if (!isMainWorldCommandMessage(event.data) || resolveTokenValidationFailureReason(event.data) !== null) {
+            return;
+        }
+
+        const message = event.data;
+        const finish = (payload: Record<string, unknown>) => post(win, {
+            type: MAIN_WORLD_RESULT_MESSAGE,
+            requestId: message.requestId,
+            operation: message.operation,
+            ...payload,
+        });
+
+        const result = executeOperation(message.operation, message.options, operations, (progress) => {
+            postProgress(win, message.requestId, progress);
+        });
+        if (!result) {
+            return;
+        }
+        void result.then(
+            (summary) => finish({ ok: true, result: summary }),
+            (error) => finish({
+                ok: false,
+                error: sanitizeProgressError(errorMessage(error)),
+                ...(errorKind(error) ? { errorKind: errorKind(error) } : {}),
+            }),
+        );
+    };
+
+    win.addEventListener('message', handleMessage);
+    return () => win.removeEventListener('message', handleMessage);
+};

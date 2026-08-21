@@ -4,45 +4,51 @@ import {
     type V3RuntimeHost,
 } from '@/features/runtime/v3-runtime';
 import {
-    createV3StreamDebugBridge,
-    type V3StreamDebugBridgeDependencies,
-    type V3StreamDebugWindow,
-} from '@/features/runtime/v3-stream-debug-bridge';
+    createMainWorldCommandBridge,
+    type MainWorldCommandBridge,
+    type MainWorldCommandBridgeDependencies,
+    type MainWorldCommandWindow,
+} from '@/features/runtime/main-world-command-request';
+import type { MainWorldProgressMessage } from '@/features/runtime/main-world-command-contract';
 
 export type V3ContentRuntimeHost = V3RuntimeHost;
-export type V3ContentRuntimeWindow = V3StreamDebugWindow;
+export type V3ContentRuntimeWindow = MainWorldCommandWindow;
 
 export type V3ContentRuntimeDependencies = {
     host: V3ContentRuntimeHost;
     window: V3ContentRuntimeWindow;
-    runBulkExport: (options: V3BulkExportOptions) => Promise<unknown>;
-    streamDebugTimeoutMs?: number;
-    createRequestId?: V3StreamDebugBridgeDependencies['createRequestId'];
     sessionToken?: string;
+    mainWorldBridge?: MainWorldCommandBridge;
+    mainWorldTimeoutMs?: MainWorldCommandBridgeDependencies['timeoutMs'];
+    createRequestId?: MainWorldCommandBridgeDependencies['createRequestId'];
+    onBulkProgress?: (message: MainWorldProgressMessage) => void;
 };
 
 export const createV3ContentRuntime = ({
     host,
     window: windowLike,
-    runBulkExport,
-    streamDebugTimeoutMs,
-    createRequestId,
     sessionToken,
+    mainWorldBridge: providedBridge,
+    mainWorldTimeoutMs,
+    createRequestId,
+    onBulkProgress,
 }: V3ContentRuntimeDependencies) => {
-    const streamDebugBridge = createV3StreamDebugBridge({
+    const mainWorldBridge = providedBridge ?? createMainWorldCommandBridge({
         window: windowLike,
-        timeoutMs: streamDebugTimeoutMs,
+        timeoutMs: mainWorldTimeoutMs,
         createRequestId,
-        token: sessionToken,
+        token: sessionToken ?? '',
     });
     const disposeRuntime = createV3Runtime(host, {
-        runBulkExport,
-        exportStreamDebug: streamDebugBridge.exportRecords,
-        clearStreamDebug: streamDebugBridge.clearRecords,
+        runBulkExport: (options: V3BulkExportOptions) => mainWorldBridge.runBulkExport(options, onBulkProgress),
+        exportStreamDebug: mainWorldBridge.exportStreamDebug,
+        clearStreamDebug: async () => {
+            await mainWorldBridge.clearStreamDebug();
+        },
     });
 
     return () => {
         disposeRuntime();
-        streamDebugBridge.dispose();
+        mainWorldBridge.dispose();
     };
 };

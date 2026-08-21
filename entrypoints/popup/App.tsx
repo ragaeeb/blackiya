@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
 import { normalizeBulkExportLimitInput } from '@/entrypoints/popup/bulk-export-input';
-import { downloadAsJSON, generateTimestamp } from '@/utils/download';
 import { DEFAULT_BULK_EXPORT_LIMIT, STORAGE_KEYS } from '@/utils/settings';
 import {
     createClearStreamDebugMessage,
@@ -112,12 +111,7 @@ const App = () => {
 
     const handleExportStreamDebug = () => {
         void runAction('export-stream-debug', 'Stream debug export failed: ', async () => {
-            const result = await sendToActiveTab(createExportStreamDebugMessage());
-            const records = Array.isArray(result) ? result : [];
-            const downloaded = downloadAsJSON(records, `blackiya-stream-debug-${generateTimestamp()}`);
-            if (!downloaded) {
-                throw new Error('Could not download stream debug JSON.');
-            }
+            await sendToActiveTab(createExportStreamDebugMessage());
             return formatStreamDebugExportedStatus();
         });
     };

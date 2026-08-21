@@ -1,4 +1,4 @@
-import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
+import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 
 let context: GeminiBatchexecuteContext | null = null;
 export const GEMINI_BATCHEXECUTE_CONTEXT_MAX_AGE_MS = 5 * 60 * 1_000;

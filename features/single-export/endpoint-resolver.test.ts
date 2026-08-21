@@ -8,7 +8,7 @@ import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { GEMINI_RPC_IDS } from '@/platforms/constants';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
-import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
+import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 
 const CHATGPT_ID = '67f0a0b3-1234-4abc-8def-1234567890ab';
 const GROK_ID = '01cb0729-6455-471d-b33a-124b3de76a29';

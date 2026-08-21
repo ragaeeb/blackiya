@@ -9,16 +9,9 @@ const state = {
     storageData: {} as Record<string, unknown>,
     storageSets: [] as Array<Record<string, unknown>>,
     sendCalls: [] as SendCall[],
-    downloadCalls: [] as Array<{ data: unknown; filename: string }>,
-    downloadResult: true,
     sendResponse: undefined as unknown | undefined,
     sendShouldThrow: false as unknown | false,
 };
-
-const downloadAsJSONMock = mock((data: unknown, filename: string) => {
-    state.downloadCalls.push({ data, filename });
-    return state.downloadResult;
-});
 
 mock.module('wxt/browser', () => ({
     browser: {
@@ -57,11 +50,6 @@ mock.module('wxt/browser', () => ({
     },
 }));
 
-mock.module('@/utils/download', () => ({
-    downloadAsJSON: downloadAsJSONMock,
-    generateTimestamp: () => '2026-08-21_00-00-00',
-}));
-
 import App from './App';
 import { V3_CLEAR_STREAM_DEBUG_MESSAGE, V3_EXPORT_CHATS_MESSAGE, V3_EXPORT_STREAM_DEBUG_MESSAGE } from './v3-messaging';
 
@@ -92,9 +80,6 @@ describe('popup v3 controls', () => {
         state.storageData = {};
         state.storageSets = [];
         state.sendCalls = [];
-        state.downloadCalls = [];
-        state.downloadResult = true;
-        downloadAsJSONMock.mockClear();
         state.sendResponse = undefined;
         state.sendShouldThrow = false;
     });
@@ -225,9 +210,11 @@ describe('popup v3 controls', () => {
         expect(button.disabled).toBe(false);
     });
 
-    it('should send the stream debug export message and report success', async () => {
-        const records = [{ streamId: 'stream-1', frames: [{ text: 'data: hello' }] }];
-        state.sendResponse = { ok: true, result: records };
+    it('should send the stream debug export message and report the MAIN-world download success', async () => {
+        state.sendResponse = {
+            ok: true,
+            result: { operation: 'stream_debug_export', streamCount: 1, frameCount: 1, filename: 'debug.json' },
+        };
 
         const container = await renderApp();
         const button = findButtonByLabel(container, 'Export Stream Debug') as HTMLButtonElement;
@@ -236,44 +223,21 @@ describe('popup v3 controls', () => {
 
         expect(state.sendCalls.length).toBe(1);
         expect(state.sendCalls[0]).toEqual({ tabId: 42, message: { type: V3_EXPORT_STREAM_DEBUG_MESSAGE } });
-        expect(state.downloadCalls).toEqual([
-            {
-                data: records,
-                filename: expect.stringMatching(/^blackiya-stream-debug-.*$/),
-            },
-        ]);
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Stream debug exported.');
     });
 
-    it('should download an empty JSON array when no stream-debug records are captured', async () => {
-        state.sendResponse = { ok: true, result: [] };
+    it('should not receive stream-debug records when the MAIN world has no captures', async () => {
+        state.sendResponse = {
+            ok: true,
+            result: { operation: 'stream_debug_export', streamCount: 0, frameCount: 0, filename: 'debug.json' },
+        };
 
         const container = await renderApp();
         const button = findButtonByLabel(container, 'Export Stream Debug') as HTMLButtonElement;
         button.click();
         await flush();
 
-        expect(state.downloadCalls).toEqual([
-            {
-                data: [],
-                filename: expect.stringMatching(/^blackiya-stream-debug-.*$/),
-            },
-        ]);
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Stream debug exported.');
-    });
-
-    it('should surface stream debug download failures instead of reporting success', async () => {
-        state.sendResponse = { ok: true, result: [] };
-        state.downloadResult = false;
-
-        const container = await renderApp();
-        const button = findButtonByLabel(container, 'Export Stream Debug') as HTMLButtonElement;
-        button.click();
-        await flush();
-
-        expect(container.querySelector('[role="status"]')?.textContent).toBe(
-            'Stream debug export failed: Could not download stream debug JSON.',
-        );
     });
 
     it('should send the stream debug clear message and report success', async () => {

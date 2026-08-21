@@ -67,7 +67,7 @@ blackiya/
 ├── dist/                    # Build output (git-ignored)
 │   └── chrome-mv3/            # Chrome extension build
 ├── entrypoints/
-│   ├── main.content.ts        # v3 content runtime entry (bulk export + stream-debug bridge)
+│   ├── main.content.ts        # v3 isolated UI/runtime entry (command-only bridge)
 │   ├── interceptor.content.ts # Thin MAIN-world entrypoint (request-context + stream capture)
 │   ├── interceptor/
 │   │   └── bootstrap.ts       # MAIN-world interceptor implementation
@@ -75,7 +75,7 @@ blackiya/
 │       ├── index.html         # Extension popup UI
 │       └── App.tsx            # Popup logic (Export Chats, stream-debug tools)
 ├── features/
-│   ├── runtime/               # v3 content runtime, message types, request-context bridges
+│   ├── runtime/               # v3 runtime plus MAIN-world command contracts/handlers
 │   ├── single-export/         # On-demand terminal single-chat export (fail-fast)
 │   ├── bulk-export/           # Bulk Export Chats orchestrator + platform providers
 │   ├── export-controls/       # Save JSON button (UI)

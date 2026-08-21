@@ -1,6 +1,6 @@
 import { GEMINI_RPC_IDS } from '@/platforms/constants';
 import type { LLMPlatform } from '@/platforms/types';
-import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
+import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 import type { ConversationData } from '@/utils/types';
 import type { FetchContext } from './fetch';
 import { fetchText } from './fetch';

@@ -28,7 +28,7 @@ To make a successful export, the extension must authenticate to the platform on 
 - platform authentication headers, and
 - for Gemini, the batchexecute request context (`at` token and related RPC fields).
 
-This request-context is held in page-local memory with a short expiry and returned through defensive snapshots for an explicit export request. It is **not** written into the exported JSON and is **not** persisted across sessions or to disk. If the request-context is missing, the extension fails fast rather than guessing or storing credentials.
+This request-context is held in the MAIN-world page-local stores with a short expiry and consumed there by the explicit export handler. It is **not** returned to the isolated UI, placed in `window.postMessage` messages, written into exported JSON, or persisted across sessions or to disk. If the request-context is missing, the extension fails fast rather than guessing or storing credentials.
 
 ## 5. Bounded, In-Memory Stream-Debug Capture
 
@@ -37,7 +37,7 @@ For troubleshooting, the extension may record an ordered, in-memory trace of raw
 - **bounded** by maximum stream count, frames per stream, and bytes per stream, with a short retention (TTL);
 - **in-memory only** — it is never written to conversation exports and is evicted automatically;
 - **sanitized** — request URLs are reduced to their path (query strings and hashes are stripped), and stream text is retained only inside the bounded frame capture;
-- **explicit** — the trace is exported or cleared only when you request it.
+- **explicit** — the trace is exported or cleared only when you request it. The MAIN-world handler performs the download and returns only a count/filename status to the isolated UI; frame text does not cross the world boundary.
 
 ## 6. No Remote Code
 

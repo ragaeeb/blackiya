@@ -19,7 +19,7 @@ Use the smallest artifact that still explains the failure. In the v3 runtime the
 
 ## Stream-Debug Records
 
-Stream-debug capture is bounded, in-memory, and exported **explicitly** (it is not written into conversation JSON). Generation endpoints are recognized per platform:
+Stream-debug capture is bounded, in-memory, and exported **explicitly** (it is not written into conversation JSON). The MAIN-world handler serializes and downloads the trace locally; the isolated UI receives only a stream/frame count and filename. Generation endpoints are recognized per platform:
 
 - ChatGPT: `POST /backend-api/f/conversation`
 - Gemini: `POST /_/BardChatUi/data/assistant.lamda.bardfrontendservice/streamgenerate`
@@ -55,7 +55,7 @@ Run the local collector:
 bun run browser:harness -- --relay --output ./blackiya-relay.ndjson
 ```
 
-Load `harness/relay-extension` as a separate unpacked development extension, open its popup, enable the relay, and use `http://127.0.0.1:4177/events` (or the collector's printed port). Then reproduce the issue in the real ChatGPT tab with the built Blackiya extension loaded. The sidecar observes generation transport metadata and the Blackiya `Save JSON` control, including the typed error kind exposed on a failed save. It strips query strings/hashes and never forwards cookies, authorization headers, Gemini `at` context, request bodies, response text, or exported conversation JSON. Events remain in memory unless `--output` is supplied.
+Load `harness/relay-extension` as a separate unpacked development extension, open its popup, enable the relay, and use `http://127.0.0.1:4177/events` (or the collector's printed port). Then reproduce the issue in the real ChatGPT tab with the built Blackiya extension loaded. The sidecar observes generation transport metadata and the Blackiya `Save JSON` control, including the typed error kind exposed on a failed save. It strips query strings/hashes and never forwards cookies, authorization headers, Gemini `at` context, request bodies, response text, stream frame text, or exported conversation JSON. Events remain in memory unless `--output` is supplied.
 
 This relay is a diagnostic sidecar, not part of the production Blackiya bundle. It is intentionally not proof against ChatGPT's production backend; its MV3 boundary test uses the strict local fixture.
 

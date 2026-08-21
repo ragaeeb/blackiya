@@ -14,8 +14,10 @@ There are exactly three user-facing behaviors:
 
 Two runtime worlds exist:
 
-- **MAIN world interceptor** (`entrypoints/interceptor.content.ts` → `entrypoints/interceptor/bootstrap.ts`): hooks page `fetch`/`XMLHttpRequest`, captures request-context (auth headers, Gemini batchexecute context), and optionally feeds raw stream frames to the stream-debug recorder.
-- **ISOLATED v3 content runtime** (`entrypoints/main.content.ts` → `features/runtime/v3-content-runtime.ts`): hosts the single-chat export control, bulk export runner, and the stream-debug bridge.
+- **MAIN world privileged side** (`entrypoints/interceptor.content.ts` → `entrypoints/interceptor/bootstrap.ts` and `bootstrap-main-bridge.ts`): hooks page `fetch`/`XMLHttpRequest`, owns request-context stores and raw stream frames, performs all explicit provider requests, validates payloads, and triggers downloads.
+- **ISOLATED v3 content runtime** (`entrypoints/main.content.ts` → `features/runtime/v3-content-runtime.ts`): hosts the UI and browser-extension message handlers. It sends command-only requests to MAIN and receives typed status, error, and progress summaries.
+
+The worlds communicate through a token-validated `window.postMessage` command channel. Its messages contain operation names, bulk options, request ids, and sanitized summaries only. Platform headers, Gemini batchexecute context, stream records, frame text, conversation payloads, and serialized JSON never cross that channel.
 
 There is no Signal Fusion Engine, no probe lease arbitration, no calibration, no Markdown export, and no compatibility mode.
 
@@ -24,15 +26,17 @@ There is no Signal Fusion Engine, no probe lease arbitration, no calibration, no
 - Entry point: `entrypoints/main.content.ts`
   - Initializes a session token (`utils/protocol/session-token.ts`).
   - Boots `createV3ContentRuntime(...)` against the browser message host.
-  - Wires bulk export (`runBulkExport`), request-context resolution, and the stream-debug bridge.
+  - Wires the Save JSON control and popup commands to the MAIN-world command requester.
 - Runtime core:
   - `features/runtime/v3-runtime.ts` — message types + typed handler (`createV3Runtime`).
-  - `features/runtime/v3-content-runtime.ts` — boots the runtime and the stream-debug bridge.
-  - `features/runtime/v3-stream-debug-bridge.ts` — postMessage bridge for stream-debug export/clear.
-  - `features/runtime/platform-header-request.ts` and `features/runtime/gemini-context-request.ts` — request-context bridges for explicit actions.
+  - `features/runtime/v3-content-runtime.ts` — boots the isolated runtime against the command requester.
+  - `features/runtime/main-world-command-contract.ts` — command, summary, error, and progress schemas.
+  - `features/runtime/main-world-command-request.ts` — isolated-side command requester; it never accepts sensitive payloads.
+  - `features/runtime/main-world-command-handler.ts` — token-validated MAIN-side command dispatcher.
 - Interceptor (MAIN world):
   - `entrypoints/interceptor.content.ts`
   - `entrypoints/interceptor/bootstrap.ts`
+  - `entrypoints/interceptor/bootstrap-main-bridge.ts` — creates privileged operations over the existing MAIN-world stores.
 - Adapter interface + factory:
   - `platforms/types.ts`
   - `platforms/factory.ts`
@@ -45,16 +49,19 @@ The v3 runtime listens for messages on the browser message host (`V3RuntimeMessa
 - `BLACKIYA_V3_EXPORT_STREAM_DEBUG` — exports the current stream-debug records.
 - `BLACKIYA_V3_CLEAR_STREAM_DEBUG` — clears the current stream-debug records.
 
-Responses are `{ ok: true; result? }` or `{ ok: false; error }`.
+Responses are `{ ok: true; result }` or `{ ok: false; error, errorKind? }`. The result is a bounded status summary: single export returns platform/filename, bulk returns counts/warnings, stream-debug export returns stream/frame counts and filename, and stream-debug clear returns the number of cleared streams. The MAIN side performs every download before sending success.
 
-The stream-debug bridge exchanges messages on the window (same origin, session-token validated):
+The world command channel uses:
 
-- `BLACKIYA_V3_STREAM_DEBUG_EXPORT_REQUEST` / `..._EXPORT_RESPONSE`
-- `BLACKIYA_V3_STREAM_DEBUG_CLEAR_REQUEST` / `..._CLEAR_RESPONSE`
+- `BLACKIYA_MAIN_WORLD_COMMAND` — operation plus request id and, for bulk export, normalized options.
+- `BLACKIYA_MAIN_WORLD_PROGRESS` — bulk counts and sanitized progress messages.
+- `BLACKIYA_MAIN_WORLD_RESULT` — typed success or error summary.
+
+The channel is token-stamped and same-origin checked. It is an authorization gate for the extension command path, not a page confidentiality boundary; the confidentiality guarantee comes from never placing credentials or payloads in its messages.
 
 Bulk export progress is emitted as `BLACKIYA_BULK_EXPORT_PROGRESS` messages with stages `started`, `progress`, `completed`, `failed`.
 
-Export messages and stream-debug bridge responses are token-stamped so a mismatched/absent session token is dropped (no compatibility mode).
+Export messages and MAIN-world command responses are token-stamped so a mismatched/absent session token is dropped (no compatibility mode).
 
 ## 4) Single-Chat Terminal Export (Fail-Fast)
 
@@ -71,7 +78,7 @@ Primary module: `features/single-export/single-export-service.ts`.
    - Empty/bad body or parse failure → `parse_failure`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
    - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text; in-progress and non-terminal thoughts remain rejected.
-5. On success, serializes the complete platform payload (including the full `mapping` tree and platform-specific raw payload fields, preserved verbatim) and injects the download via `deps.downloadJson(jsonString, filename)`.
+5. On success, serializes the complete platform payload (including the full `mapping` tree and platform-specific raw payload fields, preserved verbatim) and injects the download via `deps.downloadJson(jsonString, filename)`. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
 
@@ -103,8 +110,8 @@ There is one export control: `Save JSON`. The legacy controls are not mounted:
 
 Primary module: `features/bulk-export/orchestrator.ts` (`runBulkExport`).
 
-- Popup sends `BLACKIYA_V3_EXPORT_CHATS` (`BULK_EXPORT_CHATS_MESSAGE`) to the active tab with `{ limit, delayMs, timeoutMs }`.
-- `runBulkExport` resolves the platform adapter from the active URL and:
+- Popup sends `BLACKIYA_V3_EXPORT_CHATS` (`BULK_EXPORT_CHATS_MESSAGE`) to the active tab with `{ limit, delayMs, timeoutMs }`. The isolated runtime forwards that operation to the MAIN-world command handler; provider requests and downloads stay in MAIN.
+- MAIN-side `runBulkExport` resolves the platform adapter from the active URL and:
   1. Discovers conversation IDs from the platform list endpoint.
   2. Fetches each detail payload (paced, per-request timeout).
   3. Parses via the active adapter.
@@ -155,20 +162,13 @@ Bounded recorder defaults (`features/stream-debug/recorder.ts`):
 
 The recorder clamps each frame to its byte budget. When a bound is reached it evicts ordinary frames before transport and terminal/refusal/replacement/erase frames, preserving the late signals needed to diagnose refusals and server-side replacement/erase events. Input truncation and evicted retained bytes are both reflected in the byte/frame counters and `truncated` flag. When the stream count exceeds the cap, the oldest streams are evicted.
 
-Explicit export + clear use the token-validated postMessage bridge (`features/runtime/v3-stream-debug-bridge.ts` + `features/stream-debug/bridge.ts`). Records are returned to the caller on `EXPORT_REQUEST`; `CLEAR_REQUEST` empties the recorder. Stream records are never written into conversation JSON exports.
+Explicit export + clear use the token-validated MAIN-world command handler (`features/runtime/main-world-command-handler.ts`). MAIN serializes the bounded records and triggers the stream-debug JSON download itself, then returns only `{ streamCount, frameCount, filename }`. Clear empties the recorder and returns only the cleared-stream count. Stream records and frame text never cross into the isolated runtime and are never written into conversation JSON exports.
 
 ## 8) Request-Context Capture Without Credential Persistence
 
 Primary modules: `entrypoints/main.content.ts`, `utils/platform-header-store.ts`, and `entrypoints/interceptor/gemini-batchexecute-context-store.ts`.
 
-At explicit export time the runtime requests:
-
-- the active platform adapter,
-- the conversation id from the page URL,
-  - captured platform auth headers (`features/runtime/platform-header-request.ts`),
-  - the Gemini batchexecute context (`at`, `bl`, `f.sid`, `hl`, `_reqid`, `rt` — `features/runtime/gemini-context-request.ts`).
-
-The interceptor stores defensive snapshots in memory with a five-minute expiry and forwards only provider allowlisted headers. Header identity changes replace the prior platform snapshot; a provider's 401/403 response clears that provider's headers, and Gemini also clears its batchexecute context. The snapshots are never written into the exported JSON and are not persisted across sessions. If request-context is missing (`missing_auth`), the kernel fails fast rather than guessing credentials. Conversation JSON reflects the server's terminal response, including the complete mapping and preserved platform payload fields.
+At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive snapshots in memory with a five-minute expiry. Header identity changes replace the prior platform snapshot; a provider's 401/403 response clears that provider's headers, and Gemini also clears its batchexecute context. The snapshots are never written into the exported JSON, never placed in cross-world messages, and are not persisted across sessions. If request-context is missing (`missing_auth`), the kernel fails fast rather than guessing credentials. Conversation JSON reflects the server's terminal response, including the complete mapping and preserved platform payload fields.
 
 ## 9) Diagnostics and Debugging
 

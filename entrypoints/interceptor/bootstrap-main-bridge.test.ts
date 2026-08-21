@@ -2,18 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
 import { setupMainWorldBridge, shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import {
-    getGeminiBatchexecuteContext,
     maybeCaptureGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
 } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
-import {
-    GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
-    GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
-} from '@/utils/gemini-batchexecute-bridge';
-import { REQUEST_CONTEXT_INVALIDATION_MESSAGE } from '@/features/runtime/request-context-invalidation';
-import { PLATFORM_HEADERS_REQUEST_MESSAGE, PLATFORM_HEADERS_RESPONSE_MESSAGE } from '@/utils/platform-header-bridge';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
+import { streamDebugRecorder } from '@/features/stream-debug/recorder';
+import { MAIN_WORLD_COMMAND_MESSAGE, MAIN_WORLD_RESULT_MESSAGE } from '@/features/runtime/main-world-command-contract';
 
 describe('bootstrap-main-bridge', () => {
     let windowInstance: Window;
@@ -26,6 +21,7 @@ describe('bootstrap-main-bridge', () => {
         setSessionToken('bk:test-main-bridge');
         platformHeaderStore.clear();
         resetGeminiBatchexecuteContext();
+        streamDebugRecorder.clear();
     });
 
     afterEach(() => {
@@ -45,7 +41,7 @@ describe('bootstrap-main-bridge', () => {
         expect((windowInstance as any).__blackiya).toBeUndefined();
     });
 
-    it('should respond to platform headers requests with captured headers', () => {
+    it('should not expose captured platform headers through page messages', async () => {
         setupMainWorldBridge();
 
         platformHeaderStore.update('ChatGPT', {
@@ -53,38 +49,26 @@ describe('bootstrap-main-bridge', () => {
             'oai-device-id': 'device-1',
         });
 
-        return new Promise<void>((resolve) => {
-            const requestId = 'request-1';
-            const onMessage = (event: MessageEvent) => {
-                const message = event.data as Record<string, unknown> | null;
-                if (
-                    message?.type !== PLATFORM_HEADERS_RESPONSE_MESSAGE ||
-                    message.requestId !== requestId ||
-                    message.platformName !== 'ChatGPT'
-                ) {
-                    return;
-                }
-                windowInstance.removeEventListener('message', onMessage as any);
-                const headers = message.headers as Record<string, string> | undefined;
-                expect(headers?.authorization).toBe('Bearer test');
-                expect(headers?.['oai-device-id']).toBe('device-1');
-                resolve();
-            };
-
-            windowInstance.addEventListener('message', onMessage as any);
-            windowInstance.postMessage(
-                {
-                    type: PLATFORM_HEADERS_REQUEST_MESSAGE,
-                    requestId,
-                    platformName: 'ChatGPT',
-                    __blackiyaToken: getSessionToken(),
-                },
-                windowInstance.location.origin,
-            );
-        });
+        let responseCount = 0;
+        windowInstance.addEventListener('message', ((event: MessageEvent) => {
+            if ((event.data as Record<string, unknown>).type === 'BLACKIYA_PLATFORM_HEADERS_RESPONSE') {
+                responseCount += 1;
+            }
+        }) as any);
+        windowInstance.postMessage(
+            {
+                type: 'BLACKIYA_PLATFORM_HEADERS_REQUEST',
+                requestId: 'request-1',
+                platformName: 'ChatGPT',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(responseCount).toBe(0);
     });
 
-    it('should respond to gemini batchexecute context requests', () => {
+    it('should not expose Gemini batchexecute context through page messages', async () => {
         maybeCaptureGeminiBatchexecuteContext(
             'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c',
             'f.req=%5B%5D&at=AJvToken%3A1&',
@@ -92,90 +76,59 @@ describe('bootstrap-main-bridge', () => {
 
         setupMainWorldBridge();
 
-        return new Promise<void>((resolve) => {
-            const requestId = 'gemini-context-1';
-            const onMessage = (event: MessageEvent) => {
-                const message = event.data as Record<string, unknown> | null;
-                if (message?.type !== GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE || message.requestId !== requestId) {
-                    return;
-                }
-                windowInstance.removeEventListener('message', onMessage as any);
-                const context = message.context as Record<string, unknown> | undefined;
-                expect(context?.bl).toBe('boq');
-                expect(context?.fSid).toBe('123');
-                expect(context?.at).toBe('AJvToken:1');
-                resolve();
-            };
+        let responseCount = 0;
+        windowInstance.addEventListener('message', ((event: MessageEvent) => {
+            if ((event.data as Record<string, unknown>).type === 'BLACKIYA_GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE') {
+                responseCount += 1;
+            }
+        }) as any);
+        windowInstance.postMessage(
+            {
+                type: 'BLACKIYA_GEMINI_BATCHEXECUTE_CONTEXT_REQUEST',
+                requestId: 'gemini-context-1',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(responseCount).toBe(0);
+    });
 
-            windowInstance.addEventListener('message', onMessage as any);
-            windowInstance.postMessage(
-                {
-                    type: GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
-                    requestId,
-                    __blackiyaToken: getSessionToken(),
-                },
-                windowInstance.location.origin,
-            );
+    it('should clear stream-debug records in MAIN and return only a count summary', async () => {
+        const streamId = streamDebugRecorder.startStream({
+            streamId: 'main-clear-1',
+            platform: 'ChatGPT',
+            endpoint: 'generation',
+            method: 'POST',
+            url: '/stream',
         });
-    });
-
-    it('should clear only the requested provider after a token-validated invalidation request', async () => {
-        platformHeaderStore.update('ChatGPT', { authorization: 'Bearer chatgpt-stale' });
-        platformHeaderStore.update('Gemini', { authorization: 'Bearer gemini-stale' });
+        streamDebugRecorder.appendFrame(streamId, 'private frame', { kind: 'raw_chunk' });
         setupMainWorldBridge();
 
+        const response = new Promise<Record<string, unknown>>((resolve) => {
+            windowInstance.addEventListener('message', ((event: MessageEvent) => {
+                if ((event.data as Record<string, unknown>).type === MAIN_WORLD_RESULT_MESSAGE) {
+                    resolve(event.data as Record<string, unknown>);
+                }
+            }) as any);
+        });
         windowInstance.postMessage(
             {
-                type: REQUEST_CONTEXT_INVALIDATION_MESSAGE,
-                platformName: 'ChatGPT',
+                type: MAIN_WORLD_COMMAND_MESSAGE,
+                operation: 'stream_debug_clear',
+                requestId: 'clear-main-1',
                 __blackiyaToken: getSessionToken(),
             },
             windowInstance.location.origin,
         );
-        await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(platformHeaderStore.get('ChatGPT')).toBeUndefined();
-        expect(platformHeaderStore.get('Gemini')).toEqual({ authorization: 'Bearer gemini-stale' });
+        await expect(response).resolves.toMatchObject({
+            type: MAIN_WORLD_RESULT_MESSAGE,
+            operation: 'stream_debug_clear',
+            ok: true,
+            result: { operation: 'stream_debug_clear', clearedStreams: 1 },
+        });
+        expect(streamDebugRecorder.exportRecords()).toHaveLength(0);
     });
 
-    it('should reject invalidation requests with a missing or mismatched token', async () => {
-        platformHeaderStore.update('ChatGPT', { authorization: 'Bearer chatgpt-stale' });
-        setupMainWorldBridge();
-
-        for (const token of [undefined, 'bk:wrong-token']) {
-            windowInstance.postMessage(
-                {
-                    type: REQUEST_CONTEXT_INVALIDATION_MESSAGE,
-                    platformName: 'ChatGPT',
-                    ...(token ? { __blackiyaToken: token } : {}),
-                },
-                windowInstance.location.origin,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-
-        expect(platformHeaderStore.get('ChatGPT')).toEqual({ authorization: 'Bearer chatgpt-stale' });
-    });
-
-    it('should clear Gemini batchexecute context with the provider headers', async () => {
-        platformHeaderStore.update('Gemini', { authorization: 'Bearer gemini-stale' });
-        maybeCaptureGeminiBatchexecuteContext(
-            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc&at=ignored',
-            'f.req=%5B%5D&at=STALE-AT&',
-        );
-        setupMainWorldBridge();
-
-        windowInstance.postMessage(
-            {
-                type: REQUEST_CONTEXT_INVALIDATION_MESSAGE,
-                platformName: 'Gemini',
-                __blackiyaToken: getSessionToken(),
-            },
-            windowInstance.location.origin,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 0));
-
-        expect(platformHeaderStore.get('Gemini')).toBeUndefined();
-        expect(getGeminiBatchexecuteContext()).toBeUndefined();
-    });
 });

@@ -30,28 +30,30 @@ Read these first:
 
 ## 3) Runtime Architecture
 
-The v3 runtime is single-world for export, with a thin MAIN-world interceptor for request-context and stream capture.
+The v3 runtime keeps sensitive export work in the MAIN world, with an isolated UI/runtime that forwards command-only requests.
 
 1. MAIN world interceptor:
    - `entrypoints/interceptor.content.ts`
    - `entrypoints/interceptor/bootstrap.ts`
    - Hooks page `fetch` + `XMLHttpRequest`.
   - Captures provider-allowlisted request-context (platform auth headers, Gemini batchexecute context) and raw stream frames for stream-debug.
-   - Cross-world messages are exchanged via `window.postMessage` under a session token.
+  - Performs single export, bulk export, stream-debug export/clear, and explicit downloads from the MAIN world.
+  - Cross-world messages are exchanged via `window.postMessage` under a session token, carrying commands and typed summaries only.
 
 2. ISOLATED v3 content runtime:
    - `entrypoints/main.content.ts` (entry point; boots a `V3ContentRuntime` against the browser message host)
-   - `features/runtime/v3-content-runtime.ts` (wires bulk export + stream-debug bridge into the runtime host)
+   - `features/runtime/v3-content-runtime.ts` (wires browser messages to the MAIN-world command requester)
    - `features/runtime/v3-runtime.ts` (message types, `Export Chats` / stream-debug export + clear options)
-   - `features/runtime/v3-stream-debug-bridge.ts` (request/response bridge for stream-debug export + clear)
-   - `features/runtime/*-request.ts` (request-context bridges used by the explicit export paths)
+   - `features/runtime/main-world-command-contract.ts` (command and safe-summary schemas)
+   - `features/runtime/main-world-command-request.ts` (isolated-side command requester)
+   - `features/runtime/main-world-command-handler.ts` (MAIN-side privileged dispatcher)
 
 Key modules:
 
 - Single-export kernel: `features/single-export/single-export-service.ts` (+ `endpoint-resolver.ts`, `types.ts`)
 - Export controls: `features/export-controls/*`
 - Bulk export: `features/bulk-export/*` (orchestrator, providers, parsers, fetch, downloads, options, progress)
-- Stream-debug: `features/stream-debug/*` (recorder, stream-monitor, xhr-monitor, generation-endpoint, bridge, contract)
+- Stream-debug: `features/stream-debug/*` (recorder, stream-monitor, xhr-monitor, generation-endpoint)
 - Message contracts: `features/runtime/v3-runtime.ts`, `features/bulk-export/contract.ts`, `features/stream-debug/contract.ts`
 - Session token: `utils/protocol/session-token.ts`
 
@@ -145,14 +147,14 @@ When changing single-chat export behavior:
 1. Keep the kernel fail-fast: one explicit action, typed errors, deterministic adapter-declared candidate fallback only after `404`, and no fallback-on-timeout or retry/backoff.
 2. Preserve the ready-terminal validation gates: response `conversation_id` must match the URL id, and both `evaluateReadiness.ready` and `evaluateReadiness.terminal` must be true before download.
 3. Keep the complete `mapping` tree verbatim; never synthesize or degrade it.
-4. Do not persist request-context (auth headers, Gemini batchexecute context) — resolve it for the explicit action, use expiring defensive snapshots, clear stale identity-bound values, and invalidate the provider snapshot after a 401/403 response.
+4. Do not persist or cross-world-transfer request-context (auth headers, Gemini batchexecute context) — resolve it in the MAIN-world explicit-action handler, use expiring defensive snapshots, clear stale identity-bound values, and invalidate the provider snapshot after a 401/403 response.
 
 When changing stream-debug capture:
 
 1. Preserve ordered frames and byte accounting (original vs stored, dropped counts).
 2. Keep the recorder bounded (max streams, max frames/bytes per stream, TTL) and in-memory only.
 3. Sanitize request URLs to paths (strip query strings and hashes) before storing.
-4. Keep export and clear explicit through the token-validated postMessage bridge.
+4. Keep export and clear explicit through the token-validated MAIN-world command handler; return only counts/status, never frame text.
 
 When changing title handling:
 
@@ -167,7 +169,7 @@ When changing title handling:
 - `features/single-export/endpoint-resolver.ts`
 - `features/bulk-export/orchestrator.ts`
 - `features/stream-debug/recorder.ts`
-- `features/stream-debug/bridge.ts`
+- `features/runtime/main-world-command-handler.ts`
 
 ## 10) Documentation Hygiene
 

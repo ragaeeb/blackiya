@@ -1,6 +1,6 @@
 import type { V3BulkExportOptions } from '@/features/runtime/v3-runtime';
 import type { LLMPlatform } from '@/platforms/types';
-import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
+import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 import type { ConversationData } from '@/utils/types';
 import type { BulkExportChatsSuccessResponse, BulkExportProgressMessage } from './contract';

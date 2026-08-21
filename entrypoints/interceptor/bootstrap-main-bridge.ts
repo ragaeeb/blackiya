@@ -1,25 +1,19 @@
-import { setupStreamDebugBridge } from '@/features/stream-debug/bridge';
+import { downloadAsJSON } from '@/utils/download';
+import { downloadStringAsJsonFile } from '@/utils/dom-download';
+import { getPlatformAdapter } from '@/platforms/factory';
+import { performSingleExport } from '@/features/single-export/single-export-service';
+import { runBulkExport } from '@/features/bulk-export/orchestrator';
+import { sanitizeProgressError } from '@/features/bulk-export/progress';
+import {
+    setupMainWorldCommandHandler,
+    type MainWorldCommandOperations,
+} from '@/features/runtime/main-world-command-handler';
+import type { BulkExportProgressMessage } from '@/features/bulk-export/contract';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
-import {
-    isRequestContextInvalidationMessage,
-} from '@/features/runtime/request-context-invalidation';
-import {
-    getGeminiBatchexecuteContext,
-    resetGeminiBatchexecuteContext,
-} from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
-import {
-    GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
-    type GeminiBatchexecuteContextResponseMessage,
-    isGeminiBatchexecuteContextRequestMessage,
-} from '@/utils/gemini-batchexecute-bridge';
-import {
-    isPlatformHeadersRequestMessage,
-    PLATFORM_HEADERS_RESPONSE_MESSAGE,
-    type PlatformHeadersResponseMessage,
-} from '@/utils/platform-header-bridge';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import { getSessionToken, resolveTokenValidationFailureReason, setSessionToken, stampToken } from '@/utils/protocol/session-token';
+import { getGeminiBatchexecuteContext, resetGeminiBatchexecuteContext } from './gemini-batchexecute-context-store';
+import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 
 const MAIN_BRIDGE_INSTALLED_KEY = '__BLACKIYA_MAIN_BRIDGE_INSTALLED__';
 
@@ -42,70 +36,93 @@ export const setupMainWorldBridge = () => {
     }
     (window as any)[MAIN_BRIDGE_INSTALLED_KEY] = true;
 
-    setupStreamDebugBridge({ window: window as any, recorder: streamDebugRecorder });
-
     const handleSessionInit = (message: SessionInitMessage) => {
         if (shouldApplySessionInitToken(getSessionToken(), message.token)) {
             setSessionToken(message.token);
         }
     };
 
-    const handleHeadersRequest = (message: unknown): boolean => {
-        if (!isPlatformHeadersRequestMessage(message)) {
-            return false;
-        }
-        if (resolveTokenValidationFailureReason(message) !== null) {
-            return true;
-        }
-        const response: PlatformHeadersResponseMessage = {
-            type: PLATFORM_HEADERS_RESPONSE_MESSAGE,
-            requestId: message.requestId,
-            platformName: message.platformName,
-            headers: platformHeaderStore.get(message.platformName),
-        };
-        window.postMessage(stampToken(response), window.location.origin);
-        return true;
-    };
-
-    const handleGeminiContextRequest = (message: unknown): boolean => {
-        if (!isGeminiBatchexecuteContextRequestMessage(message)) {
-            return false;
-        }
-        if (resolveTokenValidationFailureReason(message) !== null) {
-            return true;
-        }
-        const response: GeminiBatchexecuteContextResponseMessage = {
-            type: GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
-            requestId: message.requestId,
-            context: getGeminiBatchexecuteContext(),
-        };
-        window.postMessage(stampToken(response), window.location.origin);
-        return true;
-    };
-
-    const handleRequestContextInvalidation = (message: unknown): boolean => {
-        if (!isRequestContextInvalidationMessage(message)) {
-            return false;
-        }
-        if (resolveTokenValidationFailureReason(message) !== null) {
-            return true;
-        }
-        platformHeaderStore.clear(message.platformName);
-        if (message.platformName === 'Gemini') {
+    const invalidateAuthContext = (platformName: string) => {
+        platformHeaderStore.clear(platformName);
+        if (platformName === 'Gemini') {
             resetGeminiBatchexecuteContext();
         }
-        return true;
     };
+
+    const resolveAdapter = () => getPlatformAdapter(window.location.href);
+
+    const runSingleExportInMainWorld = async () => {
+        const result = await performSingleExport(undefined, {
+            resolveAdapter: () => resolveAdapter(),
+            getPageUrl: () => window.location.href,
+            getAuthHeaders: () => {
+                const adapter = resolveAdapter();
+                return adapter ? platformHeaderStore.get(adapter.name) : undefined;
+            },
+            getGeminiBatchexecuteContext,
+            invalidateAuthContext,
+            downloadJson: downloadStringAsJsonFile,
+        });
+        if (result.kind === 'failure') {
+            const error = new Error(formatSingleExportError(result.error)) as Error & { kind?: string };
+            error.kind = result.error.kind;
+            throw error;
+        }
+        return {
+            operation: 'single_export' as const,
+            platform: result.platformName,
+            filename: result.filename,
+        };
+    };
+
+    const runBulkExportInMainWorld = (
+        options: { limit: number; delayMs: number; timeoutMs: number },
+        onProgress: (message: BulkExportProgressMessage) => void,
+    ) =>
+        runBulkExport(options, {
+            getAdapter: resolveAdapter,
+            getAuthHeaders: () => {
+                const adapter = resolveAdapter();
+                return adapter ? platformHeaderStore.get(adapter.name) : undefined;
+            },
+            getGeminiBatchexecuteContext,
+            invalidateAuthContext,
+            onProgress,
+        }).then((result) => ({
+            operation: 'bulk_export' as const,
+            ...result,
+            warnings: result.warnings.map(sanitizeProgressError),
+        }));
+
+    const exportStreamDebugInMainWorld = async () => {
+        const records = streamDebugRecorder.exportRecords();
+        const filename = `blackiya-stream-debug-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+        if (!downloadAsJSON(records, filename)) {
+            throw new Error('Could not download stream debug JSON.');
+        }
+        return {
+            operation: 'stream_debug_export' as const,
+            streamCount: records.length,
+            frameCount: records.reduce((total, record) => total + record.frames.length, 0),
+            filename: `${filename}.json`,
+        };
+    };
+
+    const operations: MainWorldCommandOperations = {
+        singleExport: runSingleExportInMainWorld,
+        bulkExport: runBulkExportInMainWorld,
+        exportStreamDebug: exportStreamDebugInMainWorld,
+        clearStreamDebug: async () => {
+            const clearedStreams = streamDebugRecorder.exportRecords().length;
+            streamDebugRecorder.clear();
+            return { operation: 'stream_debug_clear' as const, clearedStreams };
+        },
+    };
+
+    setupMainWorldCommandHandler({ window: window as any, operations });
 
     window.addEventListener('message', (event: MessageEvent) => {
         if (!isSameWindowOriginEvent(event) || !event.data || typeof event.data !== 'object') {
-            return;
-        }
-        if (
-            handleHeadersRequest(event.data) ||
-            handleGeminiContextRequest(event.data) ||
-            handleRequestContextInvalidation(event.data)
-        ) {
             return;
         }
         const message = event.data as Partial<SessionInitMessage>;
@@ -113,4 +130,23 @@ export const setupMainWorldBridge = () => {
             handleSessionInit(message as SessionInitMessage);
         }
     });
+};
+
+const formatSingleExportError = (error: { kind: string; reason?: string; status?: number; timeoutMs?: number }): string => {
+    switch (error.kind) {
+        case 'not_terminal':
+            return `Conversation is not ready to save${error.reason ? ` (${error.reason})` : ''}.`;
+        case 'timeout':
+            return `Conversation request timed out after ${error.timeoutMs ?? 'the configured'} ms.`;
+        case 'missing_auth':
+            return 'The page did not provide the authentication context needed to save this conversation.';
+        case 'http_failure':
+            return `Conversation request failed${error.status ? ` (${error.status})` : ''}.`;
+        case 'download_failure':
+            return error.reason
+                ? `Could not download the conversation (${error.reason}).`
+                : 'Could not download the conversation.';
+        default:
+            return error.reason ? `${error.kind}: ${error.reason}` : error.kind;
+    }
 };

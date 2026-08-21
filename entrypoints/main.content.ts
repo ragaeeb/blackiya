@@ -1,14 +1,9 @@
 import { browser } from 'wxt/browser';
 import { createV3ContentRuntime } from '@/features/runtime/v3-content-runtime';
-import { requestGeminiBatchexecuteContextFromMainWorld } from '@/features/runtime/gemini-context-request';
-import { requestPlatformHeadersFromMainWorld } from '@/features/runtime/platform-header-request';
-import { invalidateRequestContextInMainWorld } from '@/features/runtime/request-context-invalidation';
+import { createMainWorldCommandBridge } from '@/features/runtime/main-world-command-request';
 import { createExportControls } from '@/features/export-controls/export-controls';
-import { performSingleExport } from '@/features/single-export/single-export-service';
-import { runBulkExport } from '@/features/bulk-export/orchestrator';
 import { getPlatformAdapter } from '@/platforms/factory';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
-import { downloadStringAsJsonFile } from '@/utils/dom-download';
 import { generateSessionToken, getSessionToken, setSessionToken, stampToken } from '@/utils/protocol/session-token';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 
@@ -65,31 +60,10 @@ export default defineScript({
     runAt: 'document_idle',
     main() {
         const sessionToken = ensureSessionToken();
-
-        const getHeaders = (platformName: string) => requestPlatformHeadersFromMainWorld(platformName);
-        const getGeminiContext = () => requestGeminiBatchexecuteContextFromMainWorld();
-
-        const runSingleExportFromPage = async () => {
-            const adapter = resolveAdapterAtClick();
-            if (!adapter) {
-                throw new Error('No supported platform found for this tab.');
-            }
-            const headers = await getHeaders(adapter.name);
-            const geminiContext = adapter.name === 'Gemini' ? await getGeminiContext() : undefined;
-            const result = await performSingleExport(undefined, {
-                resolveAdapter: () => adapter,
-                getPageUrl: () => window.location.href,
-                getAuthHeaders: () => headers,
-                getGeminiBatchexecuteContext: () => geminiContext,
-                invalidateAuthContext: invalidateRequestContextInMainWorld,
-                downloadJson: downloadStringAsJsonFile,
-            });
-            if (result.kind === 'failure') {
-                const error = new Error(formatSingleExportError(result.error)) as Error & { kind?: string };
-                error.kind = result.error.kind;
-                throw error;
-            }
-        };
+        const mainWorldBridge = createMainWorldCommandBridge({
+            window: window as any,
+            token: sessionToken,
+        });
 
         const controls = createExportControls({
             resolveActionContext: () => {
@@ -102,7 +76,9 @@ export default defineScript({
                     conversationId: adapter.extractConversationId(window.location.href),
                 };
             },
-            onExport: runSingleExportFromPage,
+            onExport: async () => {
+                await mainWorldBridge.exportSingle();
+            },
         });
         controls.mount();
 
@@ -110,43 +86,11 @@ export default defineScript({
             host: createRuntimeHost(),
             window: window as any,
             sessionToken,
-            runBulkExport: async (options) => {
-                const adapter = resolveAdapterAtClick();
-                if (!adapter) {
-                    throw new Error('No supported platform found for this tab.');
-                }
-                const headers = await getHeaders(adapter.name);
-                const geminiContext = adapter.name === 'Gemini' ? await getGeminiContext() : undefined;
-                return runBulkExport(options, {
-                    getAdapter: () => adapter,
-                    getAuthHeaders: () => headers,
-                    getGeminiBatchexecuteContext: () => geminiContext,
-                    invalidateAuthContext: invalidateRequestContextInMainWorld,
-                    onProgress: (message) => {
-                        void browser.runtime.sendMessage(message);
-                    },
-                });
+            mainWorldBridge,
+            onBulkProgress: (message) => {
+                void browser.runtime.sendMessage(message);
             },
         });
 
     },
 });
-
-const formatSingleExportError = (error: { kind: string; reason?: string; status?: number; timeoutMs?: number }): string => {
-    switch (error.kind) {
-        case 'not_terminal':
-            return `Conversation is not ready to save${error.reason ? ` (${error.reason})` : ''}.`;
-        case 'timeout':
-            return `Conversation request timed out after ${error.timeoutMs ?? 'the configured'} ms.`;
-        case 'missing_auth':
-            return 'The page did not provide the authentication context needed to save this conversation.';
-        case 'http_failure':
-            return `Conversation request failed${error.status ? ` (${error.status})` : ''}.`;
-        case 'download_failure':
-            return error.reason
-                ? `Could not download the conversation (${error.reason}).`
-                : 'Could not download the conversation.';
-        default:
-            return error.reason ? `${error.kind}: ${error.reason}` : error.kind;
-    }
-};
