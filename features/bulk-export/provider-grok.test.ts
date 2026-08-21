@@ -81,7 +81,34 @@ describe('fetchConversationByIdGrokCom', () => {
 
         const result = await fetchConversationByIdGrokCom(conversationId, adapter, fetchContext);
 
-        expect(result).toEqual(conversation);
+        expect(result).toMatchObject(conversation);
+        expect((result as Record<string, unknown>).raw_payload).toEqual(conversation);
         expect(fetchedUrls.some((url) => url.includes(`/reconnect-response-v2/${responseId}`))).toBeTrue();
+    });
+
+    it('should preserve the raw reconnect fallback payload for downstream export', async () => {
+        const rawPayload = JSON.stringify({ conversation_id: conversationId, title: 'Recovered raw' });
+        const fetchContext = createMockFetchContext(
+            mock(async (input) => {
+                const url = String(input);
+                if (url.includes('/conversations_v2/')) {
+                    return new Response('missing', { status: 404 });
+                }
+                if (url.includes('/response-node')) {
+                    return new Response(JSON.stringify({ responseNodes: [{ responseId }] }), { status: 200 });
+                }
+                if (url.includes(`/reconnect-response-v2/${responseId}`)) {
+                    return new Response(rawPayload, { status: 200 });
+                }
+                return new Response('missing', { status: 404 });
+            }) as unknown as typeof fetch,
+        );
+
+        const result = await fetchConversationByIdGrokCom(conversationId, adapter, fetchContext);
+
+        expect((result as Record<string, unknown>).raw_payload).toEqual({
+            conversation_id: conversationId,
+            title: 'Recovered raw',
+        });
     });
 });

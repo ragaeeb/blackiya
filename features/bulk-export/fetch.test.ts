@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import type { FetchContext } from './fetch';
-import { fetchFirstSuccessfulResponse, fetchText, MAX_429_RETRIES } from './fetch';
+import { fetchFirstSuccessfulResponse, fetchText, MAX_429_RETRIES, MAX_429_RETRY_DELAY_MS } from './fetch';
 
 const createMockContext = (overrides: Partial<FetchContext> = {}): FetchContext => ({
     fetchImpl: mock(() => Promise.resolve(new Response('', { status: 200 }))),
@@ -100,6 +100,72 @@ describe('fetchText', () => {
         await fetchText('https://example.com', context);
 
         expect(context.sleepImpl).toHaveBeenCalledWith(2000);
+    });
+
+    it('should cap an excessive retry-after delay', async () => {
+        let callCount = 0;
+        const context = createMockContext({
+            timeoutMs: 60_000,
+            fetchImpl: mock(() => {
+                callCount += 1;
+                return callCount === 1
+                    ? Promise.resolve(new Response('', { status: 429, headers: { 'retry-after': '86400' } }))
+                    : Promise.resolve(new Response('success', { status: 200 }));
+            }),
+            sleepImpl: mock(() => Promise.resolve()),
+        });
+
+        await fetchText('https://example.com/capped-retry', context);
+
+        expect(context.sleepImpl).toHaveBeenCalledWith(MAX_429_RETRY_DELAY_MS);
+    });
+
+    it('should stop before retrying when the retry delay reaches the request deadline', async () => {
+        let now = 0;
+        let attempts = 0;
+        const context = createMockContext({
+            timeoutMs: 1_000,
+            nowImpl: () => now,
+            fetchImpl: mock(() => {
+                attempts += 1;
+                return Promise.resolve(new Response('', { status: 429, headers: { 'retry-after': '30' } }));
+            }),
+            sleepImpl: mock(async (milliseconds: number) => {
+                now += milliseconds;
+            }),
+        });
+
+        const result = await fetchText('https://example.com/deadline', context);
+
+        expect(result).toMatchObject({ ok: false, status: 0 });
+        expect(attempts).toBe(1);
+        expect(context.sleepImpl).toHaveBeenCalledWith(1_000);
+    });
+
+    it('should abort retry sleep when the request signal is aborted', async () => {
+        const abortController = new AbortController();
+        let attempts = 0;
+        const context = createMockContext({
+            fetchImpl: mock(() => {
+                attempts += 1;
+                return Promise.resolve(new Response('', { status: 429 }));
+            }),
+            sleepImpl: mock(async () => {
+                abortController.abort();
+                await new Promise<void>(() => {});
+            }),
+        });
+
+        const result = await fetchText('https://example.com/aborted-retry', context, {
+            signal: abortController.signal,
+        });
+
+        expect(result).toMatchObject({ ok: false, status: 0 });
+        if (result.ok) {
+            throw new Error('expected aborted retry to fail');
+        }
+        expect(result.message).toContain('aborted');
+        expect(attempts).toBe(1);
     });
 
     it('should handle network errors', async () => {

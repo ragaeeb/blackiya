@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { geminiState } from '../../platforms/gemini/state';
 import type { ConversationData } from '@/utils/types';
 import type { FetchContext } from './fetch';
-import { fetchConversationByIdGemini } from './provider-gemini';
+import { fetchConversationByIdGemini, listConversationIdsGemini } from './provider-gemini';
 
 const buildContext = (fetchImpl: typeof fetch): FetchContext => ({
     fetchImpl,
@@ -47,5 +48,43 @@ describe('fetchConversationByIdGemini', () => {
         );
 
         expect(result).toEqual(conversation);
+    });
+
+    it('should fail fast without the at context instead of issuing cookie-only detail GETs', async () => {
+        let requestCount = 0;
+        const fetchImpl = (() => {
+            requestCount += 1;
+            throw new Error('detail request must not be attempted');
+        }) as unknown as typeof fetch;
+
+        const result = await fetchConversationByIdGemini(
+            'gem-missing-at',
+            { parseInterceptedData: () => null } as any,
+            buildContext(fetchImpl),
+            'https://gemini.google.com/app/gem-missing-at',
+            undefined,
+        );
+
+        expect(result).toBeNull();
+        expect(requestCount).toBe(0);
+    });
+
+    it('should not reuse unbound Gemini title-cache IDs when the list request fails', async () => {
+        geminiState.reset();
+        geminiState.conversationTitles.set('stale-account-id', 'Stale account conversation');
+
+        try {
+            const result = await listConversationIdsGemini(
+                { maxItems: null, delayMs: 0, timeoutMs: 5_000 },
+                buildContext((async () => new Response('unauthorized', { status: 401 })) as unknown as typeof fetch),
+                'https://gemini.google.com/app',
+                { extractConversationId: () => null } as any,
+            );
+
+            expect(result.ids).toEqual([]);
+            expect(result.warnings.join(' ')).not.toContain('falling back to cached');
+        } finally {
+            geminiState.reset();
+        }
     });
 });

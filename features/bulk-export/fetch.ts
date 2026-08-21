@@ -1,6 +1,7 @@
 import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 
 export const MAX_429_RETRIES = 3;
+export const MAX_429_RETRY_DELAY_MS = 30_000;
 
 export type FetchTextResult =
     | { ok: true; text: string }
@@ -16,6 +17,7 @@ type FetchTextRequestInit = {
     method?: 'GET' | 'POST';
     headers?: HeadersInit;
     body?: BodyInit | null;
+    signal?: AbortSignal;
 };
 
 export type FetchContext = {
@@ -27,18 +29,91 @@ export type FetchContext = {
     delayMs?: number;
     platformName: string;
     requestCount: number;
+    signal?: AbortSignal;
+};
+
+type WaitOutcome = 'completed' | 'deadline' | 'aborted';
+
+const waitForDelay = async (
+    context: FetchContext,
+    requestedDelayMs: number,
+    deadlineAt: number,
+    signal: AbortSignal | undefined,
+): Promise<WaitOutcome> => {
+    if (signal?.aborted) {
+        return 'aborted';
+    }
+
+    const remainingMs = deadlineAt - context.nowImpl();
+    if (remainingMs <= 0) {
+        return 'deadline';
+    }
+
+    const delayMs = Math.min(requestedDelayMs, remainingMs);
+    return new Promise<WaitOutcome>((resolve, reject) => {
+        let settled = false;
+        const timerId = globalThis.setTimeout(() => {
+            finish(delayMs < requestedDelayMs ? 'deadline' : 'completed');
+        }, delayMs);
+
+        const cleanup = () => {
+            globalThis.clearTimeout(timerId);
+            signal?.removeEventListener('abort', onAbort);
+        };
+
+        const finish = (outcome: WaitOutcome) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            resolve(outcome);
+        };
+
+        const fail = (error: unknown) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            reject(error);
+        };
+
+        const onAbort = () => finish('aborted');
+        signal?.addEventListener('abort', onAbort, { once: true });
+
+        try {
+            context.sleepImpl(delayMs).then(
+                () => {
+                    if (signal?.aborted) {
+                        finish('aborted');
+                    } else if (delayMs < requestedDelayMs || context.nowImpl() >= deadlineAt) {
+                        finish('deadline');
+                    } else {
+                        finish('completed');
+                    }
+                },
+                fail,
+            );
+        } catch (error) {
+            fail(error);
+        }
+    });
 };
 
 const getRetryDelayMs = (response: Response, nowMs: number, attempt: number): number => {
+    let delayMs: number;
     const retryAfter = response.headers.get('retry-after');
     if (retryAfter) {
         const asNumber = Number(retryAfter);
         if (Number.isFinite(asNumber) && asNumber > 0) {
-            return asNumber * 1000;
+            delayMs = asNumber * 1000;
+            return Math.min(MAX_429_RETRY_DELAY_MS, delayMs);
         }
         const dateValue = Date.parse(retryAfter);
         if (Number.isFinite(dateValue)) {
-            return Math.max(1_000, dateValue - nowMs);
+            delayMs = Math.max(1_000, dateValue - nowMs);
+            return Math.min(MAX_429_RETRY_DELAY_MS, delayMs);
         }
     }
 
@@ -46,11 +121,12 @@ const getRetryDelayMs = (response: Response, nowMs: number, attempt: number): nu
     if (reset) {
         const resetEpochSeconds = Number(reset);
         if (Number.isFinite(resetEpochSeconds) && resetEpochSeconds > 0) {
-            return Math.max(1_000, resetEpochSeconds * 1000 - nowMs + 500);
+            delayMs = Math.max(1_000, resetEpochSeconds * 1000 - nowMs + 500);
+            return Math.min(MAX_429_RETRY_DELAY_MS, delayMs);
         }
     }
 
-    return Math.max(1_000, Math.min(30_000, 1_500 * 2 ** attempt));
+    return Math.min(MAX_429_RETRY_DELAY_MS, Math.max(1_000, 1_500 * 2 ** attempt));
 };
 
 const shouldRetryRateLimit = (response: Response, attempt: number) =>
@@ -62,11 +138,19 @@ const buildFailedFetchResult = (status: number, message: string): FetchTextResul
     message,
 });
 
-const waitForRequestSlot = async (context: FetchContext) => {
+const waitForRequestSlot = async (
+    context: FetchContext,
+    deadlineAt: number,
+    signal: AbortSignal | undefined,
+): Promise<WaitOutcome> => {
     if (context.requestCount > 0 && typeof context.delayMs === 'number') {
-        await context.sleepImpl(context.delayMs);
+        const outcome = await waitForDelay(context, context.delayMs, deadlineAt, signal);
+        if (outcome !== 'completed') {
+            return outcome;
+        }
     }
     context.requestCount += 1;
+    return 'completed';
 };
 
 const requestWithTimeout = async (
@@ -114,12 +198,14 @@ const readResponseText = async (response: Response, signal: AbortSignal): Promis
     });
 };
 
+type AttemptOutcome = { result: FetchTextResult } | { retryDelayMs: number };
+
 const processFetchResponse = async (
     response: Response,
     context: FetchContext,
     attempt: number,
     signal: AbortSignal,
-): Promise<{ result?: FetchTextResult; retryDelayMs?: number }> => {
+): Promise<AttemptOutcome> => {
     if (response.status === 429 && attempt >= MAX_429_RETRIES) {
         return { result: buildFailedFetchResult(429, 'Rate limit retries exhausted') };
     }
@@ -133,11 +219,50 @@ const processFetchResponse = async (
     }
 
     return {
-        result: {
-            ok: true,
-            text: await readResponseText(response, signal),
-        },
+        result: { ok: true, text: await readResponseText(response, signal) },
     };
+};
+
+const executeFetchAttempt = async (
+    url: string,
+    context: FetchContext,
+    init: FetchTextRequestInit | undefined,
+    attempt: number,
+    deadlineAt: number,
+    externalSignal: AbortSignal | undefined,
+): Promise<AttemptOutcome> => {
+    const remainingMs = deadlineAt - context.nowImpl();
+    if (remainingMs <= 0) {
+        return { result: buildFailedFetchResult(0, 'Request deadline exceeded.') };
+    }
+
+    const controller = new AbortController();
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    externalSignal?.addEventListener('abort', abortFromExternal, { once: true });
+    const timeoutId = globalThis.setTimeout(() => controller.abort(), remainingMs);
+
+    try {
+        const response = await requestWithTimeout(url, context, init, controller.signal);
+        return await processFetchResponse(response, context, attempt, controller.signal);
+    } catch (error) {
+        return { result: buildFailedFetchResult(0, error instanceof Error ? error.message : String(error)) };
+    } finally {
+        globalThis.clearTimeout(timeoutId);
+        externalSignal?.removeEventListener('abort', abortFromExternal);
+    }
+};
+
+const failureForWaitOutcome = (outcome: WaitOutcome, phase: 'slot' | 'retry'): FetchTextResult => {
+    if (outcome === 'aborted') {
+        return buildFailedFetchResult(
+            0,
+            phase === 'retry' ? 'Request aborted while waiting to retry.' : 'Request aborted while waiting for a request slot.',
+        );
+    }
+    return buildFailedFetchResult(
+        0,
+        phase === 'retry' ? 'Request deadline exceeded while waiting to retry.' : 'Request deadline exceeded.',
+    );
 };
 
 export const fetchText = async (
@@ -145,28 +270,29 @@ export const fetchText = async (
     context: FetchContext,
     init?: FetchTextRequestInit,
 ): Promise<FetchTextResult> => {
+    const externalSignal = init?.signal ?? context.signal;
+    const deadlineAt = context.nowImpl() + context.timeoutMs;
     let attempt = 0;
 
     while (attempt <= MAX_429_RETRIES) {
-        await waitForRequestSlot(context);
-        const controller = new AbortController();
-        const timeoutId = globalThis.setTimeout(() => controller.abort(), context.timeoutMs);
-
-        try {
-            const response = await requestWithTimeout(url, context, init, controller.signal);
-            const outcome = await processFetchResponse(response, context, attempt, controller.signal);
-            if (typeof outcome.retryDelayMs === 'number') {
-                const retryDelayMs = outcome.retryDelayMs;
-                await context.sleepImpl(retryDelayMs);
-                attempt += 1;
-                continue;
-            }
-            return outcome.result ?? buildFailedFetchResult(0, 'Unknown request failure');
-        } catch (error) {
-            return buildFailedFetchResult(0, error instanceof Error ? error.message : String(error));
-        } finally {
-            globalThis.clearTimeout(timeoutId);
+        const slotOutcome = await waitForRequestSlot(context, deadlineAt, externalSignal);
+        if (slotOutcome !== 'completed') {
+            return failureForWaitOutcome(slotOutcome, 'slot');
         }
+        if (externalSignal?.aborted) {
+            return buildFailedFetchResult(0, 'Request aborted.');
+        }
+
+        const outcome = await executeFetchAttempt(url, context, init, attempt, deadlineAt, externalSignal);
+        if ('result' in outcome) {
+            return outcome.result;
+        }
+
+        const retryOutcome = await waitForDelay(context, outcome.retryDelayMs, deadlineAt, externalSignal);
+        if (retryOutcome !== 'completed') {
+            return failureForWaitOutcome(retryOutcome, 'retry');
+        }
+        attempt += 1;
     }
 
     return buildFailedFetchResult(429, 'Rate limit retries exhausted');

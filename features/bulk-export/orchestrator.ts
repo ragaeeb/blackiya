@@ -2,6 +2,7 @@ import type { V3BulkExportOptions } from '@/features/runtime/v3-runtime';
 import type { LLMPlatform } from '@/platforms/types';
 import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
 import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
+import type { ConversationData } from '@/utils/types';
 import type { BulkExportChatsSuccessResponse, BulkExportProgressMessage } from './contract';
 import { downloadCanonicalConversation, type BulkDownloadImpl } from './downloads';
 import type { FetchContext, FetchImplementation } from './fetch';
@@ -112,7 +113,56 @@ const exportConversation = async (
         return false;
     }
 
+    if (!isConversationReadyForExport(conversationId, conversation, adapter)) {
+        return false;
+    }
+
     return downloadCanonicalConversation(conversation, adapter, usedFilenames, downloadImpl).downloaded;
+};
+
+const inferTerminalReadiness = (conversation: ConversationData): boolean => {
+    const messages = Object.values(conversation.mapping ?? {})
+        .map((node) => node.message)
+        .filter((message): message is NonNullable<ConversationData['mapping'][string]['message']> => {
+            return message?.author.role === 'assistant';
+        })
+        .sort((left, right) => {
+            const leftTimestamp = left.update_time ?? left.create_time ?? 0;
+            const rightTimestamp = right.update_time ?? right.create_time ?? 0;
+            return leftTimestamp - rightTimestamp;
+        });
+
+    if (messages.length === 0 || messages.some((message) => message.status === 'in_progress')) {
+        return false;
+    }
+
+    const latest = messages.at(-1);
+    if (latest?.status !== 'finished_successfully' || latest.end_turn !== true) {
+        return false;
+    }
+
+    const text = [
+        (latest.content.parts ?? []).filter((part): part is string => typeof part === 'string').join(''),
+        typeof latest.content.content === 'string' ? latest.content.content : '',
+    ].join('');
+    return text.trim().length > 0;
+};
+
+const isConversationReadyForExport = (
+    requestedConversationId: string,
+    conversation: ConversationData,
+    adapter: LLMPlatform,
+): boolean => {
+    if (conversation.conversation_id !== requestedConversationId) {
+        return false;
+    }
+
+    try {
+        const readiness = adapter.evaluateReadiness?.(conversation);
+        return readiness ? readiness.ready && readiness.terminal : inferTerminalReadiness(conversation);
+    } catch {
+        return false;
+    }
 };
 
 type BulkExportContext = {

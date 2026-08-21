@@ -11,6 +11,11 @@ import {
 import type { ConversationListResult } from './provider-chatgpt';
 import { asRecord, firstNonNull, parseJsonSafe, readString, uniqueStrings } from './utils';
 
+const preserveRawFallbackPayload = (conversation: ConversationData, responseText: string): ConversationData => ({
+    ...conversation,
+    raw_payload: parseJsonSafe(responseText) ?? responseText,
+}) as ConversationData;
+
 const resolveGrokComNextCursor = (payload: unknown): string | null => {
     const record = asRecord(payload);
     const cursor = firstNonNull([
@@ -120,7 +125,7 @@ export const fetchConversationByIdGrokCom = async (
 
         const conversation = adapter.parseInterceptedData(response.text, url);
         if (conversation) {
-            return conversation;
+            return url.includes('/response-node') ? preserveRawFallbackPayload(conversation, response.text) : conversation;
         }
     }
 
@@ -132,7 +137,7 @@ export const fetchConversationByIdGrokCom = async (
         }
         const conversation = adapter.parseInterceptedData(response.text, reconnectUrl);
         if (conversation) {
-            return conversation;
+            return preserveRawFallbackPayload(conversation, response.text);
         }
     }
 

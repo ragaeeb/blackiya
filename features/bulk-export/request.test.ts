@@ -77,8 +77,12 @@ describe('bulk export request client', () => {
 
         const result = await fetchText('https://example.test/exhausted', context);
 
-        expect(result).toEqual({ ok: false, status: 429, message: 'Rate limit retries exhausted' });
-        expect(attempts).toBe(4);
+        expect(result).toEqual({
+            ok: false,
+            status: 0,
+            message: 'Request deadline exceeded while waiting to retry.',
+        });
+        expect(attempts).toBe(3);
     });
 
 });

@@ -1,5 +1,4 @@
 import { GEMINI_RPC_IDS } from '@/platforms/constants';
-import { geminiState } from '@/platforms/gemini/state';
 import type { LLMPlatform } from '@/platforms/types';
 import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-bridge';
 import type { ConversationData } from '@/utils/types';
@@ -22,47 +21,27 @@ export const listConversationIdsGemini = async (
     const host = resolveHostFromLocation(locationHref, 'gemini.google.com');
     const locationConversationId = adapter.extractConversationId(locationHref);
     const sourcePath = locationConversationId ? `/app/${locationConversationId}` : '/app';
-    const cachedIds = uniqueStrings([
-        ...Array.from(geminiState.conversationTitles.keys()),
-        ...(locationConversationId ? [locationConversationId] : []),
-    ]);
     const url = `https://${host}${GEMINI_BATCHEXECUTE_PATH}?rpcids=${GEMINI_RPC_IDS.TITLES}&source-path=${encodeURIComponent(sourcePath)}&rt=c`;
     const response = await fetchText(url, fetchContext);
     if (!response.ok) {
         warnings.push(
             `Gemini titles list request failed: status=${response.status} message=${response.message || 'Unknown error'}`,
         );
-        if (cachedIds.length > 0) {
-            warnings.push(
-                `Gemini titles request failed; falling back to cached Gemini title ids (${cachedIds.length}).`,
-            );
-            return {
-                ids: options.maxItems === null ? cachedIds : cachedIds.slice(0, options.maxItems),
-                warnings,
-            };
-        }
         return { ids: [], warnings };
     }
 
     const parsedIds = extractGeminiConversationIdsFromBatchexecuteText(response.text);
     if (parsedIds.length > 0) {
         return {
-            ids: options.maxItems === null ? parsedIds : parsedIds.slice(0, options.maxItems),
+            ids: options.maxItems === null
+                ? uniqueStrings(parsedIds)
+                : uniqueStrings(parsedIds).slice(0, options.maxItems),
             warnings,
         };
     }
 
-    if (cachedIds.length > 0) {
-        warnings.push(
-            `Gemini titles endpoint returned no ids; falling back to cached Gemini title ids (${cachedIds.length}).`,
-        );
-    }
-
-    const ids = cachedIds;
-    return {
-        ids: options.maxItems === null ? ids : ids.slice(0, options.maxItems),
-        warnings,
-    };
+    warnings.push('Gemini titles endpoint returned no parseable conversation ids.');
+    return { ids: [], warnings };
 };
 
 const buildGeminiConversationPostUrl = (host: string, conversationId: string, context: GeminiBatchexecuteContext) => {
@@ -145,27 +124,18 @@ export const fetchConversationByIdGemini = async (
 ): Promise<ConversationData | null> => {
     const host = resolveHostFromLocation(locationHref, 'gemini.google.com');
 
-    if (geminiContext?.at) {
-        const postRequest = buildGeminiPostRequest(host, conversationId, geminiContext, fetchContext.authHeaders);
-        const response = await fetchText(postRequest.url, fetchContext, {
-            method: 'POST',
-            headers: postRequest.headers,
-            body: postRequest.body,
-        });
-        if (response.ok) {
-            const conversation = adapter.parseInterceptedData(response.text, postRequest.url);
-            if (conversation) {
-                return conversation;
-            }
-        }
+    if (!geminiContext?.at) {
+        return null;
     }
 
-    for (const url of buildGeminiDetailUrls(host, conversationId)) {
-        const response = await fetchText(url, fetchContext);
-        if (!response.ok) {
-            continue;
-        }
-        const conversation = adapter.parseInterceptedData(response.text, url);
+    const postRequest = buildGeminiPostRequest(host, conversationId, geminiContext, fetchContext.authHeaders);
+    const response = await fetchText(postRequest.url, fetchContext, {
+        method: 'POST',
+        headers: postRequest.headers,
+        body: postRequest.body,
+    });
+    if (response.ok) {
+        const conversation = adapter.parseInterceptedData(response.text, postRequest.url);
         if (conversation) {
             return conversation;
         }

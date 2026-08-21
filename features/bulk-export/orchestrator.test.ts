@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { LLMPlatform } from '@/platforms/types';
+import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
 import type { ConversationData } from '@/utils/types';
 import { runBulkExport } from './orchestrator';
 
@@ -75,6 +75,14 @@ const buildAdapter = (): LLMPlatform => ({
         `https://chatgpt.com/backend-api/conversation/${conversationId}?candidate=2`,
     ],
 });
+
+const terminalReadiness: PlatformReadiness = {
+    ready: true,
+    terminal: true,
+    reason: 'terminal',
+    contentHash: null,
+    latestAssistantTextLength: 8,
+};
 
 describe('runBulkExport', () => {
     it('should list, fetch, annotate, download, and report canonical exports', async () => {
@@ -188,6 +196,78 @@ describe('runBulkExport', () => {
 
         expect(result).toMatchObject({ discovered: 2, attempted: 2, exported: 1, failed: 1 });
         expect(progress.at(-1)).toMatchObject({ stage: 'completed', exported: 1, failed: 1 });
+    });
+
+    it('should count a conversation ID mismatch as a failure without downloading it', async () => {
+        const requestedId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        const returnedId = '69a85cf1-4bcc-832b-b221-d582b0c9910b';
+        let downloadCount = 0;
+        const adapter: LLMPlatform = {
+            ...buildAdapter(),
+            evaluateReadiness: () => terminalReadiness,
+        };
+
+        const result = await runBulkExport(
+            { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+            {
+                getAdapter: () => adapter,
+                getAuthHeaders: () => undefined,
+                locationHref: () => 'https://chatgpt.com/c/current',
+                downloadImpl: () => {
+                    downloadCount += 1;
+                },
+                fetchImpl: (async (input: RequestInfo | URL) => {
+                    const url = String(input);
+                    if (url.includes('/backend-api/conversations?')) {
+                        return new Response(JSON.stringify({ items: [{ id: requestedId }] }), { status: 200 });
+                    }
+                    return new Response(JSON.stringify(buildConversation(returnedId, 'Wrong conversation')), {
+                        status: 200,
+                    });
+                }) as unknown as typeof fetch,
+            },
+        );
+
+        expect(result).toMatchObject({ discovered: 1, attempted: 1, exported: 0, failed: 1 });
+        expect(downloadCount).toBe(0);
+    });
+
+    it('should count a non-terminal adapter payload as a failure without downloading it', async () => {
+        const conversationId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        let downloadCount = 0;
+        const adapter: LLMPlatform = {
+            ...buildAdapter(),
+            evaluateReadiness: () => ({
+                ...terminalReadiness,
+                ready: false,
+                terminal: false,
+                reason: 'assistant-in-progress',
+            }),
+        };
+
+        const result = await runBulkExport(
+            { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+            {
+                getAdapter: () => adapter,
+                getAuthHeaders: () => undefined,
+                locationHref: () => 'https://chatgpt.com/c/current',
+                downloadImpl: () => {
+                    downloadCount += 1;
+                },
+                fetchImpl: (async (input: RequestInfo | URL) => {
+                    const url = String(input);
+                    if (url.includes('/backend-api/conversations?')) {
+                        return new Response(JSON.stringify({ items: [{ id: conversationId }] }), { status: 200 });
+                    }
+                    return new Response(JSON.stringify(buildConversation(conversationId, 'Still generating')), {
+                        status: 200,
+                    });
+                }) as unknown as typeof fetch,
+            },
+        );
+
+        expect(result).toMatchObject({ discovered: 1, attempted: 1, exported: 0, failed: 1 });
+        expect(downloadCount).toBe(0);
     });
 
     it('should complete with partial counts when one detail payload is unavailable', async () => {
