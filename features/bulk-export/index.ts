@@ -1,5 +1,5 @@
-export { runBulkChatExport, resolvePlatformKind } from './orchestration';
-export type { ExportDeps, ExportResult, PlatformKind } from './orchestration';
+export { runBulkExport, resolvePlatformKind } from './orchestrator';
+export type { BulkExportDependencies, PlatformKind } from './orchestrator';
 export {
     BULK_EXPORT_CHATS_MESSAGE,
     BULK_EXPORT_PROGRESS_MESSAGE,
