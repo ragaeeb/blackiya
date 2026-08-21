@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import type { FetchContext, FetchTextResult } from './fetch';
+import type { FetchContext } from './fetch';
 import { fetchFirstSuccessfulResponse, fetchText, MAX_429_RETRIES } from './fetch';
 
 const createMockContext = (overrides: Partial<FetchContext> = {}): FetchContext => ({
@@ -110,6 +110,28 @@ describe('fetchText', () => {
         const result = await fetchText('https://example.com', context);
 
         expect(result).toEqual({ ok: false, status: 0, message: 'Network failure' });
+    });
+
+    it('should time out while reading a stalled response body', async () => {
+        const response = {
+            headers: new Headers(),
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: () => new Promise<string>(() => {}),
+        } as Response;
+        const context = createMockContext({
+            timeoutMs: 5,
+            fetchImpl: mock(() => Promise.resolve(response)),
+        });
+
+        const result = await fetchText('https://example.com/stalled', context);
+
+        expect(result).toMatchObject({ ok: false, status: 0 });
+        if (result.ok) {
+            throw new Error('expected the stalled response body to time out');
+        }
+        expect(result.message).toContain('timed out');
     });
 
     it('should pass custom headers for POST request', async () => {

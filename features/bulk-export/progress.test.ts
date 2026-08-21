@@ -66,4 +66,25 @@ describe('bulk export progress reporter', () => {
             remaining: 0,
         });
     });
+
+    it('should emit a terminal failed message with counts and a sanitized detail', () => {
+        const messages: unknown[] = [];
+        const progress = createProgressReporter('Gemini', (message) => {
+            messages.push(message);
+        });
+
+        progress.failed({ discovered: 3, attempted: 2, exported: 1, failed: 1 }, 'request failed');
+
+        expect(messages[0]).toEqual({
+            type: BULK_EXPORT_PROGRESS_MESSAGE,
+            stage: 'failed',
+            platform: 'Gemini',
+            discovered: 3,
+            attempted: 2,
+            exported: 1,
+            failed: 1,
+            remaining: 1,
+            message: 'request failed',
+        });
+    });
 });

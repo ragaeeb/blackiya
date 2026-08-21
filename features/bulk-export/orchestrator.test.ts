@@ -70,7 +70,6 @@ const buildAdapter = (): LLMPlatform => ({
         }
     },
     formatFilename: (conversation) => conversation.title,
-    getButtonInjectionTarget: () => null,
     buildApiUrls: (conversationId) => [
         `https://chatgpt.com/backend-api/conversation/${conversationId}?candidate=1`,
         `https://chatgpt.com/backend-api/conversation/${conversationId}?candidate=2`,
@@ -113,8 +112,12 @@ describe('runBulkExport', () => {
             limit: 0,
         });
         expect(downloads).toHaveLength(1);
-        expect(downloads[0]?.filename).toBe('Export title');
-        expect((downloads[0]?.payload as Record<string, unknown>).__blackiya).toEqual({
+        const [download] = downloads;
+        if (!download) {
+            throw new Error('expected one download');
+        }
+        expect(download.filename).toBe('Export title');
+        expect((download.payload as Record<string, unknown>).__blackiya).toEqual({
             exportMeta: {
                 captureSource: 'canonical_api',
                 fidelity: 'high',
@@ -155,5 +158,157 @@ describe('runBulkExport', () => {
         expect(result.exported).toBe(1);
         expect(fetchedUrls.some((url) => url.includes('?candidate=1'))).toBeTrue();
         expect(fetchedUrls.some((url) => url.includes('?candidate=2'))).toBeTrue();
+    });
+
+    it('should count a failed download without counting it as exported', async () => {
+        const firstId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        const secondId = '69a85cf1-4bcc-832b-b221-d582b0c9910b';
+        const progress: Array<{ stage: string; exported?: number; failed?: number }> = [];
+
+        const result = await runBulkExport(
+            { limit: 2, delayMs: 0, timeoutMs: 5_000 },
+            {
+                getAdapter: () => buildAdapter(),
+                getAuthHeaders: () => undefined,
+                locationHref: () => 'https://chatgpt.com/c/current',
+                downloadImpl: (_payload, filename) => filename !== firstId,
+                onProgress: (message) => progress.push(message),
+                fetchImpl: (async (input: RequestInfo | URL) => {
+                    const url = String(input);
+                    if (url.includes('/backend-api/conversations?')) {
+                        return new Response(JSON.stringify({ items: [{ id: firstId }, { id: secondId }] }), {
+                            status: 200,
+                        });
+                    }
+                    const conversationId = url.includes(secondId) ? secondId : firstId;
+                    return new Response(JSON.stringify(buildConversation(conversationId, conversationId)), { status: 200 });
+                }) as unknown as typeof fetch,
+            },
+        );
+
+        expect(result).toMatchObject({ discovered: 2, attempted: 2, exported: 1, failed: 1 });
+        expect(progress.at(-1)).toMatchObject({ stage: 'completed', exported: 1, failed: 1 });
+    });
+
+    it('should complete with partial counts when one detail payload is unavailable', async () => {
+        const firstId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        const secondId = '69a85cf1-4bcc-832b-b221-d582b0c9910b';
+
+        const result = await runBulkExport(
+            { limit: 2, delayMs: 0, timeoutMs: 5_000 },
+            {
+                getAdapter: () => buildAdapter(),
+                getAuthHeaders: () => undefined,
+                locationHref: () => 'https://chatgpt.com/c/current',
+                downloadImpl: () => true,
+                fetchImpl: (async (input: RequestInfo | URL) => {
+                    const url = String(input);
+                    if (url.includes('/backend-api/conversations?')) {
+                        return new Response(JSON.stringify({ items: [{ id: firstId }, { id: secondId }] }), {
+                            status: 200,
+                        });
+                    }
+                    if (url.includes(secondId)) {
+                        return new Response('', { status: 404 });
+                    }
+                    return new Response(JSON.stringify(buildConversation(firstId, 'Partial success')), { status: 200 });
+                }) as unknown as typeof fetch,
+            },
+        );
+
+        expect(result).toMatchObject({ discovered: 2, attempted: 2, exported: 1, failed: 1 });
+        expect(result.warnings).toEqual([]);
+    });
+
+    it('should emit failed progress and rethrow fatal detail errors with sanitized details', async () => {
+        const conversationId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        const progress: unknown[] = [];
+        const parseInterceptedData = (data: string, sourceUrl?: string) => {
+            if (sourceUrl?.includes('/backend-api/conversations?')) {
+                return null;
+            }
+            if (data.includes('detail')) {
+                throw new Error('detail failed at https://chatgpt.com/backend-api/conversation/secret?at=secret-token');
+            }
+            return null;
+        };
+
+        await expect(
+            runBulkExport(
+                { limit: 1, delayMs: 0, timeoutMs: 5_000 },
+                {
+                    getAdapter: () => ({ ...buildAdapter(), parseInterceptedData }),
+                    getAuthHeaders: () => undefined,
+                    locationHref: () => 'https://chatgpt.com/c/current',
+                    onProgress: (message) => progress.push(message),
+                    fetchImpl: (async (input: RequestInfo | URL) => {
+                        const url = String(input);
+                        if (url.includes('/backend-api/conversations?')) {
+                            return new Response(JSON.stringify({ items: [{ id: conversationId }] }), { status: 200 });
+                        }
+                        return new Response('detail', { status: 200 });
+                    }) as unknown as typeof fetch,
+                },
+            ),
+        ).rejects.toThrow('detail failed');
+
+        const failed = progress.at(-1) as Record<string, unknown>;
+        expect(failed).toMatchObject({
+            stage: 'failed',
+            discovered: 1,
+            attempted: 1,
+            exported: 0,
+            failed: 1,
+            remaining: 0,
+        });
+        expect(failed.message).toBe('detail failed at https://chatgpt.com/backend-api/conversation/secret');
+    });
+
+    it('should emit failed progress with partial counts when a downloader throws', async () => {
+        const firstId = '69a85cf1-4bcc-832b-b221-d582b0c9910a';
+        const secondId = '69a85cf1-4bcc-832b-b221-d582b0c9910b';
+        const progress: unknown[] = [];
+        let downloadCount = 0;
+
+        await expect(
+            runBulkExport(
+                { limit: 2, delayMs: 0, timeoutMs: 5_000 },
+                {
+                    getAdapter: () => buildAdapter(),
+                    getAuthHeaders: () => undefined,
+                    locationHref: () => 'https://chatgpt.com/c/current',
+                    onProgress: (message) => progress.push(message),
+                    downloadImpl: () => {
+                        downloadCount += 1;
+                        if (downloadCount === 2) {
+                            throw new Error('download failed at https://chatgpt.com/download?token=secret');
+                        }
+                        return true;
+                    },
+                    fetchImpl: (async (input: RequestInfo | URL) => {
+                        const url = String(input);
+                        if (url.includes('/backend-api/conversations?')) {
+                            return new Response(JSON.stringify({ items: [{ id: firstId }, { id: secondId }] }), {
+                                status: 200,
+                            });
+                        }
+                        const conversationId = url.includes(secondId) ? secondId : firstId;
+                        return new Response(JSON.stringify(buildConversation(conversationId, conversationId)), { status: 200 });
+                    }) as unknown as typeof fetch,
+                },
+            ),
+        ).rejects.toThrow('download failed');
+
+        expect(progress.at(-1)).toEqual({
+            type: 'BLACKIYA_BULK_EXPORT_PROGRESS',
+            stage: 'failed',
+            platform: 'ChatGPT',
+            discovered: 2,
+            attempted: 2,
+            exported: 1,
+            failed: 1,
+            remaining: 0,
+            message: 'download failed at https://chatgpt.com/download',
+        });
     });
 });

@@ -15,7 +15,11 @@ export type BulkDownload = {
     filename: string;
 };
 
-export type BulkDownloadImpl = (payload: unknown, filename: string) => void;
+export type BulkDownloadResult = BulkDownload & {
+    downloaded: boolean;
+};
+
+export type BulkDownloadImpl = (payload: unknown, filename: string) => unknown;
 
 export const attachCanonicalExportMeta = (payload: unknown): unknown => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -58,8 +62,10 @@ export const downloadCanonicalConversation = (
     adapter: LLMPlatform,
     usedFilenames: Set<string>,
     downloadImpl: BulkDownloadImpl = downloadAsJSON,
-): BulkDownload => {
+): BulkDownloadResult => {
     const download = prepareCanonicalDownload(conversation, adapter, usedFilenames);
-    downloadImpl(download.payload, download.filename);
-    return download;
+    return {
+        ...download,
+        downloaded: downloadImpl(download.payload, download.filename) !== false,
+    };
 };

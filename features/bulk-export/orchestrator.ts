@@ -90,10 +90,45 @@ const fetchConversationById = async (
     return null;
 };
 
-export const runBulkExport = async (
+const exportConversation = async (
+    conversationId: string,
+    platform: PlatformKind,
+    adapter: LLMPlatform,
+    fetchContext: FetchContext,
+    locationHref: string,
+    geminiContext: GeminiBatchexecuteContext | undefined,
+    usedFilenames: Set<string>,
+    downloadImpl: BulkDownloadImpl | undefined,
+) => {
+    const conversation = await fetchConversationById(
+        conversationId,
+        platform,
+        adapter,
+        fetchContext,
+        locationHref,
+        geminiContext,
+    );
+    if (!conversation) {
+        return false;
+    }
+
+    return downloadCanonicalConversation(conversation, adapter, usedFilenames, downloadImpl).downloaded;
+};
+
+type BulkExportContext = {
+    adapter: LLMPlatform;
+    platform: PlatformKind;
+    href: string;
+    options: ReturnType<typeof normalizeOptions>;
+    fetchContext: FetchContext;
+    geminiContext: GeminiBatchexecuteContext | undefined;
+    startedAt: number;
+};
+
+const createBulkExportContext = (
     optionsInput: V3BulkExportOptions,
     deps: BulkExportDependencies,
-): Promise<BulkExportChatsSuccessResponse['result']> => {
+): BulkExportContext => {
     const adapter = deps.getAdapter();
     if (!adapter) {
         throw new Error('No supported platform found for this tab.');
@@ -117,56 +152,131 @@ export const runBulkExport = async (
         platformName: adapter.name,
         requestCount: 0,
     };
-    const geminiContext = deps.getGeminiBatchexecuteContext?.();
-    const startedAt = fetchContext.nowImpl();
-    const listResult = await listConversationIds(platform, options, fetchContext, adapter, href);
+
+    return {
+        adapter,
+        platform,
+        href,
+        options,
+        fetchContext,
+        geminiContext: deps.getGeminiBatchexecuteContext?.(),
+        startedAt: fetchContext.nowImpl(),
+    };
+};
+
+type ConversationExportOutcome =
+    | { ok: true; downloaded: boolean }
+    | { ok: false; error: unknown };
+
+const exportConversationSafely = async (
+    conversationId: string,
+    context: BulkExportContext,
+    usedFilenames: Set<string>,
+    downloadImpl: BulkDownloadImpl | undefined,
+): Promise<ConversationExportOutcome> => {
+    try {
+        return {
+            ok: true,
+            downloaded: await exportConversation(
+                conversationId,
+                context.platform,
+                context.adapter,
+                context.fetchContext,
+                context.href,
+                context.geminiContext,
+                usedFilenames,
+                downloadImpl,
+            ),
+        };
+    } catch (error) {
+        return { ok: false, error };
+    }
+};
+
+type BulkExportCounts = {
+    discovered: number;
+    attempted: number;
+    exported: number;
+    failed: number;
+};
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+const runBulkExportWithProgress = async (
+    context: BulkExportContext,
+    deps: BulkExportDependencies,
+    progress: ReturnType<typeof createProgressReporter>,
+    counts: BulkExportCounts,
+) => {
+    const listResult = await listConversationIds(
+        context.platform,
+        context.options,
+        context.fetchContext,
+        context.adapter,
+        context.href,
+    );
     const ids = listResult.ids;
     const warnings = [...listResult.warnings];
-    const progress = createProgressReporter(adapter.name, deps.onProgress);
-    progress.started(ids.length);
+    counts.discovered = ids.length;
+    progress.started(counts.discovered);
 
     if (ids.length === 0) {
         warnings.push('No conversations discovered from list endpoint.');
     }
 
-    let attempted = 0;
-    let exported = 0;
-    let failed = 0;
     const usedFilenames = new Set<string>();
-
     for (const conversationId of ids) {
-        attempted += 1;
-        const conversation = await fetchConversationById(
+        counts.attempted += 1;
+        const outcome = await exportConversationSafely(
             conversationId,
-            platform,
-            adapter,
-            fetchContext,
-            href,
-            geminiContext,
+            context,
+            usedFilenames,
+            deps.downloadImpl,
         );
-        if (!conversation) {
-            failed += 1;
-            progress.progress({ discovered: ids.length, attempted, exported, failed });
-            continue;
+        if (!outcome.ok) {
+            counts.failed += 1;
+            throw outcome.error;
         }
-
-        downloadCanonicalConversation(conversation, adapter, usedFilenames, deps.downloadImpl);
-        exported += 1;
-        progress.progress({ discovered: ids.length, attempted, exported, failed });
+        if (outcome.downloaded) {
+            counts.exported += 1;
+        } else {
+            counts.failed += 1;
+        }
+        progress.progress(counts);
     }
 
     const result = {
-        platform: adapter.name,
-        discovered: ids.length,
-        attempted,
-        exported,
-        failed,
-        elapsedMs: fetchContext.nowImpl() - startedAt,
-        limit: options.maxItems ?? 0,
+        platform: context.adapter.name,
+        discovered: counts.discovered,
+        attempted: counts.attempted,
+        exported: counts.exported,
+        failed: counts.failed,
+        elapsedMs: context.fetchContext.nowImpl() - context.startedAt,
+        limit: context.options.maxItems ?? 0,
         warnings,
     };
     progress.completed(result);
     return result;
+};
+
+export const runBulkExport = async (
+    optionsInput: V3BulkExportOptions,
+    deps: BulkExportDependencies,
+): Promise<BulkExportChatsSuccessResponse['result']> => {
+    const context = createBulkExportContext(optionsInput, deps);
+    const progress = createProgressReporter(context.adapter.name, deps.onProgress);
+    const counts: BulkExportCounts = {
+        discovered: 0,
+        attempted: 0,
+        exported: 0,
+        failed: 0,
+    };
+    try {
+        return await runBulkExportWithProgress(context, deps, progress, counts);
+    } catch (error) {
+        progress.failed(counts, errorMessage(error));
+        throw error;
+    }
 };
 
 export const createBulkExportRunner = (deps: BulkExportDependencies) =>

@@ -14,6 +14,23 @@ export type ProgressReporter = {
     started: (discovered: number) => void;
     progress: (counts: ProgressCounts) => void;
     completed: (counts: ProgressCounts) => void;
+    failed: (counts: ProgressCounts, message: string) => void;
+};
+
+const MAX_PROGRESS_ERROR_LENGTH = 240;
+
+export const sanitizeProgressError = (message: string): string => {
+    const withoutQuery = message.replace(/https?:\/\/[^\s"'<>]+/gi, (value) => {
+        try {
+            const url = new URL(value);
+            return `${url.origin}${url.pathname}`;
+        } catch {
+            return '[redacted-url]';
+        }
+    });
+    return withoutQuery.length > MAX_PROGRESS_ERROR_LENGTH
+        ? `${withoutQuery.slice(0, MAX_PROGRESS_ERROR_LENGTH - 3)}...`
+        : withoutQuery;
 };
 
 export const createProgressReporter = (
@@ -51,6 +68,16 @@ export const createProgressReporter = (
                 platform,
                 ...counts,
                 remaining: 0,
+            });
+        },
+        failed: (counts, message) => {
+            emit({
+                type: BULK_EXPORT_PROGRESS_MESSAGE,
+                stage: 'failed',
+                platform,
+                ...counts,
+                remaining: Math.max(0, counts.discovered - counts.attempted),
+                message: sanitizeProgressError(message),
             });
         },
     };

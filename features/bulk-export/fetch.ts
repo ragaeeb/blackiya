@@ -83,10 +83,42 @@ const requestWithTimeout = async (
         signal,
     });
 
+const readResponseText = async (response: Response, signal: AbortSignal): Promise<string> => {
+    if (signal.aborted) {
+        throw new Error('Request timed out while reading response body.');
+    }
+
+    return new Promise<string>((resolve, reject) => {
+        const onAbort = () => {
+            cleanup();
+            reject(new Error('Request timed out while reading response body.'));
+        };
+        const cleanup = () => signal.removeEventListener('abort', onAbort);
+
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+            response.text().then(
+                (text) => {
+                    cleanup();
+                    resolve(text);
+                },
+                (error: unknown) => {
+                    cleanup();
+                    reject(error);
+                },
+            );
+        } catch (error) {
+            cleanup();
+            reject(error);
+        }
+    });
+};
+
 const processFetchResponse = async (
     response: Response,
     context: FetchContext,
     attempt: number,
+    signal: AbortSignal,
 ): Promise<{ result?: FetchTextResult; retryDelayMs?: number }> => {
     if (response.status === 429 && attempt >= MAX_429_RETRIES) {
         return { result: buildFailedFetchResult(429, 'Rate limit retries exhausted') };
@@ -103,7 +135,7 @@ const processFetchResponse = async (
     return {
         result: {
             ok: true,
-            text: await response.text(),
+            text: await readResponseText(response, signal),
         },
     };
 };
@@ -122,7 +154,7 @@ export const fetchText = async (
 
         try {
             const response = await requestWithTimeout(url, context, init, controller.signal);
-            const outcome = await processFetchResponse(response, context, attempt);
+            const outcome = await processFetchResponse(response, context, attempt, controller.signal);
             if (typeof outcome.retryDelayMs === 'number') {
                 const retryDelayMs = outcome.retryDelayMs;
                 await context.sleepImpl(retryDelayMs);
