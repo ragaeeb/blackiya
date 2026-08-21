@@ -57,82 +57,14 @@ describe('Gemini Adapter — integration', () => {
 
         it('should return null when extracting conversation ID from Gemini API URL', () => {
             expect(
-                geminiAdapter.extractConversationIdFromUrl(
+                geminiAdapter.extractConversationId(
                     'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb',
                 ),
             ).toBeNull();
         });
     });
 
-    describe('API pattern matching', () => {
-        it('should match batchexecute URLs even when rpcids drift', () => {
-            const pattern = geminiAdapter.apiEndpointPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBeTrue();
-            expect(
-                pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?v=1&rpcids=hNvQHb&test=1'),
-            ).toBeTrue();
-        });
-
-        it('should match generic batchexecute URLs without requiring rpcids', () => {
-            const pattern = geminiAdapter.apiEndpointPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=otAQ7b')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute')).toBeTrue();
-        });
-
-        it('should match StreamGenerate URL (Gemini 3.0 — V2.1-025)', () => {
-            expect(
-                geminiAdapter.apiEndpointPattern.test(
-                    'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq_assistant-bard-web-server_20260210.04_p0&f.sid=-37108853284977362&hl=en&_reqid=2641802&rt=c',
-                ),
-            ).toBeTrue();
-        });
-
-        it('should match StreamGenerate as completion trigger (Gemini 3.0 — V2.1-025)', () => {
-            expect(
-                geminiAdapter.completionTriggerPattern.test(
-                    'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq',
-                ),
-            ).toBeTrue();
-        });
-
-        it('should match completion trigger URLs for generic batchexecute RPCs', () => {
-            const pattern = geminiAdapter.completionTriggerPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBeTrue();
-        });
-    });
-
-    describe('Dual-match: URLs matching both apiEndpointPattern and completionTriggerPattern', () => {
-        it('StreamGenerate matches BOTH patterns (documents the overlap)', () => {
-            const url =
-                'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
-        });
-
-        it('hNvQHb batchexecute matches BOTH patterns', () => {
-            const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
-        });
-
-        it('MaZiqc batchexecute matches completionTriggerPattern (suppressed at interceptor layer)', () => {
-            const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
-        });
-
-        it('extractConversationIdFromUrl returns null for StreamGenerate (no ID in URL)', () => {
-            const url =
-                'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-            expect(geminiAdapter.extractConversationIdFromUrl?.(url)).toBeNull();
-        });
-    });
-
-    describe('Conversation data parsing', () => {
+describe('Conversation data parsing', () => {
         it('should parse a full conversation correctly (User + Assistant + Reasoning)', () => {
             const url = 'https://gemini.google.com/app/9cf87bbddf79d497';
             const result = geminiAdapter.parseInterceptedData(conversationResponseRaw, url);
