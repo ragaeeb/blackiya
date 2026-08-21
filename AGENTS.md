@@ -54,7 +54,7 @@ Key modules:
 - Export controls: `features/export-controls/*`
 - Bulk export: `features/bulk-export/*` (orchestrator, providers, parsers, fetch, downloads, options, progress)
 - Stream-debug: `features/stream-debug/*` (recorder, stream-monitor, xhr-monitor, generation-endpoint)
-- Message contracts: `features/runtime/v3-runtime.ts`, `features/bulk-export/contract.ts`, `features/stream-debug/contract.ts`
+- Message contracts: `features/runtime/v3-runtime.ts`, `features/runtime/main-world-command-contract.ts`, `features/bulk-export/contract.ts`; stream record types live in `features/stream-debug/recorder.ts`
 - Session token: `utils/protocol/session-token.ts`
 
 There is no SFE, no probe lease arbitration, and no calibration profile. The background service worker is not part of the export path.
