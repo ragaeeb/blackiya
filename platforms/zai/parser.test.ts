@@ -8,6 +8,24 @@ import {
 } from './fixtures/har-derived';
 import { mergeZaiConversationPayloads, parseZaiConversationDetail, parseZaiMessagesBatch } from './parser';
 
+const DISCONNECTED_ROOT_ID = '55555555-5555-4555-8555-555555555555';
+const DISCONNECTED_LEAF_ID = '66666666-6666-4666-8666-666666666666';
+
+const addDetailNode = (
+    detail: typeof zaiDetailPayloadFixture,
+    input: { id: string; parentId: string | null; childrenIds: string[] },
+) => {
+    Object.assign(detail.chat.history.messages, {
+        [input.id]: {
+            childrenIds: input.childrenIds,
+            id: input.id,
+            parentId: input.parentId,
+            role: 'assistant',
+            timestamp: 1_700_000_010,
+        },
+    });
+};
+
 describe('Z.ai HAR-derived payload parsing', () => {
     it('should preserve a complete detail response while marking its unloaded assistant stub in progress', () => {
         const raw = structuredClone(zaiDetailPayloadFixture);
@@ -69,6 +87,65 @@ describe('Z.ai HAR-derived payload parsing', () => {
         const missingCurrentNode = structuredClone(zaiDetailPayloadFixture);
         missingCurrentNode.chat.history.currentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
         expect(parseZaiConversationDetail(missingCurrentNode, ZAI_CONVERSATION_ID)).toBeNull();
+    });
+
+    it('should reject a canonical graph with multiple roots', () => {
+        const detail = structuredClone(zaiDetailPayloadFixture);
+        addDetailNode(detail, { id: DISCONNECTED_ROOT_ID, parentId: null, childrenIds: [] });
+
+        expect(parseZaiConversationDetail(detail, ZAI_CONVERSATION_ID)).toBeNull();
+    });
+
+    it('should reject a disconnected component not covered by DFS from the root', () => {
+        const detail = structuredClone(zaiDetailPayloadFixture);
+        addDetailNode(detail, {
+            id: DISCONNECTED_ROOT_ID,
+            parentId: DISCONNECTED_LEAF_ID,
+            childrenIds: [DISCONNECTED_LEAF_ID],
+        });
+        addDetailNode(detail, {
+            id: DISCONNECTED_LEAF_ID,
+            parentId: DISCONNECTED_ROOT_ID,
+            childrenIds: [DISCONNECTED_ROOT_ID],
+        });
+
+        expect(parseZaiConversationDetail(detail, ZAI_CONVERSATION_ID)).toBeNull();
+    });
+
+    it('should reject a cyclic graph without a root', () => {
+        const detail = structuredClone(zaiDetailPayloadFixture);
+        Object.assign(detail.chat.history.messages[ZAI_USER_MESSAGE_ID], {
+            parentId: ZAI_ASSISTANT_MESSAGE_ID,
+        });
+        Object.assign(detail.chat.history.messages[ZAI_ASSISTANT_MESSAGE_ID], {
+            childrenIds: [ZAI_USER_MESSAGE_ID],
+        });
+
+        expect(parseZaiConversationDetail(detail, ZAI_CONVERSATION_ID)).toBeNull();
+    });
+
+    it('should reject a current node outside the canonical rooted component', () => {
+        const detail = structuredClone(zaiDetailPayloadFixture);
+        addDetailNode(detail, {
+            id: DISCONNECTED_ROOT_ID,
+            parentId: null,
+            childrenIds: [DISCONNECTED_LEAF_ID],
+        });
+        addDetailNode(detail, {
+            id: DISCONNECTED_LEAF_ID,
+            parentId: DISCONNECTED_ROOT_ID,
+            childrenIds: [],
+        });
+        detail.chat.history.currentId = DISCONNECTED_LEAF_ID;
+
+        expect(parseZaiConversationDetail(detail, ZAI_CONVERSATION_ID)).toBeNull();
+    });
+
+    it('should reject a declared current node that is not a leaf', () => {
+        const detail = structuredClone(zaiDetailPayloadFixture);
+        detail.chat.history.currentId = ZAI_USER_MESSAGE_ID;
+
+        expect(parseZaiConversationDetail(detail, ZAI_CONVERSATION_ID)).toBeNull();
     });
 
     it('should reject invalid JSON and non-object payloads', () => {

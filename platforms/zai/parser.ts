@@ -162,8 +162,11 @@ const parseMappingNode = (
     };
 };
 
-const isConsistentMapping = (mapping: Record<string, MessageNode>): boolean => {
-    for (const node of Object.values(mapping)) {
+const hasConsistentEdges = (mapping: Record<string, MessageNode>, nodes: MessageNode[]): boolean => {
+    for (const node of nodes) {
+        if (new Set(node.children).size !== node.children.length) {
+            return false;
+        }
         if (node.parent && !mapping[node.parent]) {
             return false;
         }
@@ -180,6 +183,43 @@ const isConsistentMapping = (mapping: Record<string, MessageNode>): boolean => {
     return true;
 };
 
+const hasCompleteDepthFirstCoverage = (
+    mapping: Record<string, MessageNode>,
+    rootId: string,
+    nodeCount: number,
+): boolean => {
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (nodeId: string): boolean => {
+        if (visiting.has(nodeId) || visited.has(nodeId)) {
+            return false;
+        }
+        visiting.add(nodeId);
+        for (const childId of mapping[nodeId]?.children ?? []) {
+            if (!visit(childId)) {
+                return false;
+            }
+        }
+        visiting.delete(nodeId);
+        visited.add(nodeId);
+        return true;
+    };
+
+    return visit(rootId) && visited.size === nodeCount;
+};
+
+const isCanonicalMapping = (mapping: Record<string, MessageNode>): boolean => {
+    const nodes = Object.values(mapping);
+    const roots = nodes.filter((node) => node.parent === null);
+    const root = roots[0];
+    return Boolean(
+        roots.length === 1 &&
+            root &&
+            hasConsistentEdges(mapping, nodes) &&
+            hasCompleteDepthFirstCoverage(mapping, root.id, nodes.length),
+    );
+};
+
 const parseMapping = (messages: JsonRecord, source: 'detail' | 'messages_batch'): ParsedMapping | null => {
     const mapping: Record<string, MessageNode> = {};
     let model = DEFAULT_MODEL;
@@ -193,7 +233,7 @@ const parseMapping = (messages: JsonRecord, source: 'detail' | 'messages_batch')
         model = parsed.model ?? model;
     }
 
-    if (Object.keys(mapping).length === 0 || !isConsistentMapping(mapping)) {
+    if (Object.keys(mapping).length === 0 || !isCanonicalMapping(mapping)) {
         return null;
     }
     return { mapping, model };
@@ -303,7 +343,9 @@ export const parseZaiConversationDetail = (
     const parsedMapping = parseMapping(messages, 'detail');
     const currentId = history.currentId;
     const currentNode =
-        parsedMapping && isZaiConversationId(currentId) && parsedMapping.mapping[currentId] ? currentId : null;
+        parsedMapping && isZaiConversationId(currentId) && isReachableLeaf(parsedMapping.mapping, currentId)
+            ? currentId
+            : null;
     if (!parsedMapping || !currentNode) {
         return null;
     }
