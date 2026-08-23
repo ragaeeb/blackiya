@@ -4,7 +4,11 @@ import type { ConversationData } from '@/utils/types';
 
 import { isDeepSeekHistoryPayload, parseDeepSeekHistoryResponse } from './parser';
 import { evaluateDeepSeekReadiness } from './readiness';
-import { buildDeepSeekHistoryRequest, DEEPSEEK_CONVERSATION_ID_PATTERN } from './request';
+import {
+    buildDeepSeekHistoryRequest,
+    DEEPSEEK_CONVERSATION_ID_PATTERN,
+    parseDeepSeekHistoryRequestContext,
+} from './request';
 
 const MAX_TITLE_LENGTH = 80;
 const DEEPSEEK_HOSTNAME = 'chat.deepseek.com';
@@ -40,6 +44,10 @@ export const deepSeekAdapter: LLMPlatform = {
     buildApiUrls(conversationId: string): string[] {
         const request = buildDeepSeekHistoryRequest(conversationId);
         return request ? [request.url] : [];
+    },
+
+    isConversationDetailRequest(url: string, method: string): boolean {
+        return method.toUpperCase() === 'GET' && parseDeepSeekHistoryRequestContext(url) !== null;
     },
 
     parseInterceptedData(data: string, url: string): ConversationData | null {

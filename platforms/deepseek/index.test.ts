@@ -47,6 +47,30 @@ describe('DeepSeek adapter', () => {
         expect(deepSeekAdapter.buildApiUrls?.('not-a-uuid')).toEqual([]);
     });
 
+    it('should narrowly classify only canonical history detail GETs for response caching', () => {
+        expect(deepSeekAdapter.isConversationDetailRequest?.(SYNTHETIC_DEEPSEEK_HISTORY_URL, 'GET')).toBeTrue();
+        expect(deepSeekAdapter.isConversationDetailRequest?.(SYNTHETIC_DEEPSEEK_HISTORY_URL, 'get')).toBeTrue();
+        expect(deepSeekAdapter.isConversationDetailRequest?.(SYNTHETIC_DEEPSEEK_HISTORY_URL, 'POST')).toBeFalse();
+        expect(
+            deepSeekAdapter.isConversationDetailRequest?.(
+                `https://chat.deepseek.com/api/v0/chat/history_messages?cache_version=7`,
+                'GET',
+            ),
+        ).toBeFalse();
+        expect(
+            deepSeekAdapter.isConversationDetailRequest?.(
+                `https://example.com/api/v0/chat/history_messages?chat_session_id=${SYNTHETIC_DEEPSEEK_CONVERSATION_ID}`,
+                'GET',
+            ),
+        ).toBeFalse();
+        expect(
+            deepSeekAdapter.isConversationDetailRequest?.(
+                `https://chat.deepseek.com/api/v0/chat/completion?chat_session_id=${SYNTHETIC_DEEPSEEK_CONVERSATION_ID}`,
+                'GET',
+            ),
+        ).toBeFalse();
+    });
+
     it('should recognize only successful non-empty history payload shapes', () => {
         const payload = createSyntheticDeepSeekHistoryResponse();
 
