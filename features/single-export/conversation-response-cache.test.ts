@@ -44,6 +44,33 @@ describe('ConversationResponseCache', () => {
         expect(cache.get('Two', 'two')).toBeUndefined();
     });
 
+    it('should actively prune every expired entry during unrelated reads and writes', () => {
+        let now = 100;
+        const cache = new ConversationResponseCache({ maxAgeMs: 10, now: () => now });
+        cache.set('One', makeConversation('one'));
+        cache.set('Two', makeConversation('two'));
+
+        now = 111;
+        expect(cache.get('Missing', 'missing')).toBeUndefined();
+        cache.set('Three', makeConversation('three'));
+
+        now = 105;
+        expect(cache.get('One', 'one')).toBeUndefined();
+        expect(cache.get('Two', 'two')).toBeUndefined();
+        expect(cache.get('Three', 'three')).toBeDefined();
+    });
+
+    it('should clear only conversations belonging to one provider', () => {
+        const cache = new ConversationResponseCache();
+        cache.set('ChatGPT', makeConversation('chatgpt'));
+        cache.set('Gemini', makeConversation('gemini'));
+
+        cache.clear('ChatGPT');
+
+        expect(cache.get('ChatGPT', 'chatgpt')).toBeUndefined();
+        expect(cache.get('Gemini', 'gemini')).toBeDefined();
+    });
+
     it('should reject an entry larger than the byte bound', () => {
         const cache = new ConversationResponseCache({ maxBytesPerEntry: 64 });
         expect(cache.set('Grok', makeConversation('large', 'x'.repeat(1000)))).toBeFalse();

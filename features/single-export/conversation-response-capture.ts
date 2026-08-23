@@ -40,6 +40,9 @@ const captureWithAdapter = (
     if (!input.text) {
         return false;
     }
+    if (new TextEncoder().encode(input.text).byteLength > input.cache.getMaxBytesPerEntry()) {
+        return false;
+    }
     try {
         const parsed = adapter.parseInterceptedData(input.text, input.url);
         if (!parsed || !isTerminal(adapter, parsed)) {
@@ -56,6 +59,49 @@ export const captureTerminalConversationText = (input: Omit<CaptureInput, 'respo
     return adapter ? captureWithAdapter(adapter, input) : false;
 };
 
+const getDeclaredByteLength = (response: Response): number | null => {
+    const value = response.headers?.get('content-length');
+    if (!value || !/^\d+$/.test(value)) {
+        return null;
+    }
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+};
+
+const cancelReader = (reader: ReadableStreamDefaultReader<Uint8Array>): void => {
+    try {
+        void reader.cancel().catch(() => undefined);
+    } catch {}
+};
+
+const readBoundedResponseText = async (response: Response, maxBytes: number): Promise<string | null> => {
+    if (!response.body) {
+        return null;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let observedBytes = 0;
+    let text = '';
+    try {
+        while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+                text += decoder.decode();
+                return text;
+            }
+            observedBytes += chunk.value.byteLength;
+            if (observedBytes > maxBytes) {
+                cancelReader(reader);
+                return null;
+            }
+            text += decoder.decode(chunk.value, { stream: true });
+        }
+    } catch {
+        cancelReader(reader);
+        return null;
+    }
+};
+
 export const captureTerminalConversationResponse = async (input: CaptureInput): Promise<boolean> => {
     if (!input.response.ok) {
         return false;
@@ -64,8 +110,16 @@ export const captureTerminalConversationResponse = async (input: CaptureInput): 
     if (!adapter) {
         return false;
     }
+    const maxBytes = input.cache.getMaxBytesPerEntry();
+    const declaredByteLength = getDeclaredByteLength(input.response);
+    if (declaredByteLength !== null && declaredByteLength > maxBytes) {
+        return false;
+    }
     try {
-        const text = await input.response.text();
+        const text = await readBoundedResponseText(input.response.clone(), maxBytes);
+        if (text === null) {
+            return false;
+        }
         return captureWithAdapter(adapter, { ...input, text });
     } catch {
         return false;

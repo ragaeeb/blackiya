@@ -18,9 +18,14 @@ type MetaGraphqlResponseAssemblerOptions = {
     now?: () => number;
 };
 
+type StoredResponse = {
+    responseText: string;
+    byteLength: number;
+};
+
 type ResponseEntry = {
-    initialResponse: string;
-    paginationResponses: string[];
+    initialResponse: StoredResponse | null;
+    paginationResponses: Map<string, StoredResponse>;
     byteLength: number;
     updatedAt: number;
 };
@@ -41,6 +46,29 @@ const positiveInteger = (value: number | undefined, fallback: number): number =>
 };
 
 const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+
+const parsePayload = (value: string): unknown => {
+    const candidates = [value, ...value.split(/\r?\n/)]
+        .map((candidate) => candidate.replace(/^for \(;;\);/, '').trim())
+        .filter((candidate) => candidate.startsWith('{'));
+    for (const candidate of candidates) {
+        try {
+            return JSON.parse(candidate) as unknown;
+        } catch {}
+    }
+    return null;
+};
+
+const isResponseForConversation = (responseText: string, conversationId: string): boolean => {
+    const payload = parsePayload(responseText);
+    return (
+        isRecord(payload) &&
+        isRecord(payload.data) &&
+        isRecord(payload.data.conversation) &&
+        payload.data.conversation.id === conversationId &&
+        getPageInfoFromPayload(payload) !== null
+    );
+};
 
 const getPageInfoFromPayload = (payload: unknown): PageInfo | null => {
     if (!isRecord(payload) || !isRecord(payload.data) || !isRecord(payload.data.conversation)) {
@@ -141,20 +169,25 @@ export class MetaGraphqlResponseAssembler {
             return null;
         }
         const responseBytes = byteLength(responseText);
-        if (responseBytes > this.maxBytesPerEntry || responseBytes > this.maxTotalBytes) {
+        const existing = this.entries.get(conversationId);
+        const previousInitialBytes = existing?.initialResponse?.byteLength ?? 0;
+        const nextByteLength = (existing?.byteLength ?? 0) - previousInitialBytes + responseBytes;
+        if (nextByteLength > this.maxBytesPerEntry || nextByteLength > this.maxTotalBytes) {
             return null;
         }
 
         this.deleteEntry(conversationId);
-        this.entries.set(conversationId, {
-            initialResponse: responseText,
-            paginationResponses: [],
-            byteLength: responseBytes,
+        const entry: ResponseEntry = {
+            initialResponse: { responseText, byteLength: responseBytes },
+            paginationResponses: existing?.paginationResponses ?? new Map(),
+            byteLength: nextByteLength,
             updatedAt: now,
-        });
-        this.totalBytes += responseBytes;
+        };
+        this.entries.set(conversationId, entry);
+        this.totalBytes += nextByteLength;
         this.enforceBounds();
-        return this.entries.has(conversationId) && isReadyTerminal(parsed) ? parsed : null;
+        const assembled = this.entries.has(conversationId) ? this.parseEntry(entry) : null;
+        return assembled && isReadyTerminal(assembled) ? assembled : null;
     }
 
     private ingestPagination(
@@ -163,41 +196,66 @@ export class MetaGraphqlResponseAssembler {
         responseText: string,
         now: number,
     ): ConversationData | null {
-        const entry = this.entries.get(conversationId);
-        if (!entry || entry.paginationResponses.length >= this.maxPagesPerEntry) {
+        if (!isResponseForConversation(responseText, conversationId)) {
             return null;
         }
-        const current = this.parseEntry(entry);
-        const pageInfo = current ? getOldestPageInfo(current) : null;
-        if (!pageInfo?.hasPreviousPage || pageInfo.startCursor !== before) {
+        const existing = this.entries.get(conversationId);
+        const paginationResponses = existing?.paginationResponses ?? new Map<string, StoredResponse>();
+        if (!paginationResponses.has(before) && paginationResponses.size >= this.maxPagesPerEntry) {
             return null;
         }
 
         const responseBytes = byteLength(responseText);
-        const nextByteLength = entry.byteLength + responseBytes;
-        if (nextByteLength > this.maxBytesPerEntry || responseBytes > this.maxTotalBytes) {
-            return null;
-        }
-        const paginationResponses = [...entry.paginationResponses, responseText];
-        const parsed = parseMetaConversationArchive(entry.initialResponse, paginationResponses);
-        if (!parsed || parsed.conversation_id !== conversationId) {
+        const previousPageBytes = paginationResponses.get(before)?.byteLength ?? 0;
+        const nextByteLength = (existing?.byteLength ?? 0) - previousPageBytes + responseBytes;
+        if (nextByteLength > this.maxBytesPerEntry || nextByteLength > this.maxTotalBytes) {
             return null;
         }
 
         this.deleteEntry(conversationId);
-        this.entries.set(conversationId, {
-            initialResponse: entry.initialResponse,
-            paginationResponses,
+        const nextPaginationResponses = new Map(paginationResponses);
+        nextPaginationResponses.set(before, { responseText, byteLength: responseBytes });
+        const entry: ResponseEntry = {
+            initialResponse: existing?.initialResponse ?? null,
+            paginationResponses: nextPaginationResponses,
             byteLength: nextByteLength,
             updatedAt: now,
-        });
+        };
+        this.entries.set(conversationId, entry);
         this.totalBytes += nextByteLength;
         this.enforceBounds();
-        return this.entries.has(conversationId) && isReadyTerminal(parsed) ? parsed : null;
+        const parsed = this.entries.has(conversationId) ? this.parseEntry(entry) : null;
+        return parsed && isReadyTerminal(parsed) ? parsed : null;
     }
 
     private parseEntry(entry: ResponseEntry): ConversationData | null {
-        return parseMetaConversationArchive(entry.initialResponse, entry.paginationResponses);
+        if (!entry.initialResponse) {
+            return null;
+        }
+        const orderedResponses: string[] = [];
+        const visitedCursors = new Set<string>();
+        let parsed = parseMetaConversationArchive(entry.initialResponse.responseText, orderedResponses);
+        while (parsed) {
+            const pageInfo = getOldestPageInfo(parsed);
+            if (!pageInfo) {
+                return null;
+            }
+            if (!pageInfo.hasPreviousPage) {
+                return parsed;
+            }
+            const cursor = pageInfo.startCursor;
+            if (!cursor || visitedCursors.has(cursor)) {
+                return null;
+            }
+            const page = entry.paginationResponses.get(cursor);
+            if (!page) {
+                return parsed;
+            }
+            visitedCursors.add(cursor);
+            orderedResponses.push(page.responseText);
+            parsed = parseMetaConversationArchive(entry.initialResponse.responseText, orderedResponses);
+        }
+        return null;
     }
 
     private pruneExpired(now: number): void {

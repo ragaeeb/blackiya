@@ -48,7 +48,7 @@ describe('captureTerminalConversationResponse', () => {
         });
 
         const captured = await captureTerminalConversationResponse({
-            response: response.clone(),
+            response,
             url: 'https://chat.example/api/conversation/conversation-1',
             method: 'GET',
             pageUrl: 'https://chat.example/c/conversation-1',
@@ -88,8 +88,8 @@ describe('captureTerminalConversationResponse', () => {
             parseInterceptedData,
         };
         const response = new Response('large unrelated response');
-        const text = mock(response.text.bind(response));
-        response.text = text;
+        const clone = mock(response.clone.bind(response));
+        response.clone = clone;
 
         const captured = await captureTerminalConversationResponse({
             response,
@@ -101,8 +101,72 @@ describe('captureTerminalConversationResponse', () => {
         });
 
         expect(captured).toBeFalse();
-        expect(text).not.toHaveBeenCalled();
+        expect(clone).not.toHaveBeenCalled();
         expect(parseInterceptedData).not.toHaveBeenCalled();
+    });
+
+    it('should stop and cancel an unknown-length clone as soon as its byte bound is exceeded', async () => {
+        const data = makeConversation('conversation-1');
+        const parseInterceptedData = mock(() => data);
+        const adapter = { ...makeAdapter(data), parseInterceptedData };
+        const cancel = mock(async () => undefined);
+        let reads = 0;
+        const clone = {
+            ok: true,
+            headers: new Headers(),
+            body: {
+                getReader: () => ({
+                    read: async () => {
+                        reads += 1;
+                        return reads === 1
+                            ? { done: false as const, value: new Uint8Array(9) }
+                            : { done: true as const, value: undefined };
+                    },
+                    cancel,
+                }),
+            },
+        } as unknown as Response;
+        const response = {
+            ok: true,
+            clone: mock(() => clone),
+        } as unknown as Response;
+
+        const captured = await captureTerminalConversationResponse({
+            response,
+            url: 'https://chat.example/api/conversation/conversation-1',
+            method: 'GET',
+            pageUrl: 'https://chat.example/c/conversation-1',
+            resolveAdapter: () => adapter,
+            cache: new ConversationResponseCache({ maxBytesPerEntry: 8 }),
+        });
+
+        expect(captured).toBeFalse();
+        expect(response.clone).toHaveBeenCalledTimes(1);
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(parseInterceptedData).not.toHaveBeenCalled();
+    });
+
+    it('should reject a declared oversized response before cloning it', async () => {
+        const data = makeConversation('conversation-1');
+        const response = {
+            ok: true,
+            headers: new Headers({ 'content-length': '9' }),
+            clone: mock(() => {
+                throw new Error('must not clone');
+            }),
+        } as unknown as Response;
+
+        const captured = await captureTerminalConversationResponse({
+            response,
+            url: 'https://chat.example/api/conversation/conversation-1',
+            method: 'GET',
+            pageUrl: 'https://chat.example/c/conversation-1',
+            resolveAdapter: () => makeAdapter(data),
+            cache: new ConversationResponseCache({ maxBytesPerEntry: 8 }),
+        });
+
+        expect(captured).toBeFalse();
+        expect(response.clone).not.toHaveBeenCalled();
     });
 
     it('should pass request headers to a multiplexed detail classifier', async () => {

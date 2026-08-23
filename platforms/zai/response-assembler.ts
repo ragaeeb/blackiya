@@ -23,8 +23,20 @@ type ZaiObservedResponse = {
     requestBody?: string;
 };
 
-type DetailEntry = {
+type DetailResponse = {
     responseText: string;
+    byteLength: number;
+};
+
+type BatchResponse = {
+    requestBody: string;
+    responseText: string;
+    byteLength: number;
+};
+
+type ResponseEntry = {
+    detail: DetailResponse | null;
+    batch: BatchResponse | null;
     byteLength: number;
     updatedAt: number;
 };
@@ -140,7 +152,7 @@ const isReadyTerminal = (data: ConversationData): boolean => {
 };
 
 export class ZaiConversationResponseAssembler {
-    private readonly entries = new Map<string, DetailEntry>();
+    private readonly entries = new Map<string, ResponseEntry>();
     private readonly maxEntries: number;
     private readonly maxBytesPerEntry: number;
     private readonly maxTotalBytes: number;
@@ -173,7 +185,7 @@ export class ZaiConversationResponseAssembler {
                 : null;
         }
         return input.method.toUpperCase() === 'POST'
-            ? this.ingestBatch(endpoint.conversationId, input.requestBody, input.responseText)
+            ? this.ingestBatch(endpoint.conversationId, input.requestBody, input.responseText, now)
             : null;
     }
 
@@ -182,40 +194,78 @@ export class ZaiConversationResponseAssembler {
         this.totalBytes = 0;
     }
 
-    private ingestDetail(conversationId: string, responseText: string, now: number): null {
+    private ingestDetail(conversationId: string, responseText: string, now: number): ConversationData | null {
         const detail = parseZaiConversationDetail(responseText, conversationId);
         if (!detail) {
             return null;
         }
         const responseBytes = byteLength(responseText);
-        if (responseBytes > this.maxBytesPerEntry || responseBytes > this.maxTotalBytes) {
+        const existing = this.entries.get(conversationId);
+        const previousDetailBytes = existing?.detail?.byteLength ?? 0;
+        const nextByteLength = (existing?.byteLength ?? 0) - previousDetailBytes + responseBytes;
+        if (nextByteLength > this.maxBytesPerEntry || nextByteLength > this.maxTotalBytes) {
             return null;
         }
 
         this.deleteEntry(conversationId);
-        this.entries.set(conversationId, { responseText, byteLength: responseBytes, updatedAt: now });
-        this.totalBytes += responseBytes;
+        const entry: ResponseEntry = {
+            detail: { responseText, byteLength: responseBytes },
+            batch: existing?.batch ?? null,
+            byteLength: nextByteLength,
+            updatedAt: now,
+        };
+        this.entries.set(conversationId, entry);
+        this.totalBytes += nextByteLength;
         this.enforceBounds();
-        return null;
+        return this.entries.has(conversationId) ? this.assemble(conversationId, entry) : null;
     }
 
-    private ingestBatch(conversationId: string, requestBody: string | undefined, responseText: string) {
-        const entry = this.entries.get(conversationId);
+    private ingestBatch(
+        conversationId: string,
+        requestBody: string | undefined,
+        responseText: string,
+        now: number,
+    ): ConversationData | null {
         const requestedIds = parseRequestedIds(requestBody);
-        if (!entry || !requestedIds) {
+        if (!requestedIds || !requestBody) {
+            return null;
+        }
+        const responseBytes = byteLength(requestBody) + byteLength(responseText);
+        const existing = this.entries.get(conversationId);
+        const previousBatchBytes = existing?.batch?.byteLength ?? 0;
+        const nextByteLength = (existing?.byteLength ?? 0) - previousBatchBytes + responseBytes;
+        if (nextByteLength > this.maxBytesPerEntry || nextByteLength > this.maxTotalBytes) {
             return null;
         }
 
-        const detail = parseZaiConversationDetail(entry.responseText, conversationId);
-        if (!detail || !sameIdSet(requestedIds, Object.keys(detail.mapping))) {
+        this.deleteEntry(conversationId);
+        const entry: ResponseEntry = {
+            detail: existing?.detail ?? null,
+            batch: { requestBody, responseText, byteLength: responseBytes },
+            byteLength: nextByteLength,
+            updatedAt: now,
+        };
+        this.entries.set(conversationId, entry);
+        this.totalBytes += nextByteLength;
+        this.enforceBounds();
+        return this.entries.has(conversationId) ? this.assemble(conversationId, entry) : null;
+    }
+
+    private assemble(conversationId: string, entry: ResponseEntry): ConversationData | null {
+        if (!entry.detail || !entry.batch) {
             return null;
         }
-        const combinedBytes = entry.byteLength + byteLength(requestBody ?? '') + byteLength(responseText);
-        if (combinedBytes > this.maxBytesPerEntry || combinedBytes > this.maxTotalBytes) {
+        const requestedIds = parseRequestedIds(entry.batch.requestBody);
+        const detail = parseZaiConversationDetail(entry.detail.responseText, conversationId);
+        if (!requestedIds || !detail || !sameIdSet(requestedIds, Object.keys(detail.mapping))) {
             return null;
         }
 
-        const merged = mergeZaiConversationPayloads(entry.responseText, responseText, conversationId);
+        const merged = mergeZaiConversationPayloads(
+            entry.detail.responseText,
+            entry.batch.responseText,
+            conversationId,
+        );
         if (!merged || !sameIdSet(requestedIds, Object.keys(merged.mapping))) {
             return null;
         }

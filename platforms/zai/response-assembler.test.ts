@@ -65,8 +65,11 @@ describe('ZaiConversationResponseAssembler', () => {
         );
     });
 
-    it('should reject a batch response observed before its canonical detail response', () => {
-        expect(ingestBatch(new ZaiConversationResponseAssembler())).toBeNull();
+    it('should retain a canonical batch that finishes before its detail response', () => {
+        const assembler = new ZaiConversationResponseAssembler();
+
+        expect(ingestBatch(assembler)).toBeNull();
+        expect(ingestDetail(assembler)?.conversation_id).toBe(ZAI_CONVERSATION_ID);
     });
 
     it('should reject partial batch responses and batch requests missing detail IDs', () => {

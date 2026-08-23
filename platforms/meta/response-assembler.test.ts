@@ -80,14 +80,40 @@ describe('MetaGraphqlResponseAssembler', () => {
         );
     });
 
-    it('should reject pagination before an initial response and out-of-order cursors', () => {
+    it('should retain pagination that finishes before its initial response', () => {
         const assembler = new MetaGraphqlResponseAssembler();
         const initial = JSON.stringify(createMetaDetailFixture({ hasPreviousPage: true }));
         const page = JSON.stringify(createMetaOlderPageFixture());
 
         expect(assembler.ingest(paginationBody(), page)).toBeNull();
-        expect(assembler.ingest(detailBody(), initial)).toBeNull();
+        expect(assembler.ingest(detailBody(), initial)?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
+    });
+
+    it('should retain cursor pages that finish in reverse order and assemble the canonical chain', () => {
+        const assembler = new MetaGraphqlResponseAssembler();
+        const initial = JSON.stringify(createMetaDetailFixture({ hasPreviousPage: true }));
+        const firstPage = JSON.stringify(createOlderPage('synthetic-middle-message', true, 'synthetic-next-cursor'));
+        const oldestPage = JSON.stringify(createOlderPage('synthetic-oldest-message', false, null));
+
+        expect(assembler.ingest(paginationBody('synthetic-next-cursor'), oldestPage)).toBeNull();
+        expect(assembler.ingest(paginationBody(), firstPage)).toBeNull();
+        const result = assembler.ingest(detailBody(), initial);
+
+        expect(Object.keys(result?.mapping ?? {})).toEqual([
+            'synthetic-oldest-message',
+            'synthetic-middle-message',
+            'synthetic-user-message',
+            'synthetic-assistant-message',
+        ]);
+    });
+
+    it('should ignore retained pages whose request cursor is outside the canonical chain', () => {
+        const assembler = new MetaGraphqlResponseAssembler();
+        const initial = JSON.stringify(createMetaDetailFixture({ hasPreviousPage: true }));
+        const page = JSON.stringify(createMetaOlderPageFixture());
+
         expect(assembler.ingest(paginationBody('unexpected-cursor'), page)).toBeNull();
+        expect(assembler.ingest(detailBody(), initial)).toBeNull();
         expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toBeNull();
         expect(assembler.ingest(paginationBody(), page)?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
     });

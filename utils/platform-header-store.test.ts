@@ -31,9 +31,17 @@ describe('PlatformHeaderStore', () => {
     it('should discard stale identity headers when an account authorization changes', () => {
         const store = new PlatformHeaderStore();
         store.update('ChatGPT', { authorization: 'Bearer old', 'oai-device-id': 'device-old' });
-        store.update('ChatGPT', { authorization: 'Bearer new' });
+        const identityChanged = store.update('ChatGPT', { authorization: 'Bearer new' });
 
+        expect(identityChanged).toBeTrue();
         expect(store.get('ChatGPT')).toEqual({ authorization: 'Bearer new' });
+    });
+
+    it('should report a newly established identity boundary but not ordinary header merges', () => {
+        const store = new PlatformHeaderStore();
+
+        expect(store.update('ChatGPT', { authorization: 'Bearer same' })).toBeTrue();
+        expect(store.update('ChatGPT', { 'oai-device-id': 'device-1' })).toBeFalse();
     });
 
     it('should discard unrelated old headers when a partial identity snapshot changes', () => {

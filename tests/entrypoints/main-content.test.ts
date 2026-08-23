@@ -9,7 +9,10 @@ mock.module('wxt/browser', () => ({
     },
 }));
 
-import { createConversationRouteControlsController, resolveSupportedConversationRoute } from './main.content';
+import {
+    createConversationRouteControlsController,
+    resolveSupportedConversationRoute,
+} from '../../entrypoints/main.content';
 
 const X_CONVERSATION_ID = '2091428436845772921';
 

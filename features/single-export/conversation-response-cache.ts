@@ -45,6 +45,8 @@ export class ConversationResponseCache {
         if (!platformName.trim() || !data.conversation_id.trim()) {
             return false;
         }
+        const now = this.now();
+        this.pruneExpired(now);
         let serialized: string;
         try {
             serialized = JSON.stringify(data);
@@ -58,20 +60,17 @@ export class ConversationResponseCache {
 
         const key = keyFor(platformName, data.conversation_id);
         this.deleteKey(key);
-        this.entries.set(key, { serialized, byteLength, updatedAt: this.now() });
+        this.entries.set(key, { serialized, byteLength, updatedAt: now });
         this.totalBytes += byteLength;
         this.enforceBounds();
         return this.entries.has(key);
     }
 
     get(platformName: string, conversationId: string): ConversationData | undefined {
+        this.pruneExpired(this.now());
         const key = keyFor(platformName, conversationId);
         const entry = this.entries.get(key);
         if (!entry) {
-            return undefined;
-        }
-        if (this.now() - entry.updatedAt >= this.maxAgeMs) {
-            this.deleteKey(key);
             return undefined;
         }
         this.entries.delete(key);
@@ -84,9 +83,22 @@ export class ConversationResponseCache {
         }
     }
 
-    clear(): void {
+    clear(platformName?: string): void {
+        if (platformName) {
+            const prefix = `${platformName}\u0000`;
+            for (const key of this.entries.keys()) {
+                if (key.startsWith(prefix)) {
+                    this.deleteKey(key);
+                }
+            }
+            return;
+        }
         this.entries.clear();
         this.totalBytes = 0;
+    }
+
+    getMaxBytesPerEntry(): number {
+        return this.maxBytesPerEntry;
     }
 
     private enforceBounds(): void {
@@ -96,6 +108,14 @@ export class ConversationResponseCache {
                 return;
             }
             this.deleteKey(oldestKey);
+        }
+    }
+
+    private pruneExpired(now: number): void {
+        for (const [key, entry] of this.entries) {
+            if (now - entry.updatedAt >= this.maxAgeMs) {
+                this.deleteKey(key);
+            }
         }
     }
 

@@ -105,10 +105,19 @@ const framingFor = (platform: SupportedPlatformName) => {
     return 'raw' as const;
 };
 
+const clearProviderConversationState = (platform: SupportedPlatformName): void => {
+    conversationResponseCache.clear(platform);
+    if (platform === 'Meta Muse') {
+        metaGraphqlResponseAssembler.clear();
+    } else if (platform === 'Z.ai') {
+        zaiConversationResponseAssembler.clear();
+    }
+};
+
 const captureHeaders = (url: string, headers: ReturnType<typeof toForwardableHeaderRecord>) => {
     const platform = resolvePlatformName(url);
-    if (platform && headers) {
-        platformHeaderStore.update(platform, headers);
+    if (platform && headers && platformHeaderStore.update(platform, headers)) {
+        clearProviderConversationState(platform);
     }
 };
 
@@ -121,6 +130,7 @@ export const invalidateCapturedRequestContext = (url: string, status: number): b
         return false;
     }
     platformHeaderStore.clear(platform);
+    clearProviderConversationState(platform);
     if (platform === 'Gemini') {
         resetGeminiBatchexecuteContext();
     }
@@ -389,16 +399,14 @@ const captureGenericFetchResponse = (
     url: string,
     method: string,
 ): void => {
-    withResponseClone(response, (clone) => {
-        void captureTerminalConversationResponse({
-            response: clone,
-            url,
-            method,
-            requestHeaders: extractRequestHeaders(args[0], args[1]),
-            pageUrl: window.location.href,
-            resolveAdapter: getPlatformAdapter,
-            cache: conversationResponseCache,
-        });
+    void captureTerminalConversationResponse({
+        response,
+        url,
+        method,
+        requestHeaders: extractRequestHeaders(args[0], args[1]),
+        pageUrl: window.location.href,
+        resolveAdapter: getPlatformAdapter,
+        cache: conversationResponseCache,
     });
 };
 

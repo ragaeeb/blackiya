@@ -54,9 +54,9 @@ export class PlatformHeaderStore {
     }
 
     /** Stores a fresh snapshot, merging only while its identity is unchanged. */
-    update(platformName: string, incoming: HeaderRecord | undefined): void {
+    update(platformName: string, incoming: HeaderRecord | undefined): boolean {
         if (!incoming || Object.keys(incoming).length === 0) {
-            return;
+            return false;
         }
         const normalizedIncoming = Object.fromEntries(
             Object.entries(incoming)
@@ -64,7 +64,7 @@ export class PlatformHeaderStore {
                 .filter(([, value]) => value.length > 0),
         );
         if (Object.keys(normalizedIncoming).length === 0) {
-            return;
+            return false;
         }
         const updatedAt = this.now();
         const existing = this.getEntry(platformName, updatedAt);
@@ -75,11 +75,14 @@ export class PlatformHeaderStore {
                   return typeof previous === 'string' && typeof next === 'string' && previous !== next;
               })
             : false;
+        const identityEstablished =
+            !existing && IDENTITY_HEADER_NAMES.some((name) => typeof normalizedIncoming[name] === 'string');
         const merged = identityChanged ? normalizedIncoming : mergeHeaderRecords(existing?.headers, normalizedIncoming);
         if (merged) {
             this.headers.set(platformName, { headers: merged, updatedAt });
             this.enforceCapacity();
         }
+        return identityChanged || identityEstablished;
     }
 
     /** Returns a fresh defensive snapshot, or undefined after the TTL expires. */
