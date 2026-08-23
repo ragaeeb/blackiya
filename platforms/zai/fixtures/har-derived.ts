@@ -1,6 +1,7 @@
 export const ZAI_CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
 export const ZAI_USER_MESSAGE_ID = '22222222-2222-4222-8222-222222222222';
 export const ZAI_ASSISTANT_MESSAGE_ID = '33333333-3333-4333-8333-333333333333';
+export const ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID = '44444444-4444-4444-8444-444444444444';
 
 export const zaiDetailPayloadFixture = {
     archived: false,
@@ -167,4 +168,37 @@ export const zaiMessagesBatchPayloadFixture = {
         },
     },
     message_version: 1,
+};
+
+export const createZaiAlternateBranchFixtures = () => {
+    const detail = structuredClone(zaiDetailPayloadFixture);
+    const batch = structuredClone(zaiMessagesBatchPayloadFixture);
+
+    detail.chat.history.messages[ZAI_USER_MESSAGE_ID].childrenIds.push(ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID);
+    Object.assign(detail.chat.history.messages, {
+        [ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID]: {
+            childrenIds: [],
+            id: ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID,
+            parentId: ZAI_USER_MESSAGE_ID,
+            role: 'assistant',
+            timestamp: 1_700_000_010,
+        },
+    });
+
+    batch.data[ZAI_USER_MESSAGE_ID].childrenIds.push(ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID);
+    Object.assign(batch.data, {
+        [ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID]: {
+            ...structuredClone(batch.data[ZAI_ASSISTANT_MESSAGE_ID]),
+            childrenIds: [],
+            content_blocks: [{ content: 'Synthetic inactive branch.', type: 'text' }],
+            done: false,
+            id: ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID,
+            parentId: ZAI_USER_MESSAGE_ID,
+            parent_id: ZAI_USER_MESSAGE_ID,
+            timestamp: 1_700_000_010,
+            updated_at: 1_700_000_010,
+        },
+    });
+
+    return { detail, batch };
 };

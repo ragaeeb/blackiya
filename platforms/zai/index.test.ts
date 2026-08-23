@@ -17,10 +17,10 @@ describe('Z.ai adapter', () => {
         expect(zaiAdapter.extractConversationId('https://chat.z.ai/c/not-a-uuid')).toBeNull();
     });
 
-    it('should narrowly classify only the HAR-derived terminal batch response', () => {
+    it('should keep the generic one-response cache disabled for the multi-response export', () => {
         const batchUrl = `https://chat.z.ai/api/v1/chats/${ZAI_CONVERSATION_ID}/messages/batch`;
 
-        expect(zaiAdapter.isConversationDetailRequest?.(batchUrl, 'POST')).toBeTrue();
+        expect(zaiAdapter.isConversationDetailRequest?.(batchUrl, 'POST')).toBeFalse();
         expect(zaiAdapter.isConversationDetailRequest?.(batchUrl, 'GET')).toBeFalse();
         expect(
             zaiAdapter.isConversationDetailRequest?.(`https://chat.z.ai/api/v1/chats/${ZAI_CONVERSATION_ID}`, 'POST'),
@@ -36,7 +36,7 @@ describe('Z.ai adapter', () => {
         expect(zaiAdapter.buildApiUrls).toBeUndefined();
     });
 
-    it('should parse both detail and message-batch response URLs', () => {
+    it('should parse detail metadata but reject a standalone message-batch response', () => {
         const detail = zaiAdapter.parseInterceptedData(
             JSON.stringify(zaiDetailPayloadFixture),
             `https://chat.z.ai/api/v1/chats/${ZAI_CONVERSATION_ID}`,
@@ -47,9 +47,8 @@ describe('Z.ai adapter', () => {
         );
 
         expect(detail?.conversation_id).toBe(ZAI_CONVERSATION_ID);
-        expect(batch?.conversation_id).toBe(ZAI_CONVERSATION_ID);
+        expect(batch).toBeNull();
         expect(zaiAdapter.evaluateReadiness?.(detail!)).toMatchObject({ ready: false, terminal: false });
-        expect(zaiAdapter.evaluateReadiness?.(batch!)).toMatchObject({ ready: true, terminal: true });
     });
 
     it('should fail closed for unrelated endpoints and payload-id mismatches', () => {

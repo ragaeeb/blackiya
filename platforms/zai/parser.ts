@@ -214,6 +214,28 @@ const resolveCurrentNode = (mapping: Record<string, MessageNode>, preferred?: un
     return latest?.id ?? null;
 };
 
+const isReachableLeaf = (mapping: Record<string, MessageNode>, nodeId: string): boolean => {
+    const current = mapping[nodeId];
+    if (current?.children.length !== 0) {
+        return false;
+    }
+
+    const visited = new Set<string>();
+    let cursor: string | null = nodeId;
+    while (cursor) {
+        if (visited.has(cursor)) {
+            return false;
+        }
+        visited.add(cursor);
+        const node: MessageNode | undefined = mapping[cursor];
+        if (!node) {
+            return false;
+        }
+        cursor = node.parent;
+    }
+    return visited.size > 0;
+};
+
 const mappingTimes = (mapping: Record<string, MessageNode>) => {
     const createTimes = Object.values(mapping).flatMap((node) =>
         typeof node.message?.create_time === 'number' ? [node.message.create_time] : [],
@@ -357,7 +379,7 @@ export const mergeZaiConversationPayloads = (
     if (detailIds.length !== batchIds.length || detailIds.some((id, index) => id !== batchIds[index])) {
         return null;
     }
-    if (!batch.mapping[detail.current_node]) {
+    if (!isReachableLeaf(batch.mapping, detail.current_node)) {
         return null;
     }
 

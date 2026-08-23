@@ -2,13 +2,11 @@ import type { LLMPlatform } from '@/platforms/types';
 import { generateTimestamp, sanitizeFilename } from '@/utils/download';
 import type { ConversationData } from '@/utils/types';
 import { isZaiConversationId, ZAI_HOST } from './constants';
-import { isZaiConversationPayload, parseZaiConversationDetail, parseZaiMessagesBatch } from './parser';
+import { isZaiConversationPayload, parseZaiConversationDetail } from './parser';
 import { evaluateZaiReadiness } from './readiness';
 
 const MAX_TITLE_LENGTH = 80;
 const DETAIL_PATH_PATTERN = /^\/api\/v1\/chats\/([^/]+)\/?$/;
-const MESSAGES_BATCH_PATH_PATTERN = /^\/api\/v1\/chats\/([^/]+)\/messages\/batch\/?$/;
-const CANONICAL_TERMINAL_PATH_PATTERN = /^\/api\/v1\/chats\/([^/]+)\/messages\/batch$/;
 
 export type ZaiPlatformAdapter = LLMPlatform & {
     isConversationDetailRequest: (url: string, method: string) => boolean;
@@ -52,12 +50,8 @@ export const zaiAdapter: ZaiPlatformAdapter = {
         return isZaiConversationId(conversationId) ? conversationId : null;
     },
 
-    isConversationDetailRequest(url: string, method: string): boolean {
-        const parsed = parseZaiUrl(url);
-        if (!parsed || method.toUpperCase() !== 'POST' || parsed.search || parsed.hash) {
-            return false;
-        }
-        return extractEndpointConversationId(parsed.pathname, CANONICAL_TERMINAL_PATH_PATTERN) !== null;
+    isConversationDetailRequest(): boolean {
+        return false;
     },
 
     parseInterceptedData(data: string | unknown, url: string): ConversationData | null {
@@ -71,8 +65,7 @@ export const zaiAdapter: ZaiPlatformAdapter = {
             return parseZaiConversationDetail(data, detailId);
         }
 
-        const batchId = extractEndpointConversationId(parsedUrl.pathname, MESSAGES_BATCH_PATH_PATTERN);
-        return batchId ? parseZaiMessagesBatch(data, batchId) : null;
+        return null;
     },
 
     formatFilename(data: ConversationData): string {
