@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-
+import { NOVA_CONVERSATION_DETAIL_TARGET } from './constants';
 import { NOVA_CONVERSATION_ID } from './fixtures/conversation';
-import {
-    buildNovaConversationRequest,
-    isNovaConversationDetailRequest,
-    NOVA_CONVERSATION_DETAIL_TARGET,
-} from './request';
+import { buildNovaConversationRequest, isNovaConversationDetailRequest } from './request';
 
 const capturedContext = {
     conversationId: NOVA_CONVERSATION_ID,

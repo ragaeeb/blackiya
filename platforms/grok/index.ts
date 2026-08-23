@@ -15,6 +15,12 @@ import { tryParseGrokComRestEndpoint, tryParseJsonIfNeeded } from './grok-com-pa
 import { tryParseGrokNdjson } from './ndjson-parser';
 import { evaluateGrokReadiness } from './readiness';
 import { GROK_COM_CONVERSATION_ID_PATTERN } from './url-utils';
+import { parseXGrokConversationItems } from './x-conversation-parser';
+import {
+    buildXGrokConversationItemsUrl,
+    extractXGrokConversationId,
+    isXGrokConversationItemsEndpoint,
+} from './x-url-utils';
 
 export { GrokAdapterState, grokState, resetGrokAdapterState } from './state';
 
@@ -33,8 +39,15 @@ export const grokAdapter: LLMPlatform = {
 
     isPlatformUrl(url: string): boolean {
         try {
-            const { hostname } = new URL(url);
-            return hostname === 'grok.com' || hostname === 'www.grok.com';
+            const urlObj = new URL(url);
+            const { hostname } = urlObj;
+            if (hostname === 'grok.com' || hostname === 'www.grok.com' || hostname === 'grok.x.com') {
+                return true;
+            }
+            return (
+                (hostname === 'x.com' || hostname === 'www.x.com') &&
+                (urlObj.pathname === '/i/grok' || isXGrokConversationItemsEndpoint(url))
+            );
         } catch {
             return false;
         }
@@ -44,6 +57,10 @@ export const grokAdapter: LLMPlatform = {
         try {
             const urlObj = new URL(url);
 
+            const xConversationId = extractXGrokConversationId(url);
+            if (xConversationId) {
+                return xConversationId;
+            }
             if (urlObj.hostname !== 'grok.com' && urlObj.hostname !== 'www.grok.com') {
                 return null;
             }
@@ -62,6 +79,10 @@ export const grokAdapter: LLMPlatform = {
     },
 
     buildApiUrls(conversationId: string): string[] {
+        const xUrl = buildXGrokConversationItemsUrl(conversationId);
+        if (xUrl) {
+            return [xUrl];
+        }
         if (!GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId)) {
             return [];
         }
@@ -69,6 +90,18 @@ export const grokAdapter: LLMPlatform = {
             `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
             `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
         ];
+    },
+
+    isConversationDetailRequest(url: string, method: string): boolean {
+        if (method.toUpperCase() !== 'GET') {
+            return false;
+        }
+        return (
+            isXGrokConversationItemsEndpoint(url) ||
+            url.includes('/rest/app-chat/conversations_v2/') ||
+            (url.includes('/rest/app-chat/conversations/') &&
+                (url.includes('/response-node') || url.includes('/load-responses')))
+        );
     },
 
     parseInterceptedData(data: string | any, url: string): ConversationData | null {
@@ -82,6 +115,11 @@ export const grokAdapter: LLMPlatform = {
             path: _dbgPath,
             dataLen: typeof data === 'string' ? data.length : -1,
         });
+
+        const xResult = parseXGrokConversationItems(data, url);
+        if (xResult) {
+            return xResult;
+        }
 
         const grokComResult = tryParseGrokComRestEndpoint(data, url);
         if (grokComResult !== undefined) {
@@ -108,5 +146,4 @@ export const grokAdapter: LLMPlatform = {
     evaluateReadiness(data: ConversationData) {
         return evaluateGrokReadiness(data);
     },
-
 };

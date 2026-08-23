@@ -85,6 +85,21 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
             `${host}/backend-api/f/conversation/${conversationId}`,
         ]),
 
+    isConversationDetailRequest: (url: string, method: string) => {
+        if (method.toUpperCase() !== 'GET') {
+            return false;
+        }
+        try {
+            const { hostname, pathname } = new URL(url);
+            return (
+                (hostname === 'chatgpt.com' || hostname === 'chat.openai.com') &&
+                /^\/backend-api\/(?:f\/)?conversation\/[a-f0-9-]+$/i.test(pathname)
+            );
+        } catch {
+            return false;
+        }
+    },
+
     /**
      * Parses intercepted ChatGPT API response (JSON object or raw SSE text).
      */
@@ -134,7 +149,6 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
     },
 
     evaluateReadiness: (data: ConversationData) => evaluateChatGPTReadiness(data),
-
 });
 
 /** ChatGPT Platform Adapter singleton. */

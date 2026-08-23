@@ -14,20 +14,26 @@ import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-cont
 
 const GEMINI_BATCHEXECUTE_PATH = '/_/BardChatUi/data/batchexecute';
 const GROK_COM_CONVERSATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const X_GROK_CONVERSATION_ID_PATTERN = /^\d{10,20}$/;
 
 /**
  * The coarse platform kind used by the resolver. Independent of the adapter
  * name string so that an adapter rename or vendor change does not silently
  * change routing.
  */
-export type PlatformKind = 'chatgpt' | 'gemini' | 'grok' | 'unsupported';
+export type PlatformKind = 'chatgpt' | 'gemini' | 'grok' | 'adapter' | 'unsupported';
 
 const isChatGptHost = (hostname: string): boolean => hostname === 'chatgpt.com' || hostname === 'chat.openai.com';
 
 const isGeminiHost = (hostname: string): boolean =>
     hostname === 'gemini.google.com' || hostname.endsWith('.gemini.google.com');
 
-const isGrokComHost = (hostname: string): boolean => hostname === 'grok.com' || hostname === 'www.grok.com';
+const isGrokHost = (hostname: string): boolean =>
+    hostname === 'grok.com' ||
+    hostname === 'www.grok.com' ||
+    hostname === 'grok.x.com' ||
+    hostname === 'x.com' ||
+    hostname === 'www.x.com';
 
 const resolveHost = (pageUrl: string, fallback: string): string => {
     try {
@@ -65,8 +71,11 @@ export const resolvePlatformKind = (adapter: LLMPlatform | null, pageUrl: string
     if (adapter.name === 'Gemini' && (isGeminiHost(hostname) || adapterAcceptsUrl)) {
         return 'gemini';
     }
-    if (adapter.name === 'Grok' && (isGrokComHost(hostname) || adapterAcceptsUrl)) {
+    if (adapter.name === 'Grok' && (isGrokHost(hostname) || adapterAcceptsUrl)) {
         return 'grok';
+    }
+    if (adapterAcceptsUrl) {
+        return 'adapter';
     }
     return 'unsupported';
 };
@@ -137,8 +146,23 @@ const buildChatGptDetail = (adapter: LLMPlatform, conversationId: string): Detai
     return { ok: false, reason: 'missing_endpoint' };
 };
 
+const buildAdapterDetail = (adapter: LLMPlatform, conversationId: string): DetailResolutionResult => {
+    const primary = adapter.buildApiUrl?.(conversationId);
+    const candidates = adapter.buildApiUrls?.(conversationId);
+    const urls = uniqueNonEmptyStrings([primary, ...(Array.isArray(candidates) ? candidates : [])]);
+    return urls.length > 0
+        ? {
+              ok: true,
+              requests: urls.map((url) => ({ url, method: 'GET', requiresAuthContext: false })),
+          }
+        : { ok: false, reason: 'missing_endpoint' };
+};
+
 const buildGrokDetail = (adapter: LLMPlatform, conversationId: string, _pageUrl: string): DetailResolutionResult => {
-    if (!GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId)) {
+    if (
+        !GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId) &&
+        !X_GROK_CONVERSATION_ID_PATTERN.test(conversationId)
+    ) {
         return { ok: false, reason: 'missing_endpoint' };
     }
     const candidates = adapter.buildApiUrls?.(conversationId);
@@ -240,6 +264,9 @@ export const buildDetailRequest = (input: DetailResolutionInput): DetailResoluti
     }
     if (input.platform === 'gemini') {
         return buildGeminiDetail(input.adapter, input.conversationId, input.pageUrl, input.geminiContext);
+    }
+    if (input.platform === 'adapter') {
+        return buildAdapterDetail(input.adapter, input.conversationId);
     }
     return { ok: false, reason: 'missing_endpoint' };
 };

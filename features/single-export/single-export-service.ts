@@ -48,7 +48,8 @@ const failure = (error: SingleExportError): SingleExportResult => ({ kind: 'fail
 
 const hasAuthorizationHeader = (headers: Record<string, string> | undefined): boolean =>
     Object.entries(headers ?? {}).some(
-        ([name, value]) => name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
+        ([name, value]) =>
+            name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
     );
 
 const notifyAuthFailure = (deps: SingleExportDeps, platformName: string): void => {
@@ -83,9 +84,16 @@ type ResolvedRequest = {
     authHeaders?: Record<string, string>;
 };
 
-const resolveRequest = (
+type ResolvedContext = {
+    adapter: LLMPlatform;
+    conversationId: string;
+    pageUrl: string;
+    platformKind: Exclude<ReturnType<typeof resolvePlatformKind>, 'unsupported'>;
+};
+
+const resolveContext = (
     deps: SingleExportDeps,
-): { ok: true; resolved: ResolvedRequest } | { ok: false; result: SingleExportResult } => {
+): { ok: true; context: ResolvedContext } | { ok: false; result: SingleExportResult } => {
     const pageUrl = deps.getPageUrl();
     const adapter = deps.resolveAdapter(pageUrl);
     const platformKind = resolvePlatformKind(adapter, pageUrl);
@@ -101,6 +109,15 @@ const resolveRequest = (
     if (!conversationId) {
         return { ok: false, result: failure({ kind: 'missing_conversation_id', pageUrl }) };
     }
+
+    return { ok: true, context: { adapter, conversationId, pageUrl, platformKind } };
+};
+
+const resolveRequest = (
+    deps: SingleExportDeps,
+    context: ResolvedContext,
+): { ok: true; resolved: ResolvedRequest } | { ok: false; result: SingleExportResult } => {
+    const { adapter, conversationId, pageUrl, platformKind } = context;
 
     const detail = buildDetailRequest({
         platform: platformKind,
@@ -324,7 +341,12 @@ const dispatchRequest = async (
 
     return {
         ok: false,
-        result: failure({ kind: 'http_failure', platformName: resolved.adapter.name, status: 404, statusText: 'Not Found' }),
+        result: failure({
+            kind: 'http_failure',
+            platformName: resolved.adapter.name,
+            status: 404,
+            statusText: 'Not Found',
+        }),
     };
 };
 
@@ -352,8 +374,39 @@ const classifyHttpResponse = (
 type ParsedResponse = {
     adapter: LLMPlatform;
     conversationId: string;
-    request: DetailRequest;
     data: ConversationData;
+};
+
+const validateConversation = (
+    adapter: LLMPlatform,
+    conversationId: string,
+    data: ConversationData,
+): { ok: true; parsed: ParsedResponse } | { ok: false; result: SingleExportResult } => {
+    if (data.conversation_id !== conversationId) {
+        return {
+            ok: false,
+            result: failure({
+                kind: 'id_mismatch',
+                platformName: adapter.name,
+                expected: conversationId,
+                actual: typeof data.conversation_id === 'string' ? data.conversation_id : null,
+            }),
+        };
+    }
+
+    const readiness = resolveReadiness(adapter, data);
+    if (!readiness.ready || !readiness.terminal) {
+        return {
+            ok: false,
+            result: failure({
+                kind: 'not_terminal',
+                platformName: adapter.name,
+                reason: readiness.reason,
+            }),
+        };
+    }
+
+    return { ok: true, parsed: { adapter, conversationId, data } };
 };
 
 const parseAndValidate = (
@@ -396,39 +449,7 @@ const parseAndValidate = (
         };
     }
 
-    if (parsed.conversation_id !== resolved.conversationId) {
-        return {
-            ok: false,
-            result: failure({
-                kind: 'id_mismatch',
-                platformName: resolved.adapter.name,
-                expected: resolved.conversationId,
-                actual: typeof parsed.conversation_id === 'string' ? parsed.conversation_id : null,
-            }),
-        };
-    }
-
-    const readiness = resolveReadiness(resolved.adapter, parsed);
-    if (!readiness.ready || !readiness.terminal) {
-        return {
-            ok: false,
-            result: failure({
-                kind: 'not_terminal',
-                platformName: resolved.adapter.name,
-                reason: readiness.reason,
-            }),
-        };
-    }
-
-    return {
-        ok: true,
-        parsed: {
-            adapter: resolved.adapter,
-            conversationId: resolved.conversationId,
-            request,
-            data: parsed,
-        },
-    };
+    return validateConversation(resolved.adapter, resolved.conversationId, parsed);
 };
 
 const deliverDownload = (
@@ -452,6 +473,48 @@ const deliverDownload = (
     }
 };
 
+const deliverSuccess = (parsed: ParsedResponse, deps: SingleExportDeps): SingleExportResult => {
+    const deliver = deliverDownload(parsed, deps);
+    if (!deliver.ok) {
+        return deliver.result;
+    }
+    return {
+        kind: 'success',
+        platformName: parsed.adapter.name,
+        data: parsed.data,
+        filename: deliver.filename,
+        jsonString: deliver.jsonString,
+    };
+};
+
+const tryCachedExport = (
+    context: ResolvedContext,
+    deps: SingleExportDeps,
+    log: SingleExportLogger,
+): SingleExportResult | null => {
+    const cached = deps.getCachedConversation?.(context.adapter.name, context.conversationId);
+    if (!cached) {
+        return null;
+    }
+    const cachedOutcome = validateConversation(context.adapter, context.conversationId, cached);
+    if (!cachedOutcome.ok) {
+        log.debug('[Blackiya/v3] Save JSON: cached response was not eligible; falling back to detail request', {
+            platform: context.adapter.name,
+            conversationId: context.conversationId,
+        });
+        return null;
+    }
+    const result = deliverSuccess(cachedOutcome.parsed, deps);
+    if (result.kind === 'success') {
+        log.info('[Blackiya/v3] Save JSON: success from observed response cache', {
+            platform: context.adapter.name,
+            conversationId: context.conversationId,
+            mappingNodes: Object.keys(cached.mapping).length,
+        });
+    }
+    return result;
+};
+
 /**
  * Perform an on-demand single-conversation export.
  *
@@ -469,9 +532,23 @@ export const performSingleExport = async (
     const log = safeLogger(deps);
     const normalizedTimeout = normalizeSingleExportTimeout(timeoutMs, SINGLE_EXPORT_DEFAULT_TIMEOUT_MS);
 
-    const resolvedReq = resolveRequest(deps);
-    if (!resolvedReq.ok) {
+    const resolvedContext = resolveContext(deps);
+    if (!resolvedContext.ok) {
         log.error('[Blackiya/v3] Save JSON: resolution failed', {
+            kind: resolvedContext.result.kind === 'failure' ? resolvedContext.result.error.kind : 'unknown',
+        });
+        return resolvedContext.result;
+    }
+    const { context } = resolvedContext;
+
+    const cachedResult = tryCachedExport(context, deps, log);
+    if (cachedResult) {
+        return cachedResult;
+    }
+
+    const resolvedReq = resolveRequest(deps, context);
+    if (!resolvedReq.ok) {
+        log.error('[Blackiya/v3] Save JSON: detail resolution failed', {
             kind: resolvedReq.result.kind === 'failure' ? resolvedReq.result.error.kind : 'unknown',
         });
         return resolvedReq.result;
@@ -508,13 +585,13 @@ export const performSingleExport = async (
         return parsedOutcome.result;
     }
 
-    const deliver = deliverDownload(parsedOutcome.parsed, deps);
-    if (!deliver.ok) {
+    const result = deliverSuccess(parsedOutcome.parsed, deps);
+    if (result.kind === 'failure') {
         log.error('[Blackiya/v3] Save JSON: download failed', {
             platform: resolved.adapter.name,
             conversationId: resolved.conversationId,
         });
-        return deliver.result;
+        return result;
     }
 
     log.info('[Blackiya/v3] Save JSON: success', {
@@ -522,11 +599,5 @@ export const performSingleExport = async (
         conversationId: parsedOutcome.parsed.conversationId,
         mappingNodes: Object.keys(parsedOutcome.parsed.data.mapping).length,
     });
-    return {
-        kind: 'success',
-        platformName: parsedOutcome.parsed.adapter.name,
-        data: parsedOutcome.parsed.data,
-        filename: deliver.filename,
-        jsonString: deliver.jsonString,
-    };
+    return result;
 };

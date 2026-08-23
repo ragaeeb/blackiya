@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-
+import { NOVA_CONVERSATION_DETAIL_TARGET } from './constants';
 import { NOVA_CONVERSATION_ID } from './fixtures/conversation';
 import { novaAdapter } from './index';
 
@@ -52,5 +52,19 @@ describe('Amazon Nova adapter', () => {
         expect(filename.startsWith('Synthetic_Nova_Conversation_')).toBeTrue();
         expect(filename).not.toContain('/');
         expect(filename).not.toContain(':');
+    });
+
+    it('should classify only the canonical detail target when request headers are available', () => {
+        expect(
+            novaAdapter.isConversationDetailRequest?.('https://nova.amazon.com/api', 'POST', {
+                'x-amz-target': NOVA_CONVERSATION_DETAIL_TARGET,
+            }),
+        ).toBeTrue();
+        expect(
+            novaAdapter.isConversationDetailRequest?.('https://nova.amazon.com/api', 'POST', {
+                'x-amz-target': 'HyperionWebsiteService.StartSession',
+            }),
+        ).toBeFalse();
+        expect(novaAdapter.isConversationDetailRequest?.('https://nova.amazon.com/api', 'POST')).toBeFalse();
     });
 });

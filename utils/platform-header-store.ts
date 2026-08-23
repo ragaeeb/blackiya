@@ -22,6 +22,8 @@ const IDENTITY_HEADER_NAMES = [
     '__secure-next-authdata',
     'x-goog-authuser',
     'x-goog-visitor-id',
+    'x-csrf-token',
+    'bx-umidtoken',
 ] as const;
 
 type HeaderStoreOptions = {
@@ -73,9 +75,7 @@ export class PlatformHeaderStore {
                   return typeof previous === 'string' && typeof next === 'string' && previous !== next;
               })
             : false;
-        const merged = identityChanged
-            ? normalizedIncoming
-            : mergeHeaderRecords(existing?.headers, normalizedIncoming);
+        const merged = identityChanged ? normalizedIncoming : mergeHeaderRecords(existing?.headers, normalizedIncoming);
         if (merged) {
             this.headers.set(platformName, { headers: merged, updatedAt });
             this.enforceCapacity();

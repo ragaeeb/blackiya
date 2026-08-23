@@ -5,16 +5,32 @@
  */
 
 import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { claudeAdapter } from '@/platforms/claude';
+import { deepSeekAdapter } from '@/platforms/deepseek';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
+import { metaAdapter } from '@/platforms/meta';
+import { novaAdapter } from '@/platforms/nova';
+import { qwenAdapter } from '@/platforms/qwen';
 import type { LLMPlatform } from '@/platforms/types';
+import { zaiAdapter } from '@/platforms/zai';
 
 /**
  * Get all supported platforms.
  * Encapsulated in a function to allow future extension (e.g., dynamic registration).
  */
 const getPlatforms = () => {
-    return [chatGPTAdapter, geminiAdapter, grokAdapter];
+    return [
+        chatGPTAdapter,
+        geminiAdapter,
+        grokAdapter,
+        claudeAdapter,
+        deepSeekAdapter,
+        qwenAdapter,
+        zaiAdapter,
+        metaAdapter,
+        novaAdapter,
+    ];
 };
 
 /**

@@ -1,7 +1,5 @@
 import { NOVA_API_URL, NOVA_CONVERSATION_DETAIL_TARGET, NOVA_CONVERSATION_ID_PATTERN, NOVA_ORIGIN } from './constants';
 
-export { NOVA_CONVERSATION_DETAIL_TARGET } from './constants';
-
 export type NovaConversationRequestContext = {
     conversationId: string;
     traceId: string;

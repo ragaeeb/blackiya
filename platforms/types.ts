@@ -60,6 +60,9 @@ export type LLMPlatform = {
      */
     isConversationPayload?: (payload: unknown) => boolean;
 
+    /** Fast allowlist used before cloning and parsing observed responses. */
+    isConversationDetailRequest?: (url: string, method: string, headers?: HeadersInit) => boolean;
+
     buildApiUrl?: (conversationId: string) => string;
     buildApiUrls?: (conversationId: string) => string[];
 

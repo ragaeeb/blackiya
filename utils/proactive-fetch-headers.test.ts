@@ -69,19 +69,47 @@ describe('proactive fetch headers', () => {
         });
     });
 
-    it('keeps Grok authorization but rejects unrelated custom credentials', () => {
+    it('keeps Grok and x.com request context but rejects unrelated custom credentials', () => {
         const headers = toForwardableHeaderRecord(
             {
                 authorization: 'Bearer grok-token',
                 'x-api-key': 'blocked-api-key',
-                'x-csrf-token': 'blocked-csrf-token',
+                'x-csrf-token': 'csrf-token',
+                'x-twitter-active-user': 'yes',
+                'x-twitter-auth-type': 'OAuth2Session',
+                'x-twitter-client-language': 'en',
+                'x-client-transaction-id': 'blocked-ephemeral-transaction',
                 'x-signature': 'blocked-signature',
                 'x-custom-header': 'blocked-custom-header',
             },
             'Grok',
         );
 
-        expect(headers).toEqual({ authorization: 'Bearer grok-token' });
+        expect(headers).toEqual({
+            authorization: 'Bearer grok-token',
+            'x-csrf-token': 'csrf-token',
+            'x-twitter-active-user': 'yes',
+            'x-twitter-auth-type': 'OAuth2Session',
+            'x-twitter-client-language': 'en',
+        });
+    });
+
+    it('keeps only bounded request context for newly supported providers', () => {
+        expect(
+            toForwardableHeaderRecord(
+                { 'bx-umidtoken': 'qwen-context', 'bx-ua': 'ua-context', authorization: 'blocked' },
+                'Qwen',
+            ),
+        ).toEqual({ 'bx-umidtoken': 'qwen-context', 'bx-ua': 'ua-context' });
+        expect(
+            toForwardableHeaderRecord(
+                { 'x-client-version': 'deepseek-version', 'x-client-platform': 'web', cookie: 'blocked' },
+                'DeepSeek',
+            ),
+        ).toEqual({ 'x-client-version': 'deepseek-version', 'x-client-platform': 'web' });
+        expect(toForwardableHeaderRecord({ 'x-region': 'synthetic-region', cookie: 'blocked' }, 'Z.ai')).toEqual({
+            'x-region': 'synthetic-region',
+        });
     });
 
     it('fails closed when no supported provider is supplied', () => {

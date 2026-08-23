@@ -51,6 +51,22 @@ export const geminiAdapter: LLMPlatform = {
         return url.match(/\/app\/([a-zA-Z0-9_-]+)/i)?.[1] ?? url.match(/\/share\/([a-zA-Z0-9_-]+)/i)?.[1] ?? null;
     },
 
+    isConversationDetailRequest(url: string, method: string): boolean {
+        if (method.toUpperCase() !== 'POST') {
+            return false;
+        }
+        try {
+            const parsed = new URL(url);
+            return (
+                parsed.hostname === 'gemini.google.com' &&
+                parsed.pathname.toLowerCase() === '/_/bardchatui/data/batchexecute' &&
+                parsed.searchParams.get('rpcids')?.split(',').includes('hNvQHb') === true
+            );
+        } catch {
+            return false;
+        }
+    },
+
     parseInterceptedData(data: string, url: string): ConversationData | null {
         if (isTitlesEndpoint(url)) {
             const titles = parseTitlesResponse(data, url, maybeUpdateActiveConversationTitle);
@@ -120,5 +136,4 @@ export const geminiAdapter: LLMPlatform = {
     evaluateReadiness(data: ConversationData) {
         return evaluateGeminiReadiness(data);
     },
-
 };

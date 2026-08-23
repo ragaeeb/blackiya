@@ -5,13 +5,18 @@ import {
     resolvePlatformKind,
 } from '@/features/single-export/endpoint-resolver';
 import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { claudeAdapter } from '@/platforms/claude';
 import { GEMINI_RPC_IDS } from '@/platforms/constants';
+import { deepSeekAdapter } from '@/platforms/deepseek';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
+import { qwenAdapter } from '@/platforms/qwen';
+import { zaiAdapter } from '@/platforms/zai';
 import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 
 const CHATGPT_ID = '67f0a0b3-1234-4abc-8def-1234567890ab';
 const GROK_ID = '01cb0729-6455-471d-b33a-124b3de76a29';
+const X_GROK_ID = '2091428436845772921';
 const GEMINI_ID = '20de061ec5dae81c';
 
 const makeGeminiContext = (overrides: Partial<GeminiBatchexecuteContext> = {}): GeminiBatchexecuteContext => ({
@@ -40,11 +45,24 @@ describe('resolvePlatformKind', () => {
         expect(resolvePlatformKind(grokAdapter, `https://grok.com/c/${GROK_ID}`)).toBe('grok');
     });
 
+    it('should map x.com Grok conversation URLs to grok', () => {
+        expect(resolvePlatformKind(grokAdapter, `https://x.com/i/grok?conversation=${X_GROK_ID}`)).toBe('grok');
+    });
+
     it('should reject grok.x.com-only adapters for grok.com URLs (caller will fail with unsupported)', () => {
         // The Grok adapter advertises grok.com support, so this still maps to 'grok'.
         expect(resolvePlatformKind(grokAdapter, 'https://www.grok.com/c/01cb0729-6455-471d-b33a-124b3de76a29')).toBe(
             'grok',
         );
+    });
+
+    it('should map cache-first and direct adapters without provider-specific resolver branches', () => {
+        expect(resolvePlatformKind(claudeAdapter, `https://claude.ai/chat/${CHATGPT_ID}`)).toBe('adapter');
+        expect(resolvePlatformKind(deepSeekAdapter, `https://chat.deepseek.com/a/chat/s/${CHATGPT_ID}`)).toBe(
+            'adapter',
+        );
+        expect(resolvePlatformKind(qwenAdapter, `https://chat.qwen.ai/c/${CHATGPT_ID}`)).toBe('adapter');
+        expect(resolvePlatformKind(zaiAdapter, `https://chat.z.ai/c/${CHATGPT_ID}`)).toBe('adapter');
     });
 });
 
@@ -159,6 +177,22 @@ describe('buildDetailRequest — Grok', () => {
         }
         expect(result.reason).toBe('missing_endpoint');
     });
+
+    it('should build the x.com GraphQL detail request for numeric Grok IDs', () => {
+        const result = buildDetailRequest({
+            platform: 'grok',
+            adapter: grokAdapter,
+            conversationId: X_GROK_ID,
+            pageUrl: `https://x.com/i/grok?conversation=${X_GROK_ID}`,
+        });
+        expect(result.ok).toBeTrue();
+        if (!result.ok) {
+            return;
+        }
+        expect(result.requests).toHaveLength(1);
+        expect(result.requests[0]?.url).toContain('/GrokConversationItemsByRestId?');
+        expect(result.requests[0]?.url).toContain(encodeURIComponent(X_GROK_ID));
+    });
 });
 
 describe('buildDetailRequest — Gemini', () => {
@@ -232,6 +266,34 @@ describe('buildDetailRequest — Gemini', () => {
 });
 
 describe('buildDetailRequest — contract', () => {
+    it('should use a stable adapter-provided GET detail endpoint when available', () => {
+        for (const adapter of [deepSeekAdapter, qwenAdapter]) {
+            const result = buildDetailRequest({
+                platform: 'adapter',
+                adapter,
+                conversationId: CHATGPT_ID,
+                pageUrl:
+                    adapter.name === 'DeepSeek'
+                        ? `https://chat.deepseek.com/a/chat/s/${CHATGPT_ID}`
+                        : `https://chat.qwen.ai/c/${CHATGPT_ID}`,
+            });
+            expect(result.ok).toBeTrue();
+            if (result.ok) {
+                expect(result.requests[0]?.method).toBe('GET');
+            }
+        }
+    });
+
+    it('should fail with missing_endpoint for cache-only adapters when no response was observed', () => {
+        const result = buildDetailRequest({
+            platform: 'adapter',
+            adapter: zaiAdapter,
+            conversationId: CHATGPT_ID,
+            pageUrl: `https://chat.z.ai/c/${CHATGPT_ID}`,
+        });
+        expect(result).toEqual({ ok: false, reason: 'missing_endpoint' });
+    });
+
     it('should produce a GET request with credentials=include baked into the request shape', () => {
         const result = buildDetailRequest({
             platform: 'chatgpt',

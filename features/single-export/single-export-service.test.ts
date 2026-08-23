@@ -11,6 +11,7 @@ import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 const CHATGPT_ID = '67f0a0b3-1234-4abc-8def-1234567890ab';
 const GROK_ID = '01cb0729-6455-471d-b33a-124b3de76a29';
+const X_GROK_ID = '2091428436845772921';
 const GEMINI_ID = '20de061ec5dae81c';
 
 const buildMessageNode = (id: string, parent: string | null, message: Message | null): MessageNode => ({
@@ -515,6 +516,57 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 });
 
 describe('performSingleExport — successful terminal exports', () => {
+    it('should save a terminal cached response without auth, endpoint resolution, or another fetch', async () => {
+        const payload = buildTerminalChatGptConversation(CHATGPT_ID, { title: 'Cached export' });
+        const cacheOnlyAdapter: LLMPlatform = {
+            ...chatGPTAdapter,
+            buildApiUrl: undefined,
+            buildApiUrls: undefined,
+        };
+        const testContext = createTestContext({
+            pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
+            adapter: cacheOnlyAdapter,
+        });
+        testContext.setAuthHeaders(undefined);
+        testContext.deps.getCachedConversation = (platformName, conversationId) =>
+            platformName === 'ChatGPT' && conversationId === CHATGPT_ID ? payload : undefined;
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result.kind).toBe('success');
+        expect(testContext.fetchImpl).not.toHaveBeenCalled();
+        expect(testContext.download).toHaveBeenCalledTimes(1);
+    });
+
+    it('should save a cached response for a generic cache-only adapter', async () => {
+        const payload = buildTerminalChatGptConversation(CHATGPT_ID, { title: 'Cache-only provider export' });
+        const cacheOnlyAdapter: LLMPlatform = {
+            name: 'Cache-only',
+            urlMatchPattern: 'https://cache.example/*',
+            isPlatformUrl: (url) => url.startsWith('https://cache.example/'),
+            extractConversationId: () => CHATGPT_ID,
+            parseInterceptedData: () => null,
+            formatFilename: () => 'cache-only-export',
+            evaluateReadiness: () => ({
+                ready: true,
+                terminal: true,
+                reason: 'terminal',
+                contentHash: null,
+                latestAssistantTextLength: 1,
+            }),
+        };
+        const testContext = createTestContext({
+            pageUrl: `https://cache.example/c/${CHATGPT_ID}`,
+            adapter: cacheOnlyAdapter,
+        });
+        testContext.deps.getCachedConversation = () => payload;
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result).toMatchObject({ kind: 'success', platformName: 'Cache-only' });
+        expect(testContext.fetchImpl).not.toHaveBeenCalled();
+    });
+
     it('should use the next deterministic ChatGPT endpoint after a 404', async () => {
         const payload = buildTerminalChatGptConversation(CHATGPT_ID);
         const urls: string[] = [];
@@ -543,6 +595,57 @@ describe('performSingleExport — successful terminal exports', () => {
             `https://chatgpt.com/backend-api/conversation/${CHATGPT_ID}`,
             `https://chatgpt.com/backend-api/f/conversation/${CHATGPT_ID}`,
         ]);
+    });
+
+    it('should export the sanitized HAR-derived x.com Grok detail response', async () => {
+        const testContext = createTestContext({
+            pageUrl: `https://x.com/i/grok?conversation=${X_GROK_ID}`,
+            adapter: grokAdapter,
+        });
+        testContext.setAuthHeaders({
+            'x-csrf-token': 'synthetic-csrf',
+            'x-twitter-active-user': 'yes',
+            'x-twitter-auth-type': 'OAuth2Session',
+        });
+        testContext.setFetchResponse({
+            ok: true,
+            status: 200,
+            text: JSON.stringify({
+                data: {
+                    grok_conversation_by_rest_id: { is_pinned: false },
+                    grok_conversation_items_by_rest_id: {
+                        cursor: 'synthetic',
+                        items: [
+                            {
+                                chat_item_id: '2091428438666096641',
+                                created_at_ms: 1_787_470_371_309,
+                                grok_mode: 'Normal',
+                                is_partial: false,
+                                message: 'Terminal synthetic answer.',
+                                sender_type: 'Agent',
+                            },
+                            {
+                                chat_item_id: '2091428438666096640',
+                                created_at_ms: 1_787_470_370_000,
+                                grok_mode: 'Normal',
+                                message: 'Synthetic question?',
+                                sender_type: 'User',
+                            },
+                        ],
+                    },
+                },
+            }),
+        });
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result.kind).toBe('success');
+        if (result.kind !== 'success') {
+            return;
+        }
+        expect(result.data.conversation_id).toBe(X_GROK_ID);
+        expect(result.data.mapping['2091428438666096641']?.message?.status).toBe('finished_successfully');
+        expect(testContext.fetchImpl.mock.calls[0]?.[0]).toContain('/GrokConversationItemsByRestId?');
     });
 
     const cases = [

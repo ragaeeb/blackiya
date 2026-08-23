@@ -4,6 +4,7 @@ import type { ConversationData } from '@/utils/types';
 import { NOVA_CONVERSATION_ID_PATTERN, NOVA_ORIGIN } from './constants';
 import { isNovaConversationPayload, parseNovaConversationPayload } from './parser';
 import { evaluateNovaReadiness } from './readiness';
+import { isNovaConversationDetailRequest } from './request';
 
 const MAX_TITLE_LENGTH = 80;
 
@@ -34,6 +35,16 @@ export const novaAdapter: LLMPlatform = {
         const match = parsed.pathname.match(/^\/conversation\/([^/]+)\/?$/);
         const conversationId = match?.[1] ?? null;
         return conversationId && NOVA_CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
+    },
+
+    isConversationDetailRequest: (url, method, headers) => {
+        let target: string | null = null;
+        try {
+            target = headers ? new Headers(headers).get('x-amz-target') : null;
+        } catch {
+            target = null;
+        }
+        return isNovaConversationDetailRequest({ url, method, target });
     },
 
     parseInterceptedData: (data, url) => {

@@ -1,15 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
 import {
-    captureFetchRequestContext,
     default as bootstrapScript,
+    captureFetchRequestContext,
     isGeminiBatchexecutePost,
 } from '@/entrypoints/interceptor/bootstrap';
 import {
     getGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
 } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
+import { conversationResponseCache } from '@/features/single-export/conversation-response-cache';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
+import {
+    createMetaDetailFixture,
+    createMetaOlderPageFixture,
+    SYNTHETIC_META_CONVERSATION_ID,
+} from '@/platforms/meta/fixtures/conversation';
+import { buildMetaConversationDetailRequest, buildMetaConversationPaginationRequest } from '@/platforms/meta/request';
+import { NOVA_CONVERSATION_DETAIL_TARGET } from '@/platforms/nova/constants';
+import { NOVA_CONVERSATION_ID, terminalNovaConversation } from '@/platforms/nova/fixtures/conversation';
+import {
+    ZAI_CONVERSATION_ID,
+    zaiDetailPayloadFixture,
+    zaiMessagesBatchPayloadFixture,
+} from '@/platforms/zai/fixtures/har-derived';
+import { buildZaiMessagesBatchRequest } from '@/platforms/zai/requests';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 
 describe('MAIN-world bootstrap request capture', () => {
@@ -22,6 +37,7 @@ describe('MAIN-world bootstrap request capture', () => {
         platformHeaderStore.clear();
         resetGeminiBatchexecuteContext();
         streamDebugRecorder.clear();
+        conversationResponseCache.clear();
     });
 
     afterEach(() => {
@@ -34,24 +50,17 @@ describe('MAIN-world bootstrap request capture', () => {
         platformHeaderStore.clear();
         resetGeminiBatchexecuteContext();
         streamDebugRecorder.clear();
+        conversationResponseCache.clear();
     });
 
     it('recognizes only Gemini batchexecute POST requests for body capture', () => {
         expect(
-            isGeminiBatchexecutePost(
-                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb',
-                'POST',
-            ),
+            isGeminiBatchexecutePost('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb', 'POST'),
         ).toBeTrue();
         expect(
-            isGeminiBatchexecutePost(
-                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb',
-                'GET',
-            ),
+            isGeminiBatchexecutePost('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb', 'GET'),
         ).toBeFalse();
-        expect(
-            isGeminiBatchexecutePost('https://chatgpt.com/_/BardChatUi/data/batchexecute', 'POST'),
-        ).toBeFalse();
+        expect(isGeminiBatchexecutePost('https://chatgpt.com/_/BardChatUi/data/batchexecute', 'POST')).toBeFalse();
     });
 
     it('recognizes absolute Gemini URLs when the ambient window has no location', () => {
@@ -174,6 +183,179 @@ describe('MAIN-world bootstrap request capture', () => {
             }),
         ).rejects.toBe(rejection);
         expect(originalFetchCalls).toBe(1);
+    });
+
+    it('captures Qwen completion responses with SSE framing', async () => {
+        const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
+        const windowInstance = new Window({ url: `https://chat.qwen.ai/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response('data: {"synthetic":true}\n\ndata: [DONE]\n\n');
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const response = await windowInstance.fetch(
+            `https://chat.qwen.ai/api/v2/chat/completions?chat_id=${conversationId}`,
+            { method: 'POST' },
+        );
+
+        expect(await response.text()).toContain('[DONE]');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const record = streamDebugRecorder.exportRecords()[0];
+        expect(record?.platform).toBe('Qwen');
+        expect(record?.frames.some((frame) => frame.kind === 'done')).toBeTrue();
+    });
+
+    it('caches a terminal conversation detail response without consuming the page response', async () => {
+        const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
+        const payload = {
+            title: 'Observed response',
+            create_time: 1,
+            update_time: 2,
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['assistant'] },
+                assistant: {
+                    id: 'assistant',
+                    parent: 'root',
+                    children: [],
+                    message: {
+                        id: 'assistant-message',
+                        author: { role: 'assistant', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 2,
+                        content: { content_type: 'text', parts: ['Terminal answer'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+            },
+            conversation_id: conversationId,
+            current_node: 'assistant',
+            moderation_results: [],
+            plugin_ids: null,
+            gizmo_id: null,
+            gizmo_type: null,
+            is_archived: false,
+            default_model_slug: 'gpt-test',
+            safe_urls: [],
+            blocked_urls: [],
+        };
+        const windowInstance = new Window({ url: `https://chatgpt.com/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(payload));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const response = await windowInstance.fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`);
+
+        expect(await response.text()).toBe(JSON.stringify(payload));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('ChatGPT', conversationId)?.title).toBe('Observed response');
+    });
+
+    it('caches only the targeted Amazon Nova conversation RPC response', async () => {
+        const windowInstance = new Window({
+            url: `https://nova.amazon.com/conversation/${NOVA_CONVERSATION_ID}`,
+        });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(terminalNovaConversation));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch('https://nova.amazon.com/api', {
+            method: 'POST',
+            headers: { 'x-amz-target': NOVA_CONVERSATION_DETAIL_TARGET },
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('Amazon Nova', NOVA_CONVERSATION_ID)).toBeDefined();
+    });
+
+    it('assembles Meta detail and cursor-ordered pagination responses before caching', async () => {
+        const detailRequest = buildMetaConversationDetailRequest(SYNTHETIC_META_CONVERSATION_ID, {
+            documentId: 'synthetic-detail-document',
+        });
+        const paginationRequest = buildMetaConversationPaginationRequest(
+            {
+                conversationId: SYNTHETIC_META_CONVERSATION_ID,
+                before: 'synthetic-before-cursor',
+                last: 20,
+            },
+            { documentId: 'synthetic-pagination-document' },
+        );
+        if (!detailRequest || !paginationRequest) {
+            throw new Error('expected synthetic Meta requests');
+        }
+        const responses = [createMetaDetailFixture({ hasPreviousPage: true }), createMetaOlderPageFixture()];
+        const windowInstance = new Window({
+            url: `https://www.meta.ai/prompt/${SYNTHETIC_META_CONVERSATION_ID}`,
+        });
+        windowInstance.fetch = async () =>
+            new windowInstance.Response(JSON.stringify(responses.shift()), {
+                headers: { 'content-type': 'application/json' },
+            });
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(detailRequest.url, {
+            method: detailRequest.method,
+            headers: detailRequest.headers,
+            body: detailRequest.body,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('Meta Muse', SYNTHETIC_META_CONVERSATION_ID)).toBeUndefined();
+
+        await windowInstance.fetch(paginationRequest.url, {
+            method: paginationRequest.method,
+            headers: paginationRequest.headers,
+            body: paginationRequest.body,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('Meta Muse', SYNTHETIC_META_CONVERSATION_ID)).toBeDefined();
+    });
+
+    it('assembles Z.ai detail metadata and the exact requested message batch before caching', async () => {
+        const batchRequest = buildZaiMessagesBatchRequest(zaiDetailPayloadFixture);
+        if (!batchRequest) {
+            throw new Error('expected synthetic Z.ai batch request');
+        }
+        const responses = [zaiDetailPayloadFixture, zaiMessagesBatchPayloadFixture];
+        const windowInstance = new Window({ url: `https://chat.z.ai/c/${ZAI_CONVERSATION_ID}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(responses.shift()));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(`https://chat.z.ai/api/v1/chats/${ZAI_CONVERSATION_ID}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('Z.ai', ZAI_CONVERSATION_ID)).toBeUndefined();
+
+        await windowInstance.fetch(batchRequest.url, {
+            method: batchRequest.method,
+            headers: batchRequest.headers,
+            body: batchRequest.body,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('Z.ai', ZAI_CONVERSATION_ID)).toBeDefined();
     });
 
     it('clears captured ChatGPT auth context after an unauthorized response', async () => {

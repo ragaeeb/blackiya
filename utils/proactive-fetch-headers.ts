@@ -7,7 +7,16 @@
 
 export type HeaderRecord = Record<string, string>;
 
-export type SupportedPlatformName = 'ChatGPT' | 'Gemini' | 'Grok';
+export type SupportedPlatformName =
+    | 'ChatGPT'
+    | 'Gemini'
+    | 'Grok'
+    | 'Claude'
+    | 'DeepSeek'
+    | 'Qwen'
+    | 'Z.ai'
+    | 'Meta Muse'
+    | 'Amazon Nova';
 
 const FORWARDABLE_HEADERS_BY_PLATFORM: Record<SupportedPlatformName, ReadonlySet<string>> = {
     ChatGPT: new Set([
@@ -18,7 +27,25 @@ const FORWARDABLE_HEADERS_BY_PLATFORM: Record<SupportedPlatformName, ReadonlySet
         'oai-language',
     ]),
     Gemini: new Set(['authorization', 'x-goog-authuser', 'x-goog-visitor-id']),
-    Grok: new Set(['authorization']),
+    Grok: new Set([
+        'authorization',
+        'x-csrf-token',
+        'x-twitter-active-user',
+        'x-twitter-auth-type',
+        'x-twitter-client-language',
+    ]),
+    Claude: new Set(),
+    DeepSeek: new Set([
+        'x-client-bundle-id',
+        'x-client-locale',
+        'x-client-platform',
+        'x-client-timezone-offset',
+        'x-client-version',
+    ]),
+    Qwen: new Set(['bx-umidtoken', 'bx-ua', 'bx-v', 'source', 'timezone', 'version']),
+    'Z.ai': new Set(['x-region']),
+    'Meta Muse': new Set(),
+    'Amazon Nova': new Set(),
 };
 
 const appendHeaders = (target: Map<string, string>, headers: HeadersInit | undefined) => {

@@ -1,19 +1,20 @@
-import { downloadAsJSON } from '@/utils/download';
-import { downloadStringAsJsonFile } from '@/utils/dom-download';
-import { getPlatformAdapter } from '@/platforms/factory';
-import { performSingleExport } from '@/features/single-export/single-export-service';
+import type { BulkExportProgressMessage } from '@/features/bulk-export/contract';
 import { runBulkExport } from '@/features/bulk-export/orchestrator';
 import { sanitizeProgressError } from '@/features/bulk-export/progress';
 import {
-    setupMainWorldCommandHandler,
     type MainWorldCommandOperations,
+    setupMainWorldCommandHandler,
 } from '@/features/runtime/main-world-command-handler';
-import type { BulkExportProgressMessage } from '@/features/bulk-export/contract';
+import { conversationResponseCache } from '@/features/single-export/conversation-response-cache';
+import { performSingleExport } from '@/features/single-export/single-export-service';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
+import { getPlatformAdapter } from '@/platforms/factory';
+import { downloadStringAsJsonFile } from '@/utils/dom-download';
+import { downloadAsJSON } from '@/utils/download';
 import { platformHeaderStore } from '@/utils/platform-header-store';
 import { MESSAGE_TYPES } from '@/utils/protocol/constants';
-import { getGeminiBatchexecuteContext, resetGeminiBatchexecuteContext } from './gemini-batchexecute-context-store';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
+import { getGeminiBatchexecuteContext, resetGeminiBatchexecuteContext } from './gemini-batchexecute-context-store';
 
 const MAIN_BRIDGE_INSTALLED_KEY = '__BLACKIYA_MAIN_BRIDGE_INSTALLED__';
 
@@ -63,6 +64,8 @@ export const setupMainWorldBridge = () => {
                 return adapter ? platformHeaderStore.get(adapter.name) : undefined;
             },
             getGeminiBatchexecuteContext,
+            getCachedConversation: (platformName, conversationId) =>
+                conversationResponseCache.get(platformName, conversationId),
             invalidateAuthContext,
             downloadJson: downloadStringAsJsonFile,
         });
@@ -135,7 +138,12 @@ export const setupMainWorldBridge = () => {
     });
 };
 
-const formatSingleExportError = (error: { kind: string; reason?: string; status?: number; timeoutMs?: number }): string => {
+const formatSingleExportError = (error: {
+    kind: string;
+    reason?: string;
+    status?: number;
+    timeoutMs?: number;
+}): string => {
     switch (error.kind) {
         case 'not_terminal':
             return `Conversation is not ready to save${error.reason ? ` (${error.reason})` : ''}.`;
