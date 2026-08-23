@@ -21,6 +21,16 @@ import { buildConversationFromSsePayloads, extractSsePayloads } from './sse-pars
 import { CONVERSATION_ID_PATTERN, HOST_CANDIDATES, isPlaceholderTitle, tryParseJson } from './utils';
 
 const MAX_TITLE_LENGTH = 80;
+const CHATGPT_HOSTNAMES = new Set(['chatgpt.com', 'chat.openai.com']);
+
+const isChatGPTUrl = (url: string) => {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' && CHATGPT_HOSTNAMES.has(parsed.hostname);
+    } catch {
+        return false;
+    }
+};
 
 /**
  * Creates a ChatGPT Platform Adapter instance.
@@ -33,7 +43,7 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
 
     urlMatchPattern: 'https://chatgpt.com/*',
 
-    isPlatformUrl: (url: string) => url.includes('chatgpt.com') || url.includes('chat.openai.com'),
+    isPlatformUrl: isChatGPTUrl,
 
     /**
      * Extracts the conversation UUID from a ChatGPT page URL.

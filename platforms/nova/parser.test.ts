@@ -56,6 +56,33 @@ describe('Amazon Nova conversation parser', () => {
         expect(parseNovaConversationPayload(mismatched)).toBeNull();
     });
 
+    it('should keep the response non-terminal when any present companion status is unknown', () => {
+        const unknownInteraction = parseNovaConversationPayload(
+            createNovaConversationFixture({ interactionStatus: 'UNKNOWN_PROVIDER_STATE' }),
+        );
+        const unknownDeepResearch = parseNovaConversationPayload(
+            createNovaConversationFixture({ deepResearchStatus: 'UNKNOWN_PROVIDER_STATE' }),
+        );
+
+        expect(unknownInteraction?.mapping[unknownInteraction.current_node]?.message?.status).toBe('in_progress');
+        expect(unknownInteraction?.mapping[unknownInteraction.current_node]?.message?.end_turn).toBeFalse();
+        expect(unknownDeepResearch?.mapping[unknownDeepResearch.current_node]?.message?.status).toBe('in_progress');
+        expect(unknownDeepResearch?.mapping[unknownDeepResearch.current_node]?.message?.end_turn).toBeFalse();
+    });
+
+    it('should accept only explicitly terminal statuses when all present statuses agree', () => {
+        const parsed = parseNovaConversationPayload(
+            createNovaConversationFixture({
+                assistantStatus: 'finished',
+                interactionStatus: 'completed',
+                deepResearchStatus: 'succeeded',
+            }),
+        );
+
+        expect(parsed?.mapping[parsed.current_node]?.message?.status).toBe('finished_successfully');
+        expect(parsed?.mapping[parsed.current_node]?.message?.end_turn).toBeTrue();
+    });
+
     it('should reject empty and structurally unrelated payloads', () => {
         const missingInteractionId = JSON.parse(JSON.stringify(terminalNovaConversation)) as {
             conversationInteractions: Array<Record<string, unknown>>;

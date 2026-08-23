@@ -40,5 +40,14 @@ const getPlatforms = () => {
  * @returns The matching platform adapter or null if not found
  */
 export const getPlatformAdapter = (url: string): LLMPlatform | null => {
-    return getPlatforms().find((p) => p.isPlatformUrl(url)) || null;
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return null;
+    }
+    if (parsed.protocol !== 'https:') {
+        return null;
+    }
+    return getPlatforms().find((platform) => platform.isPlatformUrl(parsed.href)) ?? null;
 };

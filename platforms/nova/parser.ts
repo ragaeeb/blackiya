@@ -57,10 +57,7 @@ const classifyStatus = (messageStatus: unknown, interaction: JsonRecord): NovaMe
     if (statuses.some((status) => TRANSIENT_STATUSES.has(status))) {
         return 'in_progress';
     }
-    if (message && TERMINAL_STATUSES.has(message)) {
-        return 'finished_successfully';
-    }
-    if (!message && interactionStatus && TERMINAL_STATUSES.has(interactionStatus)) {
+    if (statuses.length > 0 && statuses.every((status) => TERMINAL_STATUSES.has(status))) {
         return 'finished_successfully';
     }
     return 'in_progress';

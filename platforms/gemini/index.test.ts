@@ -45,6 +45,10 @@ describe('Gemini Adapter — integration', () => {
             expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app/12345')).toBeTrue();
             expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/')).toBeTrue();
             expect(geminiAdapter.isPlatformUrl('https://google.com')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('http://gemini.google.com/app/12345')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com.evil.invalid/app/12345')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('https://claude.ai/chat/12345?source=gemini.google.com')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('not-a-url')).toBeFalse();
         });
 
         it('should extract conversation IDs from app and share URLs', () => {

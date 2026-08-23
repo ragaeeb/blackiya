@@ -28,6 +28,16 @@ export { resetGeminiAdapterState } from './state';
 export { GeminiAdapterState };
 
 const MAX_TITLE_LENGTH = 80;
+const GEMINI_HOSTNAME = 'gemini.google.com';
+
+const isGeminiUrl = (url: string) => {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' && parsed.hostname === GEMINI_HOSTNAME;
+    } catch {
+        return false;
+    }
+};
 
 const maybeUpdateActiveConversationTitle = (convId: string, title: string) => {
     const activeObj = geminiState.activeConversations.get(convId);
@@ -42,7 +52,7 @@ export const geminiAdapter: LLMPlatform = {
     name: 'Gemini',
     urlMatchPattern: 'https://gemini.google.com/*',
 
-    isPlatformUrl: (url: string) => url.includes('gemini.google.com'),
+    isPlatformUrl: isGeminiUrl,
 
     extractConversationId(url: string): string | null {
         if (!this.isPlatformUrl(url)) {

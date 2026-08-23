@@ -26,4 +26,10 @@ describe('platform adapter factory', () => {
     it('should not treat an unrelated x.com page as a Grok conversation', () => {
         expect(getPlatformAdapter('https://x.com/home')).toBeNull();
     });
+
+    it('should select by exact provider origin instead of provider text in the query', () => {
+        expect(getPlatformAdapter(`https://claude.ai/chat/${UUID}?source=chatgpt.com`)?.name).toBe('Claude');
+        expect(getPlatformAdapter(`https://claude.ai/chat/${UUID}?source=gemini.google.com`)?.name).toBe('Claude');
+        expect(getPlatformAdapter('https://example.invalid/?source=chatgpt.com&next=gemini.google.com')).toBeNull();
+    });
 });
