@@ -16,7 +16,8 @@ import {
 
 const X_CONVERSATION_ID = '2091428436845772921';
 
-type RouteListener = () => void;
+type RouteEvent = { persisted?: boolean };
+type RouteListener = (event: RouteEvent) => void;
 
 const createRouteWindow = (initialHref: string) => {
     let href = initialHref;
@@ -64,9 +65,9 @@ const createRouteWindow = (initialHref: string) => {
         setHref(nextHref: string) {
             href = nextHref;
         },
-        dispatch(type: string) {
+        dispatch(type: string, event: RouteEvent = {}) {
             for (const listener of listeners.get(type) ?? []) {
-                listener();
+                listener(event);
             }
         },
         tick() {
@@ -119,5 +120,57 @@ describe('single-export conversation route controls', () => {
         expect(controls.destroy).toHaveBeenCalledTimes(3);
 
         controller.stop();
+    });
+
+    it('should restore route observation and controls after persisted BFCache navigation', () => {
+        const conversationUrl = `https://x.com/i/grok?conversation=${X_CONVERSATION_ID}`;
+        const testWindow = createRouteWindow(conversationUrl);
+        const controls = {
+            mount: mock(() => ({}) as HTMLElement),
+            destroy: mock(() => {}),
+        };
+        const controller = createConversationRouteControlsController({
+            window: testWindow.routeWindow,
+            controls,
+            pollIntervalMs: 10_000,
+        });
+
+        controller.start();
+        expect(controls.mount).toHaveBeenCalledTimes(1);
+
+        testWindow.dispatch('pagehide', { persisted: true });
+        expect(controls.destroy).toHaveBeenCalledTimes(1);
+
+        testWindow.dispatch('pageshow', { persisted: true });
+        expect(controls.mount).toHaveBeenCalledTimes(2);
+
+        testWindow.routeWindow.history.pushState({}, '', '/home');
+        expect(controls.destroy).toHaveBeenCalledTimes(2);
+
+        controller.stop();
+    });
+
+    it('should tear down permanently after a non-persisted pagehide', () => {
+        const conversationUrl = `https://x.com/i/grok?conversation=${X_CONVERSATION_ID}`;
+        const testWindow = createRouteWindow(conversationUrl);
+        const controls = {
+            mount: mock(() => ({}) as HTMLElement),
+            destroy: mock(() => {}),
+        };
+        const controller = createConversationRouteControlsController({
+            window: testWindow.routeWindow,
+            controls,
+            pollIntervalMs: 10_000,
+        });
+
+        controller.start();
+        testWindow.dispatch('pagehide', { persisted: false });
+        expect(controls.destroy).toHaveBeenCalledTimes(1);
+
+        testWindow.dispatch('pageshow', { persisted: true });
+        testWindow.routeWindow.history.pushState({}, '', '/home');
+
+        expect(controls.mount).toHaveBeenCalledTimes(1);
+        expect(controls.destroy).toHaveBeenCalledTimes(1);
     });
 });

@@ -101,6 +101,7 @@ export const createExportControls = (
     let container: HTMLElement | null = null;
     let button: HTMLButtonElement | null = null;
     let state: ExportControlsState = 'idle';
+    let actionGeneration = 0;
     let resetTimer: ReturnType<typeof setTimeout> | null = null;
     let reinjectionObserver: MutationObserver | null = null;
 
@@ -176,6 +177,7 @@ export const createExportControls = (
         }
 
         clearResetTimer();
+        const currentActionGeneration = ++actionGeneration;
 
         let context: ExportActionContext;
         try {
@@ -192,10 +194,16 @@ export const createExportControls = (
         void Promise.resolve()
             .then(() => dependencies.onExport(context))
             .then(() => {
+                if (currentActionGeneration !== actionGeneration) {
+                    return;
+                }
                 setState('success');
                 scheduleIdleReset(resolvedTimings.successResetMs);
             })
             .catch((error) => {
+                if (currentActionGeneration !== actionGeneration) {
+                    return;
+                }
                 logger.warn('Single-chat export failed', error);
                 setState('error');
                 setErrorKind(error);
@@ -223,7 +231,9 @@ export const createExportControls = (
     };
 
     const destroy = () => {
+        actionGeneration += 1;
         clearResetTimer();
+        setState('idle');
         reinjectionObserver?.disconnect();
         reinjectionObserver = null;
         container?.parentElement?.removeChild(container);

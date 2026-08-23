@@ -239,4 +239,66 @@ describe('v3 export controls', () => {
         await flushMicrotasks();
         expect(controls.getState()).toBe('success');
     });
+
+    it('should remount idle after being destroyed during success', async () => {
+        const { controls } = mount();
+
+        controls.getButton()?.click();
+        await flushMicrotasks();
+        expect(controls.getState()).toBe('success');
+
+        controls.destroy();
+        controls.mount();
+
+        expect(controls.getState()).toBe('idle');
+        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.disabled).toBe(false);
+    });
+
+    it('should remount idle after being destroyed during error', async () => {
+        const { controls } = mount({
+            resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'c-1' })),
+            onExport: mock(async () => {
+                throw Object.assign(new Error('boom'), { kind: 'not_terminal' });
+            }),
+        });
+
+        controls.getButton()?.click();
+        await flushMicrotasks();
+        expect(controls.getState()).toBe('error');
+
+        controls.destroy();
+        controls.mount();
+
+        expect(controls.getState()).toBe('idle');
+        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.disabled).toBe(false);
+        expect(controls.getButton()?.hasAttribute(EXPORT_ERROR_KIND_ATTR)).toBe(false);
+    });
+
+    it('should remount idle and ignore a stale completion after being destroyed during loading', async () => {
+        let releaseExport: () => void = () => {};
+        const pendingExport = new Promise<void>((resolve) => {
+            releaseExport = resolve;
+        });
+        const { controls } = mount({
+            resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'c-1' })),
+            onExport: mock(() => pendingExport),
+        });
+
+        controls.getButton()?.click();
+        expect(controls.getState()).toBe('loading');
+
+        controls.destroy();
+        controls.mount();
+        expect(controls.getState()).toBe('idle');
+        expect(controls.getButton()?.disabled).toBe(false);
+
+        releaseExport();
+        await flushMicrotasks();
+
+        expect(controls.getState()).toBe('idle');
+        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.disabled).toBe(false);
+    });
 });

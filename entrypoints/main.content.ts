@@ -62,8 +62,8 @@ type ConversationRouteWindow = {
         pushState: (data: unknown, unused: string, url?: string | URL | null) => void;
         replaceState: (data: unknown, unused: string, url?: string | URL | null) => void;
     };
-    addEventListener: (type: string, listener: () => void) => void;
-    removeEventListener: (type: string, listener: () => void) => void;
+    addEventListener: (type: string, listener: (event: { readonly persisted?: boolean }) => void) => void;
+    removeEventListener: (type: string, listener: (event: { readonly persisted?: boolean }) => void) => void;
     setInterval: (callback: () => void, delayMs: number) => number;
     clearInterval: (timer: number) => void;
 };
@@ -83,13 +83,17 @@ export const createConversationRouteControlsController = ({
     pollIntervalMs = ROUTE_POLL_INTERVAL_MS,
     resolveRoute = resolveSupportedConversationRoute,
 }: ConversationRouteControlsControllerOptions) => {
-    let started = false;
+    let observingRoutes = false;
+    let lifecycleBound = false;
     let lastHref: string | null = null;
     let pollTimer: number | null = null;
     const originalPushState = routeWindow.history.pushState;
     const originalReplaceState = routeWindow.history.replaceState;
 
     const syncControls = () => {
+        if (!observingRoutes) {
+            return;
+        }
         const href = routeWindow.location.href;
         if (href === lastHref) {
             return;
@@ -111,11 +115,12 @@ export const createConversationRouteControlsController = ({
         syncControls();
     };
 
-    const start = () => {
-        if (started) {
+    const startRouteObservation = () => {
+        if (observingRoutes) {
             return;
         }
-        started = true;
+        observingRoutes = true;
+        lastHref = null;
         routeWindow.history.pushState = pushState;
         routeWindow.history.replaceState = replaceState;
         routeWindow.addEventListener('popstate', syncControls);
@@ -123,11 +128,11 @@ export const createConversationRouteControlsController = ({
         syncControls();
     };
 
-    const stop = () => {
-        if (!started) {
+    const stopRouteObservation = () => {
+        if (!observingRoutes) {
             return;
         }
-        started = false;
+        observingRoutes = false;
         routeWindow.removeEventListener('popstate', syncControls);
         if (routeWindow.history.pushState === pushState) {
             routeWindow.history.pushState = originalPushState;
@@ -139,7 +144,49 @@ export const createConversationRouteControlsController = ({
             routeWindow.clearInterval(pollTimer);
             pollTimer = null;
         }
+        lastHref = null;
         controls.destroy();
+    };
+
+    const handlePageHide = (event: { readonly persisted?: boolean }) => {
+        stopRouteObservation();
+        if (!event.persisted) {
+            unbindLifecycle();
+        }
+    };
+
+    const handlePageShow = (event: { readonly persisted?: boolean }) => {
+        if (event.persisted && lifecycleBound) {
+            startRouteObservation();
+        }
+    };
+
+    const bindLifecycle = () => {
+        if (lifecycleBound) {
+            return;
+        }
+        lifecycleBound = true;
+        routeWindow.addEventListener('pagehide', handlePageHide);
+        routeWindow.addEventListener('pageshow', handlePageShow);
+    };
+
+    const unbindLifecycle = () => {
+        if (!lifecycleBound) {
+            return;
+        }
+        lifecycleBound = false;
+        routeWindow.removeEventListener('pagehide', handlePageHide);
+        routeWindow.removeEventListener('pageshow', handlePageShow);
+    };
+
+    const start = () => {
+        bindLifecycle();
+        startRouteObservation();
+    };
+
+    const stop = () => {
+        stopRouteObservation();
+        unbindLifecycle();
     };
 
     return { start, stop, sync: syncControls };
@@ -172,7 +219,6 @@ export default defineScript({
             controls,
         });
         routeControls.start();
-        window.addEventListener('pagehide', routeControls.stop, { once: true });
 
         createV3ContentRuntime({
             host: createRuntimeHost(),
