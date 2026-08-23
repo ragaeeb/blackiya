@@ -1,4 +1,4 @@
-export type StreamDebugPlatform = 'ChatGPT' | 'Gemini' | 'Grok';
+export type StreamDebugPlatform = 'ChatGPT' | 'Gemini' | 'Grok' | 'Qwen';
 
 export type GenerationEndpoint = {
     platform: StreamDebugPlatform;
@@ -27,6 +27,11 @@ const endpointRules: Array<{
         endpoint: 'grok-generation',
         matches: (path) =>
             /^\/2\/grok\/add_response\.json\/?$/i.test(path) || /^\/rest\/app-chat\/conversations\/new\/?$/i.test(path),
+    },
+    {
+        platform: 'Qwen',
+        endpoint: 'qwen-generation',
+        matches: (path) => /^\/api\/v2\/chat\/completions\/?$/i.test(path),
     },
 ];
 

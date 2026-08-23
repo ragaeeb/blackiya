@@ -21,6 +21,13 @@ describe('stream-debug generation endpoint classification', () => {
             endpoint: 'grok-generation',
             path: '/2/grok/add_response.json',
         });
+        expect(
+            classifyGenerationEndpoint('https://chat.qwen.ai/api/v2/chat/completions?chat_id=secret', 'POST'),
+        ).toEqual({
+            platform: 'Qwen',
+            endpoint: 'qwen-generation',
+            path: '/api/v2/chat/completions',
+        });
     });
 
     it('should ignore non-generation methods and auxiliary endpoints', () => {
@@ -28,5 +35,7 @@ describe('stream-debug generation endpoint classification', () => {
         expect(classifyGenerationEndpoint('/backend-api/conversation/abc/stream_status', 'POST')).toBeNull();
         expect(classifyGenerationEndpoint('/_/BardChatUi/data/batchexecute?rpcids=MaZiqc', 'POST')).toBeNull();
         expect(classifyGenerationEndpoint('/rest/app-chat/conversations/reconnect-response-v2/abc', 'GET')).toBeNull();
+        expect(classifyGenerationEndpoint('/api/v2/chat/completions', 'GET')).toBeNull();
+        expect(classifyGenerationEndpoint('/api/v2/chats/abc', 'POST')).toBeNull();
     });
 });
