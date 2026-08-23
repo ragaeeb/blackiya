@@ -41,6 +41,7 @@ const parseDefaultGrokPayload = (data: string | any, url: string): ConversationD
 export const grokAdapter: LLMPlatform = {
     name: 'Grok',
     urlMatchPattern: 'https://grok.com/*',
+    detailRequestOrigins: ['https://grok.com', 'https://x.com'],
 
     isPlatformUrl(url: string): boolean {
         try {

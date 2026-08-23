@@ -294,6 +294,66 @@ describe('buildDetailRequest — contract', () => {
         expect(result).toEqual({ ok: false, reason: 'missing_endpoint' });
     });
 
+    it.each([
+        ['non-HTTPS', `http://chat.qwen.ai/api/v2/chats/${CHATGPT_ID}`],
+        ['userinfo', `https://captured-token@chat.qwen.ai/api/v2/chats/${CHATGPT_ID}`],
+        ['undeclared origin', `https://attacker.chat.qwen.ai/api/v2/chats/${CHATGPT_ID}`],
+    ])('should reject %s adapter detail candidates', (_caseName, candidateUrl) => {
+        const adapter = {
+            ...qwenAdapter,
+            detailRequestOrigins: ['https://chat.qwen.ai'],
+            buildApiUrl: () => candidateUrl,
+            buildApiUrls: () => [candidateUrl],
+        };
+
+        const result = buildDetailRequest({
+            platform: 'adapter',
+            adapter,
+            conversationId: CHATGPT_ID,
+            pageUrl: `https://chat.qwen.ai/c/${CHATGPT_ID}`,
+        });
+
+        expect(result).toEqual({ ok: false, reason: 'missing_endpoint' });
+    });
+
+    it('should reject adapter detail candidates when no trusted origins are declared', () => {
+        const candidateUrl = `https://chat.qwen.ai/api/v2/chats/${CHATGPT_ID}`;
+        const adapter = {
+            ...qwenAdapter,
+            detailRequestOrigins: undefined,
+            buildApiUrl: () => candidateUrl,
+            buildApiUrls: () => [candidateUrl],
+        };
+
+        const result = buildDetailRequest({
+            platform: 'adapter',
+            adapter,
+            conversationId: CHATGPT_ID,
+            pageUrl: `https://chat.qwen.ai/c/${CHATGPT_ID}`,
+        });
+
+        expect(result).toEqual({ ok: false, reason: 'missing_endpoint' });
+    });
+
+    it('should fail closed when one candidate is outside the declared origin set', () => {
+        const safeUrl = `https://chat.qwen.ai/api/v2/chats/${CHATGPT_ID}`;
+        const adapter = {
+            ...qwenAdapter,
+            detailRequestOrigins: ['https://chat.qwen.ai'],
+            buildApiUrl: () => safeUrl,
+            buildApiUrls: () => [safeUrl, `https://example.com/api/v2/chats/${CHATGPT_ID}`],
+        };
+
+        const result = buildDetailRequest({
+            platform: 'adapter',
+            adapter,
+            conversationId: CHATGPT_ID,
+            pageUrl: `https://chat.qwen.ai/c/${CHATGPT_ID}`,
+        });
+
+        expect(result).toEqual({ ok: false, reason: 'missing_endpoint' });
+    });
+
     it('should produce a GET request with credentials=include baked into the request shape', () => {
         const result = buildDetailRequest({
             platform: 'chatgpt',

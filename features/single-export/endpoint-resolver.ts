@@ -133,11 +133,54 @@ const uniqueNonEmptyStrings = (values: Array<string | undefined | null>): string
     return result;
 };
 
+const resolveTrustedDetailUrls = (adapter: LLMPlatform, values: Array<string | undefined | null>): string[] | null => {
+    const urls = uniqueNonEmptyStrings(values);
+    const declaredOrigins = adapter.detailRequestOrigins;
+    if (urls.length === 0 || !declaredOrigins || declaredOrigins.length === 0) {
+        return null;
+    }
+
+    const trustedOrigins = new Set<string>();
+    for (const declaredOrigin of declaredOrigins) {
+        try {
+            const parsed = new URL(declaredOrigin);
+            if (
+                parsed.protocol !== 'https:' ||
+                parsed.username.length > 0 ||
+                parsed.password.length > 0 ||
+                parsed.origin !== declaredOrigin
+            ) {
+                return null;
+            }
+            trustedOrigins.add(declaredOrigin);
+        } catch {
+            return null;
+        }
+    }
+
+    for (const url of urls) {
+        try {
+            const parsed = new URL(url);
+            if (
+                parsed.protocol !== 'https:' ||
+                parsed.username.length > 0 ||
+                parsed.password.length > 0 ||
+                !trustedOrigins.has(parsed.origin)
+            ) {
+                return null;
+            }
+        } catch {
+            return null;
+        }
+    }
+    return urls;
+};
+
 const buildChatGptDetail = (adapter: LLMPlatform, conversationId: string): DetailResolutionResult => {
     const primary = adapter.buildApiUrl?.(conversationId);
     const candidates = adapter.buildApiUrls?.(conversationId);
-    const urls = uniqueNonEmptyStrings([primary, ...(Array.isArray(candidates) ? candidates : [])]);
-    if (urls.length > 0) {
+    const urls = resolveTrustedDetailUrls(adapter, [primary, ...(Array.isArray(candidates) ? candidates : [])]);
+    if (urls) {
         return {
             ok: true,
             requests: urls.map((url) => ({ url, method: 'GET', requiresAuthContext: false })),
@@ -149,8 +192,8 @@ const buildChatGptDetail = (adapter: LLMPlatform, conversationId: string): Detai
 const buildAdapterDetail = (adapter: LLMPlatform, conversationId: string): DetailResolutionResult => {
     const primary = adapter.buildApiUrl?.(conversationId);
     const candidates = adapter.buildApiUrls?.(conversationId);
-    const urls = uniqueNonEmptyStrings([primary, ...(Array.isArray(candidates) ? candidates : [])]);
-    return urls.length > 0
+    const urls = resolveTrustedDetailUrls(adapter, [primary, ...(Array.isArray(candidates) ? candidates : [])]);
+    return urls
         ? {
               ok: true,
               requests: urls.map((url) => ({ url, method: 'GET', requiresAuthContext: false })),
@@ -166,23 +209,18 @@ const buildGrokDetail = (adapter: LLMPlatform, conversationId: string, _pageUrl:
         return { ok: false, reason: 'missing_endpoint' };
     }
     const candidates = adapter.buildApiUrls?.(conversationId);
-    const urls = uniqueNonEmptyStrings(Array.isArray(candidates) ? candidates : []);
-    if (urls.length > 0) {
+    const fallbackUrl = `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`;
+    const urls = resolveTrustedDetailUrls(
+        adapter,
+        Array.isArray(candidates) && candidates.length > 0 ? candidates : [fallbackUrl],
+    );
+    if (urls) {
         return {
             ok: true,
             requests: urls.map((url) => ({ url, method: 'GET', requiresAuthContext: false })),
         };
     }
-    return {
-        ok: true,
-        requests: [
-            {
-                url: `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
-                method: 'GET',
-                requiresAuthContext: false,
-            },
-        ],
-    };
+    return { ok: false, reason: 'missing_endpoint' };
 };
 
 const buildGeminiPostBody = (conversationId: string, at: string): string => {

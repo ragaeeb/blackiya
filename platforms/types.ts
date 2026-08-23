@@ -63,6 +63,9 @@ export type LLMPlatform = {
     /** Fast allowlist used before cloning and parsing observed responses. */
     isConversationDetailRequest?: (url: string, method: string, headers?: HeadersInit) => boolean;
 
+    /** Exact HTTPS origins allowed for adapter-built direct detail requests. */
+    detailRequestOrigins?: readonly string[];
+
     buildApiUrl?: (conversationId: string) => string;
     buildApiUrls?: (conversationId: string) => string[];
 

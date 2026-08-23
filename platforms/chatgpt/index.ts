@@ -43,6 +43,8 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
 
     urlMatchPattern: 'https://chatgpt.com/*',
 
+    detailRequestOrigins: ['https://chatgpt.com', 'https://chat.openai.com'],
+
     isPlatformUrl: isChatGPTUrl,
 
     /**

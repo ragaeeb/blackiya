@@ -11,6 +11,7 @@ const MAX_TITLE_LENGTH = 80;
 export const qwenAdapter: LLMPlatform = {
     name: 'Qwen',
     urlMatchPattern: 'https://chat.qwen.ai/*',
+    detailRequestOrigins: ['https://chat.qwen.ai'],
 
     isPlatformUrl(url: string): boolean {
         try {

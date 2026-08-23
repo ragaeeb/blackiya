@@ -300,6 +300,30 @@ describe('performSingleExport — resolution and validation', () => {
         expect(result.error.kind).toBe('missing_endpoint');
     });
 
+    it('should reject an unsafe adapter candidate before reading or forwarding captured auth headers', async () => {
+        const adapter = {
+            ...chatGPTAdapter,
+            detailRequestOrigins: ['https://chatgpt.com'],
+            buildApiUrl: () => `https://example.com/conversations/${CHATGPT_ID}`,
+            buildApiUrls: () => [`https://example.com/conversations/${CHATGPT_ID}`],
+        };
+        const testContext = createTestContext({
+            pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
+            adapter,
+        });
+        const getAuthHeaders = mock(() => ({ authorization: 'Bearer must-not-leak' }));
+        testContext.deps.getAuthHeaders = getAuthHeaders;
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result).toEqual({
+            kind: 'failure',
+            error: { kind: 'missing_endpoint', platformName: 'ChatGPT' },
+        });
+        expect(getAuthHeaders).not.toHaveBeenCalled();
+        expect(testContext.fetchImpl).not.toHaveBeenCalled();
+    });
+
     it('should fail with missing_auth for Gemini when the at token is unavailable', async () => {
         const testContext = createTestContext({
             pageUrl: `https://gemini.google.com/app/${GEMINI_ID}`,

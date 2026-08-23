@@ -25,6 +25,7 @@ const isDeepSeekUrl = (url: string) => {
 export const deepSeekAdapter: LLMPlatform = {
     name: 'DeepSeek',
     urlMatchPattern: 'https://chat.deepseek.com/*',
+    detailRequestOrigins: ['https://chat.deepseek.com'],
 
     isPlatformUrl: isDeepSeekUrl,
 
