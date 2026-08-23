@@ -34,7 +34,7 @@ The MAIN-world command bridge requires the exact same window and origin and reje
 
 ## 5. Bounded, In-Memory Conversation Cache
 
-To avoid making a redundant request when a conversation is already loaded, the extension clones narrowly classified page-owned canonical detail responses. It parses and terminal-validates the clone without consuming or changing the response delivered to the website.
+To avoid making a redundant request when a conversation is already loaded, the extension first narrowly classifies a page-owned canonical detail response, then clones it. Clone bodies are read through a hard byte cap and parsed and terminal-validated without consuming or changing the response delivered to the website.
 
 The shared terminal cache is:
 
@@ -42,6 +42,7 @@ The shared terminal cache is:
 - **bounded** — up to 12 entries, 16 MiB per entry, and 48 MiB total;
 - **in-memory only** — it is never written to extension storage or disk and disappears with page/session teardown;
 - **credential-free** — request headers, cookies, tokens, and Gemini RPC context are not stored with conversation entries; and
+- **account-bound** — establishing or changing provider identity, or receiving `401/403`, clears that provider's cached conversation and pending assembly state; and
 - **explicit at download time** — observing a response does not create a file. A JSON file is written only after `Save JSON` is clicked.
 
 Some platforms need additional fail-closed assembly before an entry is eligible. Meta Muse classifies its multiplexed GraphQL requests by request body and joins backward pages only in cursor order. Amazon Nova accepts only the conversation RPC identified by its target header. Z.ai combines identity-consistent conversation detail and message-batch responses. Incomplete, mismatched, oversized, expired, or non-terminal data is not exported.

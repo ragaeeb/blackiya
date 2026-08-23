@@ -18,7 +18,7 @@ Hard-cut invariants (the v3 model):
 - **Terminal artifact support.** ChatGPT may finish with a multimodal/image, code, or execution artifact instead of text; `finished_successfully` plus `end_turn: true` is accepted for those non-text assistant nodes, an explicitly ended `reasoning_recap` (`metadata.reasoning_status: reasoning_ended`) is accepted even when `end_turn` is false, and a completed deep-research assistant-code node followed by a finished tool-code node is terminal. In-progress and non-terminal thoughts remain fail-fast.
 - **Fail-fast.** Every non-happy path returns a typed error — no retries, speculative warm fetch, snapshot replay, stabilization, or degraded export. A cache-only adapter fails when no fresh eligible response has been observed.
 - **Explicit export is the only write path.** Nothing is written to a user JSON file without a click (`Save JSON` or `Export Chats`).
-- **Bounded cache-first capture.** Page-owned canonical detail responses are cloned without consuming the page response, parsed, terminal-validated, and retained in memory for at most five minutes. The cache defaults to 12 entries, 16 MiB per entry, and 48 MiB total; it is never persisted and contains no captured credentials.
+- **Bounded cache-first capture.** Page-owned responses are classified before cloning, clone bodies are read through a hard byte cap, then parsed, terminal-validated, and retained in memory for at most five minutes. The cache defaults to 12 entries, 16 MiB per entry, and 48 MiB total; it is never persisted and contains no captured credentials. Provider cache and pending assembly state are cleared when account identity is established or changes and after `401/403` responses.
 - **Request-context capture without credential persistence.** Provider-allowlisted headers and Gemini batchexecute context are held in expiring page-local memory for eligible direct requests. They are never written into the exported JSON, the conversation-response cache, or persistent storage.
 - **No compatibility mode.** Reactive lifecycle badges, canonical/Save-vs-Force-Save controls, SFE probes/leases, calibration, Markdown export, snapshot recovery, and the legacy lifecycle wire protocol are all out of scope.
 
@@ -75,7 +75,7 @@ There is no SFE, no probe lease arbitration, and no calibration profile. The bac
 ### Grok
 
 - `grok.com` detail export targets `/rest/app-chat/conversations_v2/{id}` with an adapter-declared fallback candidate.
-- `x.com/i/grok` uses the canonical `GrokConversationItemsByRestId` GraphQL detail response and supports both cache-first and deterministic direct export.
+- X-wide injection supports SPA entry into `/i/grok?conversation={id}`, but controls mount only while that valid conversation route is active. The route uses the canonical `GrokConversationItemsByRestId` GraphQL detail response and supports both cache-first and deterministic direct export.
 - Generation endpoints include `/2/grok/add_response.json` and `/rest/app-chat/conversations/new`.
 
 ### Cache-First Providers
@@ -207,7 +207,7 @@ Before shipping:
 
 1. Cache-first single export: an eligible page-owned terminal detail response is reused without another request; expired, oversized, mismatched, incomplete, or non-terminal entries are rejected. The cache remains bounded to 12 entries, 16 MiB per entry, 48 MiB total, and five minutes.
 2. ChatGPT and Gemini: cache hits save immediately; cache misses use their deterministic detail requests. ChatGPT still requires auth headers and advances to its declared fallback only after `404`; Gemini still requires batchexecute context.
-3. Grok: both `grok.com` and `x.com/i/grok` show `Save JSON`, parse their canonical detail shape, and use deterministic direct detail fallback when needed.
+3. Grok: `grok.com` and valid `x.com/i/grok?conversation={id}` routes show `Save JSON`, while unrelated X routes do not. Both parse their canonical detail shape and use deterministic direct detail fallback when needed.
 4. Cache-first providers: Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek save only identity-matched ready-terminal archives. Meta closes cursor pagination in order, Nova requires the exact target header, and Z.ai requires consistent detail-plus-batch assembly. Cache-only providers fail fast when no eligible response is present.
 5. Bulk export: only ChatGPT, Gemini, and `grok.com` enumerate conversation lists; pacing/timeout, `Max chats` (`0 = all`), id/readiness validation, bounded `429` retry, and one-file-per-conversation behavior remain intact.
 6. Stream-debug: frames are captured in order, bounded, sanitized, and explicitly exportable/clearable without credential leakage. Qwen completion SSE is classified; unsupported new-provider generation endpoints are not guessed.

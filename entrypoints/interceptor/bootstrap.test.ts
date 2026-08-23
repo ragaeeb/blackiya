@@ -206,7 +206,7 @@ describe('MAIN-world bootstrap request capture', () => {
         (bootstrapScript as { main: () => void }).main();
         const response = await windowInstance.fetch('https://chatgpt.com/backend-api/conversations');
 
-        expect(await response.json()).toEqual({ unrelated: true });
+        expect(await response.text()).toBe(JSON.stringify({ unrelated: true }));
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(cloneCalls).toBe(0);
     });
@@ -519,7 +519,7 @@ describe('MAIN-world bootstrap request capture', () => {
             gizmo_id: null,
             gizmo_type: null,
             is_archived: false,
-            default_model_slug: null,
+            default_model_slug: 'synthetic-model',
             safe_urls: [],
             blocked_urls: [],
         });
@@ -550,7 +550,7 @@ describe('MAIN-world bootstrap request capture', () => {
             gizmo_id: null,
             gizmo_type: null,
             is_archived: false,
-            default_model_slug: null,
+            default_model_slug: 'synthetic-model',
             safe_urls: [],
             blocked_urls: [],
         });
@@ -579,7 +579,7 @@ describe('MAIN-world bootstrap request capture', () => {
             gizmo_id: null,
             gizmo_type: null,
             is_archived: false,
-            default_model_slug: null,
+            default_model_slug: 'synthetic-model',
             safe_urls: [],
             blocked_urls: [],
         });

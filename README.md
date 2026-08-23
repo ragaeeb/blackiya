@@ -118,7 +118,7 @@ The extension requires the following host permissions:
 - `https://chat.openai.com/*` — Legacy ChatGPT platform
 - `https://gemini.google.com/*` — Gemini platform
 - `https://grok.com/*` — Grok platform
-- `https://x.com/i/grok*` — Grok conversations on X
+- `https://x.com/*` — enables injection before X's SPA navigates into Grok
 - `https://claude.ai/*` — Claude
 - `https://nova.amazon.com/*` — Amazon Nova
 - `https://meta.ai/*` and `https://www.meta.ai/*` — Meta Muse
@@ -126,7 +126,7 @@ The extension requires the following host permissions:
 - `https://chat.z.ai/*` — Z.ai
 - `https://chat.deepseek.com/*` — DeepSeek
 
-The `x.com` content-script match is limited to `/i/grok*`; unrelated X pages are not treated as Grok conversations. `https://grok.x.com/*` is not a content-script match because those requests originate from the supported page context.
+The `x.com` content script is available across the origin so navigation from X home into Grok does not miss extension injection. The export controls are still route-gated: they mount only on `/i/grok?conversation={id}` and are removed again on unrelated X routes. `https://grok.x.com/*` is not a content-script match because those requests originate from the supported page context.
 
 ## 📝 Usage
 

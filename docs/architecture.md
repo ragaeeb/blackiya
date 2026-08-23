@@ -94,7 +94,7 @@ Invariants: one explicit action per call, eligible cache first, deterministic `4
 
 ### 4.1 Cache-First Capture
 
-The MAIN-world interceptor observes page-owned `fetch` and XHR traffic without consuming or delaying the page response. It clones only responses that pass the active adapter's canonical detail classifier, parses them, requires terminal readiness, then serializes the normalized archive into `ConversationResponseCache`.
+The MAIN-world interceptor observes page-owned `fetch` and XHR traffic without consuming or delaying the page response. It classifies status, URL, method, request context, and declared response size before cloning. An eligible clone is stream-read through the cache's hard per-entry byte cap; oversized/erroring readers are cancelled. The bounded text is then parsed and terminal-validated before the normalized archive enters `ConversationResponseCache`.
 
 Default cache bounds:
 
@@ -103,13 +103,13 @@ Default cache bounds:
 - maximum retained bytes: `48 MiB`
 - expiry: `5 minutes`
 
-The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, identity-inconsistent, incomplete, or non-terminal candidates are not eligible. Eviction uses age plus oldest-entry removal to satisfy the entry and aggregate-byte bounds.
+The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, identity-inconsistent, incomplete, or non-terminal candidates are not eligible. Expired entries are actively pruned; oldest-entry removal enforces the entry and aggregate-byte bounds. Establishing or changing a provider identity, or observing its `401/403`, clears that provider's cached conversations and pending multi-response assembly.
 
 Multiplexed and multi-response transports require more context than URL/method matching:
 
-- **Meta Muse:** `POST /api/graphql` carries unrelated operations. The interceptor parses the request body to distinguish initial conversation detail from backward pagination, then assembles pages only when each `before` cursor matches the prior oldest page. The assembler uses the same five-minute/12-entry/16-MiB/48-MiB bounds plus a 100-page-per-conversation cap; only a closed, ready-terminal archive enters the shared cache.
+- **Meta Muse:** `POST /api/graphql` carries unrelated operations. The interceptor parses the request body to distinguish initial conversation detail from backward pagination, retains bounded cursor-keyed halves regardless of clone-completion order, then assembles only the canonical backward cursor chain. The assembler uses the same five-minute/12-entry/16-MiB/48-MiB bounds plus a 100-page-per-conversation cap; only a closed, ready-terminal archive enters the shared cache.
 - **Amazon Nova:** unrelated RPCs share `POST /api`. The response is eligible only when the exact `x-amz-target` request header identifies the conversation-detail operation.
-- **Z.ai:** the metadata detail and message batch are individually insufficient. Assembly validates the conversation/current-node identity and requested message IDs, merges the two responses, and caches only a complete terminal graph.
+- **Z.ai:** the metadata detail and message batch are individually insufficient. Either bounded half may finish cloning first. Assembly validates the conversation/current-node identity, exact requested message IDs, single-root cycle-free full graph coverage, and terminal current leaf before caching the merged archive.
 
 ### 4.2 Provider Support and Direct Requests
 
@@ -129,6 +129,8 @@ Multiplexed and multi-response transports require more context than URL/method m
 Cache-only does not mean degraded or partial export. It means `Save JSON` reuses a fresh terminal response the site itself loaded and returns `missing_endpoint` when no eligible cached response exists.
 
 Direct request details:
+
+Every adapter-built candidate must use HTTPS, contain no userinfo, and match an exact origin declared by that adapter before captured request headers are read or forwarded. One unsafe candidate rejects the entire candidate set.
 
 - ChatGPT: `/backend-api/conversation/{id}` (with `/backend-api/f/conversation/{id}` as fallback candidate), `GET`.
 - Grok (`grok.com`): `/rest/app-chat/conversations_v2/{id}?includeWorkspaces=true&includeTaskResult=true` (fallback: adapter `buildApiUrls`), `GET`.
@@ -219,7 +221,7 @@ Explicit export + clear use the token-validated MAIN-world command handler (`fea
 
 Primary modules: `entrypoints/main.content.ts`, `utils/platform-header-store.ts`, and `entrypoints/interceptor/gemini-batchexecute-context-store.ts`.
 
-At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth/client snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive request-context snapshots in memory with a five-minute expiry. Header identity changes replace the prior platform snapshot; a provider's `401/403` response clears that provider's headers, and Gemini also clears its batchexecute context.
+At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth/client snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive request-context snapshots in memory with a five-minute expiry. Establishing or changing header identity replaces the prior platform snapshot and clears that provider's conversation/assembly cache. A provider's `401/403` response clears both request context and conversation state; Gemini also clears its batchexecute context.
 
 Request context and conversation data remain separate:
 
