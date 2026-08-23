@@ -13,7 +13,7 @@
 [![Biome](https://img.shields.io/badge/Biome-%2360a5fa.svg?style=flat&logo=biome&logoColor=white)](https://biomejs.dev)
 [![WXT](https://img.shields.io/badge/WXT-%235d2fbf.svg?style=flat&logo=wxt&logoColor=white)](https://wxt.dev)
 
-A high-performance Chrome extension for exporting conversation JSON from ChatGPT, Gemini, and Grok — as verbatim terminal archives, on demand.
+A high-performance Chrome extension for exporting terminal conversation JSON from ChatGPT, Gemini, Grok, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek—locally and on demand.
 
 ## 📚 Architecture Docs
 
@@ -22,21 +22,23 @@ A high-performance Chrome extension for exporting conversation JSON from ChatGPT
 
 ## 🎯 Features
 
-- ✅ **Single-Chat Ready-Terminal Export**: An explicit `Save JSON` control resolves the adapter's deterministic detail-request candidates, validates the server response is ready and terminal, and downloads the complete JSON archive (full message tree, reasoning data preserved verbatim). ChatGPT advances to its fallback candidate only after a `404`.
-- ✅ **Fail-Fast**: Every non-happy path returns a typed error — no retries, no degraded/partial export, no silent data loss. A failed export tells you exactly which gate rejected it (`missing_auth`, `id_mismatch`, `not_terminal`, `download_failure`, `timeout`, …).
-- ✅ **Bulk `Export Chats`**: From the popup, export a list of conversations from the active platform tab (`Max chats`, where `0 = all`). Each detail payload must match its requested id and be ready-terminal before download; requests use pacing, per-request timeout, and bounded `429` retry handling.
+- ✅ **Single-Chat Ready-Terminal Export**: `Save JSON` supports ChatGPT, Gemini, Grok on `grok.com` and `x.com`, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek. It validates identity and terminal readiness before downloading the complete archive, including structured messages, reasoning, tools, artifacts, and the provider payload retained by the adapter.
+- ✅ **Cache-First Save**: The extension reuses an eligible terminal canonical detail response that the page already loaded. The cache is in-memory only, expires after five minutes, and is bounded to 12 entries, 16 MiB per entry, and 48 MiB total. On a miss, `Save JSON` uses a deterministic direct detail request only where the adapter supports one.
+- ✅ **Fail-Fast Single Save**: Every non-happy single-chat path returns a typed error—no retries, degraded/partial export, speculative warm fetch, or silent data loss. Cache-only providers fail when no fresh ready response is available. Bulk export separately retains bounded `429` retries.
+- ✅ **Bulk `Export Chats`**: From the popup, export ChatGPT, Gemini, or `grok.com` conversation lists (`Max chats`, where `0 = all`). Each detail payload must match its requested id and be ready-terminal before download; requests use pacing, per-request timeout, and bounded `429` retry handling.
 - ✅ **Stream-Debug Capture**: Raw ordered stream frames (SSE/NDJSON/raw) are recorded in memory, bounded, sanitized, and exported or cleared explicitly — never written into conversation JSON.
-- ✅ **Request-Context Without Credential Persistence**: Platform auth headers and Gemini batchexecute context are resolved in memory at export time, expire from page-local stores, and are never written into exports.
+- ✅ **Request-Context Without Credential Persistence**: Allowlisted provider headers and Gemini batchexecute context remain in expiring page-local memory and are never written into exports, cached conversation records, or persistent storage.
 - ✅ **Smart Titles**: Automatic conversation title resolution and export-time filename generation.
 - ✅ **Popup Controls**: Bulk export, stream-debug export, and stream-debug clearing in one place.
-- ✅ **Message Tree**: Preserves the complete nested message structure (the `mapping` tree) verbatim.
+- ✅ **Complete Conversation Data**: Preserves ChatGPT's native `mapping` tree verbatim; other adapters build a normalized message graph while retaining the complete canonical provider response in `raw_payload`.
 - ✅ **Extensive Testing**: Regression-focused unit/integration coverage for adapters, single-export, bulk-export, and stream-debug.
 - ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 
 ## 🔒 Privacy & Compliance
 
 - **Local-first and explicit.** Export happens only when you click `Save JSON` or `Export Chats`; nothing is uploaded.
-- **No credential persistence.** Request-context is captured in page-local memory with a short expiry and never written into exports.
+- **No credential persistence.** Request-context is captured in page-local memory with a short expiry and never written into exports or cached conversation records.
+- **Bounded conversation cache.** Terminal page-owned detail responses live only in memory for up to five minutes and are automatically evicted by age, entry count, and byte limits.
 - See [`docs/architecture.md`](docs/architecture.md) and [`PRIVACY_POLICY.md`](PRIVACY_POLICY.md).
 
 ## 📦 Available Scripts
@@ -84,6 +86,12 @@ blackiya/
 │   ├── chatgpt/               # ChatGPT adapter + parsing/readiness modules
 │   ├── gemini/                # Gemini adapter + RPC/title/conversation modules
 │   ├── grok/                  # Grok adapter + NDJSON/title modules
+│   ├── claude/                # Claude detail parser + readiness
+│   ├── deepseek/              # DeepSeek history parser + readiness
+│   ├── meta/                  # Meta GraphQL parser + cursor assembler
+│   ├── nova/                  # Amazon Nova RPC parser + readiness
+│   ├── qwen/                  # Qwen history parser + readiness
+│   ├── zai/                   # Z.ai detail/batch parser + readiness
 │   ├── constants.ts
 │   ├── factory.ts             # Adapter factory
 │   └── types.ts               # Platform interface definitions
@@ -110,26 +118,36 @@ The extension requires the following host permissions:
 - `https://chat.openai.com/*` — Legacy ChatGPT platform
 - `https://gemini.google.com/*` — Gemini platform
 - `https://grok.com/*` — Grok platform
+- `https://x.com/i/grok*` — Grok conversations on X
+- `https://claude.ai/*` — Claude
+- `https://nova.amazon.com/*` — Amazon Nova
+- `https://meta.ai/*` and `https://www.meta.ai/*` — Meta Muse
+- `https://chat.qwen.ai/*` — Qwen
+- `https://chat.z.ai/*` — Z.ai
+- `https://chat.deepseek.com/*` — DeepSeek
 
-`https://grok.x.com/*` is intentionally not listed. Grok streaming requests to `grok.x.com` are initiated by page JavaScript from the `grok.com` page context and are captured by the MAIN-world interceptor.
+The `x.com` content-script match is limited to `/i/grok*`; unrelated X pages are not treated as Grok conversations. `https://grok.x.com/*` is not a content-script match because those requests originate from the supported page context.
 
 ## 📝 Usage
 
 ### Single-Chat Export
 
-1. Navigate to ChatGPT, Gemini, or Grok and open a conversation.
+1. Open a conversation on ChatGPT, Gemini, `grok.com`, `x.com/i/grok`, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, or DeepSeek and wait for the page to finish loading it.
 2. Click the **Save JSON** button (the `✓ Saved` state confirms the download).
-3. The export resolves the adapter's deterministic detail candidates, validates the response is terminal, and downloads the complete JSON archive. ChatGPT accepts completed multimodal/image artifacts, explicitly ended reasoning recaps, and completed deep-research tool branches as terminal responses even when they contain no final text. A candidate fallback is used only for a `404`; there are no retries or time-based recovery paths.
+3. The export first checks the bounded in-memory cache for the active conversation. If the page-loaded response is fresh, identity-matched, and terminal, it downloads immediately. Otherwise it uses a deterministic direct detail request where supported. A candidate fallback is used only for an eligible `404`; there are no retries, speculative warm requests, or time-based recovery paths.
+
+Claude, Amazon Nova, Meta Muse, and Z.ai rely on the page-owned response cache. If their canonical detail response was not observed, is incomplete, is too large, or has expired, `Save JSON` fails fast instead of guessing a request. Reload or reopen the finished conversation so the platform loads it normally, then try again. Meta Muse closes backward GraphQL pagination in cursor order; Nova accepts only the conversation RPC identified by its target header; Z.ai combines the conversation detail and message batch before considering the archive eligible.
 
 Downloads use `{conversation-title}_{timestamp}.json`.
 
-The exported JSON is the full-fidelity source of truth: complete conversation metadata, the entire message tree (`mapping`), all message content and metadata, model information, and reasoning data — preserved verbatim from the server's terminal response.
+The exported JSON contains complete conversation metadata and a normalized message graph. ChatGPT's native `mapping` is preserved verbatim; other adapters retain their complete canonical provider response in `raw_payload` so structured reasoning, tools, artifacts, and provider-specific fields are not discarded.
 
 ### Fail-Fast Errors
 
 `Save JSON` never writes a partial archive. When export fails, the button shows `⚠ Failed` and the runtime returns a typed error for diagnostics. The common cases:
 
-- **missing auth** — retry after triggering one normal platform request so fresh provider auth headers / Gemini `at` context are captured; a 401/403 response clears the stale provider snapshot.
+- **missing auth** — retry after triggering one normal platform request so fresh provider headers / Gemini `at` context are captured; a 401/403 response clears the stale provider snapshot.
+- **missing endpoint** — no eligible cached response exists and the adapter has no deterministic direct request; reload or reopen a completed cache-only conversation and retry.
 - **not terminal** — the response was not final; retry once the conversation is complete.
 - **id mismatch / timeout / parse failure / HTTP failure / download failure** — see `docs/debug-logs-guide.md`.
 
@@ -140,7 +158,7 @@ From the extension popup:
 1. Set **Max chats** (`0 = all`; default `0`).
 2. Click **Export Chats**.
 
-The extension discovers conversation IDs from the platform list endpoint, fetches each detail payload (paced, with a per-request timeout and bounded `429` handling), and downloads one JSON file per conversation. The popup reports `Exported X/Y chats on <platform>` plus any warnings.
+Bulk export supports ChatGPT, Gemini, and `grok.com` only. The extension discovers conversation IDs from the platform list endpoint, fetches each detail payload (paced, with a per-request timeout and bounded `429` handling), and downloads one JSON file per conversation. The popup reports `Exported X/Y chats on <platform>` plus any warnings.
 
 ### Popup Tools
 

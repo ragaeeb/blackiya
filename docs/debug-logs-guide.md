@@ -2,11 +2,13 @@
 
 ## Purpose
 
-Use the smallest artifact that still explains the failure. In the v3 runtime there is no reactive lifecycle state; readiness is evaluated only during an explicit save, so diagnostics reduce to:
+Use the smallest artifact that still explains the failure. In the v3 runtime there is no reactive lifecycle state. The interceptor may retain an eligible page-owned terminal detail response in a bounded in-memory cache, but readiness is revalidated during explicit save and no conversation file is written automatically. Diagnostics reduce to:
 
 1. **Stream-debug records** — raw ordered stream frames for transport/parse triage.
 2. **Fail-fast export errors** — typed, metadata-only error results from the single-chat kernel.
 3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
+
+The terminal conversation cache is not a log export. It expires after five minutes, is bounded to 12 entries, 16 MiB per entry, and 48 MiB total, and contains no captured request credentials. `Save JSON` checks it first, then makes a deterministic direct detail request only when the active adapter supports one.
 
 ### MAIN-world bridge note
 
@@ -26,6 +28,9 @@ Stream-debug capture is bounded, in-memory, and exported **explicitly** (it is n
 - ChatGPT: `POST /backend-api/f/conversation`
 - Gemini: `POST /_/BardChatUi/data/assistant.lamda.bardfrontendservice/streamgenerate`
 - Grok: `POST /2/grok/add_response.json`, `POST /rest/app-chat/conversations/new`
+- Qwen: `POST /api/v2/chat/completions`
+
+No generation endpoint is guessed for Claude, Amazon Nova, Meta Muse, Z.ai, DeepSeek, or `x.com` Grok. Absence of stream-debug frames on those platforms is therefore not evidence that their cache-first single export failed.
 
 Each record captures:
 
@@ -65,7 +70,7 @@ The single-chat kernel returns a typed, fail-fast result and never writes a part
 | :--- | :--- | :--- |
 | `unsupported_platform` | Adapter does not match the active page origin | Confirm you are on a supported host |
 | `missing_conversation_id` | No conversation id in the page URL | Open a real conversation URL |
-| `missing_endpoint` | Adapter has no detail URL for the platform | Adapter/path drift — verify against HAR |
+| `missing_endpoint` | No eligible cached response exists and the adapter has no deterministic direct request | For Claude, Amazon Nova, Meta Muse, or Z.ai, reload/reopen the completed conversation so the page loads its canonical detail response, then retry; otherwise verify endpoint drift via HAR |
 | `missing_auth` | No auth header / Gemini `at` context captured (or HTTP `401/403`; the stale provider snapshot is cleared and the active bulk run stops) | Trigger one normal platform request, then retry |
 | `http_failure` | Unexpected HTTP status (non-2xx, non-auth) | Inspect status + endpoint via HAR |
 | `download_failure` | The validated payload could not be handed to the browser download path | Retry the explicit save and inspect browser download permissions |
@@ -75,6 +80,19 @@ The single-chat kernel returns a typed, fail-fast result and never writes a part
 | `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete; an explicitly ended ChatGPT `reasoning_recap` or completed deep-research tool branch is accepted even when no final text assistant exists |
 
 There is no `degraded_manual_only` or partial/downgraded export path in v3. If `Save JSON` fails, the error variant tells you exactly which gate rejected it.
+
+### Cache-first failure triage
+
+Supported single-save providers are ChatGPT, Gemini, Grok on `grok.com` and `x.com`, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek. Bulk `Export Chats` remains limited to ChatGPT, Gemini, and `grok.com`.
+
+For cache-only providers, first confirm the site made its normal canonical conversation request after the extension loaded:
+
+- **Claude:** canonical organization-scoped conversation detail `GET`.
+- **Amazon Nova:** `POST /api` with the exact conversation-detail target header. The URL alone is not sufficient because Nova multiplexes RPCs.
+- **Meta Muse:** `POST /api/graphql` requests whose bodies identify conversation detail and backward pagination. The assembler requires cursor order and a closed page range before caching.
+- **Z.ai:** both the conversation detail and its matching message batch. Either response alone is intentionally rejected.
+
+For direct-capable adapters—ChatGPT, Gemini, both Grok surfaces, Qwen, and DeepSeek—a cache miss proceeds to the adapter's deterministic detail request. It does not trigger retries, background warming, or speculative endpoint discovery. Authentication failures clear stale provider request context; malformed, mismatched, incomplete, and non-terminal responses remain fail-fast.
 
 ## HAR Analysis
 

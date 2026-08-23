@@ -1,20 +1,20 @@
 # Blackiya Architecture
 
-> Scope: ChatGPT, Gemini, Grok — explicit ready-terminal JSON export, bulk `Export Chats`, and bounded stream-debug capture (v3 hard cut).
+> Scope: ready-terminal single-chat JSON export for ChatGPT, Gemini, Grok (`grok.com` and `x.com`), Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek; bulk `Export Chats` for ChatGPT, Gemini, and `grok.com`; and bounded stream-debug capture (v3 hard cut).
 
 ## 1) System Overview
 
-Blackiya is a Manifest V3 browser extension that lets the user archive their own conversations from ChatGPT, Gemini, and Grok as verbatim JSON files. It does **not** react to a response lifecycle and does **not** auto-capture conversation data.
+Blackiya is a Manifest V3 browser extension that lets the user archive their own conversations from supported AI platforms as terminal JSON files. It does **not** run a reactive response-lifecycle state machine and never writes a conversation file automatically. It does passively clone narrowly classified, page-owned canonical detail responses into a bounded in-memory terminal cache so an explicit save can avoid a redundant request.
 
 There are exactly three user-facing behaviors:
 
-1. **Single-chat ready-terminal export.** An explicit `Save JSON` control on the page resolves deterministic adapter-declared detail candidates, validates the server response is **ready and terminal**, and downloads a complete JSON archive. A candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error — there are no retries, no warm-fetch, no snapshot replay, no stabilization, and no degraded export.
-2. **Bulk `Export Chats`.** From the popup, the user exports a list of conversations from the active platform tab (one JSON file per conversation).
+1. **Single-chat ready-terminal export.** An explicit `Save JSON` control first checks the terminal response cache. On a miss it resolves deterministic adapter-declared detail candidates only where the adapter supports a direct request. Every payload is identity-checked and required to be **ready and terminal** before download. A direct candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error—there are no retries, speculative warm fetches, snapshot replay, stabilization, or degraded export.
+2. **Bulk `Export Chats`.** From the popup, the user exports a ChatGPT, Gemini, or `grok.com` conversation list (one JSON file per conversation).
 3. **Stream-debug capture.** Raw ordered stream frames (SSE, NDJSON/line, or raw) are recorded in memory, bounded, and exported or cleared only on explicit request. The capture is in-memory only and sanitized for privacy.
 
 Two runtime worlds exist:
 
-- **MAIN world privileged side** (`entrypoints/interceptor.content.ts` → `entrypoints/interceptor/bootstrap.ts` and `bootstrap-main-bridge.ts`): hooks page `fetch`/`XMLHttpRequest`, owns request-context stores and raw stream frames, performs all explicit provider requests, validates payloads, and triggers downloads.
+- **MAIN world privileged side** (`entrypoints/interceptor.content.ts` → `entrypoints/interceptor/bootstrap.ts` and `bootstrap-main-bridge.ts`): hooks page `fetch`/`XMLHttpRequest`, clones eligible page-owned detail responses, owns bounded response/request-context stores and raw stream frames, performs explicit provider requests, validates payloads, and triggers downloads.
 - **ISOLATED v3 content runtime** (`entrypoints/main.content.ts` → `features/runtime/v3-content-runtime.ts`): hosts the UI and browser-extension message handlers. It sends command-only requests to MAIN and receives typed status, error, and progress summaries.
 
 The worlds communicate through a token-validated `window.postMessage` command channel. Its messages contain operation names, bulk options, request ids, and sanitized summaries only. Platform headers, Gemini batchexecute context, stream records, frame text, conversation payloads, and serialized JSON never cross that channel.
@@ -37,6 +37,11 @@ There is no Signal Fusion Engine, no probe lease arbitration, no calibration, no
   - `entrypoints/interceptor.content.ts`
   - `entrypoints/interceptor/bootstrap.ts`
   - `entrypoints/interceptor/bootstrap-main-bridge.ts` — creates privileged operations over the existing MAIN-world stores.
+- Cache-first single export:
+  - `features/single-export/conversation-response-cache.ts` — five-minute, entry/byte-bounded terminal conversation cache.
+  - `features/single-export/conversation-response-capture.ts` — exact-request classification, parser/readiness gating, and response-clone ingestion.
+  - `platforms/meta/response-assembler.ts` — request-body-classified, cursor-ordered Meta GraphQL assembly.
+  - Z.ai platform assembly — combines the page-owned detail and message batch before producing one eligible terminal conversation.
 - Adapter interface + factory:
   - `platforms/types.ts`
   - `platforms/factory.ts`
@@ -70,27 +75,67 @@ Primary module: `features/single-export/single-export-service.ts`.
 `performSingleExport(timeoutMs, deps)`:
 
 1. Resolves the platform adapter and conversation id **only at click time** from the active page URL (`deps.resolveAdapter(pageUrl)`, `deps.getPageUrl()`).
-2. Maps platform + conversation id to a deterministic detail-request candidate list via `features/single-export/endpoint-resolver.ts` (URL, method, headers, body).
-3. Dispatches the candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). ChatGPT advances only when a candidate returns `404`; the timeout covers both headers and body reads. ChatGPT also requires a non-empty, case-insensitive `authorization` header before dispatch.
-4. Validates the response:
+2. Looks up `{ adapter.name, conversationId }` in the bounded in-memory cache and revalidates identity plus ready-terminal state. An eligible hit is serialized and downloaded without another provider request.
+3. On a cache miss or ineligible entry, maps platform + conversation id to a deterministic detail-request candidate list via `features/single-export/endpoint-resolver.ts` (URL, method, headers, body). If the adapter has no deterministic request, the kernel returns `missing_endpoint` immediately.
+4. Dispatches direct candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). A candidate advances only when an eligible `404` is available; the timeout covers both headers and body reads. ChatGPT also requires a non-empty, case-insensitive `authorization` header before dispatch.
+5. Validates the direct response:
    - Missing ChatGPT `authorization` → `missing_auth` before dispatch.
    - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
    - Empty/bad body or parse failure → `parse_failure`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
    - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text. It also treats a `finished_successfully` `reasoning_recap` with `metadata.reasoning_status: reasoning_ended` as terminal when ChatGPT omits `end_turn`, and accepts a completed deep-research assistant-code node followed by a finished tool-code node. In-progress and non-terminal thoughts remain rejected.
-5. On success, serializes the complete platform payload (including the full `mapping` tree and platform-specific raw payload fields, preserved verbatim) and injects the download via `deps.downloadJson(jsonString, filename)`. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
+6. On success, serializes the complete platform archive (including the full normalized `mapping` tree and provider response retained in platform-specific raw payload fields) and injects the download via `deps.downloadJson(jsonString, filename)`. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
 
 `unsupported_platform`, `missing_conversation_id`, `missing_endpoint`, `missing_auth`, `http_failure`, `download_failure`, `timeout`, `parse_failure`, `id_mismatch`, `not_terminal`.
 
-Invariants: one explicit action per call, deterministic `404` candidate fallback only, no retries/backoff, no fallback-on-timeout, no warm fetch, no snapshot replay, no stabilization, no degraded export.
+Invariants: one explicit action per call, eligible cache first, deterministic `404` candidate fallback only, no retries/backoff, no fallback-on-timeout, no speculative warm request, no snapshot replay, no stabilization, and no degraded export.
 
-### 4.1 Deterministic detail URL (endpoint-resolver)
+### 4.1 Cache-First Capture
+
+The MAIN-world interceptor observes page-owned `fetch` and XHR traffic without consuming or delaying the page response. It clones only responses that pass the active adapter's canonical detail classifier, parses them, requires terminal readiness, then serializes the normalized archive into `ConversationResponseCache`.
+
+Default cache bounds:
+
+- maximum entries: `12`
+- maximum bytes per entry: `16 MiB`
+- maximum retained bytes: `48 MiB`
+- expiry: `5 minutes`
+
+The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, identity-inconsistent, incomplete, or non-terminal candidates are not eligible. Eviction uses age plus oldest-entry removal to satisfy the entry and aggregate-byte bounds.
+
+Multiplexed and multi-response transports require more context than URL/method matching:
+
+- **Meta Muse:** `POST /api/graphql` carries unrelated operations. The interceptor parses the request body to distinguish initial conversation detail from backward pagination, then assembles pages only when each `before` cursor matches the prior oldest page. The assembler uses the same five-minute/12-entry/16-MiB/48-MiB bounds plus a 100-page-per-conversation cap; only a closed, ready-terminal archive enters the shared cache.
+- **Amazon Nova:** unrelated RPCs share `POST /api`. The response is eligible only when the exact `x-amz-target` request header identifies the conversation-detail operation.
+- **Z.ai:** the metadata detail and message batch are individually insufficient. Assembly validates the conversation/current-node identity and requested message IDs, merges the two responses, and caches only a complete terminal graph.
+
+### 4.2 Provider Support and Direct Requests
+
+| Provider | Eligible page-owned response | Direct fallback after cache miss | Bulk export |
+| :--- | :--- | :--- | :--- |
+| ChatGPT | Canonical conversation detail `GET` | Adapter-declared detail candidates; auth required | Yes |
+| Gemini | Conversation batchexecute RPC | Deterministic batchexecute `POST`; captured `at` context required | Yes |
+| Grok (`grok.com`) | Canonical REST conversation detail | Adapter-declared REST candidates | Yes |
+| Grok (`x.com/i/grok`) | Canonical conversation-items GraphQL query | Deterministic conversation-items GraphQL `GET` | No |
+| Claude | Canonical organization-scoped conversation detail | No; cache-only | No |
+| Amazon Nova | Target-header-classified conversation RPC | No; cache-only | No |
+| Meta Muse | Request-body-classified, cursor-complete GraphQL archive | No; cache-only | No |
+| Qwen | Canonical complete-history detail | Deterministic detail `GET` | No |
+| Z.ai | Identity-consistent detail + message batch assembly | No; cache-only | No |
+| DeepSeek | Canonical history detail | Deterministic history `GET` | No |
+
+Cache-only does not mean degraded or partial export. It means `Save JSON` reuses a fresh terminal response the site itself loaded and returns `missing_endpoint` when no eligible cached response exists.
+
+Direct request details:
 
 - ChatGPT: `/backend-api/conversation/{id}` (with `/backend-api/f/conversation/{id}` as fallback candidate), `GET`.
 - Grok (`grok.com`): `/rest/app-chat/conversations_v2/{id}?includeWorkspaces=true&includeTaskResult=true` (fallback: adapter `buildApiUrls`), `GET`.
+- Grok (`x.com`): canonical `GrokConversationItemsByRestId` GraphQL `GET` with numeric conversation identity.
 - Gemini: batchexecute `POST` to `/_/BardChatUi/data/batchexecute` with `rpcids`, `source-path=/app/{id}`, `_reqid`, and body containing `f.req` + the `at` token. Requires Gemini batchexecute context (`at`, plus optional `bl`, `f.sid`, `hl`, `reqid`, `rt`); missing `at` → `missing_auth`.
+- Qwen: canonical complete-history `GET` with the required history direction/limit query.
+- DeepSeek: canonical history `GET` keyed by the active conversation id.
 
 ## 5) Export Controls (Save JSON Button)
 
@@ -124,11 +169,13 @@ Primary module: `features/bulk-export/orchestrator.ts` (`runBulkExport`).
 - Progress (`features/bulk-export/progress.ts`): `started` / `progress` / `completed` / `failed` messages with `discovered`, `attempted`, `exported`, `failed`, `remaining`.
 - Result summary: `{ platform, discovered, attempted, exported, failed, elapsedMs, limit, warnings }`.
 
-Platform coverage:
+Platform coverage (intentionally unchanged by the wider single-save support):
 
 - ChatGPT: list endpoint + detail endpoints; requires a captured non-empty `authorization` header and validates each detail payload before download.
 - Grok (`grok.com`): `/rest/app-chat/conversations` list + detail variants.
 - Gemini: best-effort via batchexecute RPC (title list + conversation), using intercepted batchexecute request context; missing `at` fails fast rather than falling back to cookie-only detail GET.
+
+`x.com` Grok, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek are not bulk providers in this release. The popup must fail clearly rather than implying that single-save support includes list enumeration.
 
 ## 7) Stream-Debug Capture
 
@@ -139,6 +186,9 @@ Generation endpoints are classified (`features/stream-debug/generation-endpoint.
 - ChatGPT: `POST /backend-api/f/conversation`
 - Gemini: `POST /_/BardChatUi/data/assistant.lamda.bardfrontendservice/streamgenerate`
 - Grok: `POST /2/grok/add_response.json` or `POST /rest/app-chat/conversations/new`
+- Qwen: `POST /api/v2/chat/completions`
+
+No generation endpoint is registered for Claude, Amazon Nova, Meta Muse, Z.ai, DeepSeek, or `x.com` Grok in this release. Their supplied reload/detail traffic did not establish a generation transport, so the classifier does not speculate.
 
 The recorder (`features/stream-debug/recorder.ts`) stores in-memory records. Each record has a `streamId`, `platform`, `endpoint`, `method`, sanitized `path`, timestamps, ordered `frames`, terminal `termination`, raw and retained byte/frame accounting, and truncation counters.
 
@@ -165,11 +215,20 @@ The recorder clamps each frame to its byte budget. When a bound is reached it ev
 
 Explicit export + clear use the token-validated MAIN-world command handler (`features/runtime/main-world-command-handler.ts`). MAIN serializes the bounded records and triggers the stream-debug JSON download itself, then returns only `{ streamCount, frameCount, filename }`. Clear empties the recorder and returns only the cleared-stream count. Stream records and frame text never cross into the isolated runtime and are never written into conversation JSON exports.
 
-## 8) Request-Context Capture Without Credential Persistence
+## 8) Request Context and Conversation Cache Privacy
 
 Primary modules: `entrypoints/main.content.ts`, `utils/platform-header-store.ts`, and `entrypoints/interceptor/gemini-batchexecute-context-store.ts`.
 
-At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive snapshots in memory with a five-minute expiry. Header identity changes replace the prior platform snapshot; a provider's 401/403 response clears that provider's headers, and Gemini also clears its batchexecute context. The snapshots are never written into the exported JSON, never placed in cross-world messages, and are not persisted across sessions. If request-context is missing (`missing_auth`), the kernel fails fast rather than guessing credentials. Conversation JSON reflects the server's terminal response, including the complete mapping and preserved platform payload fields.
+At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth/client snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive request-context snapshots in memory with a five-minute expiry. Header identity changes replace the prior platform snapshot; a provider's `401/403` response clears that provider's headers, and Gemini also clears its batchexecute context.
+
+Request context and conversation data remain separate:
+
+- Request-context stores contain only provider-allowlisted headers/RPC fields needed for eligible direct requests.
+- The conversation-response cache contains serialized terminal conversation archives and no captured request headers, cookies, or tokens.
+- Neither store is persisted, placed in extension storage, or transferred through the cross-world command channel.
+- Cache-first download is still explicit: observing a response only retains it temporarily; no file is written until `Save JSON` is clicked.
+
+If request-context is missing (`missing_auth`) or a cache-only provider has no eligible response (`missing_endpoint`), the kernel fails fast rather than guessing credentials or request shapes.
 
 ## 9) Diagnostics and Debugging
 
@@ -191,7 +250,7 @@ The following v2 concepts are intentionally **not** part of the v3 runtime:
 - Response lifecycle state machine (`idle -> prompt-sent -> streaming -> completed`).
 - Signal Fusion Engine, readiness decision modes (`canonical_ready`, `awaiting_stabilization`, `degraded_manual_only`).
 - Save vs Force-Save gating and degraded/manual-only exports.
-- Probe leases, cross-tab arbitration, calibration, canonical stabilization, warm-fetch, or snapshot/playback recovery.
+- Probe leases, cross-tab arbitration, calibration, canonical stabilization, speculative warm-fetch requests, or snapshot/playback recovery. Bounded reuse of a terminal detail response that the page already loaded is part of v3 and is not snapshot recovery.
 - Markdown export/transcripts and `export:markdown` conversions.
 - Lifecycle/probe toasts and `stream-done` readiness states.
 - Compatibility mode and the legacy lifecycle wire protocol.
