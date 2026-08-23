@@ -427,6 +427,23 @@ describe('MAIN-world bootstrap request capture', () => {
         expect(conversationResponseCache.get('ChatGPT', conversationId)).toBeUndefined();
     });
 
+    it('should invalidate the active snapshot when an exact-provider generation request uses a relative URL', async () => {
+        const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
+        conversationResponseCache.set('ChatGPT', createTerminalChatGptPayload(conversationId));
+        const windowInstance = new Window({ url: `https://chatgpt.com/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response('data: synthetic\n\n');
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch('/backend-api/f/conversation', { method: 'POST' });
+
+        expect(conversationResponseCache.get('ChatGPT', conversationId)).toBeUndefined();
+    });
+
     it('should not invalidate a cached conversation for a generation-shaped request on another origin', async () => {
         const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
         const payload = createTerminalChatGptPayload(conversationId);
@@ -533,6 +550,24 @@ describe('MAIN-world bootstrap request capture', () => {
         await waitForCapture();
 
         expect(conversationResponseCache.get('Claude', CLAUDE_CONVERSATION_ID)).toBeUndefined();
+    });
+
+    it('should invalidate a snapshot when a deterministic detail request uses a relative URL', async () => {
+        const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
+        conversationResponseCache.set('ChatGPT', createTerminalChatGptPayload(conversationId));
+        const windowInstance = new Window({ url: `https://chatgpt.com/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response('{}');
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(`/backend-api/conversation/${conversationId}`);
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('ChatGPT', conversationId)).toBeUndefined();
     });
 
     it('caches only the targeted Amazon Nova conversation RPC response', async () => {

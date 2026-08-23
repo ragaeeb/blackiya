@@ -142,27 +142,34 @@ const resolveDeterministicDetailConversation = (
     url: string,
     method: string,
 ): { platform: SupportedPlatformName; conversationId: string } | null => {
-    const adapter = getPlatformAdapter(url);
-    const platform = resolvePlatformName(url);
-    if (!adapter?.isConversationDetailRequest?.(url, method) || !platform || adapter.name !== platform) {
+    let requestUrl: string;
+    try {
+        requestUrl = new URL(url, resolveUrlBase()).href;
+    } catch {
+        return null;
+    }
+    const adapter = getPlatformAdapter(requestUrl);
+    const platform = resolvePlatformName(requestUrl);
+    if (!adapter?.isConversationDetailRequest?.(requestUrl, method) || !platform || adapter.name !== platform) {
         return null;
     }
 
     let conversationId: string | null = null;
     if (platform === 'ChatGPT') {
         try {
-            conversationId = new URL(url).pathname.match(/^\/backend-api\/(?:f\/)?conversation\/([^/]+)$/)?.[1] ?? null;
+            conversationId =
+                new URL(requestUrl).pathname.match(/^\/backend-api\/(?:f\/)?conversation\/([^/]+)$/)?.[1] ?? null;
         } catch {
             return null;
         }
     } else if (platform === 'Gemini') {
-        conversationId = extractConversationIdFromSourcePath(url);
+        conversationId = extractConversationIdFromSourcePath(requestUrl);
     } else if (platform === 'Claude') {
-        conversationId = parseClaudeConversationApiUrl(url)?.conversationId ?? null;
+        conversationId = parseClaudeConversationApiUrl(requestUrl)?.conversationId ?? null;
     } else if (platform === 'Qwen') {
-        conversationId = extractQwenConversationIdFromDetailUrl(url);
+        conversationId = extractQwenConversationIdFromDetailUrl(requestUrl);
     } else if (platform === 'DeepSeek') {
-        conversationId = parseDeepSeekHistoryRequestContext(url)?.conversationId ?? null;
+        conversationId = parseDeepSeekHistoryRequestContext(requestUrl)?.conversationId ?? null;
     }
 
     return conversationId ? { platform, conversationId } : null;
@@ -176,7 +183,13 @@ const invalidateDeterministicDetailRequestStart = (url: string, method: string):
 };
 
 const invalidateActiveConversationForGeneration = (url: string, classification: GenerationEndpoint | null): void => {
-    const requestAdapter = classification ? getPlatformAdapter(url) : null;
+    let requestUrl: string;
+    try {
+        requestUrl = new URL(url, resolveUrlBase()).href;
+    } catch {
+        return;
+    }
+    const requestAdapter = classification ? getPlatformAdapter(requestUrl) : null;
     if (!classification || !requestAdapter || requestAdapter.name !== classification.platform) {
         return;
     }
