@@ -39,6 +39,7 @@ A high-performance Chrome extension for exporting terminal conversation JSON fro
 - **Local-first and explicit.** Export happens only when you click `Save JSON` or `Export Chats`; nothing is uploaded.
 - **No credential persistence.** Request-context is captured in page-local memory with a short expiry and never written into exports or cached conversation records.
 - **Bounded conversation cache.** Terminal page-owned detail responses live only in memory for up to five minutes and are automatically evicted by age, entry count, and byte limits.
+- **Precise invalidation boundaries.** An observed `401/403` clears the affected provider state, and first establishing or changing supported identity-bearing request context clears it where such a marker is available. The current sanitized evidence does not provide a reliable non-secret ordinary account-switch/logout marker for Claude, Meta Muse, Amazon Nova, DeepSeek, or Z.ai, so their caches are not represented as account-bound.
 - See [`docs/architecture.md`](docs/architecture.md) and [`PRIVACY_POLICY.md`](PRIVACY_POLICY.md).
 
 ## 📦 Available Scripts
@@ -134,7 +135,7 @@ The `x.com` content script is available across the origin so navigation from X h
 
 1. Open a conversation on ChatGPT, Gemini, `grok.com`, `x.com/i/grok`, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, or DeepSeek and wait for the page to finish loading it.
 2. Click the **Save JSON** button (the `✓ Saved` state confirms the download).
-3. The export first checks the bounded in-memory cache for the active conversation. If the page-loaded response is fresh, identity-matched, and terminal, it downloads immediately. Otherwise it uses a deterministic direct detail request where supported. A candidate fallback is used only for an eligible `404`; there are no retries, speculative warm requests, or time-based recovery paths.
+3. The export first checks the bounded in-memory cache for the active conversation. If the page-loaded response is fresh, conversation-id-matched, and terminal, it downloads immediately. Otherwise it uses a deterministic direct detail request where supported. A candidate fallback is used only for an eligible `404`; there are no retries, speculative warm requests, or time-based recovery paths.
 
 Claude, Amazon Nova, Meta Muse, and Z.ai rely on the page-owned response cache. If their canonical detail response was not observed, is incomplete, is too large, or has expired, `Save JSON` fails fast instead of guessing a request. Reload or reopen the finished conversation so the platform loads it normally, then try again. Meta Muse closes backward GraphQL pagination in cursor order; Nova accepts only the conversation RPC identified by its target header; Z.ai combines the conversation detail and message batch before considering the archive eligible.
 

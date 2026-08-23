@@ -12,6 +12,7 @@
 * **bulk-export:** Rework popup `Export Chats` for ChatGPT, Gemini, and `grok.com` to discover conversation IDs and download one JSON file per conversation, with pacing, per-request timeout, and bounded `429` retry handling.
 * **stream-debug:** Add bounded, in-memory, ordered stream-debug capture (SSE/NDJSON/raw) with explicit export and clear. Qwen completion SSE joins the existing ChatGPT, Gemini, and Grok classifiers; generation endpoints for other new providers are not guessed. Request URLs are sanitized to paths.
 * **request-context:** Keep provider-allowlisted headers and Gemini batchexecute context in expiring MAIN-world memory. Context is never persisted, written into exports, placed in the conversation cache, or transferred across the command bridge.
+* **privacy:** Clarify the exact cache invalidation boundaries for providers without an evidence-backed non-secret account-switch signal, and disclose origin-wide `https://x.com/*` injection for SPA detection with route-gated controls and endpoint-gated conversation capture.
 * **removed:** Remove lifecycle state machine, Signal Fusion Engine, probe leases, calibration, canonical stabilization, Markdown export, snapshot recovery, and compatibility mode. The legacy lifecycle wire protocol and external extension API are out of scope.
 
 # [2.9.0](https://github.com/ragaeeb/blackiya/compare/v2.8.1...v2.9.0) (2026-08-14)

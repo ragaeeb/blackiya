@@ -42,8 +42,10 @@ The shared terminal cache is:
 - **bounded** — up to 12 entries, 16 MiB per entry, and 48 MiB total;
 - **in-memory only** — it is never written to extension storage or disk and disappears with page/session teardown;
 - **credential-free** — request headers, cookies, tokens, and Gemini RPC context are not stored with conversation entries; and
-- **account-bound** — establishing or changing provider identity, or receiving `401/403`, clears that provider's cached conversation and pending assembly state; and
+- **invalidated on supported boundaries** — first establishing or changing an allowlisted identity-bearing request-context field, or observing a `401/403`, clears that provider's cached conversation and pending assembly state; and
 - **explicit at download time** — observing a response does not create a file. A JSON file is written only after `Save JSON` is clicked.
+
+This cache is not universally account-bound. In the current sanitized request evidence, Claude exposes organization routing, Meta Muse exposes GraphQL operation/conversation routing, Amazon Nova exposes an RPC target and non-unique user type, DeepSeek exposes client/cache metadata, and Z.ai exposes region. None is a reliable non-secret ordinary account-switch or logout marker. User identifiers that appear inside a provider's conversation response are not copied into a separate account tracker. For these providers, a recognized `401/403` and page/session teardown clear state; an ordinary in-tab account change that produces neither a supported request-context change nor an auth failure may not be detected before a cached entry otherwise becomes ineligible. Blackiya does not persist an identifier or credential to extend that detection.
 
 Some platforms need additional fail-closed assembly before an entry is eligible. Meta Muse classifies its multiplexed GraphQL requests by request body and joins backward pages only in cursor order. Amazon Nova accepts only the conversation RPC identified by its target header. Z.ai combines identity-consistent conversation detail and message-batch responses. Incomplete, mismatched, oversized, expired, or non-terminal data is not exported.
 
@@ -65,7 +67,7 @@ Blackiya does not use or execute any remote code. All JavaScript and technical a
 The extension requests the following permissions for the reasons stated:
 
 - **`storage`**: Used solely to store local extension preferences. Conversation data, credentials, and stream-debug records are not persisted there.
-- **`host_permissions`**: Required to run on and communicate with the internal APIs of ChatGPT, Gemini, Grok (`grok.com` and the `/i/grok` surface on `x.com`), Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek for explicit conversation export. Content-script injection on `x.com` is limited to `/i/grok*`.
+- **`host_permissions`**: Required to run on and communicate with the internal APIs of ChatGPT, Gemini, Grok (`grok.com` and `x.com`), Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek for explicit conversation export. On X, the content scripts are injected across `https://x.com/*` so they are already present when X's SPA navigates from another route into Grok. The `Save JSON` control mounts only on a valid `/i/grok?conversation={id}` route, and conversation-response capture remains limited to the canonical Grok endpoint classifier; unrelated X pages do not show export controls or qualify unrelated responses as conversation archives.
 
 ## 9. Website Content
 

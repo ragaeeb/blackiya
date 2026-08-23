@@ -8,7 +8,7 @@ Blackiya is a Manifest V3 browser extension that lets the user archive their own
 
 There are exactly three user-facing behaviors:
 
-1. **Single-chat ready-terminal export.** An explicit `Save JSON` control first checks the terminal response cache. On a miss it resolves deterministic adapter-declared detail candidates only where the adapter supports a direct request. Every payload is identity-checked and required to be **ready and terminal** before download. A direct candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error—there are no retries, speculative warm fetches, snapshot replay, stabilization, or degraded export.
+1. **Single-chat ready-terminal export.** An explicit `Save JSON` control first checks the terminal response cache. On a miss it resolves deterministic adapter-declared detail candidates only where the adapter supports a direct request. Every payload is conversation-id-checked and required to be **ready and terminal** before download. A direct candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error—there are no retries, speculative warm fetches, snapshot replay, stabilization, or degraded export.
 2. **Bulk `Export Chats`.** From the popup, the user exports a ChatGPT, Gemini, or `grok.com` conversation list (one JSON file per conversation).
 3. **Stream-debug capture.** Raw ordered stream frames (SSE, NDJSON/line, or raw) are recorded in memory, bounded, and exported or cleared only on explicit request. The capture is in-memory only and sanitized for privacy.
 
@@ -103,7 +103,19 @@ Default cache bounds:
 - maximum retained bytes: `48 MiB`
 - expiry: `5 minutes`
 
-The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, identity-inconsistent, incomplete, or non-terminal candidates are not eligible. Expired entries are actively pruned; oldest-entry removal enforces the entry and aggregate-byte bounds. Establishing or changing a provider identity, or observing its `401/403`, clears that provider's cached conversations and pending multi-response assembly.
+The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, conversation-id-inconsistent, incomplete, or non-terminal candidates are not eligible. Expired entries are actively pruned; oldest-entry removal enforces the entry and aggregate-byte bounds. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversations and pending multi-response assembly. An observed `401/403` also clears the recognized provider's request context and conversation state.
+
+That invalidation is deliberately not described as universally account-bound. The current sanitized request evidence establishes no reliable non-secret ordinary account-switch or logout marker for five providers:
+
+| Provider | Observable sanitized context | Why it is not an account/logout boundary |
+| :--- | :--- | :--- |
+| Claude | Organization id in the canonical conversation URL | Organization routing can change without identifying the signed-in account. |
+| Meta Muse | GraphQL document id, conversation id, and pagination cursor | These identify an operation or conversation, not the viewer account. |
+| Amazon Nova | RPC target and non-unique `userType`; request credentials are excluded from identity tracking | The target/type identifies the operation or class of caller, not one account. |
+| DeepSeek | Client version/platform/locale and cache version/reset fields | These are client/cache metadata shared across accounts. |
+| Z.ai | Region in request context; user ids occur only inside conversation responses | Region is not identity, and response identifiers are not promoted into a separate retained account tracker. |
+
+For those providers, state is still cleared on a recognized `401/403` and page/session teardown, and stale entries become ineligible through the cache lifetime. An ordinary in-tab account change that produces neither an identity-bearing request-context change nor an auth failure is not claimed detectable. New invalidation signals must be supported by sanitized evidence and must not require persisting an account identifier or credential.
 
 Multiplexed and multi-response transports require more context than URL/method matching:
 
@@ -221,7 +233,9 @@ Explicit export + clear use the token-validated MAIN-world command handler (`fea
 
 Primary modules: `entrypoints/main.content.ts`, `utils/platform-header-store.ts`, and `entrypoints/interceptor/gemini-batchexecute-context-store.ts`.
 
-At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth/client snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive request-context snapshots in memory with a five-minute expiry. Establishing or changing header identity replaces the prior platform snapshot and clears that provider's conversation/assembly cache. A provider's `401/403` response clears both request context and conversation state; Gemini also clears its batchexecute context.
+At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth/client snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive request-context snapshots in memory with a five-minute expiry. When an allowlisted identity-bearing request-context field is available, establishing or changing that field replaces the prior platform snapshot and clears that provider's conversation/assembly cache. A recognized provider `401/403` response clears both request context and conversation state; Gemini also clears its batchexecute context.
+
+This is a request-context boundary, not a universal account-session detector. Claude, Meta Muse, Amazon Nova, DeepSeek, and Z.ai currently expose no reliable non-secret account-switch/logout signal in the sanitized request context described above. Their organization, operation, conversation, client, cache, region, and response-body user fields must not be treated as proof of an account change.
 
 Request context and conversation data remain separate:
 
