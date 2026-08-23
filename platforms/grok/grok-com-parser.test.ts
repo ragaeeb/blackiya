@@ -33,6 +33,49 @@ const RESPONSE_NODE_URL = `https://grok.com/rest/app-chat/conversations/${CONV_I
 const LOAD_RESPONSES_URL = `https://grok.com/rest/app-chat/conversations/${CONV_ID}/load-responses`;
 
 describe('Grok Adapter — grok.com REST parsing', () => {
+    describe('conversation detail request classification', () => {
+        it('should require GET requests to exact grok.com canonical detail URLs', () => {
+            expect(grokAdapter.isConversationDetailRequest(META_URL, 'GET')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(RESPONSE_NODE_URL, 'get')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(LOAD_RESPONSES_URL, 'GET')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(META_URL, 'POST')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(META_URL.replace('https://grok.com', 'http://grok.com'), 'GET'),
+            ).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(META_URL.replace('grok.com', 'example.test'), 'GET'),
+            ).toBeFalse();
+            expect(grokAdapter.isConversationDetailRequest(`${META_URL}&extra=true`, 'GET')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(`${RESPONSE_NODE_URL}&includeThreads=false`, 'GET'),
+            ).toBeFalse();
+            expect(grokAdapter.isConversationDetailRequest(`${LOAD_RESPONSES_URL}?page=2`, 'GET')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(
+                    'https://grok.com/rest/app-chat/conversations_v2/not-a-uuid?includeWorkspaces=true',
+                    'GET',
+                ),
+            ).toBeFalse();
+        });
+
+        it('should require the exact x.com request method, operation, id, and query set', () => {
+            const xDetailUrl =
+                'https://x.com/i/api/graphql/JfjvClaXup5BQFcwzcDUpA/GrokConversationItemsByRestId' +
+                `?variables=${encodeURIComponent(JSON.stringify({ restId: '2091428436845772921' }))}` +
+                `&features=${encodeURIComponent(JSON.stringify({ synthetic_flag: true }))}`;
+
+            expect(grokAdapter.isConversationDetailRequest(xDetailUrl, 'GET')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(xDetailUrl, 'POST')).toBeFalse();
+            expect(grokAdapter.isConversationDetailRequest(`${xDetailUrl}&extra=true`, 'GET')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(
+                    xDetailUrl.replace('2091428436845772921', 'not-numeric'),
+                    'GET',
+                ),
+            ).toBeFalse();
+        });
+    });
+
     it('should preserve all canonical response branches and the raw provider payload', () => {
         const payload = {
             conversation: {

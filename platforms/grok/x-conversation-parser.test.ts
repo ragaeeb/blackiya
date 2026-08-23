@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { evaluateGrokReadiness } from './readiness';
 import { parseXGrokConversationItems } from './x-conversation-parser';
+import { buildXGrokConversationItemsUrl } from './x-url-utils';
 
 const CONVERSATION_ID = '2091428436845772921';
-const DETAIL_URL = `https://x.com/i/api/graphql/synthetic/GrokConversationItemsByRestId?variables=${encodeURIComponent(
-    JSON.stringify({ restId: CONVERSATION_ID }),
-)}`;
+const DETAIL_URL = buildXGrokConversationItemsUrl(CONVERSATION_ID);
 
 const makePayload = (isPartial = false) => ({
     data: {
@@ -66,5 +65,40 @@ describe('x.com Grok conversation parser', () => {
     it('should reject a malformed payload and a payload without matching items', () => {
         expect(parseXGrokConversationItems('{broken', DETAIL_URL)).toBeNull();
         expect(parseXGrokConversationItems(JSON.stringify({ data: {} }), DETAIL_URL)).toBeNull();
+    });
+
+    it('should fail closed when any conversation item is malformed', () => {
+        const payload = makePayload();
+        payload.data.grok_conversation_items_by_rest_id.items.unshift({
+            chat_item_id: 'malformed-newest-item',
+            created_at_ms: 1_787_470_372_000,
+            grok_mode: 'Normal',
+            is_partial: false,
+            message: 'This item has no sender type.',
+        } as never);
+
+        expect(parseXGrokConversationItems(JSON.stringify(payload), DETAIL_URL)).toBeNull();
+    });
+
+    it('should fail closed on duplicate conversation item ids', () => {
+        const payload = makePayload();
+        payload.data.grok_conversation_items_by_rest_id.items[0]!.chat_item_id =
+            payload.data.grok_conversation_items_by_rest_id.items[1]!.chat_item_id;
+
+        expect(parseXGrokConversationItems(JSON.stringify(payload), DETAIL_URL)).toBeNull();
+    });
+
+    it('should allowlist x.com sender types', () => {
+        const payload = makePayload();
+        payload.data.grok_conversation_items_by_rest_id.items[0]!.sender_type = 'Tool';
+
+        expect(parseXGrokConversationItems(JSON.stringify(payload), DETAIL_URL)).toBeNull();
+    });
+
+    it('should require an explicit partial marker for every assistant item', () => {
+        const payload = makePayload();
+        delete payload.data.grok_conversation_items_by_rest_id.items[0]!.is_partial;
+
+        expect(parseXGrokConversationItems(JSON.stringify(payload), DETAIL_URL)).toBeNull();
     });
 });

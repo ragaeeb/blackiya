@@ -19,7 +19,7 @@ export const SUPPORTED_PLATFORM_URLS = [
     'https://chat.openai.com/*',
     'https://gemini.google.com/*',
     'https://grok.com/*',
-    'https://x.com/i/grok*',
+    'https://x.com/*',
     'https://claude.ai/*',
     'https://chat.deepseek.com/*',
     'https://chat.qwen.ai/*',

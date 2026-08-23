@@ -2,6 +2,8 @@ import { GROK_STREAM_CONVERSATION_ID_PATTERN } from './url-utils';
 
 const X_GROK_OPERATION_ID = 'JfjvClaXup5BQFcwzcDUpA';
 const X_GROK_OPERATION_NAME = 'GrokConversationItemsByRestId';
+const X_ORIGIN = 'https://x.com';
+const X_GROK_OPERATION_PATH = `/i/api/graphql/${X_GROK_OPERATION_ID}/${X_GROK_OPERATION_NAME}`;
 
 const X_GROK_FEATURES = {
     creator_subscriptions_tweet_preview_api_enabled: true,
@@ -42,12 +44,52 @@ const X_GROK_FEATURES = {
     responsive_web_graphql_timeline_navigation_enabled: true,
 } as const;
 
-const isXHost = (hostname: string) => hostname === 'x.com' || hostname === 'www.x.com';
+const parseJsonRecord = (value: string | null): Record<string, unknown> | null => {
+    if (!value) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : null;
+    } catch {
+        return null;
+    }
+};
+
+const hasCanonicalXOrigin = (url: URL) =>
+    url.origin === X_ORIGIN && url.username === '' && url.password === '' && url.hash === '';
+
+const hasCanonicalOperationQuery = (url: URL) => {
+    const queryNames = [...url.searchParams.keys()];
+    if (
+        queryNames.length !== 2 ||
+        url.searchParams.getAll('variables').length !== 1 ||
+        url.searchParams.getAll('features').length !== 1
+    ) {
+        return false;
+    }
+    const variables = parseJsonRecord(url.searchParams.get('variables'));
+    const features = parseJsonRecord(url.searchParams.get('features'));
+    if (!variables || !features || Object.keys(variables).length !== 1) {
+        return false;
+    }
+    return (
+        typeof variables.restId === 'string' &&
+        GROK_STREAM_CONVERSATION_ID_PATTERN.test(variables.restId) &&
+        Object.values(features).every((value) => typeof value === 'boolean')
+    );
+};
 
 export const isXGrokConversationItemsEndpoint = (url: string) => {
     try {
         const parsed = new URL(url);
-        return isXHost(parsed.hostname) && parsed.pathname.endsWith(`/${X_GROK_OPERATION_NAME}`);
+        return (
+            hasCanonicalXOrigin(parsed) &&
+            parsed.pathname === X_GROK_OPERATION_PATH &&
+            hasCanonicalOperationQuery(parsed)
+        );
     } catch {
         return false;
     }
@@ -56,7 +98,7 @@ export const isXGrokConversationItemsEndpoint = (url: string) => {
 export const extractXGrokConversationId = (url: string): string | null => {
     try {
         const parsed = new URL(url);
-        if (!isXHost(parsed.hostname)) {
+        if (!hasCanonicalXOrigin(parsed)) {
             return null;
         }
         if (parsed.pathname === '/i/grok') {
@@ -82,5 +124,5 @@ export const buildXGrokConversationItemsUrl = (conversationId: string): string =
     const params = new URLSearchParams();
     params.set('variables', JSON.stringify({ restId: conversationId }));
     params.set('features', JSON.stringify(X_GROK_FEATURES));
-    return `https://x.com/i/api/graphql/${X_GROK_OPERATION_ID}/${X_GROK_OPERATION_NAME}?${params.toString()}`;
+    return `${X_ORIGIN}${X_GROK_OPERATION_PATH}?${params.toString()}`;
 };

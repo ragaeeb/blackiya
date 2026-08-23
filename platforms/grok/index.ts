@@ -14,7 +14,12 @@ import type { ConversationData } from '@/utils/types';
 import { tryParseGrokComRestEndpoint, tryParseJsonIfNeeded } from './grok-com-parser';
 import { tryParseGrokNdjson } from './ndjson-parser';
 import { evaluateGrokReadiness } from './readiness';
-import { GROK_COM_CONVERSATION_ID_PATTERN } from './url-utils';
+import {
+    GROK_COM_CONVERSATION_ID_PATTERN,
+    isGrokComLoadResponsesEndpoint,
+    isGrokComMetaEndpoint,
+    isGrokComResponseNodesEndpoint,
+} from './url-utils';
 import { parseXGrokConversationItems } from './x-conversation-parser';
 import {
     buildXGrokConversationItemsUrl,
@@ -98,9 +103,9 @@ export const grokAdapter: LLMPlatform = {
         }
         return (
             isXGrokConversationItemsEndpoint(url) ||
-            url.includes('/rest/app-chat/conversations_v2/') ||
-            (url.includes('/rest/app-chat/conversations/') &&
-                (url.includes('/response-node') || url.includes('/load-responses')))
+            isGrokComMetaEndpoint(url) ||
+            isGrokComResponseNodesEndpoint(url) ||
+            isGrokComLoadResponsesEndpoint(url)
         );
     },
 

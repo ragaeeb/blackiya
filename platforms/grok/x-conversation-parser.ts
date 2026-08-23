@@ -7,7 +7,7 @@ type XGrokItem = {
     grok_mode?: string;
     is_partial?: boolean;
     message?: string;
-    sender_type: string;
+    sender_type: 'Agent' | 'User';
 };
 
 const parsePayload = (data: unknown): Record<string, any> | null => {
@@ -24,11 +24,25 @@ const isConversationItem = (value: unknown): value is XGrokItem => {
         return false;
     }
     const item = value as Partial<XGrokItem>;
-    return typeof item.chat_item_id === 'string' && typeof item.sender_type === 'string';
+    if (
+        typeof item.chat_item_id !== 'string' ||
+        item.chat_item_id.trim().length === 0 ||
+        typeof item.message !== 'string' ||
+        (item.sender_type !== 'Agent' && item.sender_type !== 'User')
+    ) {
+        return false;
+    }
+    if (item.sender_type === 'Agent' && typeof item.is_partial !== 'boolean') {
+        return false;
+    }
+    if (item.created_at_ms !== undefined && (!Number.isFinite(item.created_at_ms) || item.created_at_ms < 0)) {
+        return false;
+    }
+    return item.grok_mode === undefined || typeof item.grok_mode === 'string';
 };
 
-const roleFor = (senderType: string): 'user' | 'assistant' =>
-    senderType.toLowerCase() === 'user' ? 'user' : 'assistant';
+const roleFor = (senderType: XGrokItem['sender_type']): 'user' | 'assistant' =>
+    senderType === 'User' ? 'user' : 'assistant';
 
 const timestampFor = (item: XGrokItem): number | null =>
     typeof item.created_at_ms === 'number' && Number.isFinite(item.created_at_ms) ? item.created_at_ms / 1000 : null;
@@ -109,8 +123,16 @@ export const parseXGrokConversationItems = (data: unknown, url: string): Convers
     if (!conversationId || !Array.isArray(rawItems)) {
         return null;
     }
-    const items = rawItems.filter(isConversationItem).reverse();
-    if (items.length === 0) {
+    if (rawItems.length === 0 || !rawItems.every(isConversationItem)) {
+        return null;
+    }
+    const itemIds = new Set(rawItems.map((item) => item.chat_item_id));
+    if (itemIds.size !== rawItems.length) {
+        return null;
+    }
+    const items = [...rawItems].reverse();
+    const currentItem = items.at(-1);
+    if (currentItem?.sender_type !== 'Agent') {
         return null;
     }
 

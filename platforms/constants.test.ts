@@ -1,8 +1,9 @@
 import { expect, it } from 'bun:test';
 import { SUPPORTED_PLATFORM_URLS } from './constants';
 
-it('should inject the extension on x.com Grok pages', () => {
-    expect(SUPPORTED_PLATFORM_URLS).toContain('https://x.com/i/grok*');
+it('should inject on all x.com pages so SPA navigation into Grok is observable', () => {
+    expect(SUPPORTED_PLATFORM_URLS).toContain('https://x.com/*');
+    expect(SUPPORTED_PLATFORM_URLS).not.toContain('https://x.com/i/grok*');
 });
 
 it('should inject the extension on every cache-first conversation platform', () => {
