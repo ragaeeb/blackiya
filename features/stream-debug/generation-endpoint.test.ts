@@ -21,6 +21,16 @@ describe('stream-debug generation endpoint classification', () => {
             endpoint: 'grok-generation',
             path: '/2/grok/add_response.json',
         });
+        expect(classifyGenerationEndpoint('https://x.com/2/grok/add_response.json', 'POST')).toEqual({
+            platform: 'Grok',
+            endpoint: 'grok-generation',
+            path: '/2/grok/add_response.json',
+        });
+        expect(classifyGenerationEndpoint('https://grok.com/rest/app-chat/conversations/new', 'POST')).toEqual({
+            platform: 'Grok',
+            endpoint: 'grok-generation',
+            path: '/rest/app-chat/conversations/new',
+        });
         expect(
             classifyGenerationEndpoint('https://chat.qwen.ai/api/v2/chat/completions?chat_id=secret', 'POST'),
         ).toEqual({
@@ -37,5 +47,32 @@ describe('stream-debug generation endpoint classification', () => {
         expect(classifyGenerationEndpoint('/rest/app-chat/conversations/reconnect-response-v2/abc', 'GET')).toBeNull();
         expect(classifyGenerationEndpoint('/api/v2/chat/completions', 'GET')).toBeNull();
         expect(classifyGenerationEndpoint('/api/v2/chats/abc', 'POST')).toBeNull();
+    });
+
+    it('should require the exact HTTPS provider origin for every generation path', () => {
+        expect(classifyGenerationEndpoint('https://example.test/backend-api/f/conversation', 'POST')).toBeNull();
+        expect(
+            classifyGenerationEndpoint(
+                'https://chatgpt.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+                'POST',
+            ),
+        ).toBeNull();
+        expect(classifyGenerationEndpoint('https://x.com/api/v2/chat/completions', 'POST')).toBeNull();
+        expect(classifyGenerationEndpoint('https://claude.ai/2/grok/add_response.json', 'POST')).toBeNull();
+        expect(classifyGenerationEndpoint('http://chat.qwen.ai/api/v2/chat/completions', 'POST')).toBeNull();
+        expect(classifyGenerationEndpoint('/backend-api/f/conversation', 'POST')).toBeNull();
+    });
+
+    it('should resolve relative generation paths only against an exact HTTPS provider page', () => {
+        expect(
+            classifyGenerationEndpoint('/backend-api/f/conversation', 'POST', 'https://chatgpt.com/c/synthetic'),
+        ).toEqual({
+            platform: 'ChatGPT',
+            endpoint: 'chatgpt-generation',
+            path: '/backend-api/f/conversation',
+        });
+        expect(
+            classifyGenerationEndpoint('/backend-api/f/conversation', 'POST', 'https://example.test/c/synthetic'),
+        ).toBeNull();
     });
 });

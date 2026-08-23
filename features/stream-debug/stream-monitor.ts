@@ -247,96 +247,198 @@ const flushMonitorBuffer = (state: MonitorState, streamId: string, recorder: Str
     state.buffer = '';
 };
 
-const cancelReader = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-    try {
-        await reader.cancel();
-    } catch {
-        // Safe
+const preserveResponseMetadata = (target: Response, source: Response): void => {
+    for (const property of ['url', 'redirected', 'type'] as const) {
+        try {
+            Object.defineProperty(target, property, {
+                configurable: true,
+                value: source[property],
+            });
+        } catch {
+            // Preserve what the host Response implementation allows.
+        }
     }
 };
 
-const consumeResponse = async (
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    state: MonitorState,
-    streamId: string,
-    recorder: StreamDebugRecorder,
-    signal?: AbortSignal,
-): Promise<boolean> => {
-    for (;;) {
-        if (signal?.aborted) {
-            await cancelReader(reader);
-            return false;
-        }
+const canWrapResponseBody = (response: Response): boolean =>
+    response.status >= 200 &&
+    response.status <= 599 &&
+    response.status !== 204 &&
+    response.status !== 205 &&
+    response.status !== 304;
 
-        const { value, done } = await reader.read();
-        if (done) {
-            break;
-        }
-        appendDecodedChunk(value, state, streamId, recorder);
-    }
-
-    flushMonitorBuffer(state, streamId, recorder);
-    return !signal?.aborted;
+const createResponseWithBody = (response: Response, body: ReadableStream<Uint8Array>): Response => {
+    const ResponseConstructor = response.constructor as typeof Response;
+    const monitored = new ResponseConstructor(body, {
+        headers: response.headers,
+        status: response.status,
+        statusText: response.statusText,
+    });
+    preserveResponseMetadata(monitored, response);
+    return monitored;
 };
 
-export const monitorFetchResponse = async (
+const isAbortError = (error: unknown, signal?: AbortSignal): boolean =>
+    signal?.aborted === true ||
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    String(error).toLowerCase().includes('abort');
+
+const enqueueChunk = (controller: ReadableStreamDefaultController<Uint8Array>, value: Uint8Array | undefined): void => {
+    if (value) {
+        controller.enqueue(value);
+    }
+};
+
+export const createMonitoredFetchResponse = (
     response: Response,
     streamId: string,
     recorder: StreamDebugRecorder,
     options?: MonitorFetchOptions,
-): Promise<void> => {
+): Response => {
     if (!response.body) {
         recorder.terminateStream(streamId, 'close');
-        return;
+        return response;
+    }
+    if (!canWrapResponseBody(response)) {
+        recorder.terminateStream(streamId, 'error');
+        return response;
     }
 
+    const reader = response.body.getReader();
     const state: MonitorState = {
         framing: options?.framing ?? 'sse',
         decoder: new TextDecoder(),
         buffer: '',
     };
     const signal = options?.signal;
-    let terminated = false;
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let debugTerminated = false;
+    let observationEnabled = true;
+    let transportSettled = false;
+    let readerReleased = false;
 
-    const terminate = (event: 'close' | 'abort' | 'error') => {
-        if (!terminated) {
-            terminated = true;
+    const terminateDebug = (event: 'close' | 'abort' | 'error') => {
+        if (!debugTerminated) {
+            debugTerminated = true;
             recorder.terminateStream(streamId, event);
         }
     };
-
-    const reader = response.body.getReader();
-    const abortHandler = () => {
-        terminate('abort');
-        void cancelReader(reader);
-    };
-
-    try {
-        if (signal) {
-            if (signal.aborted) {
-                abortHandler();
-                return;
-            }
-            signal.addEventListener('abort', abortHandler, { once: true });
+    const releaseReader = () => {
+        if (readerReleased) {
+            return;
         }
-
-        if (await consumeResponse(reader, state, streamId, recorder, signal)) {
-            terminate('close');
-        } else {
-            terminate('abort');
-        }
-    } catch (err: any) {
-        if (signal?.aborted || err?.name === 'AbortError' || String(err).toLowerCase().includes('abort')) {
-            terminate('abort');
-        } else {
-            terminate('error');
-        }
-    } finally {
-        signal?.removeEventListener('abort', abortHandler);
+        readerReleased = true;
         try {
             reader.releaseLock();
         } catch {
             // Safe
         }
+    };
+    const stopObserving = () => {
+        observationEnabled = false;
+        terminateDebug('error');
+    };
+    const observeChunk = (value: Uint8Array | undefined) => {
+        if (!observationEnabled) {
+            return;
+        }
+        try {
+            appendDecodedChunk(value, state, streamId, recorder);
+        } catch {
+            stopObserving();
+        }
+    };
+    const flushObservation = () => {
+        if (!observationEnabled) {
+            return;
+        }
+        try {
+            flushMonitorBuffer(state, streamId, recorder);
+        } catch {
+            stopObserving();
+        }
+    };
+    const abortReason = () => signal?.reason ?? new DOMException('The operation was aborted', 'AbortError');
+    const abortHandler = () => {
+        if (transportSettled) {
+            return;
+        }
+        transportSettled = true;
+        terminateDebug('abort');
+        controller?.error(abortReason());
+        void reader
+            .cancel(abortReason())
+            .catch(() => undefined)
+            .finally(releaseReader);
+    };
+    const cleanup = () => {
+        signal?.removeEventListener('abort', abortHandler);
+        releaseReader();
+    };
+
+    const body = new ReadableStream<Uint8Array>(
+        {
+            start(streamController) {
+                controller = streamController;
+                if (signal?.aborted) {
+                    abortHandler();
+                } else {
+                    signal?.addEventListener('abort', abortHandler, { once: true });
+                }
+            },
+            async pull(streamController) {
+                if (transportSettled) {
+                    return;
+                }
+                try {
+                    const { value, done } = await reader.read();
+                    if (transportSettled) {
+                        return;
+                    }
+                    if (done) {
+                        transportSettled = true;
+                        flushObservation();
+                        terminateDebug('close');
+                        streamController.close();
+                        cleanup();
+                        return;
+                    }
+                    observeChunk(value);
+                    enqueueChunk(streamController, value);
+                } catch (error) {
+                    if (transportSettled) {
+                        return;
+                    }
+                    transportSettled = true;
+                    terminateDebug(isAbortError(error, signal) ? 'abort' : 'error');
+                    streamController.error(error);
+                    cleanup();
+                }
+            },
+            async cancel(reason) {
+                if (transportSettled) {
+                    return;
+                }
+                transportSettled = true;
+                terminateDebug('abort');
+                signal?.removeEventListener('abort', abortHandler);
+                try {
+                    await reader.cancel(reason);
+                } finally {
+                    releaseReader();
+                }
+            },
+        },
+        { highWaterMark: 0 },
+    );
+
+    try {
+        return createResponseWithBody(response, body);
+    } catch {
+        transportSettled = true;
+        signal?.removeEventListener('abort', abortHandler);
+        releaseReader();
+        terminateDebug('error');
+        return response;
     }
 };

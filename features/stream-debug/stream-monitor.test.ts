@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createStreamDebugRecorder } from '@/features/stream-debug/recorder';
-import { monitorFetchResponse } from '@/features/stream-debug/stream-monitor';
+import { createMonitoredFetchResponse } from '@/features/stream-debug/stream-monitor';
 
 const responseFromChunks = (
     chunks: string[],
@@ -22,6 +22,105 @@ const responseFromChunks = (
 };
 
 describe('stream-debug fetch monitor', () => {
+    it('should observe bytes only as the page consumes the pass-through response and preserve metadata', async () => {
+        const recorder = createStreamDebugRecorder();
+        const streamId = recorder.startStream({
+            streamId: 'stream-demand-coupled',
+            platform: 'ChatGPT',
+            endpoint: 'generation',
+            method: 'POST',
+            url: '/backend-api/f/conversation',
+        });
+        const encoder = new TextEncoder();
+        const chunks = [encoder.encode('data: refusal\n\n'), encoder.encode('data: [DONE]\n\n')];
+        let pullCount = 0;
+        const source = new ReadableStream<Uint8Array>(
+            {
+                pull(controller) {
+                    pullCount += 1;
+                    const chunk = chunks.shift();
+                    if (chunk) {
+                        controller.enqueue(chunk);
+                    } else {
+                        controller.close();
+                    }
+                },
+            },
+            { highWaterMark: 0 },
+        );
+        const original = new Response(source, {
+            status: 202,
+            statusText: 'Accepted',
+            headers: { 'content-type': 'text/event-stream', 'x-synthetic': 'preserved' },
+        });
+        Object.defineProperty(original, 'url', {
+            configurable: true,
+            value: 'https://chatgpt.com/backend-api/f/conversation',
+        });
+
+        const monitored = createMonitoredFetchResponse(original, streamId, recorder, { framing: 'sse' });
+        await Promise.resolve();
+
+        expect(pullCount).toBe(0);
+        expect(recorder.getStream(streamId)?.frames).toEqual([]);
+        expect(monitored.status).toBe(202);
+        expect(monitored.statusText).toBe('Accepted');
+        expect(monitored.headers.get('content-type')).toBe('text/event-stream');
+        expect(monitored.headers.get('x-synthetic')).toBe('preserved');
+        expect(monitored.url).toBe(original.url);
+
+        const reader = monitored.body!.getReader();
+        const first = await reader.read();
+        await Promise.resolve();
+        expect(new TextDecoder().decode(first.value)).toBe('data: refusal\n\n');
+        expect(pullCount).toBe(1);
+        expect(recorder.getStream(streamId)?.frames.map((frame) => frame.kind)).toEqual(['refusal']);
+
+        const second = await reader.read();
+        await Promise.resolve();
+        expect(new TextDecoder().decode(second.value)).toBe('data: [DONE]\n\n');
+        expect(pullCount).toBe(2);
+        expect(recorder.getStream(streamId)?.frames.map((frame) => frame.kind)).toEqual(['refusal', 'done']);
+
+        expect((await reader.read()).done).toBeTrue();
+        expect(pullCount).toBe(3);
+        expect(recorder.getStream(streamId)?.status).toBe('closed');
+    });
+
+    it('should propagate page cancellation upstream without pulling another chunk', async () => {
+        const recorder = createStreamDebugRecorder();
+        const streamId = recorder.startStream({
+            streamId: 'stream-page-cancel',
+            platform: 'Qwen',
+            endpoint: 'generation',
+            method: 'POST',
+            url: '/api/v2/chat/completions',
+        });
+        let pullCount = 0;
+        let cancelReason: unknown;
+        const original = new Response(
+            new ReadableStream<Uint8Array>(
+                {
+                    pull() {
+                        pullCount += 1;
+                    },
+                    cancel(reason) {
+                        cancelReason = reason;
+                    },
+                },
+                { highWaterMark: 0 },
+            ),
+        );
+        const monitored = createMonitoredFetchResponse(original, streamId, recorder, { framing: 'sse' });
+
+        await monitored.body!.cancel('page stopped reading');
+
+        expect(pullCount).toBe(0);
+        expect(cancelReason).toBe('page stopped reading');
+        expect(recorder.getStream(streamId)?.status).toBe('aborted');
+        expect(recorder.getStream(streamId)?.termination?.event).toBe('abort');
+    });
+
     it('should reassemble ordered frames across split fetch chunks and retain [DONE]', async () => {
         const recorder = createStreamDebugRecorder();
         const streamId = recorder.startStream({
@@ -37,9 +136,9 @@ describe('stream-debug fetch monitor', () => {
             'NE]\n\n',
         ]);
 
-        await monitorFetchResponse(response.clone(), streamId, recorder, { framing: 'sse' });
+        const monitored = createMonitoredFetchResponse(response, streamId, recorder, { framing: 'sse' });
 
-        expect(await response.text()).toBe('data: refusal\n\ndata: replacement\n\ndata: erase\n\ndata: [DONE]\n\n');
+        expect(await monitored.text()).toBe('data: refusal\n\ndata: replacement\n\ndata: erase\n\ndata: [DONE]\n\n');
         const [record] = recorder.exportRecords();
         expect(
             record?.frames
@@ -72,7 +171,7 @@ describe('stream-debug fetch monitor', () => {
             'data: refusal\n\ndata: replacement\n\ndata: erase\n\ndata: [DONE]\n\n',
         ]);
 
-        await monitorFetchResponse(response, streamId, recorder, { framing: 'sse' });
+        await createMonitoredFetchResponse(response, streamId, recorder, { framing: 'sse' }).arrayBuffer();
 
         const record = recorder.getStream(streamId);
         expect(record?.frames.filter((frame) => frame.kind !== 'transport').map((frame) => frame.kind)).toEqual([
@@ -105,7 +204,7 @@ describe('stream-debug fetch monitor', () => {
         });
         const response = responseFromChunks(['x'.repeat(200_000)]);
 
-        await monitorFetchResponse(response.clone(), streamId, recorder, { framing: 'line' });
+        await createMonitoredFetchResponse(response, streamId, recorder, { framing: 'line' }).arrayBuffer();
 
         const record = recorder.getStream(streamId);
         expect(record?.status).toBe('closed');
@@ -116,7 +215,7 @@ describe('stream-debug fetch monitor', () => {
         expect(record?.frames.every((frame) => frame.text.length <= 4096)).toBeTrue();
     });
 
-    it('should leave the page-owned response readable when monitoring a clone', async () => {
+    it('should pass every observed byte through to the page-owned response', async () => {
         const recorder = createStreamDebugRecorder();
         const streamId = recorder.startStream({
             streamId: 'stream-fetch-clone',
@@ -127,9 +226,9 @@ describe('stream-debug fetch monitor', () => {
         });
         const response = responseFromChunks(['data: refusal\n\n', 'data: [DONE]\n\n']);
 
-        await monitorFetchResponse(response.clone(), streamId, recorder, { framing: 'sse' });
+        const monitored = createMonitoredFetchResponse(response, streamId, recorder, { framing: 'sse' });
 
-        expect(await response.text()).toBe('data: refusal\n\ndata: [DONE]\n\n');
+        expect(await monitored.text()).toBe('data: refusal\n\ndata: [DONE]\n\n');
         expect(recorder.exportRecords()[0]?.status).toBe('closed');
     });
 
@@ -147,7 +246,9 @@ describe('stream-debug fetch monitor', () => {
         };
 
         const clean = makeRecorder('stream-close');
-        await monitorFetchResponse(responseFromChunks(['line\n']), clean.streamId, clean.recorder, { framing: 'line' });
+        await createMonitoredFetchResponse(responseFromChunks(['line\n']), clean.streamId, clean.recorder, {
+            framing: 'line',
+        }).arrayBuffer();
         expect(clean.recorder.exportRecords()[0]?.status).toBe('closed');
 
         const abort = makeRecorder('stream-abort');
@@ -157,19 +258,23 @@ describe('stream-debug fetch monitor', () => {
                 controller.error(new DOMException('aborted', 'AbortError'));
             });
         });
-        const abortPromise = monitorFetchResponse(abortResponse, abort.streamId, abort.recorder, {
+        const abortReading = createMonitoredFetchResponse(abortResponse, abort.streamId, abort.recorder, {
             framing: 'raw',
             signal: abortController.signal,
-        });
+        }).arrayBuffer();
         abortController.abort();
-        await abortPromise;
+        await expect(abortReading).rejects.toBeInstanceOf(DOMException);
         expect(abort.recorder.exportRecords()[0]?.status).toBe('aborted');
 
         const error = makeRecorder('stream-error');
         const errorResponse = responseFromChunks([], (controller) => {
             controller.error(new Error('transport failed'));
         });
-        await monitorFetchResponse(errorResponse, error.streamId, error.recorder, { framing: 'raw' });
+        await expect(
+            createMonitoredFetchResponse(errorResponse, error.streamId, error.recorder, {
+                framing: 'raw',
+            }).arrayBuffer(),
+        ).rejects.toThrow('transport failed');
         expect(error.recorder.exportRecords()[0]?.status).toBe('error');
     });
 
@@ -191,18 +296,18 @@ describe('stream-debug fetch monitor', () => {
                 },
             }),
         );
-        const monitoring = monitorFetchResponse(response, streamId, recorder, {
+        const reading = createMonitoredFetchResponse(response, streamId, recorder, {
             framing: 'raw',
             signal: abortController.signal,
-        });
+        }).arrayBuffer();
 
         abortController.abort();
         await expect(
             Promise.race([
-                monitoring,
+                reading,
                 new Promise((_, reject) => setTimeout(() => reject(new Error('monitor did not settle')), 100)),
             ]),
-        ).resolves.toBeUndefined();
+        ).rejects.toBeInstanceOf(DOMException);
         expect(canceled).toBeTrue();
         expect(recorder.getStream(streamId)?.status).toBe('aborted');
     });
@@ -217,7 +322,7 @@ describe('stream-debug fetch monitor', () => {
             url: '/backend-api/f/conversation',
         });
 
-        await monitorFetchResponse(new Response(null, { status: 204 }), streamId, recorder, { framing: 'sse' });
+        createMonitoredFetchResponse(new Response(null, { status: 204 }), streamId, recorder, { framing: 'sse' });
 
         expect(recorder.getStream(streamId)?.status).toBe('closed');
         expect(recorder.getStream(streamId)?.termination?.event).toBe('close');

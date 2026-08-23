@@ -11,7 +11,7 @@ import {
 } from '@/features/single-export/conversation-response-capture';
 import { classifyGenerationEndpoint, type GenerationEndpoint } from '@/features/stream-debug/generation-endpoint';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
-import { monitorFetchResponse } from '@/features/stream-debug/stream-monitor';
+import { createMonitoredFetchResponse } from '@/features/stream-debug/stream-monitor';
 import { createXhrStreamCapture } from '@/features/stream-debug/xhr-monitor';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapter } from '@/platforms/factory';
@@ -331,15 +331,14 @@ const startFetchStreamCapture = (
     }
 };
 
-const monitorFetchStream = (response: Response, streamId: string, classification: GenerationEndpoint) => {
+const monitorFetchStream = (response: Response, streamId: string, classification: GenerationEndpoint): Response => {
     try {
-        // The page owns the original response. Monitoring a clone is essential:
-        // consuming the original body breaks ChatGPT's artifact Download action.
-        void monitorFetchResponse(response.clone(), streamId, streamDebugRecorder, {
+        return createMonitoredFetchResponse(response, streamId, streamDebugRecorder, {
             framing: framingFor(classification.platform),
         });
     } catch {
         streamDebugRecorder.terminateStream(streamId, 'error');
+        return response;
     }
 };
 
@@ -360,7 +359,7 @@ const prepareFetchCapturePlan = async (
         prepareMetaFetchCapture(args, url, method),
         prepareZaiFetchCapture(args, url, method),
     ]);
-    const classification = classifyGenerationEndpoint(url, method);
+    const classification = classifyGenerationEndpoint(url, method, window.location.href);
     return {
         metaRequestBody,
         zaiCaptureContext,
@@ -443,7 +442,7 @@ const createInterceptFetch = (originalFetch: typeof fetch) => async (args: Param
     invalidateCapturedRequestContext(url, response.status);
     capturePlannedFetchResponse(response, plan, args, url, method);
     if (plan.classification && plan.streamId) {
-        monitorFetchStream(response, plan.streamId, plan.classification);
+        return monitorFetchStream(response, plan.streamId, plan.classification);
     }
     return response;
 };
@@ -515,7 +514,7 @@ const handleXhrLoad = (
     if (xhr.status < 200 || xhr.status >= 300 || captureXhrProviderResponse(providerPlan, xhr)) {
         return;
     }
-    if (!classifyGenerationEndpoint(url, method)) {
+    if (!classifyGenerationEndpoint(url, method, window.location.href)) {
         captureGenericXhrResponse(xhr, url, method);
     }
 };
@@ -536,7 +535,7 @@ const captureGeminiXhrContext = (
 };
 
 const installXhrStreamCapture = (xhr: XMLHttpRequest, url: string, method: string): void => {
-    const classification = classifyGenerationEndpoint(url, method);
+    const classification = classifyGenerationEndpoint(url, method, window.location.href);
     if (!classification) {
         return;
     }

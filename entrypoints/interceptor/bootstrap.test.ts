@@ -160,6 +160,48 @@ describe('MAIN-world bootstrap request capture', () => {
         });
     });
 
+    it('should monitor a generation response without cloning or consuming ahead of the page', async () => {
+        const windowInstance = new Window({ url: 'https://chatgpt.com/c/synthetic' });
+        let cloneCalls = 0;
+        windowInstance.fetch = async () => {
+            const response = new windowInstance.Response('data: refusal\n\ndata: [DONE]\n\n', {
+                status: 202,
+                statusText: 'Accepted',
+                headers: { 'content-type': 'text/event-stream', 'x-synthetic': 'preserved' },
+            });
+            response.clone = () => {
+                cloneCalls += 1;
+                throw new Error('generation response must not be cloned');
+            };
+            return response;
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const response = await windowInstance.fetch('https://chatgpt.com/backend-api/f/conversation', {
+            method: 'POST',
+        });
+
+        expect(cloneCalls).toBe(0);
+        expect(response.status).toBe(202);
+        expect(response.statusText).toBe('Accepted');
+        expect(response.headers.get('x-synthetic')).toBe('preserved');
+        expect(streamDebugRecorder.exportRecords()[0]?.frames).toEqual([]);
+
+        expect(await response.text()).toBe('data: refusal\n\ndata: [DONE]\n\n');
+        expect(cloneCalls).toBe(0);
+        expect(streamDebugRecorder.exportRecords()[0]?.frames.map((frame) => frame.kind)).toEqual([
+            'refusal',
+            'done',
+            'transport',
+        ]);
+        expect(streamDebugRecorder.exportRecords()[0]?.status).toBe('closed');
+    });
+
     it('does not retry a rejected non-idempotent POST after the page fetch was invoked', async () => {
         const windowInstance = new Window();
         const rejection = new Error('generation request failed after forwarding');
