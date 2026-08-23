@@ -13,6 +13,10 @@ import {
 import { conversationResponseCache } from '@/features/single-export/conversation-response-cache';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import {
+    SYNTHETIC_CONVERSATION_ID as CLAUDE_CONVERSATION_ID,
+    CLAUDE_DETAIL_URL,
+} from '@/platforms/claude/fixtures/conversation';
+import {
     createMetaDetailFixture,
     createMetaOlderPageFixture,
     SYNTHETIC_META_CONVERSATION_ID,
@@ -21,6 +25,7 @@ import { buildMetaConversationDetailRequest, buildMetaConversationPaginationRequ
 import { NOVA_CONVERSATION_DETAIL_TARGET } from '@/platforms/nova/constants';
 import { NOVA_CONVERSATION_ID, terminalNovaConversation } from '@/platforms/nova/fixtures/conversation';
 import {
+    ZAI_ASSISTANT_MESSAGE_ID,
     ZAI_CONVERSATION_ID,
     zaiDetailPayloadFixture,
     zaiMessagesBatchPayloadFixture,
@@ -510,6 +515,26 @@ describe('MAIN-world bootstrap request capture', () => {
         expect(conversationResponseCache.get('ChatGPT', conversationId)).toBeUndefined();
     });
 
+    it('should invalidate a cache-only snapshot when a canonical detail request exposes its conversation id', async () => {
+        conversationResponseCache.set(
+            'Claude',
+            createTerminalChatGptPayload(CLAUDE_CONVERSATION_ID, 'Superseded Claude snapshot'),
+        );
+        const windowInstance = new Window({ url: `https://claude.ai/chat/${CLAUDE_CONVERSATION_ID}` });
+        windowInstance.fetch = async () => new windowInstance.Response('{}');
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(CLAUDE_DETAIL_URL);
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Claude', CLAUDE_CONVERSATION_ID)).toBeUndefined();
+    });
+
     it('caches only the targeted Amazon Nova conversation RPC response', async () => {
         const windowInstance = new Window({
             url: `https://nova.amazon.com/conversation/${NOVA_CONVERSATION_ID}`,
@@ -576,6 +601,113 @@ describe('MAIN-world bootstrap request capture', () => {
         });
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(conversationResponseCache.get('Meta Muse', SYNTHETIC_META_CONVERSATION_ID)).toBeDefined();
+    });
+
+    it('should invalidate a cached Meta snapshot when a newer initial response is non-terminal', async () => {
+        const conversationId = '66666666-6666-4666-8666-666666666666';
+        const detailRequest = buildMetaConversationDetailRequest(conversationId, {
+            documentId: 'synthetic-detail-document',
+        });
+        if (!detailRequest) {
+            throw new Error('expected synthetic Meta request');
+        }
+        const responsePayload = JSON.parse(
+            JSON.stringify(createMetaDetailFixture({ assistantStreamingState: 'STREAMING' })).replaceAll(
+                SYNTHETIC_META_CONVERSATION_ID,
+                conversationId,
+            ),
+        ) as unknown;
+        conversationResponseCache.set(
+            'Meta Muse',
+            createTerminalChatGptPayload(conversationId, 'Superseded Meta snapshot'),
+        );
+        const windowInstance = new Window({ url: `https://www.meta.ai/prompt/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(responsePayload));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(detailRequest.url, {
+            method: detailRequest.method,
+            headers: detailRequest.headers,
+            body: detailRequest.body,
+        });
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Meta Muse', conversationId)).toBeUndefined();
+    });
+
+    it('should invalidate a cached Meta snapshot when a newer initial response requires missing pagination', async () => {
+        const conversationId = '77777777-7777-4777-8777-777777777777';
+        const detailRequest = buildMetaConversationDetailRequest(conversationId, {
+            documentId: 'synthetic-detail-document',
+        });
+        if (!detailRequest) {
+            throw new Error('expected synthetic Meta request');
+        }
+        const responsePayload = JSON.parse(
+            JSON.stringify(createMetaDetailFixture({ hasPreviousPage: true })).replaceAll(
+                SYNTHETIC_META_CONVERSATION_ID,
+                conversationId,
+            ),
+        ) as unknown;
+        conversationResponseCache.set(
+            'Meta Muse',
+            createTerminalChatGptPayload(conversationId, 'Superseded Meta snapshot'),
+        );
+        const windowInstance = new Window({ url: `https://www.meta.ai/prompt/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(responsePayload));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(detailRequest.url, {
+            method: detailRequest.method,
+            headers: detailRequest.headers,
+            body: detailRequest.body,
+        });
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Meta Muse', conversationId)).toBeUndefined();
+    });
+
+    it('should not invalidate a cached Meta snapshot when only a pagination half starts', async () => {
+        const conversationId = '88888888-8888-4888-8888-888888888888';
+        const paginationRequest = buildMetaConversationPaginationRequest(
+            { conversationId, before: 'synthetic-before-cursor', last: 20 },
+            { documentId: 'synthetic-pagination-document' },
+        );
+        if (!paginationRequest) {
+            throw new Error('expected synthetic Meta pagination request');
+        }
+        conversationResponseCache.set(
+            'Meta Muse',
+            createTerminalChatGptPayload(conversationId, 'Current Meta snapshot'),
+        );
+        const windowInstance = new Window({ url: `https://www.meta.ai/prompt/${conversationId}` });
+        windowInstance.fetch = async () =>
+            new windowInstance.Response(JSON.stringify(createMetaOlderPageFixture(conversationId)));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(paginationRequest.url, {
+            method: paginationRequest.method,
+            headers: paginationRequest.headers,
+            body: paginationRequest.body,
+        });
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Meta Muse', conversationId)?.title).toBe('Current Meta snapshot');
     });
 
     it('should assemble Meta responses when the initial clone finishes after pagination', async () => {
@@ -715,6 +847,94 @@ describe('MAIN-world bootstrap request capture', () => {
         });
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(conversationResponseCache.get('Z.ai', ZAI_CONVERSATION_ID)).toBeDefined();
+    });
+
+    it('should invalidate a cached Z.ai snapshot when a newer sequence is missing its message batch', async () => {
+        const conversationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const detailPayload = JSON.parse(
+            JSON.stringify(zaiDetailPayloadFixture).replaceAll(ZAI_CONVERSATION_ID, conversationId),
+        ) as unknown;
+        conversationResponseCache.set('Z.ai', createTerminalChatGptPayload(conversationId, 'Superseded Z.ai snapshot'));
+        const windowInstance = new Window({ url: `https://chat.z.ai/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(detailPayload));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(`https://chat.z.ai/api/v1/chats/${conversationId}`);
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Z.ai', conversationId)).toBeUndefined();
+    });
+
+    it('should invalidate a cached Z.ai snapshot when a newer assembled sequence is non-terminal', async () => {
+        const conversationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+        const detailPayload = JSON.parse(
+            JSON.stringify(zaiDetailPayloadFixture).replaceAll(ZAI_CONVERSATION_ID, conversationId),
+        ) as typeof zaiDetailPayloadFixture;
+        const batchRequest = buildZaiMessagesBatchRequest(detailPayload);
+        if (!batchRequest) {
+            throw new Error('expected synthetic Z.ai batch request');
+        }
+        const nonTerminalBatch = JSON.parse(
+            JSON.stringify(zaiMessagesBatchPayloadFixture).replaceAll(ZAI_CONVERSATION_ID, conversationId),
+        ) as typeof zaiMessagesBatchPayloadFixture;
+        nonTerminalBatch.data[ZAI_ASSISTANT_MESSAGE_ID].done = false;
+        const responses = [detailPayload, nonTerminalBatch];
+        conversationResponseCache.set('Z.ai', createTerminalChatGptPayload(conversationId, 'Superseded Z.ai snapshot'));
+        const windowInstance = new Window({ url: `https://chat.z.ai/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(responses.shift()));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(`https://chat.z.ai/api/v1/chats/${conversationId}`);
+        await windowInstance.fetch(batchRequest.url, {
+            method: batchRequest.method,
+            headers: batchRequest.headers,
+            body: batchRequest.body,
+        });
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Z.ai', conversationId)).toBeUndefined();
+    });
+
+    it('should not invalidate a cached Z.ai snapshot when only a message-batch half starts', async () => {
+        const conversationId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+        const detailPayload = JSON.parse(
+            JSON.stringify(zaiDetailPayloadFixture).replaceAll(ZAI_CONVERSATION_ID, conversationId),
+        ) as typeof zaiDetailPayloadFixture;
+        const batchPayload = JSON.parse(
+            JSON.stringify(zaiMessagesBatchPayloadFixture).replaceAll(ZAI_CONVERSATION_ID, conversationId),
+        ) as typeof zaiMessagesBatchPayloadFixture;
+        const batchRequest = buildZaiMessagesBatchRequest(detailPayload);
+        if (!batchRequest) {
+            throw new Error('expected synthetic Z.ai batch request');
+        }
+        conversationResponseCache.set('Z.ai', createTerminalChatGptPayload(conversationId, 'Current Z.ai snapshot'));
+        const windowInstance = new Window({ url: `https://chat.z.ai/c/${conversationId}` });
+        windowInstance.fetch = async () => new windowInstance.Response(JSON.stringify(batchPayload));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(batchRequest.url, {
+            method: batchRequest.method,
+            headers: batchRequest.headers,
+            body: batchRequest.body,
+        });
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Z.ai', conversationId)?.title).toBe('Current Z.ai snapshot');
     });
 
     it('should assemble Z.ai responses when the detail clone finishes after the message batch', async () => {
@@ -901,6 +1121,10 @@ describe('MAIN-world bootstrap request capture', () => {
             value: windowInstance,
             writable: true,
         });
+        conversationResponseCache.set(
+            'Meta Muse',
+            createTerminalChatGptPayload(SYNTHETIC_META_CONVERSATION_ID, 'Superseded Meta snapshot'),
+        );
 
         const requestBodyBytes = new TextEncoder().encode(detailRequest.body).byteLength;
         await withCaptureByteLimit(requestBodyBytes, async () => {
@@ -932,6 +1156,10 @@ describe('MAIN-world bootstrap request capture', () => {
             value: windowInstance,
             writable: true,
         });
+        conversationResponseCache.set(
+            'Z.ai',
+            createTerminalChatGptPayload(ZAI_CONVERSATION_ID, 'Superseded Z.ai snapshot'),
+        );
 
         await withCaptureByteLimit(8, async () => {
             (bootstrapScript as { main: () => void }).main();

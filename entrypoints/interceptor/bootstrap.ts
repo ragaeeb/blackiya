@@ -16,10 +16,14 @@ import { classifyGenerationEndpoint, type GenerationEndpoint } from '@/features/
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import { createMonitoredFetchResponse } from '@/features/stream-debug/stream-monitor';
 import { createXhrStreamCapture } from '@/features/stream-debug/xhr-monitor';
+import { parseClaudeConversationApiUrl } from '@/platforms/claude/request';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
+import { parseDeepSeekHistoryRequestContext } from '@/platforms/deepseek/request';
 import { getPlatformAdapter } from '@/platforms/factory';
-import { extractMetaGraphqlRequestContext } from '@/platforms/meta/request';
+import { extractConversationIdFromSourcePath } from '@/platforms/gemini/rpc-parser';
+import { extractMetaGraphqlRequestContext, type MetaGraphqlContextCandidate } from '@/platforms/meta/request';
 import { MetaGraphqlResponseAssembler } from '@/platforms/meta/response-assembler';
+import { extractQwenConversationIdFromDetailUrl } from '@/platforms/qwen/requests';
 import { isZaiConversationId, ZAI_HOST } from '@/platforms/zai/constants';
 import { ZaiConversationResponseAssembler } from '@/platforms/zai/response-assembler';
 import { platformHeaderStore } from '@/utils/platform-header-store';
@@ -132,6 +136,43 @@ const clearProviderConversationState = (platform: SupportedPlatformName): void =
 const invalidateConversationSnapshot = (platform: SupportedPlatformName, conversationId: string): void => {
     advanceProviderStateEpoch(platform);
     conversationResponseCache.delete(platform, conversationId);
+};
+
+const resolveDeterministicDetailConversation = (
+    url: string,
+    method: string,
+): { platform: SupportedPlatformName; conversationId: string } | null => {
+    const adapter = getPlatformAdapter(url);
+    const platform = resolvePlatformName(url);
+    if (!adapter?.isConversationDetailRequest?.(url, method) || !platform || adapter.name !== platform) {
+        return null;
+    }
+
+    let conversationId: string | null = null;
+    if (platform === 'ChatGPT') {
+        try {
+            conversationId = new URL(url).pathname.match(/^\/backend-api\/(?:f\/)?conversation\/([^/]+)$/)?.[1] ?? null;
+        } catch {
+            return null;
+        }
+    } else if (platform === 'Gemini') {
+        conversationId = extractConversationIdFromSourcePath(url);
+    } else if (platform === 'Claude') {
+        conversationId = parseClaudeConversationApiUrl(url)?.conversationId ?? null;
+    } else if (platform === 'Qwen') {
+        conversationId = extractQwenConversationIdFromDetailUrl(url);
+    } else if (platform === 'DeepSeek') {
+        conversationId = parseDeepSeekHistoryRequestContext(url)?.conversationId ?? null;
+    }
+
+    return conversationId ? { platform, conversationId } : null;
+};
+
+const invalidateDeterministicDetailRequestStart = (url: string, method: string): void => {
+    const detail = resolveDeterministicDetailConversation(url, method);
+    if (detail) {
+        conversationResponseCache.delete(detail.platform, detail.conversationId);
+    }
 };
 
 const invalidateActiveConversationForGeneration = (url: string, classification: GenerationEndpoint | null): void => {
@@ -281,16 +322,25 @@ const readFetchRequestBody = async (args: Parameters<typeof fetch>, maxBytes: nu
     return null;
 };
 
+type MetaCaptureContext = {
+    requestBody: string;
+    requestContext: MetaGraphqlContextCandidate;
+};
+
 const prepareMetaFetchCapture = async (
     args: Parameters<typeof fetch>,
     url: string,
     method: string,
-): Promise<string | null> => {
+): Promise<MetaCaptureContext | null> => {
     if (!isMetaGraphqlPost(url, method)) {
         return null;
     }
     const body = await readFetchRequestBody(args, conversationResponseCache.getMaxBytesPerEntry());
-    return body && extractMetaGraphqlRequestContext(body) ? body : null;
+    if (!body) {
+        return null;
+    }
+    const requestContext = extractMetaGraphqlRequestContext(body);
+    return requestContext ? { requestBody: body, requestContext } : null;
 };
 
 const captureMetaResponse = async (requestBody: string, response: Response, epoch: number): Promise<void> => {
@@ -314,6 +364,7 @@ const captureMetaResponse = async (requestBody: string, response: Response, epoc
 type ZaiCaptureContext = {
     url: string;
     method: 'GET' | 'POST';
+    conversationId: string;
     requestBody?: string;
 };
 
@@ -333,11 +384,11 @@ const parseZaiCaptureEndpoint = (url: string, method: string): ZaiCaptureContext
         }
         const detailId = parsed.pathname.match(/^\/api\/v1\/chats\/([^/]+)$/)?.[1];
         if (method.toUpperCase() === 'GET' && isZaiConversationId(detailId)) {
-            return { url: parsed.href, method: 'GET' };
+            return { url: parsed.href, method: 'GET', conversationId: detailId };
         }
         const batchId = parsed.pathname.match(/^\/api\/v1\/chats\/([^/]+)\/messages\/batch$/)?.[1];
         if (method.toUpperCase() === 'POST' && isZaiConversationId(batchId)) {
-            return { url: parsed.href, method: 'POST' };
+            return { url: parsed.href, method: 'POST', conversationId: batchId };
         }
     } catch {
         return null;
@@ -434,7 +485,7 @@ const monitorFetchStream = (response: Response, streamId: string, classification
 type ProviderCaptureEpoch = { platform: SupportedPlatformName; value: number };
 
 type FetchCapturePlan = {
-    metaRequestBody: string | null;
+    metaCaptureContext: MetaCaptureContext | null;
     zaiCaptureContext: ZaiCaptureContext | null;
     classification: GenerationEndpoint | null;
     streamId: string | undefined;
@@ -449,14 +500,21 @@ const prepareFetchCapturePlan = async (
     await captureFetchRequestContext(args, url, method);
     const classification = classifyGenerationEndpoint(url, method, window.location.href);
     invalidateActiveConversationForGeneration(url, classification);
+    invalidateDeterministicDetailRequestStart(url, method);
     const platform = resolvePlatformName(url);
     const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
-    const [metaRequestBody, zaiCaptureContext] = await Promise.all([
+    const [metaCaptureContext, zaiCaptureContext] = await Promise.all([
         prepareMetaFetchCapture(args, url, method),
         prepareZaiFetchCapture(args, url, method),
     ]);
+    if (metaCaptureContext?.requestContext.kind === 'conversation-detail') {
+        conversationResponseCache.delete('Meta Muse', metaCaptureContext.requestContext.conversationId);
+    }
+    if (zaiCaptureContext?.method === 'GET') {
+        conversationResponseCache.delete('Z.ai', zaiCaptureContext.conversationId);
+    }
     return {
-        metaRequestBody,
+        metaCaptureContext,
         zaiCaptureContext,
         classification,
         streamId: startFetchStreamCapture(classification, method, url),
@@ -531,12 +589,12 @@ const capturePlannedFetchResponse = (
     if (!captureEpoch || !isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)) {
         return;
     }
-    if (plan.metaRequestBody) {
+    if (plan.metaCaptureContext) {
         if (captureEpoch.platform !== 'Meta Muse') {
             return;
         }
         withResponseClone(response, (clone) => {
-            void captureMetaResponse(plan.metaRequestBody!, clone, captureEpoch.value);
+            void captureMetaResponse(plan.metaCaptureContext!.requestBody, clone, captureEpoch.value);
         });
         return;
     }
@@ -569,7 +627,7 @@ const createInterceptFetch = (originalFetch: typeof fetch) => async (args: Param
 };
 
 type XhrProviderCapturePlan =
-    | { kind: 'meta'; requestBody: string }
+    | { kind: 'meta'; captureContext: MetaCaptureContext }
     | { kind: 'zai'; context: ZaiCaptureContext }
     | null;
 
@@ -579,13 +637,15 @@ const prepareXhrProviderCapture = (
     body: Document | XMLHttpRequestBodyInit | null | undefined,
 ): XhrProviderCapturePlan => {
     const maxBytes = conversationResponseCache.getMaxBytesPerEntry();
-    if (
-        isMetaGraphqlPost(url, method) &&
-        typeof body === 'string' &&
-        isTextWithinByteLimit(body, maxBytes) &&
-        extractMetaGraphqlRequestContext(body)
-    ) {
-        return { kind: 'meta', requestBody: body };
+    if (isMetaGraphqlPost(url, method) && typeof body === 'string' && isTextWithinByteLimit(body, maxBytes)) {
+        const requestContext = extractMetaGraphqlRequestContext(body);
+        if (!requestContext) {
+            return null;
+        }
+        return {
+            kind: 'meta',
+            captureContext: { requestBody: body, requestContext },
+        };
     }
     const context = parseZaiCaptureEndpoint(url, method);
     if (!context) {
@@ -619,7 +679,7 @@ const captureXhrProviderResponse = (
     try {
         const data =
             plan.kind === 'meta'
-                ? metaGraphqlResponseAssembler.ingest(plan.requestBody, xhr.responseText)
+                ? metaGraphqlResponseAssembler.ingest(plan.captureContext.requestBody, xhr.responseText)
                 : zaiConversationResponseAssembler.ingest({ ...plan.context, responseText: xhr.responseText });
         if (data) {
             conversationResponseCache.set(plan.kind === 'meta' ? 'Meta Muse' : 'Z.ai', data);
@@ -775,11 +835,24 @@ export default defineScript({
                 url,
                 toForwardableHeaderRecord((xhr as any).__blackiyaRequestHeaders, resolvePlatformName(url) ?? undefined),
             );
-            const classification = classifyGenerationEndpoint(url, method);
+            const classification = classifyGenerationEndpoint(url, method, window.location.href);
             invalidateActiveConversationForGeneration(url, classification);
+            invalidateDeterministicDetailRequestStart(url, method);
             const platform = resolvePlatformName(url);
             const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
             const providerPlan = prepareXhrProviderCapture(url, method, body);
+            if (
+                providerPlan?.kind === 'meta' &&
+                providerPlan.captureContext.requestContext.kind === 'conversation-detail'
+            ) {
+                conversationResponseCache.delete(
+                    'Meta Muse',
+                    providerPlan.captureContext.requestContext.conversationId,
+                );
+            }
+            if (providerPlan?.kind === 'zai' && providerPlan.context.method === 'GET') {
+                conversationResponseCache.delete('Z.ai', providerPlan.context.conversationId);
+            }
             xhr.addEventListener('load', () => handleXhrLoad(xhr, url, method, providerPlan, captureEpoch));
 
             captureGeminiXhrContext(url, method, body);
