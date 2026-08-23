@@ -14,6 +14,8 @@ type ZaiConversationResponseAssemblerOptions = {
     maxTotalBytes?: number;
     maxAgeMs?: number;
     now?: () => number;
+    schedulePrune?: (callback: () => void, delayMs: number) => unknown;
+    cancelPrune?: (handle: unknown) => void;
 };
 
 type ZaiObservedResponse = {
@@ -59,7 +61,38 @@ const positiveInteger = (value: number | undefined, fallback: number): number =>
     return Math.max(1, Math.floor(value));
 };
 
-const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+const boundedByteLength = (value: string, maxBytes: number): number | null => {
+    if (value.length > maxBytes) {
+        return null;
+    }
+    const length = new TextEncoder().encode(value).byteLength;
+    return length <= maxBytes ? length : null;
+};
+
+const defaultSchedulePrune = (callback: () => void, delayMs: number): unknown => {
+    const handle = setTimeout(callback, delayMs);
+    if (typeof handle === 'object' && handle && 'unref' in handle && typeof handle.unref === 'function') {
+        handle.unref();
+    }
+    return handle;
+};
+
+const defaultCancelPrune = (handle: unknown): void => {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+};
+
+const parseMessageVersion = (responseText: string): number | null => {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(responseText);
+    } catch {
+        return null;
+    }
+    if (!isRecord(parsed) || typeof parsed.message_version !== 'number' || !Number.isFinite(parsed.message_version)) {
+        return null;
+    }
+    return parsed.message_version;
+};
 
 const parseEndpoint = (url: string): ZaiEndpoint | null => {
     let parsed: URL;
@@ -158,6 +191,9 @@ export class ZaiConversationResponseAssembler {
     private readonly maxTotalBytes: number;
     private readonly maxAgeMs: number;
     private readonly now: () => number;
+    private readonly schedulePruneCallback: (callback: () => void, delayMs: number) => unknown;
+    private readonly cancelPruneCallback: (handle: unknown) => void;
+    private pruneHandle: unknown | null = null;
     private totalBytes = 0;
 
     constructor(options: ZaiConversationResponseAssemblerOptions = {}) {
@@ -169,37 +205,49 @@ export class ZaiConversationResponseAssembler {
         );
         this.maxAgeMs = positiveInteger(options.maxAgeMs, ZAI_RESPONSE_ASSEMBLER_MAX_AGE_MS);
         this.now = options.now ?? Date.now;
+        this.schedulePruneCallback = options.schedulePrune ?? defaultSchedulePrune;
+        this.cancelPruneCallback = options.cancelPrune ?? defaultCancelPrune;
     }
 
     ingest(input: ZaiObservedResponse): ConversationData | null {
         const now = this.now();
         this.pruneExpired(now);
-        const endpoint = parseEndpoint(input.url);
-        if (!endpoint || !input.responseText) {
-            return null;
-        }
+        try {
+            const endpoint = parseEndpoint(input.url);
+            const responseBytes = boundedByteLength(input.responseText, this.maxBytesPerEntry);
+            if (!endpoint || !input.responseText || responseBytes === null) {
+                return null;
+            }
 
-        if (endpoint.kind === 'detail') {
-            return input.method.toUpperCase() === 'GET'
-                ? this.ingestDetail(endpoint.conversationId, input.responseText, now)
+            if (endpoint.kind === 'detail') {
+                return input.method.toUpperCase() === 'GET'
+                    ? this.ingestDetail(endpoint.conversationId, input.responseText, responseBytes, now)
+                    : null;
+            }
+            return input.method.toUpperCase() === 'POST'
+                ? this.ingestBatch(endpoint.conversationId, input.requestBody, input.responseText, responseBytes, now)
                 : null;
+        } finally {
+            this.scheduleExpiryPrune();
         }
-        return input.method.toUpperCase() === 'POST'
-            ? this.ingestBatch(endpoint.conversationId, input.requestBody, input.responseText, now)
-            : null;
     }
 
     clear(): void {
         this.entries.clear();
         this.totalBytes = 0;
+        this.scheduleExpiryPrune();
     }
 
-    private ingestDetail(conversationId: string, responseText: string, now: number): ConversationData | null {
+    private ingestDetail(
+        conversationId: string,
+        responseText: string,
+        responseBytes: number,
+        now: number,
+    ): ConversationData | null {
         const detail = parseZaiConversationDetail(responseText, conversationId);
         if (!detail) {
             return null;
         }
-        const responseBytes = byteLength(responseText);
         const existing = this.entries.get(conversationId);
         const previousDetailBytes = existing?.detail?.byteLength ?? 0;
         const nextByteLength = (existing?.byteLength ?? 0) - previousDetailBytes + responseBytes;
@@ -224,16 +272,21 @@ export class ZaiConversationResponseAssembler {
         conversationId: string,
         requestBody: string | undefined,
         responseText: string,
+        responseBytes: number,
         now: number,
     ): ConversationData | null {
         const requestedIds = parseRequestedIds(requestBody);
         if (!requestedIds || !requestBody) {
             return null;
         }
-        const responseBytes = byteLength(requestBody) + byteLength(responseText);
+        const requestBytes = boundedByteLength(requestBody, this.maxBytesPerEntry);
+        if (requestBytes === null) {
+            return null;
+        }
+        const batchBytes = requestBytes + responseBytes;
         const existing = this.entries.get(conversationId);
         const previousBatchBytes = existing?.batch?.byteLength ?? 0;
-        const nextByteLength = (existing?.byteLength ?? 0) - previousBatchBytes + responseBytes;
+        const nextByteLength = (existing?.byteLength ?? 0) - previousBatchBytes + batchBytes;
         if (nextByteLength > this.maxBytesPerEntry || nextByteLength > this.maxTotalBytes) {
             return null;
         }
@@ -241,7 +294,7 @@ export class ZaiConversationResponseAssembler {
         this.deleteEntry(conversationId);
         const entry: ResponseEntry = {
             detail: existing?.detail ?? null,
-            batch: { requestBody, responseText, byteLength: responseBytes },
+            batch: { requestBody, responseText, byteLength: batchBytes },
             byteLength: nextByteLength,
             updatedAt: now,
         };
@@ -257,7 +310,16 @@ export class ZaiConversationResponseAssembler {
         }
         const requestedIds = parseRequestedIds(entry.batch.requestBody);
         const detail = parseZaiConversationDetail(entry.detail.responseText, conversationId);
-        if (!requestedIds || !detail || !sameIdSet(requestedIds, Object.keys(detail.mapping))) {
+        const detailRevision = parseMessageVersion(entry.detail.responseText);
+        const batchRevision = parseMessageVersion(entry.batch.responseText);
+        if (
+            !requestedIds ||
+            !detail ||
+            detailRevision === null ||
+            batchRevision === null ||
+            detailRevision !== batchRevision ||
+            !sameIdSet(requestedIds, Object.keys(detail.mapping))
+        ) {
             return null;
         }
 
@@ -283,6 +345,27 @@ export class ZaiConversationResponseAssembler {
                 this.deleteEntry(conversationId);
             }
         }
+    }
+
+    private scheduleExpiryPrune(): void {
+        if (this.pruneHandle !== null) {
+            this.cancelPruneCallback(this.pruneHandle);
+            this.pruneHandle = null;
+        }
+        if (this.entries.size === 0) {
+            return;
+        }
+
+        let earliestExpiry = Number.POSITIVE_INFINITY;
+        for (const entry of this.entries.values()) {
+            earliestExpiry = Math.min(earliestExpiry, entry.updatedAt + this.maxAgeMs);
+        }
+        const delayMs = Math.max(0, earliestExpiry - this.now());
+        this.pruneHandle = this.schedulePruneCallback(() => {
+            this.pruneHandle = null;
+            this.pruneExpired(this.now());
+            this.scheduleExpiryPrune();
+        }, delayMs);
     }
 
     private enforceBounds(): void {

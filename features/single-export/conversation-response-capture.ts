@@ -9,6 +9,8 @@ type CaptureInput = {
     pageUrl: string;
     resolveAdapter: (url: string) => LLMPlatform | null;
     cache: ConversationResponseCache;
+    canMutate?: (platformName: string) => boolean;
+    onNonTerminal?: (platformName: string, conversationId: string) => void;
 };
 
 const isTerminal = (adapter: LLMPlatform, data: Parameters<ConversationResponseCache['set']>[1]) => {
@@ -40,12 +42,23 @@ const captureWithAdapter = (
     if (!input.text) {
         return false;
     }
-    if (new TextEncoder().encode(input.text).byteLength > input.cache.getMaxBytesPerEntry()) {
+    if (!isTextWithinByteLimit(input.text, input.cache.getMaxBytesPerEntry())) {
         return false;
     }
     try {
         const parsed = adapter.parseInterceptedData(input.text, input.url);
-        if (!parsed || !isTerminal(adapter, parsed)) {
+        if (!parsed) {
+            return false;
+        }
+        if (input.canMutate && !input.canMutate(adapter.name)) {
+            return false;
+        }
+        if (!isTerminal(adapter, parsed)) {
+            if (input.onNonTerminal) {
+                input.onNonTerminal(adapter.name, parsed.conversation_id);
+            } else {
+                input.cache.delete(adapter.name, parsed.conversation_id);
+            }
             return false;
         }
         return input.cache.set(adapter.name, parsed);
@@ -59,13 +72,28 @@ export const captureTerminalConversationText = (input: Omit<CaptureInput, 'respo
     return adapter ? captureWithAdapter(adapter, input) : false;
 };
 
-const getDeclaredByteLength = (response: Response): number | null => {
-    const value = response.headers?.get('content-length');
+const getDeclaredByteLength = (source: Pick<Response, 'headers'> | Pick<Request, 'headers'>): number | null => {
+    const value = source.headers?.get('content-length');
     if (!value || !/^\d+$/.test(value)) {
         return null;
     }
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) ? parsed : null;
+};
+
+export const isDeclaredBodyOversized = (
+    source: Pick<Response, 'headers'> | Pick<Request, 'headers'>,
+    maxBytes: number,
+): boolean => {
+    const declaredByteLength = getDeclaredByteLength(source);
+    return declaredByteLength !== null && declaredByteLength > maxBytes;
+};
+
+export const isTextWithinByteLimit = (text: string, maxBytes: number): boolean => {
+    if (text.length > maxBytes) {
+        return false;
+    }
+    return new TextEncoder().encode(text).byteLength <= maxBytes;
 };
 
 const cancelReader = (reader: ReadableStreamDefaultReader<Uint8Array>): void => {
@@ -74,11 +102,14 @@ const cancelReader = (reader: ReadableStreamDefaultReader<Uint8Array>): void => 
     } catch {}
 };
 
-const readBoundedResponseText = async (response: Response, maxBytes: number): Promise<string | null> => {
-    if (!response.body) {
+export const readBoundedBodyText = async (
+    source: Pick<Response, 'body' | 'headers'> | Pick<Request, 'body' | 'headers'>,
+    maxBytes: number,
+): Promise<string | null> => {
+    if (!source.body || isDeclaredBodyOversized(source, maxBytes)) {
         return null;
     }
-    const reader = response.body.getReader();
+    const reader = source.body.getReader();
     const decoder = new TextDecoder();
     let observedBytes = 0;
     let text = '';
@@ -111,12 +142,11 @@ export const captureTerminalConversationResponse = async (input: CaptureInput): 
         return false;
     }
     const maxBytes = input.cache.getMaxBytesPerEntry();
-    const declaredByteLength = getDeclaredByteLength(input.response);
-    if (declaredByteLength !== null && declaredByteLength > maxBytes) {
+    if (isDeclaredBodyOversized(input.response, maxBytes)) {
         return false;
     }
     try {
-        const text = await readBoundedResponseText(input.response.clone(), maxBytes);
+        const text = await readBoundedBodyText(input.response.clone(), maxBytes);
         if (text === null) {
             return false;
         }

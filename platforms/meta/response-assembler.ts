@@ -16,6 +16,8 @@ type MetaGraphqlResponseAssemblerOptions = {
     maxTotalBytes?: number;
     maxAgeMs?: number;
     now?: () => number;
+    schedulePrune?: (callback: () => void, delayMs: number) => unknown;
+    cancelPrune?: (handle: unknown) => void;
 };
 
 type StoredResponse = {
@@ -45,7 +47,25 @@ const positiveInteger = (value: number | undefined, fallback: number): number =>
     return Math.max(1, Math.floor(value));
 };
 
-const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+const boundedByteLength = (value: string, maxBytes: number): number | null => {
+    if (value.length > maxBytes) {
+        return null;
+    }
+    const length = new TextEncoder().encode(value).byteLength;
+    return length <= maxBytes ? length : null;
+};
+
+const defaultSchedulePrune = (callback: () => void, delayMs: number): unknown => {
+    const handle = setTimeout(callback, delayMs);
+    if (typeof handle === 'object' && handle && 'unref' in handle && typeof handle.unref === 'function') {
+        handle.unref();
+    }
+    return handle;
+};
+
+const defaultCancelPrune = (handle: unknown): void => {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+};
 
 const parsePayload = (value: string): unknown => {
     const candidates = [value, ...value.split(/\r?\n/)]
@@ -116,6 +136,9 @@ export class MetaGraphqlResponseAssembler {
     private readonly maxTotalBytes: number;
     private readonly maxAgeMs: number;
     private readonly now: () => number;
+    private readonly schedulePruneCallback: (callback: () => void, delayMs: number) => unknown;
+    private readonly cancelPruneCallback: (handle: unknown) => void;
+    private pruneHandle: unknown | null = null;
     private totalBytes = 0;
 
     constructor(options: MetaGraphqlResponseAssemblerOptions = {}) {
@@ -128,20 +151,34 @@ export class MetaGraphqlResponseAssembler {
         );
         this.maxAgeMs = positiveInteger(options.maxAgeMs, META_RESPONSE_ASSEMBLER_MAX_AGE_MS);
         this.now = options.now ?? Date.now;
+        this.schedulePruneCallback = options.schedulePrune ?? defaultSchedulePrune;
+        this.cancelPruneCallback = options.cancelPrune ?? defaultCancelPrune;
     }
 
     ingest(requestBody: string, responseText: string): ConversationData | null {
         const now = this.now();
         this.pruneExpired(now);
-        const context = extractMetaGraphqlRequestContext(requestBody);
-        if (!context || responseText.length === 0) {
-            return null;
-        }
+        try {
+            const responseBytes = boundedByteLength(responseText, this.maxBytesPerEntry);
+            if (
+                responseText.length === 0 ||
+                responseBytes === null ||
+                boundedByteLength(requestBody, this.maxBytesPerEntry) === null
+            ) {
+                return null;
+            }
+            const context = extractMetaGraphqlRequestContext(requestBody);
+            if (!context) {
+                return null;
+            }
 
-        if (context.kind === 'conversation-detail') {
-            return this.ingestInitial(context.conversationId, responseText, now);
+            if (context.kind === 'conversation-detail') {
+                return this.ingestInitial(context.conversationId, responseText, responseBytes, now);
+            }
+            return this.ingestPagination(context.conversationId, context.before, responseText, responseBytes, now);
+        } finally {
+            this.scheduleExpiryPrune();
         }
-        return this.ingestPagination(context.conversationId, context.before, responseText, now);
     }
 
     getReadyConversation(conversationId: string): ConversationData | null {
@@ -150,25 +187,34 @@ export class MetaGraphqlResponseAssembler {
         }
         const now = this.now();
         this.pruneExpired(now);
-        const entry = this.entries.get(conversationId);
-        if (!entry) {
-            return null;
+        try {
+            const entry = this.entries.get(conversationId);
+            if (!entry) {
+                return null;
+            }
+            const parsed = this.parseEntry(entry);
+            return parsed && isReadyTerminal(parsed) ? parsed : null;
+        } finally {
+            this.scheduleExpiryPrune();
         }
-        const parsed = this.parseEntry(entry);
-        return parsed && isReadyTerminal(parsed) ? parsed : null;
     }
 
     clear(): void {
         this.entries.clear();
         this.totalBytes = 0;
+        this.scheduleExpiryPrune();
     }
 
-    private ingestInitial(conversationId: string, responseText: string, now: number): ConversationData | null {
+    private ingestInitial(
+        conversationId: string,
+        responseText: string,
+        responseBytes: number,
+        now: number,
+    ): ConversationData | null {
         const parsed = parseMetaConversationArchive(responseText, []);
         if (!parsed || parsed.conversation_id !== conversationId) {
             return null;
         }
-        const responseBytes = byteLength(responseText);
         const existing = this.entries.get(conversationId);
         const previousInitialBytes = existing?.initialResponse?.byteLength ?? 0;
         const nextByteLength = (existing?.byteLength ?? 0) - previousInitialBytes + responseBytes;
@@ -194,6 +240,7 @@ export class MetaGraphqlResponseAssembler {
         conversationId: string,
         before: string,
         responseText: string,
+        responseBytes: number,
         now: number,
     ): ConversationData | null {
         if (!isResponseForConversation(responseText, conversationId)) {
@@ -205,7 +252,6 @@ export class MetaGraphqlResponseAssembler {
             return null;
         }
 
-        const responseBytes = byteLength(responseText);
         const previousPageBytes = paginationResponses.get(before)?.byteLength ?? 0;
         const nextByteLength = (existing?.byteLength ?? 0) - previousPageBytes + responseBytes;
         if (nextByteLength > this.maxBytesPerEntry || nextByteLength > this.maxTotalBytes) {
@@ -264,6 +310,27 @@ export class MetaGraphqlResponseAssembler {
                 this.deleteEntry(conversationId);
             }
         }
+    }
+
+    private scheduleExpiryPrune(): void {
+        if (this.pruneHandle !== null) {
+            this.cancelPruneCallback(this.pruneHandle);
+            this.pruneHandle = null;
+        }
+        if (this.entries.size === 0) {
+            return;
+        }
+
+        let earliestExpiry = Number.POSITIVE_INFINITY;
+        for (const entry of this.entries.values()) {
+            earliestExpiry = Math.min(earliestExpiry, entry.updatedAt + this.maxAgeMs);
+        }
+        const delayMs = Math.max(0, earliestExpiry - this.now());
+        this.pruneHandle = this.schedulePruneCallback(() => {
+            this.pruneHandle = null;
+            this.pruneExpired(this.now());
+            this.scheduleExpiryPrune();
+        }, delayMs);
     }
 
     private enforceBounds(): void {

@@ -79,6 +79,25 @@ describe('captureTerminalConversationResponse', () => {
         expect(cache.get('Synthetic', 'conversation-1')).toBeUndefined();
     });
 
+    it('should evict a superseded terminal snapshot when a matching detail response is non-terminal', async () => {
+        const data = makeConversation('conversation-1');
+        const adapter = makeAdapter(data, false);
+        const cache = new ConversationResponseCache();
+        cache.set('Synthetic', data);
+
+        const captured = await captureTerminalConversationResponse({
+            response: new Response('{}', { status: 200 }),
+            url: 'https://chat.example/api/conversation/conversation-1',
+            method: 'GET',
+            pageUrl: 'https://chat.example/c/conversation-1',
+            resolveAdapter: () => adapter,
+            cache,
+        });
+
+        expect(captured).toBeFalse();
+        expect(cache.get('Synthetic', 'conversation-1')).toBeUndefined();
+    });
+
     it('should not read or parse responses outside the adapter detail allowlist', async () => {
         const data = makeConversation('conversation-1');
         const parseInterceptedData = mock(() => data);

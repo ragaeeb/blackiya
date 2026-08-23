@@ -60,6 +60,28 @@ describe('ConversationResponseCache', () => {
         expect(cache.get('Three', 'three')).toBeDefined();
     });
 
+    it('should schedule expiry pruning without requiring another cache access', () => {
+        let now = 100;
+        let scheduledPrune: (() => void) | undefined;
+        const cache = new ConversationResponseCache({
+            maxAgeMs: 10,
+            now: () => now,
+            schedulePrune: (callback) => {
+                scheduledPrune = callback;
+                return 1;
+            },
+            cancelPrune: () => undefined,
+        });
+        cache.set('One', makeConversation('one'));
+        expect(scheduledPrune).toBeDefined();
+
+        now = 110;
+        scheduledPrune?.();
+        now = 100;
+
+        expect(cache.get('One', 'one')).toBeUndefined();
+    });
+
     it('should clear only conversations belonging to one provider', () => {
         const cache = new ConversationResponseCache();
         cache.set('ChatGPT', makeConversation('chatgpt'));

@@ -152,6 +152,20 @@ describe('ZaiConversationResponseAssembler', () => {
         ).toBeNull();
     });
 
+    it('should require matching finite message revisions across detail and batch responses', () => {
+        const mismatchedBatch = structuredClone(zaiMessagesBatchPayloadFixture);
+        mismatchedBatch.message_version += 1;
+        const mismatchedAssembler = new ZaiConversationResponseAssembler();
+        ingestDetail(mismatchedAssembler);
+        expect(ingestBatch(mismatchedAssembler, mismatchedBatch)).toBeNull();
+
+        const missingRevisionDetail = structuredClone(zaiDetailPayloadFixture) as Record<string, unknown>;
+        Reflect.deleteProperty(missingRevisionDetail, 'message_version');
+        const missingAssembler = new ZaiConversationResponseAssembler();
+        ingestDetail(missingAssembler, missingRevisionDetail);
+        expect(ingestBatch(missingAssembler)).toBeNull();
+    });
+
     it('should reject a declared current node that is not a leaf', () => {
         const detail = structuredClone(zaiDetailPayloadFixture);
         detail.chat.history.currentId = ZAI_USER_MESSAGE_ID;
@@ -168,6 +182,28 @@ describe('ZaiConversationResponseAssembler', () => {
 
         ingestDetail(assembler);
         now = 110;
+
+        expect(ingestBatch(assembler)).toBeNull();
+    });
+
+    it('should schedule expiry pruning without requiring another assembler access', () => {
+        let now = 100;
+        let scheduledPrune: (() => void) | undefined;
+        const assembler = new ZaiConversationResponseAssembler({
+            maxAgeMs: 10,
+            now: () => now,
+            schedulePrune: (callback) => {
+                scheduledPrune = callback;
+                return 1;
+            },
+            cancelPrune: () => undefined,
+        });
+        ingestDetail(assembler);
+        expect(scheduledPrune).toBeDefined();
+
+        now = 110;
+        scheduledPrune?.();
+        now = 100;
 
         expect(ingestBatch(assembler)).toBeNull();
     });

@@ -8,6 +8,9 @@ import { conversationResponseCache } from '@/features/single-export/conversation
 import {
     captureTerminalConversationResponse,
     captureTerminalConversationText,
+    isDeclaredBodyOversized,
+    isTextWithinByteLimit,
+    readBoundedBodyText,
 } from '@/features/single-export/conversation-response-capture';
 import { classifyGenerationEndpoint, type GenerationEndpoint } from '@/features/stream-debug/generation-endpoint';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
@@ -31,6 +34,7 @@ const GEMINI_BATCHEXECUTE_PATH = '/_/bardchatui/data/batchexecute';
 const META_GRAPHQL_PATH = '/api/graphql';
 const metaGraphqlResponseAssembler = new MetaGraphqlResponseAssembler();
 const zaiConversationResponseAssembler = new ZaiConversationResponseAssembler();
+const providerStateEpochs = new Map<SupportedPlatformName, number>();
 
 const resolveUrlBase = (): string => {
     try {
@@ -105,12 +109,44 @@ const framingFor = (platform: SupportedPlatformName) => {
     return 'raw' as const;
 };
 
+const getProviderStateEpoch = (platform: SupportedPlatformName): number => providerStateEpochs.get(platform) ?? 0;
+
+const advanceProviderStateEpoch = (platform: SupportedPlatformName): void => {
+    const current = getProviderStateEpoch(platform);
+    providerStateEpochs.set(platform, current >= Number.MAX_SAFE_INTEGER ? 0 : current + 1);
+};
+
+const isProviderStateEpochCurrent = (platform: SupportedPlatformName, epoch: number): boolean =>
+    getProviderStateEpoch(platform) === epoch;
+
 const clearProviderConversationState = (platform: SupportedPlatformName): void => {
+    advanceProviderStateEpoch(platform);
     conversationResponseCache.clear(platform);
     if (platform === 'Meta Muse') {
         metaGraphqlResponseAssembler.clear();
     } else if (platform === 'Z.ai') {
         zaiConversationResponseAssembler.clear();
+    }
+};
+
+const invalidateConversationSnapshot = (platform: SupportedPlatformName, conversationId: string): void => {
+    advanceProviderStateEpoch(platform);
+    conversationResponseCache.delete(platform, conversationId);
+};
+
+const invalidateActiveConversationForGeneration = (url: string, classification: GenerationEndpoint | null): void => {
+    const requestAdapter = classification ? getPlatformAdapter(url) : null;
+    if (!classification || !requestAdapter || requestAdapter.name !== classification.platform) {
+        return;
+    }
+    const pageUrl = window.location.href;
+    const adapter = getPlatformAdapter(pageUrl);
+    if (!adapter || adapter.name !== classification.platform) {
+        return;
+    }
+    const conversationId = adapter.extractConversationId(pageUrl);
+    if (conversationId) {
+        invalidateConversationSnapshot(classification.platform, conversationId);
     }
 };
 
@@ -182,17 +218,62 @@ const isMetaGraphqlPost = (url: string, method: string): boolean => {
     }
 };
 
-const readFetchRequestBody = async (args: Parameters<typeof fetch>): Promise<string | null> => {
+const formEncodedComponentLength = (value: string): number => {
+    let length = 0;
+    for (const character of value) {
+        const codePoint = character.codePointAt(0) ?? 0;
+        const isUnescaped =
+            (codePoint >= 0x30 && codePoint <= 0x39) ||
+            (codePoint >= 0x41 && codePoint <= 0x5a) ||
+            (codePoint >= 0x61 && codePoint <= 0x7a) ||
+            codePoint === 0x2a ||
+            codePoint === 0x2d ||
+            codePoint === 0x2e ||
+            codePoint === 0x5f ||
+            codePoint === 0x20;
+        if (isUnescaped) {
+            length += 1;
+        } else if (codePoint <= 0x7f) {
+            length += 3;
+        } else if (codePoint <= 0x7ff) {
+            length += 6;
+        } else if (codePoint <= 0xffff) {
+            length += 9;
+        } else {
+            length += 12;
+        }
+    }
+    return length;
+};
+
+const isUrlSearchParamsWithinByteLimit = (body: URLSearchParams, maxBytes: number): boolean => {
+    let byteLength = 0;
+    let parameterCount = 0;
+    for (const [name, value] of body) {
+        byteLength += (parameterCount > 0 ? 1 : 0) + formEncodedComponentLength(name) + 1;
+        byteLength += formEncodedComponentLength(value);
+        if (byteLength > maxBytes) {
+            return false;
+        }
+        parameterCount += 1;
+    }
+    return true;
+};
+
+const readFetchRequestBody = async (args: Parameters<typeof fetch>, maxBytes: number): Promise<string | null> => {
     const body = args[1]?.body;
     if (typeof body === 'string') {
-        return body;
+        return isTextWithinByteLimit(body, maxBytes) ? body : null;
     }
     if (body instanceof URLSearchParams) {
-        return body.toString();
+        return isUrlSearchParamsWithinByteLimit(body, maxBytes) ? body.toString() : null;
     }
     if (body === undefined && args[0] instanceof Request) {
+        if (isDeclaredBodyOversized(args[0], maxBytes)) {
+            return null;
+        }
         try {
-            return await args[0].clone().text();
+            return await readBoundedBodyText(args[0].clone(), maxBytes);
         } catch {
             return null;
         }
@@ -208,16 +289,20 @@ const prepareMetaFetchCapture = async (
     if (!isMetaGraphqlPost(url, method)) {
         return null;
     }
-    const body = await readFetchRequestBody(args);
+    const body = await readFetchRequestBody(args, conversationResponseCache.getMaxBytesPerEntry());
     return body && extractMetaGraphqlRequestContext(body) ? body : null;
 };
 
-const captureMetaResponse = async (requestBody: string, response: Response): Promise<void> => {
+const captureMetaResponse = async (requestBody: string, response: Response, epoch: number): Promise<void> => {
     if (!response.ok) {
         return;
     }
     try {
-        const data = metaGraphqlResponseAssembler.ingest(requestBody, await response.text());
+        const responseText = await readBoundedBodyText(response, conversationResponseCache.getMaxBytesPerEntry());
+        if (responseText === null || !isProviderStateEpochCurrent('Meta Muse', epoch)) {
+            return;
+        }
+        const data = metaGraphqlResponseAssembler.ingest(requestBody, responseText);
         if (data) {
             conversationResponseCache.set('Meta Muse', data);
         }
@@ -269,18 +354,22 @@ const prepareZaiFetchCapture = async (
     if (!context || context.method === 'GET') {
         return context;
     }
-    const requestBody = await readFetchRequestBody(args);
+    const requestBody = await readFetchRequestBody(args, conversationResponseCache.getMaxBytesPerEntry());
     return requestBody ? { ...context, requestBody } : null;
 };
 
-const captureZaiResponse = async (context: ZaiCaptureContext, response: Response): Promise<void> => {
+const captureZaiResponse = async (context: ZaiCaptureContext, response: Response, epoch: number): Promise<void> => {
     if (!response.ok) {
         return;
     }
     try {
+        const responseText = await readBoundedBodyText(response, conversationResponseCache.getMaxBytesPerEntry());
+        if (responseText === null || !isProviderStateEpochCurrent('Z.ai', epoch)) {
+            return;
+        }
         const data = zaiConversationResponseAssembler.ingest({
             ...context,
-            responseText: await response.text(),
+            responseText,
         });
         if (data) {
             conversationResponseCache.set('Z.ai', data);
@@ -342,11 +431,14 @@ const monitorFetchStream = (response: Response, streamId: string, classification
     }
 };
 
+type ProviderCaptureEpoch = { platform: SupportedPlatformName; value: number };
+
 type FetchCapturePlan = {
     metaRequestBody: string | null;
     zaiCaptureContext: ZaiCaptureContext | null;
     classification: GenerationEndpoint | null;
     streamId: string | undefined;
+    captureEpoch: ProviderCaptureEpoch | null;
 };
 
 const prepareFetchCapturePlan = async (
@@ -355,16 +447,20 @@ const prepareFetchCapturePlan = async (
     method: string,
 ): Promise<FetchCapturePlan> => {
     await captureFetchRequestContext(args, url, method);
+    const classification = classifyGenerationEndpoint(url, method, window.location.href);
+    invalidateActiveConversationForGeneration(url, classification);
+    const platform = resolvePlatformName(url);
+    const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
     const [metaRequestBody, zaiCaptureContext] = await Promise.all([
         prepareMetaFetchCapture(args, url, method),
         prepareZaiFetchCapture(args, url, method),
     ]);
-    const classification = classifyGenerationEndpoint(url, method, window.location.href);
     return {
         metaRequestBody,
         zaiCaptureContext,
         classification,
         streamId: startFetchStreamCapture(classification, method, url),
+        captureEpoch,
     };
 };
 
@@ -385,6 +481,9 @@ const forwardPageFetch = async (
 };
 
 const withResponseClone = (response: Response, capture: (clone: Response) => void): void => {
+    if (isDeclaredBodyOversized(response, conversationResponseCache.getMaxBytesPerEntry())) {
+        return;
+    }
     try {
         capture(response.clone());
     } catch {
@@ -397,6 +496,7 @@ const captureGenericFetchResponse = (
     args: Parameters<typeof fetch>,
     url: string,
     method: string,
+    captureEpoch: ProviderCaptureEpoch,
 ): void => {
     void captureTerminalConversationResponse({
         response,
@@ -406,6 +506,17 @@ const captureGenericFetchResponse = (
         pageUrl: window.location.href,
         resolveAdapter: getPlatformAdapter,
         cache: conversationResponseCache,
+        canMutate: (platformName) =>
+            platformName === captureEpoch.platform &&
+            isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value),
+        onNonTerminal: (platformName, conversationId) => {
+            if (
+                platformName === captureEpoch.platform &&
+                isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
+            ) {
+                invalidateConversationSnapshot(captureEpoch.platform, conversationId);
+            }
+        },
     });
 };
 
@@ -416,20 +527,30 @@ const capturePlannedFetchResponse = (
     url: string,
     method: string,
 ): void => {
+    const captureEpoch = plan.captureEpoch;
+    if (!captureEpoch || !isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)) {
+        return;
+    }
     if (plan.metaRequestBody) {
+        if (captureEpoch.platform !== 'Meta Muse') {
+            return;
+        }
         withResponseClone(response, (clone) => {
-            void captureMetaResponse(plan.metaRequestBody!, clone);
+            void captureMetaResponse(plan.metaRequestBody!, clone, captureEpoch.value);
         });
         return;
     }
     if (plan.zaiCaptureContext) {
+        if (captureEpoch.platform !== 'Z.ai') {
+            return;
+        }
         withResponseClone(response, (clone) => {
-            void captureZaiResponse(plan.zaiCaptureContext!, clone);
+            void captureZaiResponse(plan.zaiCaptureContext!, clone, captureEpoch.value);
         });
         return;
     }
     if (!plan.classification) {
-        captureGenericFetchResponse(response, args, url, method);
+        captureGenericFetchResponse(response, args, url, method, captureEpoch);
     }
 };
 
@@ -457,11 +578,20 @@ const prepareXhrProviderCapture = (
     method: string,
     body: Document | XMLHttpRequestBodyInit | null | undefined,
 ): XhrProviderCapturePlan => {
-    if (isMetaGraphqlPost(url, method) && typeof body === 'string' && extractMetaGraphqlRequestContext(body)) {
+    const maxBytes = conversationResponseCache.getMaxBytesPerEntry();
+    if (
+        isMetaGraphqlPost(url, method) &&
+        typeof body === 'string' &&
+        isTextWithinByteLimit(body, maxBytes) &&
+        extractMetaGraphqlRequestContext(body)
+    ) {
         return { kind: 'meta', requestBody: body };
     }
     const context = parseZaiCaptureEndpoint(url, method);
     if (!context) {
+        return null;
+    }
+    if (context.method === 'POST' && (typeof body !== 'string' || !isTextWithinByteLimit(body, maxBytes))) {
         return null;
     }
     return {
@@ -470,9 +600,21 @@ const prepareXhrProviderCapture = (
     };
 };
 
-const captureXhrProviderResponse = (plan: XhrProviderCapturePlan, xhr: XMLHttpRequest): boolean => {
+const captureXhrProviderResponse = (
+    plan: XhrProviderCapturePlan,
+    xhr: XMLHttpRequest,
+    captureEpoch: ProviderCaptureEpoch | null,
+): boolean => {
     if (!plan) {
         return false;
+    }
+    const platform = plan.kind === 'meta' ? 'Meta Muse' : 'Z.ai';
+    if (
+        !captureEpoch ||
+        captureEpoch.platform !== platform ||
+        !isProviderStateEpochCurrent(platform, captureEpoch.value)
+    ) {
+        return true;
     }
     try {
         const data =
@@ -488,7 +630,12 @@ const captureXhrProviderResponse = (plan: XhrProviderCapturePlan, xhr: XMLHttpRe
     return true;
 };
 
-const captureGenericXhrResponse = (xhr: XMLHttpRequest, url: string, method: string): void => {
+const captureGenericXhrResponse = (
+    xhr: XMLHttpRequest,
+    url: string,
+    method: string,
+    captureEpoch: ProviderCaptureEpoch,
+): void => {
     try {
         captureTerminalConversationText({
             text: xhr.responseText,
@@ -498,6 +645,17 @@ const captureGenericXhrResponse = (xhr: XMLHttpRequest, url: string, method: str
             pageUrl: window.location.href,
             resolveAdapter: getPlatformAdapter,
             cache: conversationResponseCache,
+            canMutate: (platformName) =>
+                platformName === captureEpoch.platform &&
+                isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value),
+            onNonTerminal: (platformName, conversationId) => {
+                if (
+                    platformName === captureEpoch.platform &&
+                    isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
+                ) {
+                    invalidateConversationSnapshot(captureEpoch.platform, conversationId);
+                }
+            },
         });
     } catch {
         // Some XHR response types make responseText inaccessible.
@@ -509,13 +667,18 @@ const handleXhrLoad = (
     url: string,
     method: string,
     providerPlan: XhrProviderCapturePlan,
+    captureEpoch: ProviderCaptureEpoch | null,
 ): void => {
     invalidateCapturedRequestContext(url, xhr.status);
-    if (xhr.status < 200 || xhr.status >= 300 || captureXhrProviderResponse(providerPlan, xhr)) {
+    if (xhr.status < 200 || xhr.status >= 300 || captureXhrProviderResponse(providerPlan, xhr, captureEpoch)) {
         return;
     }
-    if (!classifyGenerationEndpoint(url, method, window.location.href)) {
-        captureGenericXhrResponse(xhr, url, method);
+    if (
+        !classifyGenerationEndpoint(url, method, window.location.href) &&
+        captureEpoch &&
+        isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
+    ) {
+        captureGenericXhrResponse(xhr, url, method, captureEpoch);
     }
 };
 
@@ -608,12 +771,16 @@ export default defineScript({
             const xhr = this as XMLHttpRequest;
             const url = String((xhr as any).__blackiyaRequestUrl ?? '');
             const method = String((xhr as any).__blackiyaRequestMethod ?? 'GET').toUpperCase();
-            const providerPlan = prepareXhrProviderCapture(url, method, body);
-            xhr.addEventListener('load', () => handleXhrLoad(xhr, url, method, providerPlan));
             captureHeaders(
                 url,
                 toForwardableHeaderRecord((xhr as any).__blackiyaRequestHeaders, resolvePlatformName(url) ?? undefined),
             );
+            const classification = classifyGenerationEndpoint(url, method);
+            invalidateActiveConversationForGeneration(url, classification);
+            const platform = resolvePlatformName(url);
+            const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
+            const providerPlan = prepareXhrProviderCapture(url, method, body);
+            xhr.addEventListener('load', () => handleXhrLoad(xhr, url, method, providerPlan, captureEpoch));
 
             captureGeminiXhrContext(url, method, body);
             installXhrStreamCapture(xhr, url, method);

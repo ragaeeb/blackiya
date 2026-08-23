@@ -11,6 +11,8 @@ type CacheOptions = {
     maxTotalBytes?: number;
     maxAgeMs?: number;
     now?: () => number;
+    schedulePrune?: (callback: () => void, delayMs: number) => unknown;
+    cancelPrune?: (handle: unknown) => void;
 };
 
 type CacheEntry = {
@@ -21,6 +23,18 @@ type CacheEntry = {
 
 const keyFor = (platformName: string, conversationId: string) => `${platformName}\u0000${conversationId}`;
 
+const defaultSchedulePrune = (callback: () => void, delayMs: number): unknown => {
+    const handle = setTimeout(callback, delayMs);
+    if (typeof handle === 'object' && handle && 'unref' in handle && typeof handle.unref === 'function') {
+        handle.unref();
+    }
+    return handle;
+};
+
+const defaultCancelPrune = (handle: unknown): void => {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+};
+
 export class ConversationResponseCache {
     private readonly entries = new Map<string, CacheEntry>();
     private readonly maxEntries: number;
@@ -28,6 +42,9 @@ export class ConversationResponseCache {
     private readonly maxTotalBytes: number;
     private readonly maxAgeMs: number;
     private readonly now: () => number;
+    private readonly schedulePruneCallback: (callback: () => void, delayMs: number) => unknown;
+    private readonly cancelPruneCallback: (handle: unknown) => void;
+    private pruneHandle: unknown | null = null;
     private totalBytes = 0;
 
     constructor(options: CacheOptions = {}) {
@@ -39,6 +56,8 @@ export class ConversationResponseCache {
         );
         this.maxAgeMs = Math.max(1, Math.floor(options.maxAgeMs ?? CONVERSATION_RESPONSE_MAX_AGE_MS));
         this.now = options.now ?? Date.now;
+        this.schedulePruneCallback = options.schedulePrune ?? defaultSchedulePrune;
+        this.cancelPruneCallback = options.cancelPrune ?? defaultCancelPrune;
     }
 
     set(platformName: string, data: ConversationData): boolean {
@@ -47,6 +66,7 @@ export class ConversationResponseCache {
         }
         const now = this.now();
         this.pruneExpired(now);
+        this.scheduleExpiryPrune();
         let serialized: string;
         try {
             serialized = JSON.stringify(data);
@@ -63,11 +83,13 @@ export class ConversationResponseCache {
         this.entries.set(key, { serialized, byteLength, updatedAt: now });
         this.totalBytes += byteLength;
         this.enforceBounds();
+        this.scheduleExpiryPrune();
         return this.entries.has(key);
     }
 
     get(platformName: string, conversationId: string): ConversationData | undefined {
         this.pruneExpired(this.now());
+        this.scheduleExpiryPrune();
         const key = keyFor(platformName, conversationId);
         const entry = this.entries.get(key);
         if (!entry) {
@@ -83,6 +105,11 @@ export class ConversationResponseCache {
         }
     }
 
+    delete(platformName: string, conversationId: string): void {
+        this.deleteKey(keyFor(platformName, conversationId));
+        this.scheduleExpiryPrune();
+    }
+
     clear(platformName?: string): void {
         if (platformName) {
             const prefix = `${platformName}\u0000`;
@@ -91,10 +118,12 @@ export class ConversationResponseCache {
                     this.deleteKey(key);
                 }
             }
+            this.scheduleExpiryPrune();
             return;
         }
         this.entries.clear();
         this.totalBytes = 0;
+        this.scheduleExpiryPrune();
     }
 
     getMaxBytesPerEntry(): number {
@@ -117,6 +146,27 @@ export class ConversationResponseCache {
                 this.deleteKey(key);
             }
         }
+    }
+
+    private scheduleExpiryPrune(): void {
+        if (this.pruneHandle !== null) {
+            this.cancelPruneCallback(this.pruneHandle);
+            this.pruneHandle = null;
+        }
+        if (this.entries.size === 0) {
+            return;
+        }
+
+        let earliestExpiry = Number.POSITIVE_INFINITY;
+        for (const entry of this.entries.values()) {
+            earliestExpiry = Math.min(earliestExpiry, entry.updatedAt + this.maxAgeMs);
+        }
+        const delayMs = Math.max(0, earliestExpiry - this.now());
+        this.pruneHandle = this.schedulePruneCallback(() => {
+            this.pruneHandle = null;
+            this.pruneExpired(this.now());
+            this.scheduleExpiryPrune();
+        }, delayMs);
     }
 
     private deleteKey(key: string): void {

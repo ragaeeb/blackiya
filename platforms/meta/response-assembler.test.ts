@@ -151,6 +151,28 @@ describe('MetaGraphqlResponseAssembler', () => {
         expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toBeNull();
     });
 
+    it('should schedule expiry pruning without requiring another assembler access', () => {
+        let now = 100;
+        let scheduledPrune: (() => void) | undefined;
+        const assembler = new MetaGraphqlResponseAssembler({
+            maxAgeMs: 10,
+            now: () => now,
+            schedulePrune: (callback) => {
+                scheduledPrune = callback;
+                return 1;
+            },
+            cancelPrune: () => undefined,
+        });
+        expect(assembler.ingest(detailBody(), JSON.stringify(createMetaDetailFixture()))).not.toBeNull();
+        expect(scheduledPrune).toBeDefined();
+
+        now = 110;
+        scheduledPrune?.();
+        now = 100;
+
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toBeNull();
+    });
+
     it('should clear all retained response text explicitly', () => {
         const assembler = new MetaGraphqlResponseAssembler();
         const responseText = JSON.stringify(createMetaDetailFixture());
