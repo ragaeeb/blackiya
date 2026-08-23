@@ -68,6 +68,30 @@ describe('Claude adapter', () => {
             ).toBeNull();
         });
 
+        it('should reject orphaned parents, cycles, disconnected roots, and stale current nodes', () => {
+            const orphaned = createClaudeTerminalPayload();
+            orphaned.chat_messages[1]!.parent_message_uuid = '60000000-0000-4000-8000-000000000006';
+
+            const cyclic = createClaudeTerminalPayload();
+            cyclic.chat_messages[0]!.parent_message_uuid = SYNTHETIC_ASSISTANT_MESSAGE_ID;
+
+            const disconnected = createClaudeTerminalPayload();
+            disconnected.chat_messages.push({
+                ...structuredClone(disconnected.chat_messages[1]!),
+                uuid: '70000000-0000-4000-8000-000000000007',
+                parent_message_uuid: null,
+            });
+            disconnected.current_leaf_message_uuid = '70000000-0000-4000-8000-000000000007';
+
+            const staleCurrent = createClaudeTerminalPayload();
+            staleCurrent.current_leaf_message_uuid = SYNTHETIC_USER_MESSAGE_ID;
+
+            for (const payload of [orphaned, cyclic, disconnected, staleCurrent]) {
+                expect(claudeAdapter.parseInterceptedData(JSON.stringify(payload), CLAUDE_DETAIL_URL)).toBeNull();
+                expect(claudeAdapter.isConversationPayload?.(payload)).toBeFalse();
+            }
+        });
+
         it('should identify only canonical Claude conversation payloads', () => {
             expect(claudeAdapter.isConversationPayload?.(createClaudeTerminalPayload())).toBeTrue();
             expect(claudeAdapter.isConversationPayload?.({ uuid: SYNTHETIC_CONVERSATION_ID })).toBeFalse();

@@ -72,6 +72,48 @@ const isClaudeMessagePayload = (value: unknown): value is ClaudeMessagePayload =
     );
 };
 
+const hasValidClaudeMessageGraph = (messages: ClaudeMessagePayload[], currentLeafId: string): boolean => {
+    const messageIds = new Set(messages.map((message) => message.uuid));
+    if (messageIds.size !== messages.length || !messageIds.has(currentLeafId)) {
+        return false;
+    }
+    if (messages.filter((message) => message.parent_message_uuid === null).length !== 1) {
+        return false;
+    }
+    for (const message of messages) {
+        if (
+            message.parent_message_uuid !== null &&
+            (message.parent_message_uuid === message.uuid || !messageIds.has(message.parent_message_uuid))
+        ) {
+            return false;
+        }
+    }
+
+    const states = new Map<string, 'visiting' | 'visited'>();
+    const messagesById = new Map(messages.map((message) => [message.uuid, message]));
+    const reachesRoot = (messageId: string): boolean => {
+        const state = states.get(messageId);
+        if (state === 'visiting') {
+            return false;
+        }
+        if (state === 'visited') {
+            return true;
+        }
+        states.set(messageId, 'visiting');
+        const parentId = messagesById.get(messageId)?.parent_message_uuid ?? null;
+        if (parentId !== null && !reachesRoot(parentId)) {
+            return false;
+        }
+        states.set(messageId, 'visited');
+        return true;
+    };
+
+    return (
+        messages.every((message) => reachesRoot(message.uuid)) &&
+        !messages.some((message) => message.parent_message_uuid === currentLeafId)
+    );
+};
+
 export const isClaudeConversationPayload = (payload: unknown): payload is ClaudeConversationPayload => {
     if (!isRecord(payload)) {
         return false;
@@ -103,8 +145,7 @@ export const isClaudeConversationPayload = (payload: unknown): payload is Claude
         return false;
     }
 
-    const messageIds = new Set(payload.chat_messages.map((message) => message.uuid));
-    return messageIds.size === payload.chat_messages.length && messageIds.has(payload.current_leaf_message_uuid);
+    return hasValidClaudeMessageGraph(payload.chat_messages, payload.current_leaf_message_uuid);
 };
 
 const extractTextBlocks = (content: ClaudeContentBlock[]): string =>
@@ -169,14 +210,12 @@ export const parseClaudeConversationPayload = (payload: unknown, requestUrl: str
         return null;
     }
 
-    const messageIds = new Set(payload.chat_messages.map((message) => message.uuid));
     const mapping: ConversationData['mapping'] = {};
     for (const rawMessage of payload.chat_messages) {
-        const parent = rawMessage.parent_message_uuid;
         mapping[rawMessage.uuid] = {
             id: rawMessage.uuid,
             message: buildMessage(rawMessage),
-            parent: parent && messageIds.has(parent) ? parent : null,
+            parent: rawMessage.parent_message_uuid,
             children: [],
         };
     }

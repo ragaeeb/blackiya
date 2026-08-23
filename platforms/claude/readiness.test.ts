@@ -71,11 +71,9 @@ describe('Claude readiness', () => {
     });
 
     it('should require the current leaf to be an assistant message', () => {
-        const readiness = claudeAdapter.evaluateReadiness?.(
-            parseFixture((payload) => {
-                payload.current_leaf_message_uuid = SYNTHETIC_USER_MESSAGE_ID;
-            }),
-        );
+        const data = parseFixture();
+        data.current_node = SYNTHETIC_USER_MESSAGE_ID;
+        const readiness = claudeAdapter.evaluateReadiness?.(data);
 
         expect(readiness).toMatchObject({
             ready: false,
@@ -120,6 +118,26 @@ describe('Claude readiness', () => {
             terminal: true,
             reason: 'assistant-content-missing',
         });
+    });
+
+    it('should reject unknown and structurally empty artifact blocks', () => {
+        for (const content of [
+            [{ type: 'unknown' }],
+            [{ type: 'tool_use', id: '', name: '', input: null }],
+            [{ type: 'tool_result', tool_use_id: '', content: [] }],
+        ]) {
+            const readiness = claudeAdapter.evaluateReadiness?.(
+                parseFixture((payload) => {
+                    payload.chat_messages[1]!.content = content;
+                }),
+            );
+
+            expect(readiness).toMatchObject({
+                ready: false,
+                terminal: true,
+                reason: 'assistant-content-missing',
+            });
+        }
     });
 
     it('should evaluate only the declared current leaf', () => {

@@ -3,6 +3,7 @@ import {
     createQwenConversationDetailFixture,
     QWEN_FIXTURE_ASSISTANT_MESSAGE_ID,
     QWEN_FIXTURE_CONVERSATION_ID,
+    QWEN_FIXTURE_USER_MESSAGE_ID,
 } from './fixtures/conversation-detail';
 import { parseQwenConversationDetail } from './parser';
 import { evaluateQwenReadiness } from './readiness';
@@ -107,12 +108,9 @@ describe('evaluateQwenReadiness', () => {
     });
 
     it('should reject a current node that is not an assistant message', () => {
-        const result = evaluateQwenReadiness(
-            parseFixture((payload) => {
-                payload.data.currentId = payload.data.chat.messages[0]!.id;
-                payload.data.chat.history.currentId = payload.data.chat.messages[0]!.id;
-            }),
-        );
+        const data = parseFixture();
+        data.current_node = QWEN_FIXTURE_USER_MESSAGE_ID;
+        const result = evaluateQwenReadiness(data);
 
         expect(result).toMatchObject({ ready: false, terminal: false, reason: 'assistant-missing' });
     });

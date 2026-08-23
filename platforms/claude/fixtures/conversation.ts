@@ -2,7 +2,6 @@ export const SYNTHETIC_ORGANIZATION_ID = '10000000-0000-4000-8000-000000000001';
 export const SYNTHETIC_CONVERSATION_ID = '20000000-0000-4000-8000-000000000002';
 export const SYNTHETIC_USER_MESSAGE_ID = '30000000-0000-4000-8000-000000000003';
 export const SYNTHETIC_ASSISTANT_MESSAGE_ID = '40000000-0000-4000-8000-000000000004';
-export const SYNTHETIC_ROOT_MESSAGE_ID = '50000000-0000-4000-8000-000000000005';
 
 export const CLAUDE_DETAIL_URL =
     `https://claude.ai/api/organizations/${SYNTHETIC_ORGANIZATION_ID}` +
@@ -74,7 +73,7 @@ export const createClaudeTerminalPayload = (): ClaudeFixturePayload => ({
     chat_messages: [
         {
             uuid: SYNTHETIC_USER_MESSAGE_ID,
-            parent_message_uuid: SYNTHETIC_ROOT_MESSAGE_ID,
+            parent_message_uuid: null,
             index: 0,
             sender: 'human',
             content: [

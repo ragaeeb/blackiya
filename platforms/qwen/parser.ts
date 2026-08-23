@@ -40,21 +40,63 @@ const qwenRole = (value: unknown): Author['role'] | null => {
     return null;
 };
 
-const resolveMessages = (data: JsonRecord): JsonRecord[] => {
+const jsonValuesEqual = (left: unknown, right: unknown): boolean => {
+    if (Object.is(left, right)) {
+        return true;
+    }
+    if (Array.isArray(left) || Array.isArray(right)) {
+        return (
+            Array.isArray(left) &&
+            Array.isArray(right) &&
+            left.length === right.length &&
+            left.every((value, index) => jsonValuesEqual(value, right[index]))
+        );
+    }
+    const leftRecord = toRecord(left);
+    const rightRecord = toRecord(right);
+    if (!leftRecord || !rightRecord) {
+        return false;
+    }
+    const leftKeys = Object.keys(leftRecord).sort();
+    const rightKeys = Object.keys(rightRecord).sort();
+    return (
+        leftKeys.length === rightKeys.length &&
+        leftKeys.every((key, index) => key === rightKeys[index] && jsonValuesEqual(leftRecord[key], rightRecord[key]))
+    );
+};
+
+const resolveMessages = (data: JsonRecord): JsonRecord[] | null => {
     const chat = toRecord(data.chat);
-    const direct = Array.isArray(chat?.messages)
-        ? chat.messages.map(toRecord).filter((item): item is JsonRecord => !!item)
-        : [];
-    if (direct.length > 0) {
-        return direct;
+    const directValues = Array.isArray(chat?.messages) ? chat.messages : [];
+    const direct = directValues.map(toRecord);
+    if (direct.some((message) => message === null)) {
+        return null;
     }
     const history = toRecord(chat?.history);
     const keyedMessages = toRecord(history?.messages);
-    return keyedMessages
-        ? Object.values(keyedMessages)
-              .map(toRecord)
-              .filter((item): item is JsonRecord => !!item)
+    const keyed = keyedMessages
+        ? Object.entries(keyedMessages).map(([id, value]) => [id, toRecord(value)] as const)
         : [];
+    if (keyed.some(([id, message]) => !message || message.id !== id)) {
+        return null;
+    }
+
+    const parsedDirect = direct as JsonRecord[];
+    const parsedKeyed = keyed.map(([, message]) => message!);
+    if (parsedDirect.length > 0 && parsedKeyed.length > 0) {
+        const keyedById = new Map(parsedKeyed.map((message) => [stringValue(message.id), message]));
+        if (
+            keyedById.size !== parsedKeyed.length ||
+            parsedDirect.length !== parsedKeyed.length ||
+            !parsedDirect.every((message) => {
+                const id = stringValue(message.id);
+                return id !== null && jsonValuesEqual(message, keyedById.get(id));
+            })
+        ) {
+            return null;
+        }
+    }
+    return parsedDirect.length > 0 ? parsedDirect : parsedKeyed;
 };
 
 const answerSegments = (message: JsonRecord): JsonRecord[] =>
@@ -137,20 +179,57 @@ const createMessageNode = (source: JsonRecord): MessageNode | null => {
     };
 };
 
-const connectMessageNode = (mapping: Record<string, MessageNode>, node: MessageNode) => {
-    if (node.parent && !mapping[node.parent]) {
-        mapping[node.parent] = { id: node.parent, message: null, parent: null, children: [node.id] };
-    } else if (node.parent && !mapping[node.parent]!.children.includes(node.id)) {
-        mapping[node.parent]!.children.push(node.id);
-    }
-    for (const childId of node.children) {
-        if (!mapping[childId]) {
-            mapping[childId] = { id: childId, message: null, parent: node.id, children: [] };
+const hasConsistentQwenLinks = (mapping: Record<string, MessageNode>, nodes: MessageNode[]): boolean => {
+    for (const node of nodes) {
+        if (node.parent !== null && !mapping[node.parent]) {
+            return false;
+        }
+        const uniqueChildren = new Set(node.children);
+        if (uniqueChildren.size !== node.children.length || node.children.some((childId) => !mapping[childId])) {
+            return false;
+        }
+        const expectedChildren = nodes
+            .filter((candidate) => candidate.parent === node.id)
+            .map((candidate) => candidate.id);
+        if (
+            expectedChildren.length !== uniqueChildren.size ||
+            expectedChildren.some((childId) => !uniqueChildren.has(childId))
+        ) {
+            return false;
         }
     }
+    return true;
 };
 
-const createMapping = (messages: JsonRecord[]): Record<string, MessageNode> | null => {
+const hasConnectedQwenTree = (
+    mapping: Record<string, MessageNode>,
+    nodes: MessageNode[],
+    rootId: string,
+    currentNode: string,
+): boolean => {
+    const visited = new Set<string>();
+    const visiting = new Set<string>();
+    const visit = (nodeId: string): boolean => {
+        if (visiting.has(nodeId)) {
+            return false;
+        }
+        if (visited.has(nodeId)) {
+            return true;
+        }
+        visiting.add(nodeId);
+        for (const childId of mapping[nodeId]!.children) {
+            if (!visit(childId)) {
+                return false;
+            }
+        }
+        visiting.delete(nodeId);
+        visited.add(nodeId);
+        return true;
+    };
+    return visit(rootId) && visited.size === nodes.length && visited.has(currentNode);
+};
+
+const createMapping = (messages: JsonRecord[], currentNode: string): Record<string, MessageNode> | null => {
     const mapping: Record<string, MessageNode> = {};
     for (const source of messages) {
         const node = createMessageNode(source);
@@ -159,8 +238,13 @@ const createMapping = (messages: JsonRecord[]): Record<string, MessageNode> | nu
         }
         mapping[node.id] = node;
     }
-    for (const node of Object.values(mapping)) {
-        connectMessageNode(mapping, node);
+    const nodes = Object.values(mapping);
+    const roots = nodes.filter((node) => node.parent === null);
+    if (roots.length !== 1 || !mapping[currentNode] || mapping[currentNode]!.children.length > 0) {
+        return null;
+    }
+    if (!hasConsistentQwenLinks(mapping, nodes) || !hasConnectedQwenTree(mapping, nodes, roots[0]!.id, currentNode)) {
+        return null;
     }
     return mapping;
 };
@@ -192,11 +276,19 @@ export const parseQwenConversationDetail = (raw: unknown, url: string): Conversa
         return null;
     }
     const messages = resolveMessages(data);
-    const mapping = createMapping(messages);
     const chat = toRecord(data.chat);
     const history = toRecord(chat?.history);
-    const currentNode = stringValue(data.currentId) ?? stringValue(history?.currentId);
-    if (!mapping || !currentNode || !mapping[currentNode]?.message) {
+    const directCurrentNode = stringValue(data.currentId);
+    const historyCurrentNode = stringValue(history?.currentId);
+    if (directCurrentNode && historyCurrentNode && directCurrentNode !== historyCurrentNode) {
+        return null;
+    }
+    const currentNode = directCurrentNode ?? historyCurrentNode;
+    if (!messages || !currentNode) {
+        return null;
+    }
+    const mapping = createMapping(messages, currentNode);
+    if (!mapping?.[currentNode]?.message) {
         return null;
     }
     return {

@@ -36,7 +36,7 @@ describe('qwenAdapter', () => {
         const detailUrl = `https://chat.qwen.ai/api/v2/chats/${QWEN_FIXTURE_CONVERSATION_ID}`;
         const pagedDetailUrl = `${detailUrl}?direction=up&limit=10`;
 
-        expect(qwenAdapter.isConversationDetailRequest?.(detailUrl, 'GET')).toBeTrue();
+        expect(qwenAdapter.isConversationDetailRequest?.(detailUrl, 'GET')).toBeFalse();
         expect(qwenAdapter.isConversationDetailRequest?.(pagedDetailUrl, 'get')).toBeTrue();
         expect(qwenAdapter.isConversationDetailRequest?.(detailUrl, 'POST')).toBeFalse();
         expect(qwenAdapter.isConversationDetailRequest?.('https://chat.qwen.ai/api/v2/chats/', 'GET')).toBeFalse();
@@ -46,6 +46,8 @@ describe('qwenAdapter', () => {
         expect(qwenAdapter.isConversationDetailRequest?.(`${detailUrl}/tags`, 'GET')).toBeFalse();
         expect(qwenAdapter.isConversationDetailRequest?.(`${detailUrl}?direction=down&limit=10`, 'GET')).toBeFalse();
         expect(qwenAdapter.isConversationDetailRequest?.(`${pagedDetailUrl}&extra=true`, 'GET')).toBeFalse();
+        expect(qwenAdapter.isConversationDetailRequest?.(`${pagedDetailUrl}&direction=up`, 'GET')).toBeFalse();
+        expect(qwenAdapter.isConversationDetailRequest?.(`${pagedDetailUrl}&limit=10`, 'GET')).toBeFalse();
         expect(
             qwenAdapter.isConversationDetailRequest?.(
                 `https://example.com/api/v2/chats/${QWEN_FIXTURE_CONVERSATION_ID}`,

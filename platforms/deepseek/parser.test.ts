@@ -45,6 +45,29 @@ describe('DeepSeek history parser', () => {
         expect(parseDeepSeekHistoryResponse(JSON.stringify(mismatch), SYNTHETIC_DEEPSEEK_HISTORY_URL)).toBeNull();
     });
 
+    it('should reject orphaned parents, cycles, disconnected roots, and stale current nodes', () => {
+        const orphaned = createSyntheticDeepSeekHistoryResponse();
+        orphaned.data.biz_data.chat_messages[1]!.parent_id = 999;
+
+        const cyclic = createSyntheticDeepSeekHistoryResponse();
+        cyclic.data.biz_data.chat_messages[0]!.parent_id = 202;
+
+        const disconnected = createSyntheticDeepSeekHistoryResponse();
+        disconnected.data.biz_data.chat_messages[1]!.parent_id = 0;
+
+        const staleCurrent = createSyntheticDeepSeekHistoryResponse();
+        staleCurrent.data.biz_data.chat_messages.push({
+            ...structuredClone(staleCurrent.data.biz_data.chat_messages[1]!),
+            message_id: 303,
+            parent_id: 202,
+            inserted_at: 1_700_000_011,
+        });
+
+        for (const payload of [orphaned, cyclic, disconnected, staleCurrent]) {
+            expect(parseDeepSeekHistoryResponse(JSON.stringify(payload), SYNTHETIC_DEEPSEEK_HISTORY_URL)).toBeNull();
+        }
+    });
+
     it('should reject non-DeepSeek and non-history endpoint URLs', () => {
         const payload = JSON.stringify(createSyntheticDeepSeekHistoryResponse());
 

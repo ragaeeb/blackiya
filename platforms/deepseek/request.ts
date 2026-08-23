@@ -53,8 +53,29 @@ const readAllowlistedHeaders = (headers: HeadersInit | undefined) => {
 const parseDeepSeekHistoryUrl = (url: string): URL | null => {
     try {
         const parsed = new URL(url);
-        if (parsed.origin !== DEEPSEEK_ORIGIN || parsed.pathname !== DEEPSEEK_HISTORY_PATH) {
+        if (
+            parsed.origin !== DEEPSEEK_ORIGIN ||
+            parsed.pathname !== DEEPSEEK_HISTORY_PATH ||
+            parsed.username.length > 0 ||
+            parsed.password.length > 0 ||
+            parsed.hash.length > 0
+        ) {
             return null;
+        }
+        const allowedNames = new Set(['chat_session_id', 'cache_version', 'cache_reset_at']);
+        for (const name of parsed.searchParams.keys()) {
+            if (!allowedNames.has(name)) {
+                return null;
+            }
+        }
+        if (parsed.searchParams.getAll('chat_session_id').length !== 1) {
+            return null;
+        }
+        for (const optionalName of ['cache_version', 'cache_reset_at']) {
+            const values = parsed.searchParams.getAll(optionalName);
+            if (values.length > 1 || (values.length === 1 && values[0]!.trim().length === 0)) {
+                return null;
+            }
         }
         return parsed;
     } catch {

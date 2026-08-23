@@ -56,4 +56,23 @@ describe('DeepSeek history request helpers', () => {
             ),
         ).toBeNull();
     });
+
+    it('should reject noncanonical history query variants', () => {
+        const base =
+            `https://chat.deepseek.com/api/v0/chat/history_messages?chat_session_id=` +
+            SYNTHETIC_DEEPSEEK_CONVERSATION_ID;
+        const variants = [
+            `${base}&extra=true`,
+            `${base}&cursor=synthetic`,
+            `${base}&chat_session_id=${SYNTHETIC_DEEPSEEK_CONVERSATION_ID}`,
+            `${base}&cache_version=7&cache_version=8`,
+            `${base}&cache_reset_at=`,
+            `${base}#fragment`,
+            base.replace('https://', 'https://synthetic-user@'),
+        ];
+
+        for (const url of variants) {
+            expect(parseDeepSeekHistoryRequestContext(url, syntheticClientHeaders)).toBeNull();
+        }
+    });
 });

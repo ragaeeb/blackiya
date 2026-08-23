@@ -49,12 +49,10 @@ describe('DeepSeek readiness', () => {
     }
 
     it('should fail closed when the current message is not an assistant turn', () => {
-        const payload = createSyntheticDeepSeekHistoryResponse();
-        payload.data.biz_data.chat_session.current_message_id = 101;
-        const parsed = parseDeepSeekHistoryResponse(JSON.stringify(payload), SYNTHETIC_DEEPSEEK_HISTORY_URL);
+        const parsed = parseFixture();
+        parsed.current_node = '101';
 
-        expect(parsed).not.toBeNull();
-        expect(evaluateDeepSeekReadiness(parsed!)).toMatchObject({
+        expect(evaluateDeepSeekReadiness(parsed)).toMatchObject({
             ready: false,
             terminal: false,
             reason: 'current-assistant-missing',

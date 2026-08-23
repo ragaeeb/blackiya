@@ -42,6 +42,42 @@ describe('parseQwenConversationDetail', () => {
         ]);
     });
 
+    it('should reject conflicting ordered and ID-keyed message representations', () => {
+        const payload = createQwenConversationDetailFixture();
+        payload.data.chat.messages = structuredClone(payload.data.chat.messages);
+        (payload.data.chat.messages[1] as { done: boolean }).done = false;
+
+        expect(parseQwenConversationDetail(payload, DETAIL_URL)).toBeNull();
+    });
+
+    it('should reject orphaned parents, cycles, disconnected roots, and stale current nodes', () => {
+        const orphaned = createQwenConversationDetailFixture();
+        orphaned.data.chat.messages[1]!.parentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        orphaned.data.chat.history.messages[QWEN_FIXTURE_ASSISTANT_MESSAGE_ID]!.parentId =
+            'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+        const cyclic = createQwenConversationDetailFixture();
+        cyclic.data.chat.messages[0]!.parentId = QWEN_FIXTURE_ASSISTANT_MESSAGE_ID;
+        cyclic.data.chat.messages[1]!.childrenIds = [QWEN_FIXTURE_USER_MESSAGE_ID];
+
+        const disconnected = createQwenConversationDetailFixture();
+        (disconnected.data.chat.messages[1] as { parentId: string | null }).parentId = null;
+        (
+            disconnected.data.chat.history.messages[QWEN_FIXTURE_ASSISTANT_MESSAGE_ID] as {
+                parentId: string | null;
+            }
+        ).parentId = null;
+        disconnected.data.chat.messages[0]!.childrenIds = [];
+
+        const staleCurrent = createQwenConversationDetailFixture();
+        staleCurrent.data.currentId = QWEN_FIXTURE_USER_MESSAGE_ID;
+        staleCurrent.data.chat.history.currentId = QWEN_FIXTURE_USER_MESSAGE_ID;
+
+        for (const payload of [orphaned, cyclic, disconnected, staleCurrent]) {
+            expect(parseQwenConversationDetail(payload, DETAIL_URL)).toBeNull();
+        }
+    });
+
     it('should reject malformed, unsuccessful, wrong-endpoint, and ID-mismatched payloads', () => {
         const unsuccessful = createQwenConversationDetailFixture();
         unsuccessful.success = false;

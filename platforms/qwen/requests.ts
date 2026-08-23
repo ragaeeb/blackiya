@@ -105,9 +105,6 @@ export const extractQwenConversationIdFromDetailUrl = (url: string): string | nu
 };
 
 const hasCanonicalDetailQuery = (url: URL): boolean => {
-    if (url.searchParams.size === 0) {
-        return true;
-    }
     return (
         url.searchParams.size === 2 &&
         url.searchParams.getAll('direction').length === 1 &&

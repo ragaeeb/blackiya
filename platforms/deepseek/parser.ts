@@ -141,6 +141,52 @@ const parseSession = (value: unknown): DeepSeekSession | null => {
     };
 };
 
+const hasValidDeepSeekMessageGraph = (messages: DeepSeekMessage[], currentMessageId: string): boolean => {
+    const roots = messages.filter((message) => message.parentId === '0');
+    if (roots.length !== 1) {
+        return false;
+    }
+
+    const childrenById = new Map(messages.map((message) => [message.messageId, [] as string[]]));
+    for (const message of messages) {
+        if (message.parentId === null || message.parentId === message.messageId) {
+            return false;
+        }
+        if (message.parentId !== '0') {
+            const siblings = childrenById.get(message.parentId);
+            if (!siblings) {
+                return false;
+            }
+            siblings.push(message.messageId);
+        }
+    }
+    if ((childrenById.get(currentMessageId)?.length ?? 0) > 0) {
+        return false;
+    }
+
+    const visited = new Set<string>();
+    const visiting = new Set<string>();
+    const visit = (messageId: string): boolean => {
+        if (visiting.has(messageId)) {
+            return false;
+        }
+        if (visited.has(messageId)) {
+            return true;
+        }
+        visiting.add(messageId);
+        for (const childId of childrenById.get(messageId) ?? []) {
+            if (!visit(childId)) {
+                return false;
+            }
+        }
+        visiting.delete(messageId);
+        visited.add(messageId);
+        return true;
+    };
+
+    return visit(roots[0]!.messageId) && visited.size === messages.length && visited.has(currentMessageId);
+};
+
 const parseEnvelope = (value: unknown): DeepSeekHistoryEnvelope | null => {
     if (!isRecord(value) || value.code !== 0 || !isRecord(value.data) || value.data.biz_code !== 0) {
         return null;
@@ -164,7 +210,7 @@ const parseEnvelope = (value: unknown): DeepSeekHistoryEnvelope | null => {
         seenIds.add(parsed.messageId);
         messages.push(parsed);
     }
-    if (!seenIds.has(session.currentMessageId)) {
+    if (!seenIds.has(session.currentMessageId) || !hasValidDeepSeekMessageGraph(messages, session.currentMessageId)) {
         return null;
     }
 
@@ -239,10 +285,8 @@ const buildMapping = (conversationId: string, messages: DeepSeekMessage[]) => {
     const mapping: Record<string, MessageNode> = {
         [rootId]: { id: rootId, message: null, parent: null, children: [] },
     };
-    const messageIds = new Set(messages.map((message) => message.messageId));
-
     for (const message of messages) {
-        const parent = message.parentId && messageIds.has(message.parentId) ? message.parentId : rootId;
+        const parent = message.parentId === '0' ? rootId : message.parentId;
         mapping[message.messageId] = {
             id: message.messageId,
             message: buildNormalizedMessage(message),

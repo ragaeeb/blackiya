@@ -30,15 +30,52 @@ const extractText = (data: ConversationData): string => {
         .normalize('NFC');
 };
 
-const hasStructuredArtifact = (parts: MessagePart[] | undefined): boolean =>
-    (parts ?? []).some(
-        (part) =>
-            typeof part === 'object' &&
-            part !== null &&
-            typeof part.type === 'string' &&
-            part.type !== 'text' &&
-            part.type !== 'thinking',
+const hasNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+
+const hasToolResultContent = (value: unknown): boolean => {
+    if (hasNonEmptyString(value)) {
+        return true;
+    }
+    if (!Array.isArray(value)) {
+        return false;
+    }
+    return value.some(
+        (item) =>
+            typeof item === 'object' &&
+            item !== null &&
+            'type' in item &&
+            item.type === 'text' &&
+            'text' in item &&
+            hasNonEmptyString(item.text),
     );
+};
+
+const isSupportedStructuredArtifact = (part: MessagePart): boolean => {
+    if (typeof part !== 'object' || part === null || !('type' in part)) {
+        return false;
+    }
+    if (part.type === 'tool_use') {
+        return (
+            'id' in part &&
+            hasNonEmptyString(part.id) &&
+            'name' in part &&
+            hasNonEmptyString(part.name) &&
+            'input' in part &&
+            part.input !== null &&
+            part.input !== undefined
+        );
+    }
+    return (
+        part.type === 'tool_result' &&
+        'tool_use_id' in part &&
+        hasNonEmptyString(part.tool_use_id) &&
+        'content' in part &&
+        hasToolResultContent(part.content)
+    );
+};
+
+const hasStructuredArtifact = (parts: MessagePart[] | undefined): boolean =>
+    (parts ?? []).some(isSupportedStructuredArtifact);
 
 export const evaluateClaudeReadiness = (data: ConversationData): PlatformReadiness => {
     const currentMessage = data.mapping[data.current_node]?.message;
