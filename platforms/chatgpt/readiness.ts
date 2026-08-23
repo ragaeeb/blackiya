@@ -73,12 +73,42 @@ const hasFinishedAssistantText = (message: Message): boolean =>
     message.content.content_type === 'text' &&
     extractAssistantText(message).length > 0;
 
-const isTerminalNonTextAssistant = (message: Message, text: string): boolean =>
+const isExplicitlyEndedReasoningRecap = (message: Message): boolean =>
     message.status === 'finished_successfully' &&
-    message.end_turn === true &&
-    text.length === 0 &&
-    message.content.content_type !== 'text' &&
-    message.content.content_type !== 'thoughts';
+    message.content.content_type === 'reasoning_recap' &&
+    message.metadata?.reasoning_status === 'reasoning_ended';
+
+const isCompletedDeepResearchAssistant = (message: Message | undefined): boolean =>
+    message?.author.role === 'assistant' &&
+    message.status === 'finished_successfully' &&
+    message.content.content_type === 'code' &&
+    message.metadata?.is_complete === true &&
+    message.metadata?.message_type === 'next';
+
+const isTerminalDeepResearchToolBranch = (activeBranchMessages: Message[]): boolean => {
+    const latestMessage = activeBranchMessages.at(-1);
+    const precedingMessage = activeBranchMessages.at(-2);
+    return (
+        latestMessage?.author.role === 'tool' &&
+        latestMessage.status === 'finished_successfully' &&
+        latestMessage.content.content_type === 'code' &&
+        latestMessage.metadata?.message_type === 'next' &&
+        isCompletedDeepResearchAssistant(precedingMessage)
+    );
+};
+
+const isTerminalNonTextAssistant = (message: Message, text: string): boolean => {
+    if (isExplicitlyEndedReasoningRecap(message)) {
+        return true;
+    }
+    return (
+        message.status === 'finished_successfully' &&
+        message.end_turn === true &&
+        text.length === 0 &&
+        message.content.content_type !== 'text' &&
+        message.content.content_type !== 'thoughts'
+    );
+};
 
 const resolveTerminalAssistantReadiness = (
     activeBranchMessages: Message[],
@@ -87,10 +117,13 @@ const resolveTerminalAssistantReadiness = (
     const latestMessage = activeBranchMessages.at(-1);
     const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
     const latestMessageText = latestMessage ? extractMessageText(latestMessage) : '';
+    const hasTerminalMarker =
+        (latestMessage?.author.role === 'assistant' &&
+            isTerminalNonTextAssistant(latestMessage, latestMessageText)) ||
+        isTerminalDeepResearchToolBranch(activeBranchMessages);
     if (
-        latestMessage?.author.role !== 'assistant' ||
         latestUserIndex < 0 ||
-        !isTerminalNonTextAssistant(latestMessage, latestMessageText)
+        !hasTerminalMarker
     ) {
         return null;
     }
@@ -98,7 +131,7 @@ const resolveTerminalAssistantReadiness = (
         ready: true,
         terminal: true,
         reason: 'terminal-marker',
-        contentHash: hashText(latestMessage.id || data.current_node),
+        contentHash: hashText(latestMessage?.id || data.current_node),
         latestAssistantTextLength: 1,
     };
 };
@@ -108,7 +141,8 @@ const resolveTerminalAssistantReadiness = (
  *
  * Readiness requires:
  * - The active branch ends in a finished assistant text message or an
- *   explicit terminal non-text marker
+ *   explicit terminal non-text marker, including a reasoning recap whose
+ *   metadata says reasoning has ended or a completed deep-research tool turn
  * - No later assistant message is still `in_progress`
  *
  * `end_turn` is advisory for history payloads. Modern ChatGPT responses can

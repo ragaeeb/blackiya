@@ -7,7 +7,6 @@ Use the smallest artifact that still explains the failure. In the v3 runtime the
 1. **Stream-debug records** — raw ordered stream frames for transport/parse triage.
 2. **Fail-fast export errors** — typed, metadata-only error results from the single-chat kernel.
 3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
-4. **Live authenticated-browser relay** — opt-in, localhost-only transport and `Save JSON` state diagnostics while reproducing in a real ChatGPT tab.
 
 ### MAIN-world bridge note
 
@@ -19,7 +18,6 @@ The command bridge accepts only events from the exact page window and exact page
 | :--- | :--- | :--- |
 | Stream-debug record(s) | Endpoint drift, framing/parse problems, malformed or truncated stream payloads | Ordered frames with byte accounting |
 | HAR analysis (JSON/MD) | Changed endpoints or unclear payload paths | Redacted endpoint/timeline summary from a `.har` |
-| Live relay NDJSON | A failure only reproducible in the authenticated browser | Sanitized generation paths, status/byte/signal metadata, and `Save JSON` state/error kind; no credentials or payload bodies |
 
 ## Stream-Debug Records
 
@@ -51,18 +49,6 @@ This priority-aware eviction preserves late refusal, replacement, and erase sign
 
 A `truncated` stream does **not** mean the export failed — it means the debug trace was bounded. Treat a truncated trace as expected only when the source stream genuinely exceeds the bounded budget.
 
-### Live authenticated-browser relay
-
-Run the local collector:
-
-```bash
-bun run browser:harness -- --relay --output ./blackiya-relay.ndjson
-```
-
-Load `harness/relay-extension` as a separate unpacked development extension, open its popup, enable the relay, and use `http://127.0.0.1:4177/events` (or the collector's printed port). Then reproduce the issue in the real ChatGPT tab with the built Blackiya extension loaded. The sidecar observes generation transport metadata and the Blackiya `Save JSON` control, including the typed error kind exposed on a failed save. It strips query strings/hashes and never forwards cookies, authorization headers, Gemini `at` context, request bodies, response text, stream frame text, or exported conversation JSON. Events remain in memory unless `--output` is supplied.
-
-This relay is a diagnostic sidecar, not part of the production Blackiya bundle. It is intentionally not proof against ChatGPT's production backend; its MV3 boundary test uses the strict local fixture.
-
 ### When to use
 
 Use a stream-debug record when:
@@ -86,7 +72,7 @@ The single-chat kernel returns a typed, fail-fast result and never writes a part
 | `timeout` | Request exceeded the hard timeout | Confirm the conversation is terminal, then retry explicitly; flag latency if persistent |
 | `parse_failure` | Empty body, parser returned null, or parser threw | Check payload shape via stream-debug/HAR |
 | `id_mismatch` | Response `conversation_id` differs from the URL id | Stale/redirected id — reopen and retry |
-| `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete |
+| `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete; an explicitly ended ChatGPT `reasoning_recap` or completed deep-research tool branch is accepted even when no final text assistant exists |
 
 There is no `degraded_manual_only` or partial/downgraded export path in v3. If `Save JSON` fails, the error variant tells you exactly which gate rejected it.
 
@@ -105,5 +91,6 @@ The analyzer writes redacted endpoint/timeline summaries plus hint matches for f
 1. Platform + exact URL(s) and extension version.
 2. Repro steps and timing.
 3. The fail-fast error result shown by `Save JSON` (if export failed).
-4. A stream-debug export if the issue is framing/parse/transport related.
-5. Screenshot of the final UI state.
+4. The redacted HAR analysis if the issue involves endpoint or payload drift.
+5. A stream-debug export if the issue is framing/parse/transport related.
+6. Screenshot of the final UI state.

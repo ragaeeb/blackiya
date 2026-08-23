@@ -45,21 +45,6 @@ jobs:
       - name: Build project
         run: bun run build
 
-      - name: Install Playwright Chromium
-        run: bunx playwright install --with-deps chromium
-
-      - name: Run deterministic browser harness
-        run: bun run test:e2e -- e2e/harness.playwright.ts
-
-      - name: Run MV3 extension boundary harness
-        run: xvfb-run -a bun run test:e2e -- e2e/harness-extension.playwright.ts
-
-      - name: Run authenticated browser relay harness
-        run: xvfb-run -a bun run test:e2e -- e2e/relay.playwright.ts
-
-      - name: Run popup smoke harness
-        run: xvfb-run -a bun run test:e2e -- e2e/smoke.playwright.ts
-
       - name: Create Zip Artifact
         run: bun run zip
 

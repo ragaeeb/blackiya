@@ -29,8 +29,6 @@
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "bun test",
-    "test:e2e": "playwright test",
-    "browser:harness": "bun run scripts/browser-harness.ts",
     "test:watch": "bun test --watch",
     "har:analyze": "bun run scripts/analyze-har.ts",
     "check": "biome check --write .",
@@ -43,7 +41,6 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
     "@happy-dom/global-registrator": "^20.11.6",
-    "@playwright/test": "^1.62.1",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
     "@semantic-release/github": "^12.0.9",

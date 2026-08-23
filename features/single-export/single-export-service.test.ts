@@ -106,7 +106,7 @@ const buildInProgressChatGptConversation = (id: string): ConversationData => {
     return data;
 };
 
-type Harness = {
+type TestContext = {
     deps: SingleExportDeps;
     fetchImpl: Mock<typeof fetch>;
     download: Mock<(jsonString: string, filename: string) => void>;
@@ -133,7 +133,7 @@ type Harness = {
     abortSignals: AbortSignal[];
 };
 
-const createHarness = (initial: { pageUrl: string; adapter: LLMPlatform | null }): Harness => {
+const createTestContext = (initial: { pageUrl: string; adapter: LLMPlatform | null }): TestContext => {
     let pageUrl = initial.pageUrl;
     let adapter: LLMPlatform | null = initial.adapter;
     let authHeaders: Record<string, string> | undefined = {
@@ -214,7 +214,7 @@ const createHarness = (initial: { pageUrl: string; adapter: LLMPlatform | null }
         });
     }) as Mock<typeof fetch>;
 
-    const download = mock((_jsonString: string, _filename: string) => {}) as Harness['download'];
+    const download = mock((_jsonString: string, _filename: string) => {}) as TestContext['download'];
 
     const deps: SingleExportDeps = {
         resolveAdapter: (_url: string) => adapter,
@@ -262,8 +262,8 @@ const createHarness = (initial: { pageUrl: string; adapter: LLMPlatform | null }
 
 describe('performSingleExport — resolution and validation', () => {
     it('should fail with unsupported_platform when no adapter matches the page URL', async () => {
-        const harness = createHarness({ pageUrl: 'https://example.com/something', adapter: null });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const testContext = createTestContext({ pageUrl: 'https://example.com/something', adapter: null });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -272,8 +272,8 @@ describe('performSingleExport — resolution and validation', () => {
     });
 
     it('should fail with missing_conversation_id when the URL has no conversation ID', async () => {
-        const harness = createHarness({ pageUrl: 'https://chatgpt.com/', adapter: chatGPTAdapter });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const testContext = createTestContext({ pageUrl: 'https://chatgpt.com/', adapter: chatGPTAdapter });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -287,11 +287,11 @@ describe('performSingleExport — resolution and validation', () => {
             buildApiUrl: undefined,
             buildApiUrls: undefined,
         } as unknown as LLMPlatform;
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter,
         });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -300,12 +300,12 @@ describe('performSingleExport — resolution and validation', () => {
     });
 
     it('should fail with missing_auth for Gemini when the at token is unavailable', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://gemini.google.com/app/${GEMINI_ID}`,
             adapter: geminiAdapter,
         });
-        harness.setGeminiContext(undefined);
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.setGeminiContext(undefined);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -314,60 +314,60 @@ describe('performSingleExport — resolution and validation', () => {
     });
 
     it('should fail with missing_auth before dispatch when ChatGPT authorization is unavailable', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
-        harness.setAuthHeaders({ 'x-test': 'client-context-only' });
-        harness.setFetchResponse({ ok: true, status: 200, text: '{}' });
+        testContext.setAuthHeaders({ 'x-test': 'client-context-only' });
+        testContext.setFetchResponse({ ok: true, status: 200, text: '{}' });
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
 
         expect(result).toEqual({
             kind: 'failure',
             error: { kind: 'missing_auth', platformName: 'ChatGPT' },
         });
-        expect(harness.fetchImpl).not.toHaveBeenCalled();
+        expect(testContext.fetchImpl).not.toHaveBeenCalled();
     });
 
     it('should accept an authorization header regardless of casing', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
         const payload = buildTerminalChatGptConversation(CHATGPT_ID);
-        harness.setAuthHeaders({ Authorization: 'Bearer case-insensitive-token' });
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        testContext.setAuthHeaders({ Authorization: 'Bearer case-insensitive-token' });
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
 
         expect(result.kind).toBe('success');
-        expect(harness.fetchImpl.mock.calls[0]?.[1]?.headers).toEqual({
+        expect(testContext.fetchImpl.mock.calls[0]?.[1]?.headers).toEqual({
             Authorization: 'Bearer case-insensitive-token',
         });
     });
 });
 
 describe('performSingleExport — HTTP/parse/ID/terminal', () => {
-    let harness: Harness;
+    let testContext: TestContext;
     beforeEach(() => {
-        harness = createHarness({
+        testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
     });
     afterEach(() => {
-        harness.fetchImpl.mockReset();
-        harness.download.mockReset();
-        harness.logger.info.mockReset();
-        harness.logger.warn.mockReset();
-        harness.logger.error.mockReset();
-        harness.logger.debug.mockReset();
+        testContext.fetchImpl.mockReset();
+        testContext.download.mockReset();
+        testContext.logger.info.mockReset();
+        testContext.logger.warn.mockReset();
+        testContext.logger.error.mockReset();
+        testContext.logger.debug.mockReset();
     });
 
     it('should fail with http_failure on a 5xx response', async () => {
-        harness.setFetchResponse({ ok: false, status: 503, statusText: 'Service Unavailable' });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.setFetchResponse({ ok: false, status: 503, statusText: 'Service Unavailable' });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -380,9 +380,9 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 
     it('should fail with missing_auth on a 401 response', async () => {
         const invalidateAuthContext = mock();
-        harness.deps.invalidateAuthContext = invalidateAuthContext;
-        harness.setFetchResponse({ ok: false, status: 401, statusText: 'Unauthorized' });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.deps.invalidateAuthContext = invalidateAuthContext;
+        testContext.setFetchResponse({ ok: false, status: 401, statusText: 'Unauthorized' });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -393,9 +393,9 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 
     it('should fail with missing_auth on a 403 response', async () => {
         const invalidateAuthContext = mock();
-        harness.deps.invalidateAuthContext = invalidateAuthContext;
-        harness.setFetchResponse({ ok: false, status: 403, statusText: 'Forbidden' });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.deps.invalidateAuthContext = invalidateAuthContext;
+        testContext.setFetchResponse({ ok: false, status: 403, statusText: 'Forbidden' });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -405,23 +405,23 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
     });
 
     it('should invalidate Gemini context when a single export receives an auth failure', async () => {
-        const geminiHarness = createHarness({
+        const geminiTestContext = createTestContext({
             pageUrl: `https://gemini.google.com/app/${GEMINI_ID}`,
             adapter: geminiAdapter,
         });
         const invalidateAuthContext = mock();
-        geminiHarness.deps.invalidateAuthContext = invalidateAuthContext;
-        geminiHarness.setFetchResponse({ ok: false, status: 403, statusText: 'Forbidden' });
+        geminiTestContext.deps.invalidateAuthContext = invalidateAuthContext;
+        geminiTestContext.setFetchResponse({ ok: false, status: 403, statusText: 'Forbidden' });
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, geminiHarness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, geminiTestContext.deps);
 
         expect(result).toMatchObject({ kind: 'failure', error: { kind: 'missing_auth' } });
         expect(invalidateAuthContext).toHaveBeenCalledWith('Gemini');
     });
 
     it('should fail with parse_failure when the parser returns null', async () => {
-        harness.setFetchResponse({ ok: true, status: 200, statusText: 'OK', text: 'unparseable' });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.setFetchResponse({ ok: true, status: 200, statusText: 'OK', text: 'unparseable' });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -431,12 +431,12 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 
     it('should return download_failure when browser download injection throws', async () => {
         const payload = buildTerminalChatGptConversation(CHATGPT_ID);
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
-        harness.deps.downloadJson = () => {
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        testContext.deps.downloadJson = () => {
             throw new Error('download permission denied');
         };
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
 
         expect(result).toEqual({
             kind: 'failure',
@@ -450,8 +450,8 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 
     it('should fail with id_mismatch when the response carries a different conversation_id', async () => {
         const wrong = buildTerminalChatGptConversation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(wrong) });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(wrong) });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -465,8 +465,8 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 
     it('should fail with not_terminal when the conversation is still streaming', async () => {
         const inProgress = buildInProgressChatGptConversation(CHATGPT_ID);
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(inProgress) });
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(inProgress) });
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -485,14 +485,14 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
                 latestAssistantTextLength: 0,
             }),
         };
-        harness = createHarness({
+        testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: notReadyAdapter,
         });
         const payload = buildTerminalChatGptConversation(CHATGPT_ID);
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('failure');
         if (result.kind !== 'failure') {
             return;
@@ -505,8 +505,8 @@ describe('performSingleExport — HTTP/parse/ID/terminal', () => {
 
     it('should fail with timeout when the AbortController fires after timeoutMs', async () => {
         // Mock delay > min-timeout so the AbortController actually fires before the response resolves.
-        harness.setFetchResponse({ ok: true, status: 200, text: '{}', delayMs: 2000 });
-        const result = await performSingleExport(100, harness.deps);
+        testContext.setFetchResponse({ ok: true, status: 200, text: '{}', delayMs: 2000 });
+        const result = await performSingleExport(100, testContext.deps);
         if (result.kind !== 'failure') {
             throw new Error(`expected failure but got ${result.kind}`);
         }
@@ -522,7 +522,7 @@ describe('performSingleExport — successful terminal exports', () => {
             new Response('', { status: 404, statusText: 'Not Found' }),
             new Response(JSON.stringify(payload), { status: 200, statusText: 'OK' }),
         ];
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
@@ -534,9 +534,9 @@ describe('performSingleExport — successful terminal exports', () => {
             }
             return response;
         });
-        harness.deps.fetchImpl = fetchImpl as unknown as typeof fetch;
+        testContext.deps.fetchImpl = fetchImpl as unknown as typeof fetch;
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
 
         expect(result.kind).toBe('success');
         expect(urls).toEqual([
@@ -590,12 +590,12 @@ describe('performSingleExport — successful terminal exports', () => {
                 }),
                 formatFilename: (data: ConversationData) => `${c.name}_export_test_${data.conversation_id.slice(0, 8)}`,
             };
-            const harness = createHarness({ pageUrl: c.pageUrl, adapter: stubbedAdapter });
-            harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+            const testContext = createTestContext({ pageUrl: c.pageUrl, adapter: stubbedAdapter });
+            testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
             const result: SingleExportResult = await performSingleExport(
                 SINGLE_EXPORT_DEFAULT_TIMEOUT_MS,
-                harness.deps,
+                testContext.deps,
             );
 
             if (result.kind !== 'success') {
@@ -609,8 +609,8 @@ describe('performSingleExport — successful terminal exports', () => {
             expect(result.filename).toBe(`${c.name}_export_test_${c.id.slice(0, 8)}`);
             expect(result.jsonString).toBe(JSON.stringify(payload, null, 2));
             // Download was invoked with the serialized JSON and the filename
-            expect(harness.download).toHaveBeenCalledTimes(1);
-            const call = harness.download.mock.calls[0]!;
+            expect(testContext.download).toHaveBeenCalledTimes(1);
+            const call = testContext.download.mock.calls[0]!;
             expect(call[0]).toBe(result.jsonString);
             expect(call[1]).toBe(result.filename);
         });
@@ -628,10 +628,10 @@ describe('performSingleExport — successful terminal exports', () => {
                     latestAssistantTextLength: 1,
                 }),
             };
-            const harness = createHarness({ pageUrl: c.pageUrl, adapter: stubbedAdapter });
-            harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+            const testContext = createTestContext({ pageUrl: c.pageUrl, adapter: stubbedAdapter });
+            testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
-            const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+            const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
             expect(result.kind).toBe('success');
             if (result.kind !== 'success') {
                 return;
@@ -649,14 +649,14 @@ describe('performSingleExport — successful terminal exports', () => {
     }
 
     it('should sanitize placeholder/empty titles through the adapter formatter', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
         const payload = buildTerminalChatGptConversation(CHATGPT_ID, { title: 'New conversation' });
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
-        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
         expect(result.kind).toBe('success');
         if (result.kind !== 'success') {
             return;
@@ -671,7 +671,7 @@ describe('performSingleExport — successful terminal exports', () => {
 
 describe('performSingleExport — request shape', () => {
     it('should time out when the response body never resolves', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
@@ -681,9 +681,9 @@ describe('performSingleExport — request shape', () => {
             statusText: 'OK',
             text: () => new Promise<string>(() => {}),
         } as unknown as Response;
-        harness.deps.fetchImpl = mock(async () => stalledResponse) as unknown as typeof fetch;
+        testContext.deps.fetchImpl = mock(async () => stalledResponse) as unknown as typeof fetch;
 
-        const result = await performSingleExport(100, harness.deps);
+        const result = await performSingleExport(100, testContext.deps);
 
         expect(result).toEqual({
             kind: 'failure',
@@ -696,33 +696,33 @@ describe('performSingleExport — request shape', () => {
     });
 
     it('should pass credentials: include and the auth headers for ChatGPT', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
             adapter: chatGPTAdapter,
         });
         const payload = buildTerminalChatGptConversation(CHATGPT_ID);
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
-        await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
 
-        expect(harness.fetchImpl).toHaveBeenCalledTimes(1);
-        const init = harness.fetchImpl.mock.calls[0]![1];
+        expect(testContext.fetchImpl).toHaveBeenCalledTimes(1);
+        const init = testContext.fetchImpl.mock.calls[0]![1];
         expect(init?.credentials).toBe('include');
         expect(init?.headers).toEqual({ authorization: 'Bearer test-token', 'x-test': '1' });
     });
 
     it('should POST the Gemini batchexecute body with content-type', async () => {
-        const harness = createHarness({
+        const testContext = createTestContext({
             pageUrl: `https://gemini.google.com/app/${GEMINI_ID}`,
             adapter: geminiAdapter,
         });
         const payload = buildTerminalChatGptConversation(GEMINI_ID);
-        harness.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
+        testContext.setFetchResponse({ ok: true, status: 200, text: JSON.stringify(payload) });
 
-        await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, harness.deps);
+        await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
 
-        expect(harness.fetchImpl).toHaveBeenCalledTimes(1);
-        const call = harness.fetchImpl.mock.calls[0]!;
+        expect(testContext.fetchImpl).toHaveBeenCalledTimes(1);
+        const call = testContext.fetchImpl.mock.calls[0]!;
         const url = call[0];
         const init = call[1];
         if (!init) {

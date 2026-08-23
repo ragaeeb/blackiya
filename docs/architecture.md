@@ -77,7 +77,7 @@ Primary module: `features/single-export/single-export-service.ts`.
    - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
    - Empty/bad body or parse failure → `parse_failure`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
-   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text; in-progress and non-terminal thoughts remain rejected.
+   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text. It also treats a `finished_successfully` `reasoning_recap` with `metadata.reasoning_status: reasoning_ended` as terminal when ChatGPT omits `end_turn`, and accepts a completed deep-research assistant-code node followed by a finished tool-code node. In-progress and non-terminal thoughts remain rejected.
 5. On success, serializes the complete platform payload (including the full `mapping` tree and platform-specific raw payload fields, preserved verbatim) and injects the download via `deps.downloadJson(jsonString, filename)`. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
@@ -177,13 +177,8 @@ Debug artifacts:
 
 - Stream-debug record(s) — raw ordered stream frames, exported explicitly.
 - HAR analysis — `bun run har:analyze --input <file.har> ...` for endpoint drift.
-- Deterministic kernel harness — `bun run test:e2e -- e2e/harness.playwright.ts` covers terminal success, non-terminal fail-closed behavior, multimodal terminal JSON, JSON download contents, and the fixture's artifact-host replacement model.
-- MV3 boundary harness — `bun run build && bun run test:e2e -- e2e/harness-extension.playwright.ts` loads the built Blackiya MV3 extension into Chromium, serves the document and provider endpoints from a strict local ChatGPT-origin fixture, captures a fake authorization header through the real interceptor bridge, and verifies the real `Save JSON` control survives the fixture's artifact-host replacement and downloads JSON. This is not a production ChatGPT backend or authenticated-session proof.
-- Development authenticated-browser relay — `bun run browser:harness -- --relay` starts a collector on `http://127.0.0.1:4177/events`. Load `harness/relay-extension` as a separate unpacked development extension, open its popup, enable the relay, and set the collector URL if the port differs. The relay remains disabled by default and is localhost-only. `bun run browser:harness -- --relay --output ./blackiya-relay.ndjson` additionally writes the sanitized event stream to the explicitly selected local file.
-
-The development relay is a sidecar for operating the real ChatGPT tab with the built extension. Its MAIN-world page hook observes only ChatGPT generation transport metadata and the `Save JSON` DOM state; it can also summarize records when the v3 stream-debug export response is explicitly emitted. It forwards sanitized paths, methods, status, frame/byte counts, bounded signal classifications (`done`, `refusal`, `replacement`, `erase`), and Save JSON state transitions. It never reads or forwards cookies, authorization headers, Gemini `at` tokens, request bodies, response text, or exported conversation JSON. The collector applies the same allowlist and query/hash stripping again before accepting an event. The relay extension stores only its enabled flag and localhost endpoint in extension storage; events are kept in collector memory unless `--output` is supplied.
-
-Relay limitations are intentional: it is dev-only and local-only, it does not change the production Blackiya bundle, it does not access the private stream recorder directly, and it does not prove behavior against ChatGPT's production backend. The two-extension Playwright test verifies the sidecar path against the local fixture and asserts that the collector receives no fake auth token, request body, headers, or query string.
+- Unit/integration tests — `bun test` cover readiness, single-export, bulk-export, runtime, and stream-debug behavior with sanitized fixtures.
+- Compile/build checks — `bun run compile` and `bun run build` validate the TypeScript graph and production MV3 bundle.
 
 Docs:
 

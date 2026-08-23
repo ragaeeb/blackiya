@@ -15,7 +15,7 @@ The v3 runtime has three user-facing surfaces:
 Hard-cut invariants (the v3 model):
 
 - **Explicit, ready-terminal-only export.** The single-chat kernel resolves deterministic detail candidates, advances only after an eligible `404`, validates the server response is ready and terminal, and refuses to save otherwise.
-- **Terminal artifact support.** ChatGPT may finish with a multimodal/image, code, or execution artifact instead of text; `finished_successfully` plus `end_turn: true` is accepted for those non-text assistant nodes, while in-progress and non-terminal thoughts remain fail-fast.
+- **Terminal artifact support.** ChatGPT may finish with a multimodal/image, code, or execution artifact instead of text; `finished_successfully` plus `end_turn: true` is accepted for those non-text assistant nodes, an explicitly ended `reasoning_recap` (`metadata.reasoning_status: reasoning_ended`) is accepted even when `end_turn` is false, and a completed deep-research assistant-code node followed by a finished tool-code node is terminal. In-progress and non-terminal thoughts remain fail-fast.
 - **Fail-fast.** Every non-happy path returns a typed error — no retries, no warm fetch, no snapshot replay, no stabilization, no degraded export.
 - **Explicit export is the only write path.** Nothing is written to a user JSON file without a click (`Save JSON` or `Export Chats`).
 - **Request-context capture without credential persistence.** Platform auth headers and Gemini batchexecute context are resolved at export time, live only for a single in-memory request, and are never written into the exported JSON or persisted across sessions.
@@ -114,8 +114,7 @@ bun test features/stream-debug/recorder.test.ts --bail
 bun test features/stream-debug/stream-monitor.test.ts --bail
 bun test features/runtime/v3-content-runtime.test.ts --bail
 bun test features/export-controls/export-controls.test.ts --bail
-bun run test:e2e
-bun run test:e2e -- e2e/harness.playwright.ts
+bun run har:analyze --input <file.har> --host chatgpt.com
 ```
 
 Test isolation rules (avoid cross-module pollution):
