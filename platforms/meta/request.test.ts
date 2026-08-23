@@ -60,7 +60,11 @@ describe('Meta Muse GraphQL request helpers', () => {
                     syntheticIgnoredField: 'ignored',
                 }),
             ),
-        ).toEqual({ kind: 'conversation-detail', documentId: DETAIL_DOCUMENT_ID });
+        ).toEqual({
+            kind: 'conversation-detail',
+            conversationId: SYNTHETIC_META_CONVERSATION_ID,
+            documentId: DETAIL_DOCUMENT_ID,
+        });
 
         expect(
             extractMetaGraphqlRequestContext(
@@ -73,7 +77,13 @@ describe('Meta Muse GraphQL request helpers', () => {
                     },
                 }),
             ),
-        ).toEqual({ kind: 'conversation-pagination', documentId: PAGINATION_DOCUMENT_ID });
+        ).toEqual({
+            kind: 'conversation-pagination',
+            conversationId: SYNTHETIC_META_CONVERSATION_ID,
+            documentId: PAGINATION_DOCUMENT_ID,
+            before: 'synthetic-before-cursor',
+            last: 20,
+        });
     });
 
     it('should reject malformed ids, document context, cursors, and page sizes', () => {

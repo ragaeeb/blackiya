@@ -17,10 +17,19 @@ export type MetaGraphqlRequest = {
     body: string;
 };
 
-export type MetaGraphqlContextCandidate = {
-    kind: 'conversation-detail' | 'conversation-pagination';
-    documentId: string;
-};
+export type MetaGraphqlContextCandidate =
+    | {
+          kind: 'conversation-detail';
+          conversationId: string;
+          documentId: string;
+      }
+    | {
+          kind: 'conversation-pagination';
+          conversationId: string;
+          documentId: string;
+          before: string;
+          last: number;
+      };
 
 type MetaPaginationInput = {
     conversationId: string;
@@ -112,7 +121,11 @@ export const extractMetaGraphqlRequestContext = (body: string): MetaGraphqlConte
         typeof variables.id === 'string' &&
         isMetaConversationId(variables.id)
     ) {
-        return { kind: 'conversation-detail', documentId: parsed.doc_id };
+        return {
+            kind: 'conversation-detail',
+            conversationId: variables.id,
+            documentId: parsed.doc_id,
+        };
     }
 
     if (
@@ -121,7 +134,13 @@ export const extractMetaGraphqlRequestContext = (body: string): MetaGraphqlConte
         isCursor(variables.before) &&
         isPageSize(variables.last)
     ) {
-        return { kind: 'conversation-pagination', documentId: parsed.doc_id };
+        return {
+            kind: 'conversation-pagination',
+            conversationId: variables.conversationId,
+            documentId: parsed.doc_id,
+            before: variables.before,
+            last: variables.last,
+        };
     }
 
     return null;
