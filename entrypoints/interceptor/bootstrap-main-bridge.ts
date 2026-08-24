@@ -1,6 +1,7 @@
 import type { BulkExportProgressMessage } from '@/features/bulk-export/contract';
 import { runBulkExport } from '@/features/bulk-export/orchestrator';
 import { sanitizeProgressError } from '@/features/bulk-export/progress';
+import type { MainWorldSingleExportTarget } from '@/features/runtime/main-world-command-contract';
 import {
     type MainWorldCommandOperations,
     setupMainWorldCommandHandler,
@@ -55,14 +56,20 @@ export const setupMainWorldBridge = () => {
 
     const resolveAdapter = () => getPlatformAdapter(window.location.href);
 
-    const runSingleExportInMainWorld = async () => {
+    const runSingleExportInMainWorld = async (target: MainWorldSingleExportTarget) => {
+        const pageUrl = window.location.href;
+        const adapter = getPlatformAdapter(pageUrl);
+        const conversationId = adapter?.extractConversationId(pageUrl);
+        if (!adapter || adapter.name !== target.platform || conversationId !== target.conversationId) {
+            const error = new Error('Conversation changed before export started.') as Error & { kind?: string };
+            error.kind = 'conversation_changed';
+            throw error;
+        }
+
         const result = await performSingleExport(undefined, {
-            resolveAdapter: () => resolveAdapter(),
-            getPageUrl: () => window.location.href,
-            getAuthHeaders: () => {
-                const adapter = resolveAdapter();
-                return adapter ? platformHeaderStore.get(adapter.name) : undefined;
-            },
+            resolveAdapter: () => adapter,
+            getPageUrl: () => pageUrl,
+            getAuthHeaders: () => platformHeaderStore.get(adapter.name),
             getGeminiBatchexecuteContext,
             getCachedConversation: (platformName, conversationId) =>
                 conversationResponseCache.get(platformName, conversationId),

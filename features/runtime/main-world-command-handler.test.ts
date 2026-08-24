@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Window } from 'happy-dom';
 import {
-    isValidMainWorldMessageEvent,
-    type MainWorldCommandOperations,
-    setupMainWorldCommandHandler,
-} from '@/features/runtime/main-world-command-handler';
-import {
     MAIN_WORLD_COMMAND_MESSAGE,
     MAIN_WORLD_PROGRESS_MESSAGE,
     MAIN_WORLD_RESULT_MESSAGE,
 } from '@/features/runtime/main-world-command-contract';
+import {
+    isValidMainWorldMessageEvent,
+    type MainWorldCommandOperations,
+    setupMainWorldCommandHandler,
+} from '@/features/runtime/main-world-command-handler';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 
 describe('MAIN-world command handler', () => {
@@ -90,13 +90,20 @@ describe('MAIN-world command handler', () => {
         ).toBeFalse();
     });
 
-    const postCommand = (operation: string, requestId: string, options?: Record<string, unknown>, token = getSessionToken()) => {
+    const postCommand = (
+        operation: string,
+        requestId: string,
+        options?: Record<string, unknown>,
+        token = getSessionToken(),
+        target?: { platform: string; conversationId: string },
+    ) => {
         windowInstance.postMessage(
             {
                 type: MAIN_WORLD_COMMAND_MESSAGE,
                 operation,
                 requestId,
                 ...(options ? { options } : {}),
+                ...(target ? { target } : {}),
                 __blackiyaToken: token,
             },
             windowInstance.location.origin,
@@ -110,8 +117,23 @@ describe('MAIN-world command handler', () => {
                 platform: 'ChatGPT',
                 filename: 'conversation.json',
             })),
-            bulkExport: mock(async () => ({ operation: 'bulk_export' as const, platform: 'ChatGPT', discovered: 0, attempted: 0, exported: 0, failed: 0, elapsedMs: 1, limit: 0, warnings: [] })),
-            exportStreamDebug: mock(async () => ({ operation: 'stream_debug_export' as const, streamCount: 1, frameCount: 1, filename: 'debug.json' })),
+            bulkExport: mock(async () => ({
+                operation: 'bulk_export' as const,
+                platform: 'ChatGPT',
+                discovered: 0,
+                attempted: 0,
+                exported: 0,
+                failed: 0,
+                elapsedMs: 1,
+                limit: 0,
+                warnings: [],
+            })),
+            exportStreamDebug: mock(async () => ({
+                operation: 'stream_debug_export' as const,
+                streamCount: 1,
+                frameCount: 1,
+                filename: 'debug.json',
+            })),
             clearStreamDebug: mock(async () => ({ operation: 'stream_debug_clear' as const, clearedStreams: 1 })),
         };
         setupMainWorldCommandHandler({ window: windowInstance as never, operations });
@@ -124,7 +146,10 @@ describe('MAIN-world command handler', () => {
             }) as any);
         });
 
-        postCommand('single_export', 'single-1');
+        postCommand('single_export', 'single-1', undefined, getSessionToken(), {
+            platform: 'ChatGPT',
+            conversationId: 'conversation-a',
+        });
 
         await expect(response).resolves.toEqual({
             type: MAIN_WORLD_RESULT_MESSAGE,
@@ -139,11 +164,19 @@ describe('MAIN-world command handler', () => {
             __blackiyaToken: getSessionToken(),
         });
         expect(operations.singleExport).toHaveBeenCalledTimes(1);
+        expect(operations.singleExport).toHaveBeenCalledWith({
+            platform: 'ChatGPT',
+            conversationId: 'conversation-a',
+        });
     });
 
     it('should expose only typed bulk progress and completion summaries', async () => {
         const operations: MainWorldCommandOperations = {
-            singleExport: mock(async () => ({ operation: 'single_export' as const, platform: 'ChatGPT', filename: 'x.json' })),
+            singleExport: mock(async () => ({
+                operation: 'single_export' as const,
+                platform: 'ChatGPT',
+                filename: 'x.json',
+            })),
             bulkExport: mock(async (_options, onProgress) => {
                 onProgress({
                     stage: 'progress',
@@ -166,7 +199,12 @@ describe('MAIN-world command handler', () => {
                     warnings: [],
                 };
             }),
-            exportStreamDebug: mock(async () => ({ operation: 'stream_debug_export' as const, streamCount: 0, frameCount: 0, filename: 'x.json' })),
+            exportStreamDebug: mock(async () => ({
+                operation: 'stream_debug_export' as const,
+                streamCount: 0,
+                frameCount: 0,
+                filename: 'x.json',
+            })),
             clearStreamDebug: mock(async () => ({ operation: 'stream_debug_clear' as const, clearedStreams: 0 })),
         };
         setupMainWorldCommandHandler({ window: windowInstance as never, operations });
@@ -215,8 +253,23 @@ describe('MAIN-world command handler', () => {
                 (error as Error & { kind?: string }).kind = 'not_terminal';
                 throw error;
             }),
-            bulkExport: mock(async () => ({ operation: 'bulk_export' as const, platform: 'ChatGPT', discovered: 0, attempted: 0, exported: 0, failed: 0, elapsedMs: 1, limit: 0, warnings: [] })),
-            exportStreamDebug: mock(async () => ({ operation: 'stream_debug_export' as const, streamCount: 0, frameCount: 0, filename: 'x.json' })),
+            bulkExport: mock(async () => ({
+                operation: 'bulk_export' as const,
+                platform: 'ChatGPT',
+                discovered: 0,
+                attempted: 0,
+                exported: 0,
+                failed: 0,
+                elapsedMs: 1,
+                limit: 0,
+                warnings: [],
+            })),
+            exportStreamDebug: mock(async () => ({
+                operation: 'stream_debug_export' as const,
+                streamCount: 0,
+                frameCount: 0,
+                filename: 'x.json',
+            })),
             clearStreamDebug: mock(async () => ({ operation: 'stream_debug_clear' as const, clearedStreams: 0 })),
         };
         setupMainWorldCommandHandler({ window: windowInstance as never, operations });
@@ -229,7 +282,10 @@ describe('MAIN-world command handler', () => {
             }) as any);
         });
 
-        postCommand('single_export', 'single-error');
+        postCommand('single_export', 'single-error', undefined, getSessionToken(), {
+            platform: 'ChatGPT',
+            conversationId: 'conversation-a',
+        });
 
         const resolved = await response;
         expect(resolved).toMatchObject({
@@ -245,14 +301,70 @@ describe('MAIN-world command handler', () => {
 
     it('should ignore commands with an invalid token', async () => {
         const operations: MainWorldCommandOperations = {
-            singleExport: mock(async () => ({ operation: 'single_export' as const, platform: 'ChatGPT', filename: 'x.json' })),
-            bulkExport: mock(async () => ({ operation: 'bulk_export' as const, platform: 'ChatGPT', discovered: 0, attempted: 0, exported: 0, failed: 0, elapsedMs: 1, limit: 0, warnings: [] })),
-            exportStreamDebug: mock(async () => ({ operation: 'stream_debug_export' as const, streamCount: 0, frameCount: 0, filename: 'x.json' })),
+            singleExport: mock(async () => ({
+                operation: 'single_export' as const,
+                platform: 'ChatGPT',
+                filename: 'x.json',
+            })),
+            bulkExport: mock(async () => ({
+                operation: 'bulk_export' as const,
+                platform: 'ChatGPT',
+                discovered: 0,
+                attempted: 0,
+                exported: 0,
+                failed: 0,
+                elapsedMs: 1,
+                limit: 0,
+                warnings: [],
+            })),
+            exportStreamDebug: mock(async () => ({
+                operation: 'stream_debug_export' as const,
+                streamCount: 0,
+                frameCount: 0,
+                filename: 'x.json',
+            })),
             clearStreamDebug: mock(async () => ({ operation: 'stream_debug_clear' as const, clearedStreams: 0 })),
         };
         setupMainWorldCommandHandler({ window: windowInstance as never, operations });
 
-        postCommand('single_export', 'invalid-token', undefined, 'bk:wrong-token');
+        postCommand('single_export', 'invalid-token', undefined, 'bk:wrong-token', {
+            platform: 'ChatGPT',
+            conversationId: 'conversation-a',
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(operations.singleExport).not.toHaveBeenCalled();
+    });
+
+    it('should reject unbound single-export commands before invoking MAIN operations', async () => {
+        const operations: MainWorldCommandOperations = {
+            singleExport: mock(async () => ({
+                operation: 'single_export' as const,
+                platform: 'ChatGPT',
+                filename: 'x.json',
+            })),
+            bulkExport: mock(async () => ({
+                operation: 'bulk_export' as const,
+                platform: 'ChatGPT',
+                discovered: 0,
+                attempted: 0,
+                exported: 0,
+                failed: 0,
+                elapsedMs: 1,
+                limit: 0,
+                warnings: [],
+            })),
+            exportStreamDebug: mock(async () => ({
+                operation: 'stream_debug_export' as const,
+                streamCount: 0,
+                frameCount: 0,
+                filename: 'x.json',
+            })),
+            clearStreamDebug: mock(async () => ({ operation: 'stream_debug_clear' as const, clearedStreams: 0 })),
+        };
+        setupMainWorldCommandHandler({ window: windowInstance as never, operations });
+
+        postCommand('single_export', 'unbound-single');
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(operations.singleExport).not.toHaveBeenCalled();

@@ -39,9 +39,28 @@ describe('v3 content runtime', () => {
     it('should wire popup messages to MAIN-world export commands', async () => {
         const { host, dispatch } = createHost();
         const mainWorldBridge = {
-            exportSingle: mock(async () => ({ operation: 'single_export' as const, platform: 'ChatGPT', filename: 'x.json' })),
-            runBulkExport: mock(async () => ({ operation: 'bulk_export' as const, platform: 'ChatGPT', discovered: 2, attempted: 2, exported: 2, failed: 0, elapsedMs: 1, limit: 0, warnings: [] })),
-            exportStreamDebug: mock(async () => ({ operation: 'stream_debug_export' as const, streamCount: 0, frameCount: 0, filename: 'x.json' })),
+            exportSingle: mock(async (_target) => ({
+                operation: 'single_export' as const,
+                platform: 'ChatGPT',
+                filename: 'x.json',
+            })),
+            runBulkExport: mock(async () => ({
+                operation: 'bulk_export' as const,
+                platform: 'ChatGPT',
+                discovered: 2,
+                attempted: 2,
+                exported: 2,
+                failed: 0,
+                elapsedMs: 1,
+                limit: 0,
+                warnings: [],
+            })),
+            exportStreamDebug: mock(async () => ({
+                operation: 'stream_debug_export' as const,
+                streamCount: 0,
+                frameCount: 0,
+                filename: 'x.json',
+            })),
             clearStreamDebug: mock(async () => ({ operation: 'stream_debug_clear' as const, clearedStreams: 0 })),
             dispose: mock(() => undefined),
         };

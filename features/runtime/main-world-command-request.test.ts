@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import { MAIN_WORLD_COMMAND_MESSAGE, MAIN_WORLD_RESULT_MESSAGE } from '@/features/runtime/main-world-command-contract';
 import {
     createMainWorldCommandBridge,
     type MainWorldCommandWindow,
 } from '@/features/runtime/main-world-command-request';
-import {
-    MAIN_WORLD_COMMAND_MESSAGE,
-    MAIN_WORLD_RESULT_MESSAGE,
-} from '@/features/runtime/main-world-command-contract';
 
 const createWindow = () => {
     const listeners = new Set<(event: { data: unknown; origin: string; source: unknown }) => void>();
@@ -33,8 +30,19 @@ const createWindow = () => {
                             ok: true,
                             result:
                                 message.operation === 'stream_debug_export'
-                                    ? { operation: 'stream_debug_export', streamCount: 2, frameCount: 4, filename: 'debug.json' }
-                                    : { operation: message.operation },
+                                    ? {
+                                          operation: 'stream_debug_export',
+                                          streamCount: 2,
+                                          frameCount: 4,
+                                          filename: 'debug.json',
+                                      }
+                                    : message.operation === 'single_export'
+                                      ? {
+                                            operation: 'single_export',
+                                            platform: 'ChatGPT',
+                                            filename: 'conversation.json',
+                                        }
+                                      : { operation: message.operation },
                             __blackiyaToken: 'test-token',
                         },
                         origin: 'https://chatgpt.com',
@@ -43,10 +51,14 @@ const createWindow = () => {
                 }
             });
         },
-        addEventListener: (_type: 'message', listener: (event: { data: unknown; origin: string; source: unknown }) => void) =>
-            listeners.add(listener),
-        removeEventListener: (_type: 'message', listener: (event: { data: unknown; origin: string; source: unknown }) => void) =>
-            listeners.delete(listener),
+        addEventListener: (
+            _type: 'message',
+            listener: (event: { data: unknown; origin: string; source: unknown }) => void,
+        ) => listeners.add(listener),
+        removeEventListener: (
+            _type: 'message',
+            listener: (event: { data: unknown; origin: string; source: unknown }) => void,
+        ) => listeners.delete(listener),
     } as unknown as MainWorldCommandWindow & {
         __listeners: Set<(event: { data: unknown; origin: string; source: unknown }) => void>;
     };
@@ -55,6 +67,33 @@ const createWindow = () => {
 };
 
 describe('isolated MAIN-world command requester', () => {
+    it('should bind single export to the action-time platform and conversation id', async () => {
+        const windowLike = createWindow();
+        let postedCommand: Record<string, unknown> | undefined;
+        const originalPostMessage = windowLike.postMessage;
+        windowLike.postMessage = (data, targetOrigin) => {
+            postedCommand = data as Record<string, unknown>;
+            originalPostMessage(data, targetOrigin);
+        };
+        const bridge = createMainWorldCommandBridge({
+            window: windowLike,
+            token: 'test-token',
+            timeoutMs: 100,
+            createRequestId: () => 'request-bound-single',
+        });
+
+        await bridge.exportSingle({ platform: 'ChatGPT', conversationId: 'conversation-a' });
+
+        expect(postedCommand).toMatchObject({
+            type: MAIN_WORLD_COMMAND_MESSAGE,
+            operation: 'single_export',
+            target: { platform: 'ChatGPT', conversationId: 'conversation-a' },
+        });
+        expect(postedCommand).not.toHaveProperty('headers');
+        expect(postedCommand).not.toHaveProperty('body');
+        bridge.dispose();
+    });
+
     it('should resolve a safe stream-debug download summary instead of records', async () => {
         const bridge = createMainWorldCommandBridge({
             window: createWindow(),
@@ -102,7 +141,9 @@ describe('isolated MAIN-world command requester', () => {
             createRequestId: () => 'request-2',
         });
 
-        await expect(bridge.exportSingle()).rejects.toMatchObject({ message: 'Conversation is not ready to save.', kind: 'not_terminal' });
+        await expect(
+            bridge.exportSingle({ platform: 'ChatGPT', conversationId: 'conversation-a' }),
+        ).rejects.toMatchObject({ message: 'Conversation is not ready to save.', kind: 'not_terminal' });
         bridge.dispose();
     });
 
@@ -149,9 +190,10 @@ describe('isolated MAIN-world command requester', () => {
             createRequestId: () => 'request-delayed-bulk',
         });
 
-        await expect(
-            bridge.runBulkExport({ limit: 1, delayMs: 0, timeoutMs: 20_000 }),
-        ).resolves.toMatchObject({ operation: 'bulk_export', exported: 1 });
+        await expect(bridge.runBulkExport({ limit: 1, delayMs: 0, timeoutMs: 20_000 })).resolves.toMatchObject({
+            operation: 'bulk_export',
+            exported: 1,
+        });
         await new Promise((resolve) => setTimeout(resolve, 5));
 
         expect(commandCount).toBe(1);

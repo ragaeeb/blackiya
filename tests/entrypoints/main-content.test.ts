@@ -155,13 +155,14 @@ describe('single-export conversation route controls', () => {
             filename: 'conversation.json',
         }));
         let currentRoute = { platform: 'Grok', conversationId: X_CONVERSATION_ID };
-        const onExport = createBoundSingleExportHandler(
-            { exportSingle },
-            () => currentRoute,
-        );
+        const onExport = createBoundSingleExportHandler({ exportSingle }, () => currentRoute);
 
         await onExport({ platform: 'Grok', conversationId: X_CONVERSATION_ID });
         expect(exportSingle).toHaveBeenCalledTimes(1);
+        expect(exportSingle).toHaveBeenCalledWith({
+            platform: 'Grok',
+            conversationId: X_CONVERSATION_ID,
+        });
 
         currentRoute = { platform: 'Grok', conversationId: '2091428436845772999' };
         await expect(onExport({ platform: 'Grok', conversationId: X_CONVERSATION_ID })).rejects.toThrow(

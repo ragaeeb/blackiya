@@ -5,6 +5,7 @@ import {
     type MainWorldCommandOperation,
     type MainWorldCommandSummary,
     type MainWorldProgressMessage,
+    type MainWorldSingleExportTarget,
 } from '@/features/runtime/main-world-command-contract';
 
 export type MainWorldCommandWindow = {
@@ -29,7 +30,7 @@ export type MainWorldCommandBridgeDependencies = {
 };
 
 export type MainWorldCommandBridge = {
-    exportSingle: () => Promise<MainWorldCommandSummary>;
+    exportSingle: (target: MainWorldSingleExportTarget) => Promise<MainWorldCommandSummary>;
     runBulkExport: (
         options: { limit: number; delayMs: number; timeoutMs: number },
         onProgress?: (message: MainWorldProgressMessage) => void,
@@ -116,6 +117,7 @@ export const createMainWorldCommandBridge = ({
         operation: MainWorldCommandOperation,
         options?: { limit: number; delayMs: number; timeoutMs: number },
         onProgress?: (message: MainWorldProgressMessage) => void,
+        target?: MainWorldSingleExportTarget,
     ): Promise<MainWorldCommandSummary> =>
         new Promise((resolve, reject) => {
             const requestId = createRequestId();
@@ -160,6 +162,7 @@ export const createMainWorldCommandBridge = ({
                     requestId,
                     operation,
                     ...(options ? { options } : {}),
+                    ...(target ? { target } : {}),
                     __blackiyaToken: token,
                 },
                 windowLike.location.origin,
@@ -167,7 +170,7 @@ export const createMainWorldCommandBridge = ({
         });
 
     return {
-        exportSingle: () => request('single_export'),
+        exportSingle: (target) => request('single_export', undefined, undefined, target),
         runBulkExport: (options, onProgress) => request('bulk_export', options, onProgress),
         exportStreamDebug: () => request('stream_debug_export'),
         clearStreamDebug: () => request('stream_debug_clear'),

@@ -5,17 +5,19 @@ export const MAIN_WORLD_COMMAND_MESSAGE = 'BLACKIYA_MAIN_WORLD_COMMAND';
 export const MAIN_WORLD_RESULT_MESSAGE = 'BLACKIYA_MAIN_WORLD_RESULT';
 export const MAIN_WORLD_PROGRESS_MESSAGE = 'BLACKIYA_MAIN_WORLD_PROGRESS';
 
-export type MainWorldCommandOperation =
-    | 'single_export'
-    | 'bulk_export'
-    | 'stream_debug_export'
-    | 'stream_debug_clear';
+export type MainWorldCommandOperation = 'single_export' | 'bulk_export' | 'stream_debug_export' | 'stream_debug_clear';
+
+export type MainWorldSingleExportTarget = {
+    platform: string;
+    conversationId: string;
+};
 
 export type MainWorldCommandMessage = {
     type: typeof MAIN_WORLD_COMMAND_MESSAGE;
     requestId: string;
     operation: MainWorldCommandOperation;
     options?: V3BulkExportOptions;
+    target?: MainWorldSingleExportTarget;
     __blackiyaToken?: string;
 };
 
@@ -121,6 +123,18 @@ const isBulkOptions = (value: unknown): value is V3BulkExportOptions => {
     );
 };
 
+const isSingleExportTarget = (value: unknown): value is MainWorldSingleExportTarget => {
+    if (!isRecord(value) || Object.keys(value).some((key) => key !== 'platform' && key !== 'conversationId')) {
+        return false;
+    }
+    return (
+        typeof value.platform === 'string' &&
+        value.platform.length > 0 &&
+        typeof value.conversationId === 'string' &&
+        value.conversationId.length > 0
+    );
+};
+
 export const isMainWorldCommandMessage = (value: unknown): value is MainWorldCommandMessage => {
     if (!isRecord(value) || value.type !== MAIN_WORLD_COMMAND_MESSAGE) {
         return false;
@@ -132,9 +146,12 @@ export const isMainWorldCommandMessage = (value: unknown): value is MainWorldCom
         return false;
     }
     if (value.operation === 'bulk_export') {
-        return isBulkOptions(value.options);
+        return value.target === undefined && isBulkOptions(value.options);
     }
-    return value.options === undefined;
+    if (value.operation === 'single_export') {
+        return value.options === undefined && isSingleExportTarget(value.target);
+    }
+    return value.options === undefined && value.target === undefined;
 };
 
 const isSummary = (value: unknown): value is MainWorldCommandSummary => {
@@ -199,8 +216,11 @@ export const isMainWorldProgressMessage = (value: unknown): value is MainWorldPr
     ) {
         return false;
     }
-    return ['discovered', 'attempted', 'exported', 'failed', 'remaining'].every((key) => {
-        const candidate = value[key];
-        return candidate === undefined || isFiniteNonNegativeNumber(candidate);
-    }) && (value.message === undefined || typeof value.message === 'string');
+    return (
+        ['discovered', 'attempted', 'exported', 'failed', 'remaining'].every((key) => {
+            const candidate = value[key];
+            return candidate === undefined || isFiniteNonNegativeNumber(candidate);
+        }) &&
+        (value.message === undefined || typeof value.message === 'string')
+    );
 };

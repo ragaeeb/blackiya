@@ -68,12 +68,16 @@ export const createBoundSingleExportHandler = (
         const currentRoute = resolveCurrentRoute();
         if (
             !currentRoute ||
+            !context.conversationId ||
             currentRoute.platform !== context.platform ||
             currentRoute.conversationId !== context.conversationId
         ) {
             throw new Error('Conversation changed before export started.');
         }
-        await mainWorldBridge.exportSingle();
+        await mainWorldBridge.exportSingle({
+            platform: context.platform,
+            conversationId: context.conversationId,
+        });
     };
 };
 
