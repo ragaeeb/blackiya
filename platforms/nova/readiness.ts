@@ -1,6 +1,7 @@
 import type { PlatformReadiness } from '@/platforms/types';
 import { hashText } from '@/utils/hash';
 import type { ConversationData, MessageNode } from '@/utils/types';
+import { hasMaterialNovaStructuredContent } from './parser';
 
 const notReady = (reason: string, terminal: boolean, latestAssistantTextLength = 0): PlatformReadiness => ({
     ready: false,
@@ -9,22 +10,6 @@ const notReady = (reason: string, terminal: boolean, latestAssistantTextLength =
     contentHash: null,
     latestAssistantTextLength,
 });
-
-const hasMaterialStructuredValue = (value: unknown): boolean => {
-    if (typeof value === 'string') {
-        return value.trim().length > 0;
-    }
-    if (typeof value === 'number') {
-        return Number.isFinite(value);
-    }
-    if (Array.isArray(value)) {
-        return value.some(hasMaterialStructuredValue);
-    }
-    if (value !== null && typeof value === 'object') {
-        return Object.values(value).some(hasMaterialStructuredValue);
-    }
-    return false;
-};
 
 export const evaluateNovaReadiness = (data: ConversationData): PlatformReadiness => {
     const assistantMessages = Object.values(data.mapping)
@@ -69,7 +54,8 @@ export const evaluateNovaReadiness = (data: ConversationData): PlatformReadiness
     }
 
     const structuredParts = parts.filter(
-        (part) => typeof part === 'object' && part !== null && hasMaterialStructuredValue(part),
+        (part) =>
+            typeof part === 'object' && part !== null && !Array.isArray(part) && hasMaterialNovaStructuredContent(part),
     );
     if (structuredParts.length > 0) {
         return {

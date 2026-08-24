@@ -82,8 +82,22 @@ const resolveRole = (value: unknown): Message['author']['role'] | null => {
     return null;
 };
 
-const hasStructuredContent = (content: JsonRecord) =>
-    STRUCTURED_CONTENT_KEYS.some((key) => content[key] !== null && content[key] !== undefined);
+const hasMaterialStructuredValue = (value: unknown): boolean => {
+    if (typeof value === 'string') {
+        return value.trim().length > 0;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value);
+    }
+    if (Array.isArray(value)) {
+        return value.some(hasMaterialStructuredValue);
+    }
+    const record = toRecord(value);
+    return record ? Object.values(record).some(hasMaterialStructuredValue) : false;
+};
+
+export const hasMaterialNovaStructuredContent = (content: JsonRecord) =>
+    STRUCTURED_CONTENT_KEYS.some((key) => hasMaterialStructuredValue(content[key]));
 
 type ParsedContentEntry = {
     parts: MessagePart[];
@@ -99,7 +113,7 @@ const parseContentEntry = (entry: unknown): ParsedContentEntry | null => {
         return null;
     }
     const text = typeof content.text === 'string' ? content.text : null;
-    const structured = hasStructuredContent(content);
+    const structured = hasMaterialNovaStructuredContent(content);
     const parts: MessagePart[] = [];
     if (text !== null) {
         parts.push(text);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+    createNovaConversationFixture,
     failedNovaConversation,
     pendingDeepResearchNovaConversation,
     pendingNovaConversation,
@@ -39,11 +40,33 @@ describe('Amazon Nova readiness', () => {
         expect(readiness.latestAssistantTextLength).toBe(0);
     });
 
-    it('should reject empty or false structured markers as missing content', () => {
-        for (const part of [{ artifact: {} }, { files: [] }, { toolUse: false }, { artifact: { files: [] } }]) {
-            const data = parseFixture(terminalArtifactNovaConversation);
-            data.mapping[data.current_node]!.message!.content.parts = [part];
-            expect(evaluateNovaReadiness(data).reason).toBe('assistant-content-missing');
+    it('should reject metadata-only and recursively empty structured payloads as missing content', () => {
+        const assistantContents = [
+            [{ type: 'artifact', artifact: {} }],
+            [{ type: 'artifact', artifact: { files: [], nested: { enabled: false } } }],
+            [{ type: 'files', files: [] }],
+            [{ type: 'tool', toolUse: false }],
+        ];
+
+        for (const assistantContent of assistantContents) {
+            const readiness = evaluateNovaReadiness(parseFixture(createNovaConversationFixture({ assistantContent })));
+
+            expect(readiness.ready).toBeFalse();
+            expect(readiness.terminal).toBeTrue();
+            expect(readiness.reason).toBe('assistant-content-missing');
+        }
+    });
+
+    it('should accept materially populated recognized structured payload fields', () => {
+        for (const assistantContent of [
+            [{ type: 'artifact', artifact: { artifactId: 'synthetic-artifact' } }],
+            [{ type: 'files', files: [{ name: 'synthetic-file.txt' }] }],
+        ]) {
+            const readiness = evaluateNovaReadiness(parseFixture(createNovaConversationFixture({ assistantContent })));
+
+            expect(readiness.ready).toBeTrue();
+            expect(readiness.terminal).toBeTrue();
+            expect(readiness.reason).toBe('terminal-structured-content');
         }
     });
 
