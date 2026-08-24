@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { MAX_EXPLICIT_EXPORT_RESPONSE_BYTES } from '@/utils/bounded-response-body';
 import type { FetchContext } from './fetch';
 import { fetchFirstSuccessfulResponse, fetchText, MAX_429_RETRIES, MAX_429_RETRY_DELAY_MS } from './fetch';
 
@@ -218,6 +219,33 @@ describe('fetchText', () => {
             throw new Error('expected the stalled response body to time out');
         }
         expect(result.message).toContain('timed out');
+    });
+
+    it('should return a typed oversized-response failure and cancel a streamed body on overflow', async () => {
+        let cancelled = false;
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new Uint8Array(MAX_EXPLICIT_EXPORT_RESPONSE_BYTES));
+                controller.enqueue(new Uint8Array(1));
+            },
+            cancel() {
+                cancelled = true;
+            },
+        });
+        const context = createMockContext({
+            fetchImpl: mock(() => Promise.resolve(new Response(body, { status: 200 }))),
+        });
+
+        const result = await fetchText('https://example.com/oversized', context);
+
+        expect(result).toEqual({
+            ok: false,
+            kind: 'response_too_large',
+            status: 0,
+            message: `Response body exceeded ${MAX_EXPLICIT_EXPORT_RESPONSE_BYTES} bytes.`,
+            maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+        });
+        expect(cancelled).toBeTrue();
     });
 
     it('should pass custom headers for POST request', async () => {

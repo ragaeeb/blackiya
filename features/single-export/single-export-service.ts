@@ -22,6 +22,10 @@
 import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
 import { logger as defaultLogger } from '@/utils/logger';
 import type { ConversationData } from '@/utils/types';
+import {
+    MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+    readBoundedResponseBodyText,
+} from '@/utils/bounded-response-body';
 import { buildDetailRequest, type DetailRequest, resolvePlatformKind } from './endpoint-resolver';
 import {
     normalizeSingleExportTimeout,
@@ -195,11 +199,23 @@ const createTimeoutGuard = (timeoutMs: number): TimeoutGuard => {
 const readBodyWithTimeout = async (
     response: Response,
     timeoutPromise: Promise<never>,
-): Promise<{ body: string; timedOut: boolean }> => {
+    signal: AbortSignal,
+): Promise<
+    | { kind: 'success'; body: string }
+    | { kind: 'too_large' }
+    | { kind: 'read_failure'; timedOut: boolean }
+> => {
     try {
-        return { body: await Promise.race([response.text(), timeoutPromise]), timedOut: false };
+        const result = await Promise.race([
+            readBoundedResponseBodyText(response, {
+                maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+                signal,
+            }),
+            timeoutPromise,
+        ]);
+        return result.kind === 'too_large' ? result : { kind: 'success', body: result.text };
     } catch (error) {
-        return { body: '', timedOut: error === REQUEST_TIMEOUT };
+        return { kind: 'read_failure', timedOut: error === REQUEST_TIMEOUT };
     }
 };
 
@@ -284,15 +300,34 @@ const fetchCandidate = async (
             return { kind: 'response', response, body: '' };
         }
 
-        const bodyResult = await readBodyWithTimeout(response, timeoutGuard.timeoutPromise);
-        const bodyTimedOut = bodyResult.timedOut || timeoutGuard.hasTimedOut();
+        const bodyResult = await readBodyWithTimeout(
+            response,
+            timeoutGuard.timeoutPromise,
+            timeoutGuard.controller.signal,
+        );
+        const bodyTimedOut =
+            (bodyResult.kind === 'read_failure' && bodyResult.timedOut) || timeoutGuard.hasTimedOut();
         if (bodyTimedOut) {
             return {
                 kind: 'failure',
                 result: failure({ kind: 'timeout', platformName: resolved.adapter.name, timeoutMs }),
             };
         }
-        return { kind: 'response', response, body: bodyResult.body };
+        if (bodyResult.kind === 'too_large') {
+            return {
+                kind: 'failure',
+                result: failure({
+                    kind: 'response_too_large',
+                    platformName: resolved.adapter.name,
+                    maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+                }),
+            };
+        }
+        return {
+            kind: 'response',
+            response,
+            body: bodyResult.kind === 'success' ? bodyResult.body : '',
+        };
     } catch (err) {
         if (isTimeoutError(err, timeoutGuard)) {
             return {
@@ -457,7 +492,10 @@ const deliverDownload = (
     deps: SingleExportDeps,
 ): { ok: true; filename: string; jsonString: string } | { ok: false; result: SingleExportResult } => {
     const jsonString = JSON.stringify(parsed.data, null, 2);
-    const filename = parsed.adapter.formatFilename(parsed.data);
+    const formattedFilename = parsed.adapter.formatFilename(parsed.data);
+    const filename = formattedFilename.toLowerCase().endsWith('.json')
+        ? `${formattedFilename.slice(0, -5)}.json`
+        : `${formattedFilename}.json`;
     try {
         deps.downloadJson(jsonString, filename);
         return { ok: true, filename, jsonString };

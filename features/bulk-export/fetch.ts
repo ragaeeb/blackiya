@@ -1,4 +1,8 @@
 import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
+import {
+    MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+    readBoundedResponseBodyText,
+} from '@/utils/bounded-response-body';
 
 export const MAX_429_RETRIES = 3;
 export const MAX_429_RETRY_DELAY_MS = 30_000;
@@ -9,6 +13,14 @@ export type FetchTextResult =
           ok: false;
           status: number;
           message: string;
+          kind?: undefined;
+      }
+    | {
+          ok: false;
+          kind: 'response_too_large';
+          status: 0;
+          message: string;
+          maxBytes: number;
       };
 
 export class BulkAuthContextRejectedError extends Error {
@@ -180,35 +192,21 @@ const requestWithTimeout = async (
         signal,
     });
 
-const readResponseText = async (response: Response, signal: AbortSignal): Promise<string> => {
+const readResponseText = async (response: Response, signal: AbortSignal) => {
     if (signal.aborted) {
         throw new Error('Request timed out while reading response body.');
     }
-
-    return new Promise<string>((resolve, reject) => {
-        const onAbort = () => {
-            cleanup();
-            reject(new Error('Request timed out while reading response body.'));
-        };
-        const cleanup = () => signal.removeEventListener('abort', onAbort);
-
-        signal.addEventListener('abort', onAbort, { once: true });
-        try {
-            response.text().then(
-                (text) => {
-                    cleanup();
-                    resolve(text);
-                },
-                (error: unknown) => {
-                    cleanup();
-                    reject(error);
-                },
-            );
-        } catch (error) {
-            cleanup();
-            reject(error);
+    try {
+        return await readBoundedResponseBodyText(response, {
+            maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+            signal,
+        });
+    } catch (error) {
+        if (signal.aborted) {
+            throw new Error('Request timed out while reading response body.');
         }
-    });
+        throw error;
+    }
 };
 
 type AttemptOutcome = { result: FetchTextResult } | { retryDelayMs: number };
@@ -240,9 +238,19 @@ const processFetchResponse = async (
         return { result: buildFailedFetchResult(response.status, response.statusText || 'Request failed') };
     }
 
-    return {
-        result: { ok: true, text: await readResponseText(response, signal) },
-    };
+    const body = await readResponseText(response, signal);
+    if (body.kind === 'too_large') {
+        return {
+            result: {
+                ok: false,
+                kind: 'response_too_large',
+                status: 0,
+                message: `Response body exceeded ${MAX_EXPLICIT_EXPORT_RESPONSE_BYTES} bytes.`,
+                maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+            },
+        };
+    }
+    return { result: { ok: true, text: body.text } };
 };
 
 const executeFetchAttempt = async (

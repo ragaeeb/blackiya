@@ -8,6 +8,7 @@ import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
 import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
+import { MAX_EXPLICIT_EXPORT_RESPONSE_BYTES } from '@/utils/bounded-response-body';
 
 const CHATGPT_ID = '67f0a0b3-1234-4abc-8def-1234567890ab';
 const GROK_ID = '01cb0729-6455-471d-b33a-124b3de76a29';
@@ -589,6 +590,25 @@ describe('performSingleExport — successful terminal exports', () => {
 
         expect(result).toMatchObject({ kind: 'success', platformName: 'Cache-only' });
         expect(testContext.fetchImpl).not.toHaveBeenCalled();
+        expect(testContext.download).toHaveBeenCalledWith(expect.any(String), 'cache-only-export.json');
+    });
+
+    it('should preserve an existing JSON suffix when delivering the actual download', async () => {
+        const payload = buildTerminalChatGptConversation(CHATGPT_ID);
+        const adapter: LLMPlatform = {
+            ...chatGPTAdapter,
+            formatFilename: () => 'already-json.json',
+        };
+        const testContext = createTestContext({
+            pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
+            adapter,
+        });
+        testContext.deps.getCachedConversation = () => payload;
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result).toMatchObject({ kind: 'success', filename: 'already-json.json' });
+        expect(testContext.download).toHaveBeenCalledWith(expect.any(String), 'already-json.json');
     });
 
     it('should use the next deterministic ChatGPT endpoint after a 404', async () => {
@@ -733,7 +753,7 @@ describe('performSingleExport — successful terminal exports', () => {
             expect(result.kind).toBe('success');
             // Title and filename handling
             expect(result.data.title).toBe(payload.title);
-            expect(result.filename).toBe(`${c.name}_export_test_${c.id.slice(0, 8)}`);
+            expect(result.filename).toBe(`${c.name}_export_test_${c.id.slice(0, 8)}.json`);
             expect(result.jsonString).toBe(JSON.stringify(payload, null, 2));
             // Download was invoked with the serialized JSON and the filename
             expect(testContext.download).toHaveBeenCalledTimes(1);
@@ -797,6 +817,39 @@ describe('performSingleExport — successful terminal exports', () => {
 });
 
 describe('performSingleExport — request shape', () => {
+    it('should fail with a typed oversized-response error before reading a declared oversized body', async () => {
+        const testContext = createTestContext({
+            pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,
+            adapter: chatGPTAdapter,
+        });
+        let cancelled = false;
+        const body = new ReadableStream<Uint8Array>({
+            cancel: () => {
+                cancelled = true;
+            },
+        });
+        testContext.deps.fetchImpl = mock(
+            async () =>
+                new Response(body, {
+                    status: 200,
+                    headers: { 'content-length': String(MAX_EXPLICIT_EXPORT_RESPONSE_BYTES + 1) },
+                }),
+        ) as unknown as typeof fetch;
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result).toEqual({
+            kind: 'failure',
+            error: {
+                kind: 'response_too_large',
+                platformName: 'ChatGPT',
+                maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+            },
+        });
+        expect(cancelled).toBeTrue();
+        expect(testContext.download).not.toHaveBeenCalled();
+    });
+
     it('should time out when the response body never resolves', async () => {
         const testContext = createTestContext({
             pageUrl: `https://chatgpt.com/c/${CHATGPT_ID}`,

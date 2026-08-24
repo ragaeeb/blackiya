@@ -28,6 +28,7 @@ export type SingleExportError =
     | { kind: 'http_failure'; platformName: string; status: number; statusText: string }
     | { kind: 'download_failure'; platformName: string; reason: string }
     | { kind: 'timeout'; platformName: string; timeoutMs: number }
+    | { kind: 'response_too_large'; platformName: string; maxBytes: number }
     | { kind: 'parse_failure'; platformName: string; reason: string }
     | { kind: 'id_mismatch'; platformName: string; expected: string; actual: string | null }
     | { kind: 'not_terminal'; platformName: string; reason: string };
