@@ -82,19 +82,20 @@ Primary module: `features/single-export/single-export-service.ts`.
    - Missing ChatGPT `authorization` → `missing_auth` before dispatch.
    - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
    - Empty/bad body or parse failure → `parse_failure`.
+   - A declared or streamed body above `16 MiB` is cancelled and returns `response_too_large`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
    - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text. It also treats a `finished_successfully` `reasoning_recap` with `metadata.reasoning_status: reasoning_ended` as terminal when ChatGPT omits `end_turn`, and accepts a completed deep-research assistant-code node followed by a finished tool-code node. In-progress and non-terminal thoughts remain rejected.
-6. On success, serializes the complete platform archive (including the full normalized `mapping` tree and provider response retained in platform-specific raw payload fields) and injects the download via `deps.downloadJson(jsonString, filename)`. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
+6. On success, serializes the complete platform archive (including the full normalized `mapping` tree and provider response retained in platform-specific raw payload fields) and injects the download via `deps.downloadJson(jsonString, filename)`. The boundary idempotently adds `.json` when needed. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
 
-`unsupported_platform`, `missing_conversation_id`, `missing_endpoint`, `missing_auth`, `http_failure`, `download_failure`, `timeout`, `parse_failure`, `id_mismatch`, `not_terminal`.
+`unsupported_platform`, `missing_conversation_id`, `missing_endpoint`, `missing_auth`, `http_failure`, `download_failure`, `timeout`, `response_too_large`, `parse_failure`, `id_mismatch`, `not_terminal`.
 
 Invariants: one explicit action per call, eligible cache first, deterministic `404` candidate fallback only, no retries/backoff, no fallback-on-timeout, no speculative warm request, no snapshot replay, no stabilization, and no degraded export.
 
 ### 4.1 Cache-First Capture
 
-The MAIN-world interceptor observes page-owned `fetch` and XHR traffic without consuming or delaying the page response. It classifies status, URL, method, request context, and declared response size before cloning. An eligible clone is stream-read through the cache's hard per-entry byte cap; oversized/erroring readers are cancelled. The bounded text is then parsed and terminal-validated before the normalized archive enters `ConversationResponseCache`.
+The MAIN-world interceptor observes page-owned `fetch` and XHR traffic without consuming or delaying the page response. Page Fetch forwarding begins concurrently with capture planning; streamed request-body inspection fails open after `25ms` and cancels only its clone. It classifies status, URL, method, request context, and declared response size before cloning. Eligible response captures are sequence-checked before cloning, limited to three concurrent bounded reads, and stream-read through the cache's hard per-entry byte cap; oversized/erroring readers are cancelled. The bounded text is then parsed and terminal-validated before the normalized archive enters `ConversationResponseCache`.
 
 Default cache bounds:
 
@@ -103,7 +104,7 @@ Default cache bounds:
 - maximum retained bytes: `48 MiB`
 - expiry: `5 minutes`
 
-The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, conversation-id-inconsistent, incomplete, or non-terminal candidates are not eligible. A matching non-terminal detail response or exact-provider generation start invalidates the prior terminal snapshot immediately, so an explicit save cannot export a superseded turn. A canonical detail request whose conversation id is deterministic also deletes only that matching snapshot before forwarding the page request; Meta does this only for the initial detail operation and Z.ai only for the detail `GET`, not for pagination or message-batch halves. Expired entries and pending assembly text are pruned by scheduled expiry even without later cache access; oldest-entry removal enforces the entry and aggregate-byte bounds. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversations and pending multi-response assembly while advancing a provider epoch, so delayed pre-invalidation clones cannot repopulate state. An observed `401/403` also clears the recognized provider's request context and conversation state and advances that epoch.
+The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, conversation-id-inconsistent, incomplete, or non-terminal candidates are not eligible. A matching non-terminal detail response or exact-provider generation start invalidates the prior terminal snapshot immediately, so an explicit save cannot export a superseded turn. Canonical ChatGPT, Gemini, Grok, Claude, Qwen, DeepSeek, and exact-target Nova request starts advance a per-conversation sequence; delayed responses from an older sequence cannot overwrite or evict a newer snapshot. Meta does this only for the initial detail operation and Z.ai only for the detail `GET`, not for pagination or message-batch halves. Expired entries and pending assembly text are pruned by scheduled expiry even without later cache access; oldest-entry removal enforces the entry and aggregate-byte bounds. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversations and pending multi-response assembly while advancing a provider epoch, so delayed pre-invalidation clones cannot repopulate state. An observed `401/403` also clears the recognized provider's request context and conversation state and advances that epoch.
 
 That invalidation is deliberately not described as universally account-bound. The current sanitized request evidence establishes no reliable non-secret ordinary account-switch or logout marker for five providers:
 
@@ -139,6 +140,8 @@ Multiplexed and multi-response transports require more context than URL/method m
 | DeepSeek | Canonical history detail | Deterministic history `GET` | No |
 
 Cache-only does not mean degraded or partial export. It means `Save JSON` reuses a fresh terminal response the site itself loaded and returns `missing_endpoint` when no eligible cached response exists.
+
+Canonical Grok detail payloads replace prior parser graph state so server-removed or replaced nodes cannot survive into a later export. Incremental Grok transports retain their merge behavior, and readiness follows only the active `current_node` ancestry rather than inactive alternative branches.
 
 Direct request details:
 

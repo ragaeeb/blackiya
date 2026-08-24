@@ -39,6 +39,7 @@ A high-performance Chrome extension for exporting terminal conversation JSON fro
 - **Local-first and explicit.** Export happens only when you click `Save JSON` or `Export Chats`; nothing is uploaded.
 - **No credential persistence.** Request-context is captured in page-local memory with a short expiry and never written into exports or cached conversation records.
 - **Bounded conversation cache.** Terminal page-owned detail responses live only in memory for up to five minutes and are automatically evicted by age, entry count, and byte limits.
+- **Bounded export reads.** Single and bulk response bodies are capped at 16 MiB and cancelled on overflow; single-chat filenames always end in `.json`.
 - **Precise invalidation boundaries.** An observed `401/403` clears the affected provider state, and first establishing or changing supported identity-bearing request context clears it where such a marker is available. The current sanitized evidence does not provide a reliable non-secret ordinary account-switch/logout marker for Claude, Meta Muse, Amazon Nova, DeepSeek, or Z.ai, so their caches are not represented as account-bound.
 - See [`docs/architecture.md`](docs/architecture.md) and [`PRIVACY_POLICY.md`](PRIVACY_POLICY.md).
 
