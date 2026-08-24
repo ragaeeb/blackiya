@@ -289,6 +289,5 @@ describe('Grok Adapter — NDJSON streaming parsing', () => {
                 (thoughts as Array<{ content?: string }>).some((t) => t.content?.includes('Waqf requires permanent')),
             ).toBeTrue();
         });
-
     });
 });

@@ -423,11 +423,14 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
         for (const record of records.values()) {
             earliestExpiry = Math.min(earliestExpiry, record.lastActivityAt + ttlMs);
         }
-        pruneHandle = schedulePruneCallback(() => {
-            pruneHandle = null;
-            prune(now());
-            scheduleExpiryPrune();
-        }, Math.max(0, earliestExpiry - now()));
+        pruneHandle = schedulePruneCallback(
+            () => {
+                pruneHandle = null;
+                prune(now());
+                scheduleExpiryPrune();
+            },
+            Math.max(0, earliestExpiry - now()),
+        );
     };
 
     const deleteOldest = () => {

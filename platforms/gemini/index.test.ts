@@ -1,9 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { join } from 'node:path';
-
-import type { Message, MessageNode, RawConversationPayload } from '@/utils/types';
 import { parseConversationPayload } from '@/platforms/gemini/conversation-parser';
 import { LRUCache } from '@/utils/lru-cache';
+import type { Message, MessageNode, RawConversationPayload } from '@/utils/types';
 
 const loggerSpies = {
     info: mock(() => {}),
@@ -68,7 +67,7 @@ describe('Gemini Adapter — integration', () => {
         });
     });
 
-describe('Conversation data parsing', () => {
+    describe('Conversation data parsing', () => {
         it('should parse a full conversation correctly (User + Assistant + Reasoning)', () => {
             const url = 'https://gemini.google.com/app/9cf87bbddf79d497';
             const result = geminiAdapter.parseInterceptedData(conversationResponseRaw, url);
@@ -95,7 +94,8 @@ describe('Conversation data parsing', () => {
 
             const assistantMsg = messages.find((m) => m.author.role === 'assistant')!;
             expect(assistantMsg).toBeDefined();
-            const assistantText = typeof assistantMsg.content.parts?.[0] === 'string' ? assistantMsg.content.parts[0] : '';
+            const assistantText =
+                typeof assistantMsg.content.parts?.[0] === 'string' ? assistantMsg.content.parts[0] : '';
             expect(assistantText.startsWith('P258071 - The Shaykh: Yes.')).toBeTrue();
             expect(assistantText.endsWith('rforms of them what man is able, and nothing else.')).toBeTrue();
 

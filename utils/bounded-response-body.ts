@@ -1,8 +1,6 @@
 export const MAX_EXPLICIT_EXPORT_RESPONSE_BYTES = 16 * 1024 * 1024;
 
-export type BoundedResponseBodyResult =
-    | { kind: 'success'; text: string }
-    | { kind: 'too_large' };
+export type BoundedResponseBodyResult = { kind: 'success'; text: string } | { kind: 'too_large' };
 
 type ReadBoundedResponseBodyOptions = {
     maxBytes: number;

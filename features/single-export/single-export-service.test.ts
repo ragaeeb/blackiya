@@ -6,9 +6,9 @@ import { chatGPTAdapter } from '@/platforms/chatgpt';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
+import { MAX_EXPLICIT_EXPORT_RESPONSE_BYTES } from '@/utils/bounded-response-body';
 import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-context';
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
-import { MAX_EXPLICIT_EXPORT_RESPONSE_BYTES } from '@/utils/bounded-response-body';
 
 const CHATGPT_ID = '67f0a0b3-1234-4abc-8def-1234567890ab';
 const GROK_ID = '01cb0729-6455-471d-b33a-124b3de76a29';

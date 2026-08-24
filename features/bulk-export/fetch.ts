@@ -1,8 +1,5 @@
+import { MAX_EXPLICIT_EXPORT_RESPONSE_BYTES, readBoundedResponseBodyText } from '@/utils/bounded-response-body';
 import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
-import {
-    MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
-    readBoundedResponseBodyText,
-} from '@/utils/bounded-response-body';
 
 export const MAX_429_RETRIES = 3;
 export const MAX_429_RETRY_DELAY_MS = 30_000;
@@ -108,18 +105,15 @@ const waitForDelay = async (
         signal?.addEventListener('abort', onAbort, { once: true });
 
         try {
-            context.sleepImpl(delayMs).then(
-                () => {
-                    if (signal?.aborted) {
-                        finish('aborted');
-                    } else if (delayMs < requestedDelayMs || context.nowImpl() >= deadlineAt) {
-                        finish('deadline');
-                    } else {
-                        finish('completed');
-                    }
-                },
-                fail,
-            );
+            context.sleepImpl(delayMs).then(() => {
+                if (signal?.aborted) {
+                    finish('aborted');
+                } else if (delayMs < requestedDelayMs || context.nowImpl() >= deadlineAt) {
+                    finish('deadline');
+                } else {
+                    finish('completed');
+                }
+            }, fail);
         } catch (error) {
             fail(error);
         }
@@ -286,7 +280,9 @@ const failureForWaitOutcome = (outcome: WaitOutcome, phase: 'slot' | 'retry'): F
     if (outcome === 'aborted') {
         return buildFailedFetchResult(
             0,
-            phase === 'retry' ? 'Request aborted while waiting to retry.' : 'Request aborted while waiting for a request slot.',
+            phase === 'retry'
+                ? 'Request aborted while waiting to retry.'
+                : 'Request aborted while waiting for a request slot.',
         );
     }
     return buildFailedFetchResult(

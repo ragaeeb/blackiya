@@ -20,12 +20,9 @@
  */
 
 import type { LLMPlatform, PlatformReadiness } from '@/platforms/types';
+import { MAX_EXPLICIT_EXPORT_RESPONSE_BYTES, readBoundedResponseBodyText } from '@/utils/bounded-response-body';
 import { logger as defaultLogger } from '@/utils/logger';
 import type { ConversationData } from '@/utils/types';
-import {
-    MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
-    readBoundedResponseBodyText,
-} from '@/utils/bounded-response-body';
 import { buildDetailRequest, type DetailRequest, resolvePlatformKind } from './endpoint-resolver';
 import {
     normalizeSingleExportTimeout,
@@ -200,11 +197,7 @@ const readBodyWithTimeout = async (
     response: Response,
     timeoutPromise: Promise<never>,
     signal: AbortSignal,
-): Promise<
-    | { kind: 'success'; body: string }
-    | { kind: 'too_large' }
-    | { kind: 'read_failure'; timedOut: boolean }
-> => {
+): Promise<{ kind: 'success'; body: string } | { kind: 'too_large' } | { kind: 'read_failure'; timedOut: boolean }> => {
     try {
         const result = await Promise.race([
             readBoundedResponseBodyText(response, {
@@ -271,6 +264,44 @@ const executeCandidateFetch = async (
     }
 };
 
+const handleCandidateResponse = async (
+    resolved: ResolvedRequest,
+    response: Response,
+    timeoutGuard: TimeoutGuard,
+    timeoutMs: number,
+): Promise<CandidateOutcome> => {
+    if (response.status === DETERMINISTIC_FALLBACK_STATUS) {
+        await cancelResponseBody(response);
+        return { kind: 'fallback', response };
+    }
+    if (!response.ok) {
+        return { kind: 'response', response, body: '' };
+    }
+
+    const bodyResult = await readBodyWithTimeout(response, timeoutGuard.timeoutPromise, timeoutGuard.controller.signal);
+    if ((bodyResult.kind === 'read_failure' && bodyResult.timedOut) || timeoutGuard.hasTimedOut()) {
+        return {
+            kind: 'failure',
+            result: failure({ kind: 'timeout', platformName: resolved.adapter.name, timeoutMs }),
+        };
+    }
+    if (bodyResult.kind === 'too_large') {
+        return {
+            kind: 'failure',
+            result: failure({
+                kind: 'response_too_large',
+                platformName: resolved.adapter.name,
+                maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
+            }),
+        };
+    }
+    return {
+        kind: 'response',
+        response,
+        body: bodyResult.kind === 'success' ? bodyResult.body : '',
+    };
+};
+
 const fetchCandidate = async (
     resolved: ResolvedRequest,
     request: DetailRequest,
@@ -289,45 +320,7 @@ const fetchCandidate = async (
         if (!fetched.ok) {
             return { kind: 'failure', result: fetched.result };
         }
-        const { response } = fetched;
-
-        if (response.status === DETERMINISTIC_FALLBACK_STATUS) {
-            await cancelResponseBody(response);
-            return { kind: 'fallback', response };
-        }
-
-        if (!response.ok) {
-            return { kind: 'response', response, body: '' };
-        }
-
-        const bodyResult = await readBodyWithTimeout(
-            response,
-            timeoutGuard.timeoutPromise,
-            timeoutGuard.controller.signal,
-        );
-        const bodyTimedOut =
-            (bodyResult.kind === 'read_failure' && bodyResult.timedOut) || timeoutGuard.hasTimedOut();
-        if (bodyTimedOut) {
-            return {
-                kind: 'failure',
-                result: failure({ kind: 'timeout', platformName: resolved.adapter.name, timeoutMs }),
-            };
-        }
-        if (bodyResult.kind === 'too_large') {
-            return {
-                kind: 'failure',
-                result: failure({
-                    kind: 'response_too_large',
-                    platformName: resolved.adapter.name,
-                    maxBytes: MAX_EXPLICIT_EXPORT_RESPONSE_BYTES,
-                }),
-            };
-        }
-        return {
-            kind: 'response',
-            response,
-            body: bodyResult.kind === 'success' ? bodyResult.body : '',
-        };
+        return await handleCandidateResponse(resolved, fetched.response, timeoutGuard, timeoutMs);
     } catch (err) {
         if (isTimeoutError(err, timeoutGuard)) {
             return {
