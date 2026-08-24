@@ -4,6 +4,7 @@ import {
     maybeCaptureGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
 } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
+import { readBoundedRequestBodyWithDeadline } from '@/features/single-export/bounded-request-body';
 import { conversationResponseCache } from '@/features/single-export/conversation-response-cache';
 import {
     captureTerminalConversationResponse,
@@ -21,8 +22,11 @@ import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { parseDeepSeekHistoryRequestContext } from '@/platforms/deepseek/request';
 import { getPlatformAdapter } from '@/platforms/factory';
 import { extractConversationIdFromSourcePath } from '@/platforms/gemini/rpc-parser';
+import { extractGrokComConversationIdFromUrl } from '@/platforms/grok/url-utils';
+import { extractXGrokConversationId } from '@/platforms/grok/x-url-utils';
 import { extractMetaGraphqlRequestContext, type MetaGraphqlContextCandidate } from '@/platforms/meta/request';
 import { MetaGraphqlResponseAssembler } from '@/platforms/meta/response-assembler';
+import { NOVA_CONVERSATION_ID_PATTERN } from '@/platforms/nova/constants';
 import { extractQwenConversationIdFromDetailUrl } from '@/platforms/qwen/requests';
 import { isZaiConversationId, ZAI_HOST } from '@/platforms/zai/constants';
 import { ZaiConversationResponseAssembler } from '@/platforms/zai/response-assembler';
@@ -36,10 +40,14 @@ import {
 const INTERCEPTOR_MARKER = '__BLACKIYA_INTERCEPTED__';
 const GEMINI_BATCHEXECUTE_PATH = '/_/bardchatui/data/batchexecute';
 const META_GRAPHQL_PATH = '/api/graphql';
+const REQUEST_BODY_CAPTURE_DEADLINE_MS = 25;
+const MAX_CONCURRENT_RESPONSE_CAPTURES = 3;
 const metaGraphqlResponseAssembler = new MetaGraphqlResponseAssembler();
 const zaiConversationResponseAssembler = new ZaiConversationResponseAssembler();
 const providerStateEpochs = new Map<SupportedPlatformName, number>();
 const conversationCaptureSequences = new Map<string, number>();
+let conversationCaptureOrder = 0;
+let activeResponseCaptures = 0;
 
 const resolveUrlBase = (): string => {
     try {
@@ -126,6 +134,16 @@ const isProviderStateEpochCurrent = (platform: SupportedPlatformName, epoch: num
 
 type ConversationCaptureSequence = { platform: SupportedPlatformName; conversationId: string; value: number };
 
+const nextConversationCaptureOrder = (): number => {
+    if (conversationCaptureOrder >= Number.MAX_SAFE_INTEGER) {
+        conversationCaptureSequences.clear();
+        conversationCaptureOrder = 1;
+    } else {
+        conversationCaptureOrder += 1;
+    }
+    return conversationCaptureOrder;
+};
+
 const conversationSequenceKey = (platform: SupportedPlatformName, conversationId: string) =>
     `${platform}\u0000${conversationId}`;
 
@@ -135,13 +153,15 @@ const getConversationCaptureSequence = (platform: SupportedPlatformName, convers
 const beginConversationCaptureSequence = (
     platform: SupportedPlatformName,
     conversationId: string,
+    requestOrder = nextConversationCaptureOrder(),
 ): ConversationCaptureSequence => {
     const key = conversationSequenceKey(platform, conversationId);
     const current = getConversationCaptureSequence(platform, conversationId);
-    const value = current >= Number.MAX_SAFE_INTEGER ? 0 : current + 1;
-    conversationCaptureSequences.set(key, value);
-    conversationResponseCache.delete(platform, conversationId);
-    return { platform, conversationId, value };
+    if (current < requestOrder) {
+        conversationCaptureSequences.set(key, requestOrder);
+        conversationResponseCache.delete(platform, conversationId);
+    }
+    return { platform, conversationId, value: requestOrder };
 };
 
 const currentConversationCaptureSequence = (
@@ -154,8 +174,21 @@ const currentConversationCaptureSequence = (
 });
 
 const isConversationCaptureSequenceCurrent = (sequence: ConversationCaptureSequence | null): boolean =>
-    !sequence ||
-    getConversationCaptureSequence(sequence.platform, sequence.conversationId) === sequence.value;
+    !sequence || getConversationCaptureSequence(sequence.platform, sequence.conversationId) === sequence.value;
+
+const tryReserveResponseCapture = (): (() => void) | null => {
+    if (activeResponseCaptures >= MAX_CONCURRENT_RESPONSE_CAPTURES) {
+        return null;
+    }
+    activeResponseCaptures += 1;
+    let released = false;
+    return () => {
+        if (!released) {
+            released = true;
+            activeResponseCaptures -= 1;
+        }
+    };
+};
 
 const clearProviderConversationState = (platform: SupportedPlatformName): void => {
     advanceProviderStateEpoch(platform);
@@ -177,9 +210,48 @@ const invalidateConversationSnapshot = (platform: SupportedPlatformName, convers
     beginConversationCaptureSequence(platform, conversationId);
 };
 
+const extractNovaConversationId = (requestBody?: string | null): string | null => {
+    if (!requestBody) {
+        return null;
+    }
+    try {
+        const candidate = (JSON.parse(requestBody) as { conversationId?: unknown }).conversationId;
+        return typeof candidate === 'string' && NOVA_CONVERSATION_ID_PATTERN.test(candidate) ? candidate : null;
+    } catch {
+        return null;
+    }
+};
+
+const extractDetailConversationId = (
+    platform: SupportedPlatformName,
+    requestUrl: string,
+    requestBody?: string | null,
+): string | null => {
+    switch (platform) {
+        case 'ChatGPT':
+            return new URL(requestUrl).pathname.match(/^\/backend-api\/(?:f\/)?conversation\/([^/]+)$/)?.[1] ?? null;
+        case 'Gemini':
+            return extractConversationIdFromSourcePath(requestUrl);
+        case 'Claude':
+            return parseClaudeConversationApiUrl(requestUrl)?.conversationId ?? null;
+        case 'Qwen':
+            return extractQwenConversationIdFromDetailUrl(requestUrl);
+        case 'DeepSeek':
+            return parseDeepSeekHistoryRequestContext(requestUrl)?.conversationId ?? null;
+        case 'Grok':
+            return extractXGrokConversationId(requestUrl) ?? extractGrokComConversationIdFromUrl(requestUrl);
+        case 'Amazon Nova':
+            return extractNovaConversationId(requestBody);
+        default:
+            return null;
+    }
+};
+
 const resolveDeterministicDetailConversation = (
     url: string,
     method: string,
+    requestHeaders?: HeadersInit,
+    requestBody?: string | null,
 ): { platform: SupportedPlatformName; conversationId: string } | null => {
     let requestUrl: string;
     try {
@@ -189,38 +261,28 @@ const resolveDeterministicDetailConversation = (
     }
     const adapter = getPlatformAdapter(requestUrl);
     const platform = resolvePlatformName(requestUrl);
-    if (!adapter?.isConversationDetailRequest?.(requestUrl, method) || !platform || adapter.name !== platform) {
+    if (
+        !adapter?.isConversationDetailRequest?.(requestUrl, method, requestHeaders) ||
+        !platform ||
+        adapter.name !== platform
+    ) {
         return null;
     }
 
-    let conversationId: string | null = null;
-    if (platform === 'ChatGPT') {
-        try {
-            conversationId =
-                new URL(requestUrl).pathname.match(/^\/backend-api\/(?:f\/)?conversation\/([^/]+)$/)?.[1] ?? null;
-        } catch {
-            return null;
-        }
-    } else if (platform === 'Gemini') {
-        conversationId = extractConversationIdFromSourcePath(requestUrl);
-    } else if (platform === 'Claude') {
-        conversationId = parseClaudeConversationApiUrl(requestUrl)?.conversationId ?? null;
-    } else if (platform === 'Qwen') {
-        conversationId = extractQwenConversationIdFromDetailUrl(requestUrl);
-    } else if (platform === 'DeepSeek') {
-        conversationId = parseDeepSeekHistoryRequestContext(requestUrl)?.conversationId ?? null;
-    }
-
+    const conversationId = extractDetailConversationId(platform, requestUrl, requestBody);
     return conversationId ? { platform, conversationId } : null;
 };
 
 const invalidateDeterministicDetailRequestStart = (
     url: string,
     method: string,
+    requestOrder: number,
+    requestHeaders?: HeadersInit,
+    requestBody?: string | null,
 ): ConversationCaptureSequence | null => {
-    const detail = resolveDeterministicDetailConversation(url, method);
+    const detail = resolveDeterministicDetailConversation(url, method, requestHeaders, requestBody);
     if (detail) {
-        return beginConversationCaptureSequence(detail.platform, detail.conversationId);
+        return beginConversationCaptureSequence(detail.platform, detail.conversationId, requestOrder);
     }
     return null;
 };
@@ -356,20 +418,32 @@ const isUrlSearchParamsWithinByteLimit = (body: URLSearchParams, maxBytes: numbe
     return true;
 };
 
-const readFetchRequestBody = async (args: Parameters<typeof fetch>, maxBytes: number): Promise<string | null> => {
-    const body = args[1]?.body;
+const serializeRequestBodyWithinLimit = (body: unknown, maxBytes: number): string | null => {
     if (typeof body === 'string') {
         return isTextWithinByteLimit(body, maxBytes) ? body : null;
     }
     if (body instanceof URLSearchParams) {
         return isUrlSearchParamsWithinByteLimit(body, maxBytes) ? body.toString() : null;
     }
+    return null;
+};
+
+const readFetchRequestBody = async (args: Parameters<typeof fetch>, maxBytes: number): Promise<string | null> => {
+    const body = args[1]?.body;
+    const serializedBody = serializeRequestBodyWithinLimit(body, maxBytes);
+    if (serializedBody !== null) {
+        return serializedBody;
+    }
     if (body === undefined && args[0] instanceof Request) {
         if (isDeclaredBodyOversized(args[0], maxBytes)) {
             return null;
         }
         try {
-            return await readBoundedBodyText(args[0].clone(), maxBytes);
+            return await readBoundedRequestBodyWithDeadline(
+                args[0].clone(),
+                maxBytes,
+                REQUEST_BODY_CAPTURE_DEADLINE_MS,
+            );
         } catch {
             return null;
         }
@@ -505,9 +579,11 @@ const captureZaiResponse = async (
 
 const defineScript = typeof defineContentScript !== 'undefined' ? defineContentScript : (config: any) => config;
 
-export const captureFetchRequestContext = async (args: Parameters<typeof fetch>, url: string, method: string) => {
-    const platform = resolvePlatformName(url);
-    captureHeaders(url, extractForwardableHeadersFromFetchArgs(args, platform ?? undefined));
+const captureGeminiFetchRequestContext = async (
+    args: Parameters<typeof fetch>,
+    url: string,
+    method: string,
+): Promise<void> => {
     if (!isGeminiBatchexecutePost(url, method)) {
         return;
     }
@@ -521,6 +597,12 @@ export const captureFetchRequestContext = async (args: Parameters<typeof fetch>,
     } catch {
         // Capturing diagnostics must never change the page request.
     }
+};
+
+export const captureFetchRequestContext = async (args: Parameters<typeof fetch>, url: string, method: string) => {
+    const platform = resolvePlatformName(url);
+    captureHeaders(url, extractForwardableHeadersFromFetchArgs(args, platform ?? undefined));
+    await captureGeminiFetchRequestContext(args, url, method);
 };
 
 const startFetchStreamCapture = (
@@ -571,21 +653,43 @@ const prepareFetchCapturePlan = async (
     url: string,
     method: string,
 ): Promise<FetchCapturePlan> => {
-    await captureFetchRequestContext(args, url, method);
+    const requestOrder = nextConversationCaptureOrder();
+    const platform = resolvePlatformName(url);
+    captureHeaders(url, extractForwardableHeadersFromFetchArgs(args, platform ?? undefined));
     const classification = classifyGenerationEndpoint(url, method, window.location.href);
     invalidateActiveConversationForGeneration(url, classification);
-    let captureSequence = invalidateDeterministicDetailRequestStart(url, method);
-    const platform = resolvePlatformName(url);
+    const requestHeaders = extractRequestHeaders(args[0], args[1]);
+    const maxBytes = conversationResponseCache.getMaxBytesPerEntry();
+    const synchronousBody = serializeRequestBodyWithinLimit(args[1]?.body, maxBytes);
+    let captureSequence = invalidateDeterministicDetailRequestStart(
+        url,
+        method,
+        requestOrder,
+        requestHeaders,
+        synchronousBody,
+    );
     const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
-    const [metaCaptureContext, zaiCaptureContext] = await Promise.all([
+    const [, metaCaptureContext, zaiCaptureContext, novaRequestBody] = await Promise.all([
+        captureGeminiFetchRequestContext(args, url, method),
         prepareMetaFetchCapture(args, url, method),
         prepareZaiFetchCapture(args, url, method),
+        platform === 'Amazon Nova' && !captureSequence ? readFetchRequestBody(args, maxBytes) : null,
     ]);
+    if (platform === 'Amazon Nova' && !captureSequence && novaRequestBody) {
+        captureSequence = invalidateDeterministicDetailRequestStart(
+            url,
+            method,
+            requestOrder,
+            requestHeaders,
+            novaRequestBody,
+        );
+    }
     if (metaCaptureContext?.requestContext.kind === 'conversation-detail') {
         metaGraphqlResponseAssembler.delete(metaCaptureContext.requestContext.conversationId);
         captureSequence = beginConversationCaptureSequence(
             'Meta Muse',
             metaCaptureContext.requestContext.conversationId,
+            requestOrder,
         );
     } else if (metaCaptureContext) {
         captureSequence = currentConversationCaptureSequence(
@@ -595,7 +699,7 @@ const prepareFetchCapturePlan = async (
     }
     if (zaiCaptureContext?.method === 'GET') {
         zaiConversationResponseAssembler.delete(zaiCaptureContext.conversationId);
-        captureSequence = beginConversationCaptureSequence('Z.ai', zaiCaptureContext.conversationId);
+        captureSequence = beginConversationCaptureSequence('Z.ai', zaiCaptureContext.conversationId, requestOrder);
     } else if (zaiCaptureContext) {
         captureSequence = currentConversationCaptureSequence('Z.ai', zaiCaptureContext.conversationId);
     }
@@ -625,13 +729,18 @@ const forwardPageFetch = async (
     }
 };
 
-const withResponseClone = (response: Response, capture: (clone: Response) => void): void => {
+const withResponseClone = (response: Response, capture: (clone: Response) => Promise<void>): void => {
     if (isDeclaredBodyOversized(response, conversationResponseCache.getMaxBytesPerEntry())) {
         return;
     }
+    const release = tryReserveResponseCapture();
+    if (!release) {
+        return;
+    }
     try {
-        capture(response.clone());
+        void capture(response.clone()).finally(release);
     } catch {
+        release();
         // A failed clone must not affect the page-owned response.
     }
 };
@@ -644,6 +753,13 @@ const captureGenericFetchResponse = (
     captureEpoch: ProviderCaptureEpoch,
     captureSequence: ConversationCaptureSequence | null,
 ): void => {
+    if (!isConversationCaptureSequenceCurrent(captureSequence)) {
+        return;
+    }
+    const release = tryReserveResponseCapture();
+    if (!release) {
+        return;
+    }
     void captureTerminalConversationResponse({
         response,
         url,
@@ -664,7 +780,7 @@ const captureGenericFetchResponse = (
                 beginConversationCaptureSequence(captureEpoch.platform, conversationId);
             }
         },
-    });
+    }).finally(release);
 };
 
 const capturePlannedFetchResponse = (
@@ -675,30 +791,29 @@ const capturePlannedFetchResponse = (
     method: string,
 ): void => {
     const captureEpoch = plan.captureEpoch;
-    if (!captureEpoch || !isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)) {
+    if (
+        !captureEpoch ||
+        !isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value) ||
+        !isConversationCaptureSequenceCurrent(plan.captureSequence)
+    ) {
         return;
     }
     if (plan.metaCaptureContext) {
         if (captureEpoch.platform !== 'Meta Muse') {
             return;
         }
-        withResponseClone(response, (clone) => {
-            void captureMetaResponse(
-                plan.metaCaptureContext!.requestBody,
-                clone,
-                captureEpoch.value,
-                plan.captureSequence!,
-            );
-        });
+        withResponseClone(response, (clone) =>
+            captureMetaResponse(plan.metaCaptureContext!.requestBody, clone, captureEpoch.value, plan.captureSequence!),
+        );
         return;
     }
     if (plan.zaiCaptureContext) {
         if (captureEpoch.platform !== 'Z.ai') {
             return;
         }
-        withResponseClone(response, (clone) => {
-            void captureZaiResponse(plan.zaiCaptureContext!, clone, captureEpoch.value, plan.captureSequence!);
-        });
+        withResponseClone(response, (clone) =>
+            captureZaiResponse(plan.zaiCaptureContext!, clone, captureEpoch.value, plan.captureSequence!),
+        );
         return;
     }
     if (!plan.classification) {
@@ -709,8 +824,19 @@ const capturePlannedFetchResponse = (
 const createInterceptFetch = (originalFetch: typeof fetch) => async (args: Parameters<typeof fetch>) => {
     const url = extractRequestUrl(args[0]);
     const method = extractRequestMethod(args[0], args[1]);
-    const plan = await prepareFetchCapturePlan(args, url, method);
-    const response = await forwardPageFetch(originalFetch, args, plan.streamId);
+    const planPromise = prepareFetchCapturePlan(args, url, method);
+    const responsePromise = forwardPageFetch(originalFetch, args, undefined);
+    let plan: FetchCapturePlan;
+    let response: Response;
+    try {
+        [plan, response] = await Promise.all([planPromise, responsePromise]);
+    } catch (error) {
+        const settledPlan = await planPromise.catch(() => null);
+        if (settledPlan?.streamId) {
+            streamDebugRecorder.terminateStream(settledPlan.streamId, 'error');
+        }
+        throw error;
+    }
 
     invalidateCapturedRequestContext(url, response.status);
     capturePlannedFetchResponse(response, plan, args, url, method);
@@ -853,8 +979,12 @@ const captureGeminiXhrContext = (
     if (!isGeminiBatchexecutePost(url, method)) {
         return;
     }
+    const boundedBody = serializeRequestBodyWithinLimit(body, conversationResponseCache.getMaxBytesPerEntry());
+    if (boundedBody === null) {
+        return;
+    }
     try {
-        maybeCaptureGeminiBatchexecuteContext(url, body);
+        maybeCaptureGeminiBatchexecuteContext(url, boundedBody);
     } catch {
         // Safe non-interference boundary.
     }
@@ -940,7 +1070,16 @@ export default defineScript({
             );
             const classification = classifyGenerationEndpoint(url, method, window.location.href);
             invalidateActiveConversationForGeneration(url, classification);
-            let captureSequence = invalidateDeterministicDetailRequestStart(url, method);
+            const requestOrder = nextConversationCaptureOrder();
+            const requestHeaders = (xhr as any).__blackiyaRequestHeaders as Record<string, string> | undefined;
+            const requestBody = serializeRequestBodyWithinLimit(body, conversationResponseCache.getMaxBytesPerEntry());
+            let captureSequence = invalidateDeterministicDetailRequestStart(
+                url,
+                method,
+                requestOrder,
+                requestHeaders,
+                requestBody,
+            );
             const platform = resolvePlatformName(url);
             const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
             const providerPlan = prepareXhrProviderCapture(url, method, body);
@@ -952,6 +1091,7 @@ export default defineScript({
                 captureSequence = beginConversationCaptureSequence(
                     'Meta Muse',
                     providerPlan.captureContext.requestContext.conversationId,
+                    requestOrder,
                 );
             } else if (providerPlan?.kind === 'meta') {
                 captureSequence = currentConversationCaptureSequence(
@@ -961,7 +1101,11 @@ export default defineScript({
             }
             if (providerPlan?.kind === 'zai' && providerPlan.context.method === 'GET') {
                 zaiConversationResponseAssembler.delete(providerPlan.context.conversationId);
-                captureSequence = beginConversationCaptureSequence('Z.ai', providerPlan.context.conversationId);
+                captureSequence = beginConversationCaptureSequence(
+                    'Z.ai',
+                    providerPlan.context.conversationId,
+                    requestOrder,
+                );
             } else if (providerPlan?.kind === 'zai') {
                 captureSequence = currentConversationCaptureSequence('Z.ai', providerPlan.context.conversationId);
             }

@@ -16,6 +16,7 @@ import {
     SYNTHETIC_CONVERSATION_ID as CLAUDE_CONVERSATION_ID,
     CLAUDE_DETAIL_URL,
 } from '@/platforms/claude/fixtures/conversation';
+import { buildXGrokConversationItemsUrl } from '@/platforms/grok/x-url-utils';
 import {
     createMetaDetailFixture,
     createMetaOlderPageFixture,
@@ -23,7 +24,11 @@ import {
 } from '@/platforms/meta/fixtures/conversation';
 import { buildMetaConversationDetailRequest, buildMetaConversationPaginationRequest } from '@/platforms/meta/request';
 import { NOVA_CONVERSATION_DETAIL_TARGET } from '@/platforms/nova/constants';
-import { NOVA_CONVERSATION_ID, terminalNovaConversation } from '@/platforms/nova/fixtures/conversation';
+import {
+    createNovaConversationFixture,
+    NOVA_CONVERSATION_ID,
+    terminalNovaConversation,
+} from '@/platforms/nova/fixtures/conversation';
 import {
     ZAI_ASSISTANT_MESSAGE_ID,
     ZAI_CONVERSATION_ID,
@@ -72,6 +77,46 @@ const createTerminalChatGptPayload = (conversationId: string, title = 'Observed 
     safe_urls: [],
     blocked_urls: [],
 });
+
+const X_GROK_CONVERSATION_ID = '2091428436845772921';
+const createXGrokPayload = (message: string, isPartial = false) => ({
+    data: {
+        grok_conversation_by_rest_id: { is_pinned: false },
+        grok_conversation_items_by_rest_id: {
+            cursor: 'synthetic-cursor',
+            items: [
+                {
+                    chat_item_id: '2091428438666096641',
+                    created_at_ms: 1_787_470_371_309,
+                    grok_mode: 'Normal',
+                    is_partial: isPartial,
+                    message,
+                    sender_type: 'Agent',
+                },
+                {
+                    chat_item_id: '2091428438666096640',
+                    created_at_ms: 1_787_470_370_000,
+                    grok_mode: 'Normal',
+                    message: 'A synthetic question?',
+                    sender_type: 'User',
+                },
+            ],
+        },
+    },
+});
+
+const installDeferredXhrTransport = (windowInstance: Window) => {
+    const pending: InstanceType<typeof windowInstance.XMLHttpRequest>[] = [];
+    windowInstance.XMLHttpRequest.prototype.send = function () {
+        pending.push(this);
+    };
+    const respond = (xhr: InstanceType<typeof windowInstance.XMLHttpRequest>, responseText: string, status = 200) => {
+        Object.defineProperty(xhr, 'status', { configurable: true, value: status });
+        Object.defineProperty(xhr, 'responseText', { configurable: true, value: responseText });
+        xhr.dispatchEvent(new windowInstance.Event('load'));
+    };
+    return { pending, respond };
+};
 
 const createDeferredBodyClone = (text: string) => {
     let release!: () => void;
@@ -419,7 +464,9 @@ describe('MAIN-world bootstrap request capture', () => {
         });
 
         (bootstrapScript as { main: () => void }).main();
-        const response = await windowInstance.fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`);
+        const response = await windowInstance.fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`, {
+            headers: { authorization: 'Bearer first-observed-account' },
+        });
 
         expect(await response.text()).toBe(JSON.stringify(payload));
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -639,6 +686,273 @@ describe('MAIN-world bootstrap request capture', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(conversationResponseCache.get('Amazon Nova', NOVA_CONVERSATION_ID)).toBeDefined();
+    });
+
+    it('should not let an older delayed x.com Grok detail replace a newer terminal detail', async () => {
+        const detailUrl = buildXGrokConversationItemsUrl(X_GROK_CONVERSATION_ID);
+        const olderText = JSON.stringify(createXGrokPayload('Older Grok answer'));
+        const newerText = JSON.stringify(createXGrokPayload('Newer Grok answer'));
+        const delayed = createDeferredBodyClone(olderText);
+        let responseIndex = 0;
+        const windowInstance = new Window({ url: `https://x.com/i/grok?conversation=${X_GROK_CONVERSATION_ID}` });
+        windowInstance.fetch = async () => {
+            const isOlder = responseIndex++ === 0;
+            const response = new windowInstance.Response(isOlder ? olderText : newerText);
+            if (isOlder) {
+                response.clone = () => delayed.clone as unknown as InstanceType<typeof windowInstance.Response>;
+            }
+            return response;
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch(detailUrl);
+        await windowInstance.fetch(detailUrl);
+        await waitForCapture();
+        expect(
+            conversationResponseCache.get('Grok', X_GROK_CONVERSATION_ID)?.mapping?.['2091428438666096641']?.message
+                ?.content.parts?.[0],
+        ).toBe('Newer Grok answer');
+
+        delayed.release();
+        await waitForCapture();
+        expect(
+            conversationResponseCache.get('Grok', X_GROK_CONVERSATION_ID)?.mapping?.['2091428438666096641']?.message
+                ?.content.parts?.[0],
+        ).toBe('Newer Grok answer');
+    });
+
+    it('should not let an older delayed Nova detail replace a newer terminal detail', async () => {
+        const olderPayload = createNovaConversationFixture();
+        const newerPayload = structuredClone(olderPayload) as Record<string, any>;
+        newerPayload.conversationInteractions[0].conversationTitle = 'Newer Nova snapshot';
+        const olderText = JSON.stringify(olderPayload);
+        const newerText = JSON.stringify(newerPayload);
+        const delayed = createDeferredBodyClone(olderText);
+        let responseIndex = 0;
+        const windowInstance = new Window({
+            url: `https://nova.amazon.com/conversation/${NOVA_CONVERSATION_ID}`,
+        });
+        windowInstance.fetch = async () => {
+            const isOlder = responseIndex++ === 0;
+            const response = new windowInstance.Response(isOlder ? olderText : newerText);
+            if (isOlder) {
+                response.clone = () => delayed.clone as unknown as InstanceType<typeof windowInstance.Response>;
+            }
+            return response;
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+        const request = {
+            method: 'POST',
+            headers: { 'x-amz-target': NOVA_CONVERSATION_DETAIL_TARGET },
+            body: JSON.stringify({ conversationId: NOVA_CONVERSATION_ID }),
+        };
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch('https://nova.amazon.com/api', request);
+        await windowInstance.fetch('https://nova.amazon.com/api', request);
+        await waitForCapture();
+        expect(conversationResponseCache.get('Amazon Nova', NOVA_CONVERSATION_ID)?.title).toBe('Newer Nova snapshot');
+
+        delayed.release();
+        await waitForCapture();
+        expect(conversationResponseCache.get('Amazon Nova', NOVA_CONVERSATION_ID)?.title).toBe('Newer Nova snapshot');
+    });
+
+    it('should not let an older delayed Grok XHR replace a newer terminal detail', () => {
+        const detailUrl = buildXGrokConversationItemsUrl(X_GROK_CONVERSATION_ID);
+        const windowInstance = new Window({ url: `https://x.com/i/grok?conversation=${X_GROK_CONVERSATION_ID}` });
+        const transport = installDeferredXhrTransport(windowInstance);
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const older = new windowInstance.XMLHttpRequest();
+        older.open('GET', detailUrl);
+        older.send();
+        const newer = new windowInstance.XMLHttpRequest();
+        newer.open('GET', detailUrl);
+        newer.send();
+
+        transport.respond(transport.pending[1]!, JSON.stringify(createXGrokPayload('Newer Grok XHR answer')));
+        transport.respond(transport.pending[0]!, JSON.stringify(createXGrokPayload('Older Grok XHR answer')));
+
+        expect(
+            conversationResponseCache.get('Grok', X_GROK_CONVERSATION_ID)?.mapping?.['2091428438666096641']?.message
+                ?.content.parts?.[0],
+        ).toBe('Newer Grok XHR answer');
+    });
+
+    it('should not let an older delayed Nova XHR repopulate after a newer non-terminal detail', () => {
+        const terminalText = JSON.stringify(createNovaConversationFixture());
+        const nonTerminalText = JSON.stringify(
+            createNovaConversationFixture({ assistantStatus: 'in_progress', interactionStatus: 'in_progress' }),
+        );
+        const windowInstance = new Window({
+            url: `https://nova.amazon.com/conversation/${NOVA_CONVERSATION_ID}`,
+        });
+        const transport = installDeferredXhrTransport(windowInstance);
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+        const requestBody = JSON.stringify({ conversationId: NOVA_CONVERSATION_ID });
+
+        (bootstrapScript as { main: () => void }).main();
+        const older = new windowInstance.XMLHttpRequest();
+        older.open('POST', 'https://nova.amazon.com/api');
+        older.setRequestHeader('x-amz-target', NOVA_CONVERSATION_DETAIL_TARGET);
+        older.send(requestBody);
+        const newer = new windowInstance.XMLHttpRequest();
+        newer.open('POST', 'https://nova.amazon.com/api');
+        newer.setRequestHeader('x-amz-target', NOVA_CONVERSATION_DETAIL_TARGET);
+        newer.send(requestBody);
+
+        transport.respond(transport.pending[1]!, nonTerminalText);
+        transport.respond(transport.pending[0]!, terminalText);
+
+        expect(conversationResponseCache.get('Amazon Nova', NOVA_CONVERSATION_ID)).toBeUndefined();
+    });
+
+    it('should start the page fetch before a streamed Request clone finishes inspection', async () => {
+        const request = new Request(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c',
+            { method: 'POST', body: 'f.req=x&at=secret' },
+        );
+        const delayed = createDeferredBodyClone('f.req=x&at=secret');
+        request.clone = () => delayed.clone as unknown as Request;
+        let pageFetchStarted = false;
+        const windowInstance = new Window({ url: 'https://gemini.google.com/app/synthetic' });
+        windowInstance.fetch = async () => {
+            pageFetchStarted = true;
+            return new windowInstance.Response('{}');
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const responsePromise = windowInstance.fetch(request as unknown as Parameters<typeof windowInstance.fetch>[0]);
+        await waitForCapture();
+
+        expect(pageFetchStarted).toBeTrue();
+        delayed.release();
+        await responsePromise;
+    });
+
+    it('should fail open when a streamed Request clone never finishes', async () => {
+        const cancel = mock(async () => undefined);
+        const never = new Promise<never>(() => undefined);
+        const request = new Request(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c',
+            { method: 'POST', body: 'f.req=x&at=secret' },
+        );
+        request.clone = () =>
+            ({
+                headers: new Headers(),
+                body: { getReader: () => ({ read: () => never, cancel }) },
+            }) as unknown as Request;
+        const windowInstance = new Window({ url: 'https://gemini.google.com/app/synthetic' });
+        windowInstance.fetch = async () => new windowInstance.Response('{}');
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const result = await Promise.race([
+            windowInstance
+                .fetch(request as unknown as Parameters<typeof windowInstance.fetch>[0])
+                .then(() => 'forwarded'),
+            new Promise<string>((resolve) => {
+                timeoutHandle = setTimeout(() => resolve('timed-out'), 250);
+            }),
+        ]);
+        clearTimeout(timeoutHandle);
+
+        expect(result).toBe('forwarded');
+        expect(cancel).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reject oversized Gemini XHR strings and URLSearchParams before parsing', async () => {
+        const windowInstance = new Window({ url: 'https://gemini.google.com/app/synthetic' });
+        installDeferredXhrTransport(windowInstance);
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        await withCaptureByteLimit(8, async () => {
+            (bootstrapScript as { main: () => void }).main();
+            const detailUrl =
+                'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c';
+            const stringXhr = new windowInstance.XMLHttpRequest();
+            stringXhr.open('POST', detailUrl);
+            stringXhr.send('f.req=x&at=secret');
+            const paramsXhr = new windowInstance.XMLHttpRequest();
+            paramsXhr.open('POST', detailUrl);
+            paramsXhr.send(new URLSearchParams({ 'f.req': 'x', at: 'secret' }) as never);
+        });
+
+        expect(getGeminiBatchexecuteContext()).toBeUndefined();
+    });
+
+    it('should reserve at most three concurrent response clones', async () => {
+        const conversationIds = [
+            '67f0a0b3-1234-4abc-8def-123456789001',
+            '67f0a0b3-1234-4abc-8def-123456789002',
+            '67f0a0b3-1234-4abc-8def-123456789003',
+            '67f0a0b3-1234-4abc-8def-123456789004',
+        ];
+        const delayed = conversationIds.map((conversationId) =>
+            createDeferredBodyClone(JSON.stringify(createTerminalChatGptPayload(conversationId))),
+        );
+        let responseIndex = 0;
+        const cloneCalls = conversationIds.map(() => 0);
+        const windowInstance = new Window({ url: `https://chatgpt.com/c/${conversationIds[0]}` });
+        windowInstance.fetch = async () => {
+            const index = responseIndex++;
+            const response = new windowInstance.Response('{}');
+            response.clone = () => {
+                cloneCalls[index] = (cloneCalls[index] ?? 0) + 1;
+                return delayed[index]!.clone as unknown as InstanceType<typeof windowInstance.Response>;
+            };
+            return response;
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        for (const conversationId of conversationIds) {
+            await windowInstance.fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`);
+        }
+        await waitForCapture();
+
+        expect(cloneCalls).toEqual([1, 1, 1, 0]);
+        delayed.forEach((capture) => {
+            capture.release();
+        });
+        await waitForCapture();
     });
 
     it('assembles Meta detail and cursor-ordered pagination responses before caching', async () => {
