@@ -1,7 +1,10 @@
 import { browser } from 'wxt/browser';
-import type { ExportControls } from '@/features/export-controls/contract';
+import type { ExportActionContext, ExportControls } from '@/features/export-controls/contract';
 import { createExportControls } from '@/features/export-controls/export-controls';
-import { createMainWorldCommandBridge } from '@/features/runtime/main-world-command-request';
+import {
+    createMainWorldCommandBridge,
+    type MainWorldCommandBridge,
+} from '@/features/runtime/main-world-command-request';
 import { createV3ContentRuntime } from '@/features/runtime/v3-content-runtime';
 import { SUPPORTED_PLATFORM_URLS } from '@/platforms/constants';
 import { getPlatformAdapter } from '@/platforms/factory';
@@ -56,6 +59,24 @@ export const resolveSupportedConversationRoute = (url: string) => {
     return conversationId ? { platform: adapter.name, conversationId } : null;
 };
 
+export const createBoundSingleExportHandler = (
+    mainWorldBridge: Pick<MainWorldCommandBridge, 'exportSingle'>,
+    resolveCurrentRoute: () => ExportActionContext | null = () =>
+        resolveSupportedConversationRoute(window.location.href),
+) => {
+    return async (context: ExportActionContext) => {
+        const currentRoute = resolveCurrentRoute();
+        if (
+            !currentRoute ||
+            currentRoute.platform !== context.platform ||
+            currentRoute.conversationId !== context.conversationId
+        ) {
+            throw new Error('Conversation changed before export started.');
+        }
+        await mainWorldBridge.exportSingle();
+    };
+};
+
 type ConversationRouteWindow = {
     location: { readonly href: string };
     history: {
@@ -86,6 +107,7 @@ export const createConversationRouteControlsController = ({
     let observingRoutes = false;
     let lifecycleBound = false;
     let lastHref: string | null = null;
+    let lastRouteKey: string | null = null;
     let pollTimer: number | null = null;
     const originalPushState = routeWindow.history.pushState;
     const originalReplaceState = routeWindow.history.replaceState;
@@ -99,10 +121,17 @@ export const createConversationRouteControlsController = ({
             return;
         }
         lastHref = href;
-        if (resolveRoute(href)) {
+        const route = resolveRoute(href);
+        if (route) {
+            const routeKey = `${route.platform}\0${route.conversationId}`;
+            if (lastRouteKey !== null && lastRouteKey !== routeKey) {
+                controls.destroy();
+            }
             controls.mount();
+            lastRouteKey = routeKey;
         } else {
             controls.destroy();
+            lastRouteKey = null;
         }
     };
 
@@ -145,6 +174,7 @@ export const createConversationRouteControlsController = ({
             pollTimer = null;
         }
         lastHref = null;
+        lastRouteKey = null;
         controls.destroy();
     };
 
@@ -210,9 +240,7 @@ export default defineScript({
                 }
                 return route;
             },
-            onExport: async () => {
-                await mainWorldBridge.exportSingle();
-            },
+            onExport: createBoundSingleExportHandler(mainWorldBridge),
         });
         const routeControls = createConversationRouteControlsController({
             window: window as unknown as ConversationRouteWindow,

@@ -301,4 +301,23 @@ describe('v3 export controls', () => {
         expect(controls.getButton()?.textContent).toBe('Save JSON');
         expect(controls.getButton()?.disabled).toBe(false);
     });
+
+    it('should not start a queued export after route teardown', async () => {
+        const onExport = mock(async () => {});
+        const { controls } = mount({
+            resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'conversation-a' })),
+            onExport,
+        });
+
+        controls.getButton()?.click();
+        expect(controls.getState()).toBe('loading');
+
+        controls.destroy();
+        controls.mount();
+        await flushMicrotasks();
+
+        expect(onExport).toHaveBeenCalledTimes(0);
+        expect(controls.getState()).toBe('idle');
+        expect(controls.getButton()?.textContent).toBe('Save JSON');
+    });
 });

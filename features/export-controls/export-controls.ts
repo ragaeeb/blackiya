@@ -192,7 +192,12 @@ export const createExportControls = (
 
         setState('loading');
         void Promise.resolve()
-            .then(() => dependencies.onExport(context))
+            .then(() => {
+                if (currentActionGeneration !== actionGeneration) {
+                    return;
+                }
+                return dependencies.onExport(context);
+            })
             .then(() => {
                 if (currentActionGeneration !== actionGeneration) {
                     return;

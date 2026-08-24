@@ -10,6 +10,7 @@ mock.module('wxt/browser', () => ({
 }));
 
 import {
+    createBoundSingleExportHandler,
     createConversationRouteControlsController,
     resolveSupportedConversationRoute,
 } from '../../entrypoints/main.content';
@@ -120,6 +121,53 @@ describe('single-export conversation route controls', () => {
         expect(controls.destroy).toHaveBeenCalledTimes(3);
 
         controller.stop();
+    });
+
+    it('should reset controls when navigating between valid conversations', () => {
+        const conversationA = `https://x.com/i/grok?conversation=${X_CONVERSATION_ID}`;
+        const conversationB = 'https://x.com/i/grok?conversation=2091428436845772999';
+        const testWindow = createRouteWindow(conversationA);
+        const controls = {
+            mount: mock(() => ({}) as HTMLElement),
+            destroy: mock(() => {}),
+        };
+        const controller = createConversationRouteControlsController({
+            window: testWindow.routeWindow,
+            controls,
+            pollIntervalMs: 10_000,
+        });
+
+        controller.start();
+        expect(controls.mount).toHaveBeenCalledTimes(1);
+
+        testWindow.routeWindow.history.pushState({}, '', conversationB);
+
+        expect(controls.destroy).toHaveBeenCalledTimes(1);
+        expect(controls.mount).toHaveBeenCalledTimes(2);
+
+        controller.stop();
+    });
+
+    it('should invoke single export only while the action-time conversation remains current', async () => {
+        const exportSingle = mock(async () => ({
+            operation: 'single_export' as const,
+            platform: 'Grok',
+            filename: 'conversation.json',
+        }));
+        let currentRoute = { platform: 'Grok', conversationId: X_CONVERSATION_ID };
+        const onExport = createBoundSingleExportHandler(
+            { exportSingle },
+            () => currentRoute,
+        );
+
+        await onExport({ platform: 'Grok', conversationId: X_CONVERSATION_ID });
+        expect(exportSingle).toHaveBeenCalledTimes(1);
+
+        currentRoute = { platform: 'Grok', conversationId: '2091428436845772999' };
+        await expect(onExport({ platform: 'Grok', conversationId: X_CONVERSATION_ID })).rejects.toThrow(
+            'Conversation changed before export started.',
+        );
+        expect(exportSingle).toHaveBeenCalledTimes(1);
     });
 
     it('should restore route observation and controls after persisted BFCache navigation', () => {
