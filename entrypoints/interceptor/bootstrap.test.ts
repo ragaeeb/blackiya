@@ -241,6 +241,23 @@ describe('MAIN-world bootstrap request capture', () => {
         expect(getGeminiBatchexecuteContext()?.at).toBe('AJvToken:1');
     });
 
+    it('should cancel an oversized Gemini request clone before context parsing', async () => {
+        const request = new Request(
+            'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c',
+            { method: 'POST', body: 'f.req=x&at=secret' },
+        );
+        const oversized = createImmediateBodyClone('f.req=x&at=secret');
+        request.clone = () => oversized.clone as unknown as Request;
+
+        await withCaptureByteLimit(8, async () => {
+            await captureFetchRequestContext([request], request.url, 'POST');
+        });
+
+        expect(oversized.cancel).toHaveBeenCalledTimes(1);
+        expect(getGeminiBatchexecuteContext()).toBeUndefined();
+        expect(await request.text()).toBe('f.req=x&at=secret');
+    });
+
     it('installs the fetch interceptor without consuming the original streamed response', async () => {
         const windowInstance = new Window();
         const responseBody = 'data: streamed response\n\n';
@@ -530,6 +547,39 @@ describe('MAIN-world bootstrap request capture', () => {
         await waitForCapture();
 
         expect(conversationResponseCache.get('ChatGPT', conversationId)).toBeUndefined();
+    });
+
+    it('should not let an older delayed terminal detail replace a newer terminal detail', async () => {
+        const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
+        const olderText = JSON.stringify(createTerminalChatGptPayload(conversationId, 'Older snapshot'));
+        const newerText = JSON.stringify(createTerminalChatGptPayload(conversationId, 'Newer snapshot'));
+        const delayed = createDeferredBodyClone(olderText);
+        let responseIndex = 0;
+        const windowInstance = new Window({ url: `https://chatgpt.com/c/${conversationId}` });
+        windowInstance.fetch = async () => {
+            const isOlder = responseIndex++ === 0;
+            const response = new windowInstance.Response(isOlder ? olderText : newerText);
+            if (isOlder) {
+                response.clone = () => delayed.clone as unknown as InstanceType<typeof windowInstance.Response>;
+            }
+            return response;
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const detailUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
+        await windowInstance.fetch(detailUrl);
+        await windowInstance.fetch(detailUrl);
+        await waitForCapture();
+        expect(conversationResponseCache.get('ChatGPT', conversationId)?.title).toBe('Newer snapshot');
+
+        delayed.release();
+        await waitForCapture();
+        expect(conversationResponseCache.get('ChatGPT', conversationId)?.title).toBe('Newer snapshot');
     });
 
     it('should invalidate a cache-only snapshot when a canonical detail request exposes its conversation id', async () => {

@@ -74,6 +74,8 @@ export type StreamDebugRecorderOptions = {
     maxStreamBytes?: number;
     maxPerStreamBytes?: number;
     maxTotalBytes?: number;
+    schedulePrune?: (callback: () => void, delayMs: number) => unknown;
+    cancelPrune?: (handle: unknown) => void;
 };
 
 export type AppendStreamDebugFrameOptions = {
@@ -152,6 +154,18 @@ const defaultStreamId = () => {
         return `stream:${crypto.randomUUID()}`;
     }
     return `stream:${Date.now().toString(36)}:${streamIdCounter.toString(36)}`;
+};
+
+const defaultSchedulePrune = (callback: () => void, delayMs: number): unknown => {
+    const handle = setTimeout(callback, delayMs);
+    if (typeof handle === 'object' && handle && 'unref' in handle && typeof handle.unref === 'function') {
+        handle.unref();
+    }
+    return handle;
+};
+
+const defaultCancelPrune = (handle: unknown): void => {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
 };
 
 export const sanitizeStreamUrl = (url: string): string => {
@@ -374,8 +388,11 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
         DEFAULT_MAX_STREAM_BYTES,
     );
     const maxTotalBytes = positiveInteger(options.maxTotalBytes, DEFAULT_MAX_TOTAL_BYTES);
+    const schedulePruneCallback = options.schedulePrune ?? defaultSchedulePrune;
+    const cancelPruneCallback = options.cancelPrune ?? defaultCancelPrune;
     const records = new Map<string, MutableStreamDebugRecord>();
     let storedBytesTotal = 0;
+    let pruneHandle: unknown | null = null;
 
     const removeRecord = (streamId: string) => {
         const record = records.get(streamId);
@@ -388,10 +405,29 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
 
     const prune = (nowMs: number) => {
         for (const [streamId, record] of records) {
-            if (record.status !== 'active' && nowMs - record.lastActivityAt > ttlMs) {
+            if (nowMs - record.lastActivityAt >= ttlMs) {
                 removeRecord(streamId);
             }
         }
+    };
+
+    const scheduleExpiryPrune = () => {
+        if (pruneHandle !== null) {
+            cancelPruneCallback(pruneHandle);
+            pruneHandle = null;
+        }
+        if (records.size === 0) {
+            return;
+        }
+        let earliestExpiry = Number.POSITIVE_INFINITY;
+        for (const record of records.values()) {
+            earliestExpiry = Math.min(earliestExpiry, record.lastActivityAt + ttlMs);
+        }
+        pruneHandle = schedulePruneCallback(() => {
+            pruneHandle = null;
+            prune(now());
+            scheduleExpiryPrune();
+        }, Math.max(0, earliestExpiry - now()));
     };
 
     const deleteOldest = () => {
@@ -591,6 +627,7 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
             truncated: false,
             nextSequence: 0,
         });
+        scheduleExpiryPrune();
         return streamId;
     };
 
@@ -630,6 +667,7 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
         }
 
         appendRetainedFrame(record, preparedFrame, timestamp, storedText, storedByteLength);
+        scheduleExpiryPrune();
         return true;
     };
 
@@ -639,10 +677,12 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
             return false;
         }
         const timestamp = now();
+        record.lastActivityAt = timestamp;
+        appendFrame(streamId, { text: '', kind: 'transport', event, timestamp });
         record.status = event === 'close' ? 'closed' : event === 'abort' ? 'aborted' : 'error';
         record.termination = { event, at: timestamp };
         record.endedAt = timestamp;
-        appendFrame(streamId, { text: '', kind: 'transport', event, timestamp });
+        scheduleExpiryPrune();
         return true;
     };
 
@@ -664,6 +704,10 @@ export const createStreamDebugRecorder = (options: StreamDebugRecorderOptions = 
         getAllStreams,
         exportRecords: getAllStreams,
         clear: () => {
+            if (pruneHandle !== null) {
+                cancelPruneCallback(pruneHandle);
+                pruneHandle = null;
+            }
             records.clear();
             storedBytesTotal = 0;
         },

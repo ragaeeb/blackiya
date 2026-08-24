@@ -39,6 +39,14 @@ describe('Amazon Nova readiness', () => {
         expect(readiness.latestAssistantTextLength).toBe(0);
     });
 
+    it('should reject empty or false structured markers as missing content', () => {
+        for (const part of [{ artifact: {} }, { files: [] }, { toolUse: false }, { artifact: { files: [] } }]) {
+            const data = parseFixture(terminalArtifactNovaConversation);
+            data.mapping[data.current_node]!.message!.content.parts = [part];
+            expect(evaluateNovaReadiness(data).reason).toBe('assistant-content-missing');
+        }
+    });
+
     it('should reject in-progress responses as non-terminal', () => {
         const readiness = evaluateNovaReadiness(parseFixture(pendingNovaConversation));
 

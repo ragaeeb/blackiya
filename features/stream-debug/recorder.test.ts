@@ -186,12 +186,18 @@ describe('features/stream-debug/recorder comprehensive tests', () => {
         expect(remaining).toEqual(['/s3', '/s4']);
     });
 
-    it('should retain an active stream for a late terminal frame beyond its TTL', () => {
+    it('should automatically evict an abandoned active stream after its inactivity TTL', () => {
         let currentTime = 10_000;
+        let scheduled: (() => void) | undefined;
         const recorder = createStreamDebugRecorder({
             now: () => currentTime,
             ttlMs: 1_000,
             createStreamId: () => 'stream-late-terminal',
+            schedulePrune: (callback) => {
+                scheduled = callback;
+                return callback;
+            },
+            cancelPrune: () => undefined,
         });
         const streamId = recorder.startStream({
             platform: 'ChatGPT',
@@ -201,8 +207,31 @@ describe('features/stream-debug/recorder comprehensive tests', () => {
         });
 
         currentTime = 12_000;
-        expect(recorder.appendFrame(streamId, 'data: [DONE]')).toBeTrue();
-        expect(recorder.getStream(streamId)?.frames.find((frame) => frame.kind === 'done')?.event).toBe('done');
+        scheduled?.();
+        expect(recorder.getStream(streamId)).toBeUndefined();
+    });
+
+    it('should retain a termination frame when close arrives after the nominal TTL', () => {
+        let currentTime = 10_000;
+        const recorder = createStreamDebugRecorder({
+            now: () => currentTime,
+            ttlMs: 1_000,
+            createStreamId: () => 'stream-late-close',
+            schedulePrune: () => 1,
+            cancelPrune: () => undefined,
+        });
+        const streamId = recorder.startStream({
+            platform: 'ChatGPT',
+            endpoint: 'chatgpt-generation',
+            method: 'POST',
+            url: '/stream',
+        });
+
+        currentTime = 12_000;
+        expect(recorder.terminateStream(streamId, 'close')).toBeTrue();
+        const record = recorder.getStream(streamId);
+        expect(record?.termination?.event).toBe('close');
+        expect(record?.frames.at(-1)?.event).toBe('close');
     });
 
     it('should not promote control words embedded in ordinary content', () => {

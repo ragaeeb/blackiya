@@ -205,6 +205,11 @@ export class MetaGraphqlResponseAssembler {
         this.scheduleExpiryPrune();
     }
 
+    delete(conversationId: string): void {
+        this.deleteEntry(conversationId);
+        this.scheduleExpiryPrune();
+    }
+
     private ingestInitial(
         conversationId: string,
         responseText: string,

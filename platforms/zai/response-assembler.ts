@@ -238,6 +238,11 @@ export class ZaiConversationResponseAssembler {
         this.scheduleExpiryPrune();
     }
 
+    delete(conversationId: string): void {
+        this.deleteEntry(conversationId);
+        this.scheduleExpiryPrune();
+    }
+
     private ingestDetail(
         conversationId: string,
         responseText: string,

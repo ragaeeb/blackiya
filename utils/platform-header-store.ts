@@ -75,8 +75,9 @@ export class PlatformHeaderStore {
                   return typeof previous === 'string' && typeof next === 'string' && previous !== next;
               })
             : false;
+        const hadIdentity = IDENTITY_HEADER_NAMES.some((name) => typeof existing?.headers[name] === 'string');
         const identityEstablished =
-            !existing && IDENTITY_HEADER_NAMES.some((name) => typeof normalizedIncoming[name] === 'string');
+            !hadIdentity && IDENTITY_HEADER_NAMES.some((name) => typeof normalizedIncoming[name] === 'string');
         const merged = identityChanged ? normalizedIncoming : mergeHeaderRecords(existing?.headers, normalizedIncoming);
         if (merged) {
             this.headers.set(platformName, { headers: merged, updatedAt });

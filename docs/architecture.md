@@ -202,7 +202,7 @@ Generation endpoints are classified (`features/stream-debug/generation-endpoint.
 - Grok: `POST /2/grok/add_response.json` or `POST /rest/app-chat/conversations/new`
 - Qwen: `POST /api/v2/chat/completions`
 
-No generation endpoint is registered for Claude, Amazon Nova, Meta Muse, Z.ai, DeepSeek, or `x.com` Grok in this release. Their supplied reload/detail traffic did not establish a generation transport, so the classifier does not speculate.
+No generation endpoint is registered for Claude, Amazon Nova, Meta Muse, Z.ai, or DeepSeek in this release. Their supplied reload/detail traffic did not establish a generation transport, so the classifier does not speculate. Grok generation capture includes the exact `/2/grok/add_response.json` transport on its declared Grok and X origins.
 
 The recorder (`features/stream-debug/recorder.ts`) stores in-memory records. Each record has a `streamId`, `platform`, `endpoint`, `method`, sanitized `path`, timestamps, ordered `frames`, terminal `termination`, raw and retained byte/frame accounting, and truncation counters.
 
@@ -223,7 +223,7 @@ Bounded recorder defaults (`features/stream-debug/recorder.ts`):
 - max bytes per frame: `64 KiB`
 - max bytes per stream: `512 KiB`
 - max retained bytes across streams: `8 MiB`
-- TTL: `15 minutes` (idle/ended streams are pruned)
+- TTL: `15 minutes` (idle or ended streams are pruned by a scheduled in-memory expiry, even without another recorder operation)
 
 The recorder clamps each frame to its byte budget. When a bound is reached it evicts ordinary frames before transport and terminal/refusal/replacement/erase frames, preserving the late signals needed to diagnose refusals and server-side replacement/erase events. Input truncation and evicted retained bytes are both reflected in the byte/frame counters and `truncated` flag. When the stream count exceeds the cap, the oldest streams are evicted.
 

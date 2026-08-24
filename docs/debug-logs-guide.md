@@ -30,7 +30,7 @@ Stream-debug capture is bounded, in-memory, and exported **explicitly** (it is n
 - Grok: `POST /2/grok/add_response.json`, `POST /rest/app-chat/conversations/new`
 - Qwen: `POST /api/v2/chat/completions`
 
-No generation endpoint is guessed for Claude, Amazon Nova, Meta Muse, Z.ai, DeepSeek, or `x.com` Grok. Absence of stream-debug frames on those platforms is therefore not evidence that their cache-first single export failed.
+No generation endpoint is guessed for Claude, Amazon Nova, Meta Muse, Z.ai, or DeepSeek. Grok generation capture recognizes the exact `/2/grok/add_response.json` transport on its declared Grok and X origins. Absence of stream-debug frames on unsupported platforms is therefore not evidence that their cache-first single export failed.
 
 Each record captures:
 

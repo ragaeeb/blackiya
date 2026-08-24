@@ -39,6 +39,7 @@ const META_GRAPHQL_PATH = '/api/graphql';
 const metaGraphqlResponseAssembler = new MetaGraphqlResponseAssembler();
 const zaiConversationResponseAssembler = new ZaiConversationResponseAssembler();
 const providerStateEpochs = new Map<SupportedPlatformName, number>();
+const conversationCaptureSequences = new Map<string, number>();
 
 const resolveUrlBase = (): string => {
     try {
@@ -123,9 +124,47 @@ const advanceProviderStateEpoch = (platform: SupportedPlatformName): void => {
 const isProviderStateEpochCurrent = (platform: SupportedPlatformName, epoch: number): boolean =>
     getProviderStateEpoch(platform) === epoch;
 
+type ConversationCaptureSequence = { platform: SupportedPlatformName; conversationId: string; value: number };
+
+const conversationSequenceKey = (platform: SupportedPlatformName, conversationId: string) =>
+    `${platform}\u0000${conversationId}`;
+
+const getConversationCaptureSequence = (platform: SupportedPlatformName, conversationId: string): number =>
+    conversationCaptureSequences.get(conversationSequenceKey(platform, conversationId)) ?? 0;
+
+const beginConversationCaptureSequence = (
+    platform: SupportedPlatformName,
+    conversationId: string,
+): ConversationCaptureSequence => {
+    const key = conversationSequenceKey(platform, conversationId);
+    const current = getConversationCaptureSequence(platform, conversationId);
+    const value = current >= Number.MAX_SAFE_INTEGER ? 0 : current + 1;
+    conversationCaptureSequences.set(key, value);
+    conversationResponseCache.delete(platform, conversationId);
+    return { platform, conversationId, value };
+};
+
+const currentConversationCaptureSequence = (
+    platform: SupportedPlatformName,
+    conversationId: string,
+): ConversationCaptureSequence => ({
+    platform,
+    conversationId,
+    value: getConversationCaptureSequence(platform, conversationId),
+});
+
+const isConversationCaptureSequenceCurrent = (sequence: ConversationCaptureSequence | null): boolean =>
+    !sequence ||
+    getConversationCaptureSequence(sequence.platform, sequence.conversationId) === sequence.value;
+
 const clearProviderConversationState = (platform: SupportedPlatformName): void => {
     advanceProviderStateEpoch(platform);
     conversationResponseCache.clear(platform);
+    for (const key of conversationCaptureSequences.keys()) {
+        if (key.startsWith(`${platform}\u0000`)) {
+            conversationCaptureSequences.delete(key);
+        }
+    }
     if (platform === 'Meta Muse') {
         metaGraphqlResponseAssembler.clear();
     } else if (platform === 'Z.ai') {
@@ -135,7 +174,7 @@ const clearProviderConversationState = (platform: SupportedPlatformName): void =
 
 const invalidateConversationSnapshot = (platform: SupportedPlatformName, conversationId: string): void => {
     advanceProviderStateEpoch(platform);
-    conversationResponseCache.delete(platform, conversationId);
+    beginConversationCaptureSequence(platform, conversationId);
 };
 
 const resolveDeterministicDetailConversation = (
@@ -175,11 +214,15 @@ const resolveDeterministicDetailConversation = (
     return conversationId ? { platform, conversationId } : null;
 };
 
-const invalidateDeterministicDetailRequestStart = (url: string, method: string): void => {
+const invalidateDeterministicDetailRequestStart = (
+    url: string,
+    method: string,
+): ConversationCaptureSequence | null => {
     const detail = resolveDeterministicDetailConversation(url, method);
     if (detail) {
-        conversationResponseCache.delete(detail.platform, detail.conversationId);
+        return beginConversationCaptureSequence(detail.platform, detail.conversationId);
     }
+    return null;
 };
 
 const invalidateActiveConversationForGeneration = (url: string, classification: GenerationEndpoint | null): void => {
@@ -228,13 +271,12 @@ export const invalidateCapturedRequestContext = (url: string, status: number): b
 };
 
 const extractRequestUrl = (input: RequestInfo | URL): string => {
-    if (typeof input === 'string') {
-        return input;
+    const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    try {
+        return new URL(rawUrl, resolveUrlBase()).href;
+    } catch {
+        return rawUrl;
     }
-    if (input instanceof URL) {
-        return input.href;
-    }
-    return input.url;
 };
 
 const extractRequestMethod = (input: RequestInfo | URL, init?: RequestInit): string => {
@@ -356,13 +398,22 @@ const prepareMetaFetchCapture = async (
     return requestContext ? { requestBody: body, requestContext } : null;
 };
 
-const captureMetaResponse = async (requestBody: string, response: Response, epoch: number): Promise<void> => {
+const captureMetaResponse = async (
+    requestBody: string,
+    response: Response,
+    epoch: number,
+    sequence: ConversationCaptureSequence,
+): Promise<void> => {
     if (!response.ok) {
         return;
     }
     try {
         const responseText = await readBoundedBodyText(response, conversationResponseCache.getMaxBytesPerEntry());
-        if (responseText === null || !isProviderStateEpochCurrent('Meta Muse', epoch)) {
+        if (
+            responseText === null ||
+            !isProviderStateEpochCurrent('Meta Muse', epoch) ||
+            !isConversationCaptureSequenceCurrent(sequence)
+        ) {
             return;
         }
         const data = metaGraphqlResponseAssembler.ingest(requestBody, responseText);
@@ -422,13 +473,22 @@ const prepareZaiFetchCapture = async (
     return requestBody ? { ...context, requestBody } : null;
 };
 
-const captureZaiResponse = async (context: ZaiCaptureContext, response: Response, epoch: number): Promise<void> => {
+const captureZaiResponse = async (
+    context: ZaiCaptureContext,
+    response: Response,
+    epoch: number,
+    sequence: ConversationCaptureSequence,
+): Promise<void> => {
     if (!response.ok) {
         return;
     }
     try {
         const responseText = await readBoundedBodyText(response, conversationResponseCache.getMaxBytesPerEntry());
-        if (responseText === null || !isProviderStateEpochCurrent('Z.ai', epoch)) {
+        if (
+            responseText === null ||
+            !isProviderStateEpochCurrent('Z.ai', epoch) ||
+            !isConversationCaptureSequenceCurrent(sequence)
+        ) {
             return;
         }
         const data = zaiConversationResponseAssembler.ingest({
@@ -453,9 +513,9 @@ export const captureFetchRequestContext = async (args: Parameters<typeof fetch>,
     }
 
     try {
-        let body: unknown = args[1]?.body;
-        if (body === undefined && args[0] instanceof Request) {
-            body = await args[0].clone().text();
+        const body = await readFetchRequestBody(args, conversationResponseCache.getMaxBytesPerEntry());
+        if (body === null) {
+            return;
         }
         maybeCaptureGeminiBatchexecuteContext(url, body);
     } catch {
@@ -503,6 +563,7 @@ type FetchCapturePlan = {
     classification: GenerationEndpoint | null;
     streamId: string | undefined;
     captureEpoch: ProviderCaptureEpoch | null;
+    captureSequence: ConversationCaptureSequence | null;
 };
 
 const prepareFetchCapturePlan = async (
@@ -513,7 +574,7 @@ const prepareFetchCapturePlan = async (
     await captureFetchRequestContext(args, url, method);
     const classification = classifyGenerationEndpoint(url, method, window.location.href);
     invalidateActiveConversationForGeneration(url, classification);
-    invalidateDeterministicDetailRequestStart(url, method);
+    let captureSequence = invalidateDeterministicDetailRequestStart(url, method);
     const platform = resolvePlatformName(url);
     const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
     const [metaCaptureContext, zaiCaptureContext] = await Promise.all([
@@ -521,10 +582,22 @@ const prepareFetchCapturePlan = async (
         prepareZaiFetchCapture(args, url, method),
     ]);
     if (metaCaptureContext?.requestContext.kind === 'conversation-detail') {
-        conversationResponseCache.delete('Meta Muse', metaCaptureContext.requestContext.conversationId);
+        metaGraphqlResponseAssembler.delete(metaCaptureContext.requestContext.conversationId);
+        captureSequence = beginConversationCaptureSequence(
+            'Meta Muse',
+            metaCaptureContext.requestContext.conversationId,
+        );
+    } else if (metaCaptureContext) {
+        captureSequence = currentConversationCaptureSequence(
+            'Meta Muse',
+            metaCaptureContext.requestContext.conversationId,
+        );
     }
     if (zaiCaptureContext?.method === 'GET') {
-        conversationResponseCache.delete('Z.ai', zaiCaptureContext.conversationId);
+        zaiConversationResponseAssembler.delete(zaiCaptureContext.conversationId);
+        captureSequence = beginConversationCaptureSequence('Z.ai', zaiCaptureContext.conversationId);
+    } else if (zaiCaptureContext) {
+        captureSequence = currentConversationCaptureSequence('Z.ai', zaiCaptureContext.conversationId);
     }
     return {
         metaCaptureContext,
@@ -532,6 +605,7 @@ const prepareFetchCapturePlan = async (
         classification,
         streamId: startFetchStreamCapture(classification, method, url),
         captureEpoch,
+        captureSequence,
     };
 };
 
@@ -568,6 +642,7 @@ const captureGenericFetchResponse = (
     url: string,
     method: string,
     captureEpoch: ProviderCaptureEpoch,
+    captureSequence: ConversationCaptureSequence | null,
 ): void => {
     void captureTerminalConversationResponse({
         response,
@@ -579,13 +654,14 @@ const captureGenericFetchResponse = (
         cache: conversationResponseCache,
         canMutate: (platformName) =>
             platformName === captureEpoch.platform &&
-            isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value),
+            isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value) &&
+            isConversationCaptureSequenceCurrent(captureSequence),
         onNonTerminal: (platformName, conversationId) => {
             if (
                 platformName === captureEpoch.platform &&
                 isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
             ) {
-                invalidateConversationSnapshot(captureEpoch.platform, conversationId);
+                beginConversationCaptureSequence(captureEpoch.platform, conversationId);
             }
         },
     });
@@ -607,7 +683,12 @@ const capturePlannedFetchResponse = (
             return;
         }
         withResponseClone(response, (clone) => {
-            void captureMetaResponse(plan.metaCaptureContext!.requestBody, clone, captureEpoch.value);
+            void captureMetaResponse(
+                plan.metaCaptureContext!.requestBody,
+                clone,
+                captureEpoch.value,
+                plan.captureSequence!,
+            );
         });
         return;
     }
@@ -616,12 +697,12 @@ const capturePlannedFetchResponse = (
             return;
         }
         withResponseClone(response, (clone) => {
-            void captureZaiResponse(plan.zaiCaptureContext!, clone, captureEpoch.value);
+            void captureZaiResponse(plan.zaiCaptureContext!, clone, captureEpoch.value, plan.captureSequence!);
         });
         return;
     }
     if (!plan.classification) {
-        captureGenericFetchResponse(response, args, url, method, captureEpoch);
+        captureGenericFetchResponse(response, args, url, method, captureEpoch, plan.captureSequence);
     }
 };
 
@@ -677,6 +758,7 @@ const captureXhrProviderResponse = (
     plan: XhrProviderCapturePlan,
     xhr: XMLHttpRequest,
     captureEpoch: ProviderCaptureEpoch | null,
+    captureSequence: ConversationCaptureSequence | null,
 ): boolean => {
     if (!plan) {
         return false;
@@ -685,7 +767,8 @@ const captureXhrProviderResponse = (
     if (
         !captureEpoch ||
         captureEpoch.platform !== platform ||
-        !isProviderStateEpochCurrent(platform, captureEpoch.value)
+        !isProviderStateEpochCurrent(platform, captureEpoch.value) ||
+        !isConversationCaptureSequenceCurrent(captureSequence)
     ) {
         return true;
     }
@@ -708,6 +791,7 @@ const captureGenericXhrResponse = (
     url: string,
     method: string,
     captureEpoch: ProviderCaptureEpoch,
+    captureSequence: ConversationCaptureSequence | null,
 ): void => {
     try {
         captureTerminalConversationText({
@@ -720,13 +804,14 @@ const captureGenericXhrResponse = (
             cache: conversationResponseCache,
             canMutate: (platformName) =>
                 platformName === captureEpoch.platform &&
-                isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value),
+                isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value) &&
+                isConversationCaptureSequenceCurrent(captureSequence),
             onNonTerminal: (platformName, conversationId) => {
                 if (
                     platformName === captureEpoch.platform &&
                     isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
                 ) {
-                    invalidateConversationSnapshot(captureEpoch.platform, conversationId);
+                    beginConversationCaptureSequence(captureEpoch.platform, conversationId);
                 }
             },
         });
@@ -741,9 +826,14 @@ const handleXhrLoad = (
     method: string,
     providerPlan: XhrProviderCapturePlan,
     captureEpoch: ProviderCaptureEpoch | null,
+    captureSequence: ConversationCaptureSequence | null,
 ): void => {
     invalidateCapturedRequestContext(url, xhr.status);
-    if (xhr.status < 200 || xhr.status >= 300 || captureXhrProviderResponse(providerPlan, xhr, captureEpoch)) {
+    if (
+        xhr.status < 200 ||
+        xhr.status >= 300 ||
+        captureXhrProviderResponse(providerPlan, xhr, captureEpoch, captureSequence)
+    ) {
         return;
     }
     if (
@@ -751,7 +841,7 @@ const handleXhrLoad = (
         captureEpoch &&
         isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
     ) {
-        captureGenericXhrResponse(xhr, url, method, captureEpoch);
+        captureGenericXhrResponse(xhr, url, method, captureEpoch, captureSequence);
     }
 };
 
@@ -822,7 +912,7 @@ export default defineScript({
         const originalSetRequestHeader = xhrPrototype.setRequestHeader;
 
         xhrPrototype.open = function (method: string, url: string | URL, ...rest: any[]) {
-            (this as any).__blackiyaRequestUrl = String(url);
+            (this as any).__blackiyaRequestUrl = extractRequestUrl(url);
             (this as any).__blackiyaRequestMethod = method.toUpperCase();
             (this as any).__blackiyaRequestHeaders = {};
             return originalOpen.apply(this, [method, url, ...rest] as any);
@@ -850,7 +940,7 @@ export default defineScript({
             );
             const classification = classifyGenerationEndpoint(url, method, window.location.href);
             invalidateActiveConversationForGeneration(url, classification);
-            invalidateDeterministicDetailRequestStart(url, method);
+            let captureSequence = invalidateDeterministicDetailRequestStart(url, method);
             const platform = resolvePlatformName(url);
             const captureEpoch = platform ? { platform, value: getProviderStateEpoch(platform) } : null;
             const providerPlan = prepareXhrProviderCapture(url, method, body);
@@ -858,15 +948,26 @@ export default defineScript({
                 providerPlan?.kind === 'meta' &&
                 providerPlan.captureContext.requestContext.kind === 'conversation-detail'
             ) {
-                conversationResponseCache.delete(
+                metaGraphqlResponseAssembler.delete(providerPlan.captureContext.requestContext.conversationId);
+                captureSequence = beginConversationCaptureSequence(
+                    'Meta Muse',
+                    providerPlan.captureContext.requestContext.conversationId,
+                );
+            } else if (providerPlan?.kind === 'meta') {
+                captureSequence = currentConversationCaptureSequence(
                     'Meta Muse',
                     providerPlan.captureContext.requestContext.conversationId,
                 );
             }
             if (providerPlan?.kind === 'zai' && providerPlan.context.method === 'GET') {
-                conversationResponseCache.delete('Z.ai', providerPlan.context.conversationId);
+                zaiConversationResponseAssembler.delete(providerPlan.context.conversationId);
+                captureSequence = beginConversationCaptureSequence('Z.ai', providerPlan.context.conversationId);
+            } else if (providerPlan?.kind === 'zai') {
+                captureSequence = currentConversationCaptureSequence('Z.ai', providerPlan.context.conversationId);
             }
-            xhr.addEventListener('load', () => handleXhrLoad(xhr, url, method, providerPlan, captureEpoch));
+            xhr.addEventListener('load', () =>
+                handleXhrLoad(xhr, url, method, providerPlan, captureEpoch, captureSequence),
+            );
 
             captureGeminiXhrContext(url, method, body);
             installXhrStreamCapture(xhr, url, method);

@@ -44,6 +44,17 @@ describe('PlatformHeaderStore', () => {
         expect(store.update('ChatGPT', { 'oai-device-id': 'device-1' })).toBeFalse();
     });
 
+    it('should report identity establishment after non-identity headers were stored first', () => {
+        const store = new PlatformHeaderStore();
+
+        expect(store.update('ChatGPT', { 'x-client-version': '1' })).toBeFalse();
+        expect(store.update('ChatGPT', { authorization: 'Bearer established' })).toBeTrue();
+        expect(store.get('ChatGPT')).toEqual({
+            'x-client-version': '1',
+            authorization: 'Bearer established',
+        });
+    });
+
     it('should discard unrelated old headers when a partial identity snapshot changes', () => {
         const store = new PlatformHeaderStore();
         store.update('ChatGPT', {

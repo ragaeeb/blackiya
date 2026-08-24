@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createStreamDebugRecorder } from '@/features/stream-debug/recorder';
-import { createMonitoredFetchResponse } from '@/features/stream-debug/stream-monitor';
+import { createMonitoredFetchResponse, extractSseFrames } from '@/features/stream-debug/stream-monitor';
 
 const responseFromChunks = (
     chunks: string[],
@@ -22,6 +22,13 @@ const responseFromChunks = (
 };
 
 describe('stream-debug fetch monitor', () => {
+    it('should split SSE frames across CR, LF, CRLF, and mixed blank lines', () => {
+        expect(extractSseFrames('data: one\r\rdata: two\r\n\ndata: three\n\rdata: four\r\n\r\n')).toEqual({
+            frames: ['data: one', 'data: two', 'data: three', 'data: four'],
+            remainder: '',
+        });
+    });
+
     it('should observe bytes only as the page consumes the pass-through response and preserve metadata', async () => {
         const recorder = createStreamDebugRecorder();
         const streamId = recorder.startStream({

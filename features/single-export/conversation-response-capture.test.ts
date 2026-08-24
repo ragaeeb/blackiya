@@ -38,6 +38,26 @@ const makeAdapter = (data: ConversationData, ready = true): LLMPlatform => ({
 });
 
 describe('captureTerminalConversationResponse', () => {
+    it('should normalize a relative detail URL before adapter classification and parsing', async () => {
+        const data = makeConversation('conversation-1');
+        const adapter = makeAdapter(data);
+        adapter.isConversationDetailRequest = (url) => url === 'https://chat.example/api/conversation/conversation-1';
+        const resolveAdapter = (url: string) => (url.startsWith('https://chat.example/') ? adapter : null);
+        const cache = new ConversationResponseCache();
+
+        const captured = await captureTerminalConversationResponse({
+            response: new Response('{}'),
+            url: '/api/conversation/conversation-1',
+            method: 'GET',
+            pageUrl: 'https://chat.example/c/conversation-1',
+            resolveAdapter,
+            cache,
+        });
+
+        expect(captured).toBeTrue();
+        expect(cache.get('Synthetic', 'conversation-1')).toEqual(data);
+    });
+
     it('should cache a terminal parsed response without consuming the page-owned response', async () => {
         const data = makeConversation('conversation-1');
         const adapter = makeAdapter(data);

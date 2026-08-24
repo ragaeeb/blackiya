@@ -21,14 +21,23 @@ const isTerminal = (adapter: LLMPlatform, data: Parameters<ConversationResponseC
     return readiness.ready && readiness.terminal;
 };
 
+const normalizeCaptureUrl = (url: string, pageUrl: string): string => {
+    try {
+        return new URL(url, pageUrl).href;
+    } catch {
+        return url;
+    }
+};
+
 const resolveEligibleAdapter = (input: Omit<CaptureInput, 'response'>): LLMPlatform | null => {
-    const adapter = input.resolveAdapter(input.url) ?? input.resolveAdapter(input.pageUrl);
+    const captureUrl = normalizeCaptureUrl(input.url, input.pageUrl);
+    const adapter = input.resolveAdapter(captureUrl) ?? input.resolveAdapter(input.pageUrl);
     if (!adapter) {
         return null;
     }
     if (
         adapter.isConversationDetailRequest &&
-        !adapter.isConversationDetailRequest(input.url, input.method, input.requestHeaders)
+        !adapter.isConversationDetailRequest(captureUrl, input.method, input.requestHeaders)
     ) {
         return null;
     }
@@ -46,7 +55,7 @@ const captureWithAdapter = (
         return false;
     }
     try {
-        const parsed = adapter.parseInterceptedData(input.text, input.url);
+        const parsed = adapter.parseInterceptedData(input.text, normalizeCaptureUrl(input.url, input.pageUrl));
         if (!parsed) {
             return false;
         }

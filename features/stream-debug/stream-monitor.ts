@@ -15,33 +15,13 @@ export const extractSseFrames = (buffer: string): { frames: string[]; remainder:
     const frames: string[] = [];
     let current = buffer;
     while (true) {
-        const doubleNewlineUnix = current.indexOf('\n\n');
-        const doubleNewlineWin = current.indexOf('\r\n\r\n');
-        let splitIdx = -1;
-        let sepLen = 2;
-
-        if (doubleNewlineUnix >= 0 && doubleNewlineWin >= 0) {
-            if (doubleNewlineUnix < doubleNewlineWin) {
-                splitIdx = doubleNewlineUnix;
-                sepLen = 2;
-            } else {
-                splitIdx = doubleNewlineWin;
-                sepLen = 4;
-            }
-        } else if (doubleNewlineUnix >= 0) {
-            splitIdx = doubleNewlineUnix;
-            sepLen = 2;
-        } else if (doubleNewlineWin >= 0) {
-            splitIdx = doubleNewlineWin;
-            sepLen = 4;
-        }
-
-        if (splitIdx < 0) {
+        const separator = /(?:\r\n|\r|\n)(?:\r\n|\r|\n)/.exec(current);
+        if (!separator || separator.index < 0) {
             break;
         }
 
-        const frame = current.slice(0, splitIdx);
-        current = current.slice(splitIdx + sepLen);
+        const frame = current.slice(0, separator.index);
+        current = current.slice(separator.index + separator[0].length);
         if (frame.trim().length > 0) {
             frames.push(frame.trim());
         }
