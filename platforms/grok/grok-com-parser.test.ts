@@ -120,6 +120,77 @@ describe('Grok Adapter — grok.com REST parsing', () => {
         expect((result as unknown as Record<string, unknown>).raw_payload).toEqual(payload);
     });
 
+    it('should replace canonical conversation state while preserving later incremental merges', () => {
+        const firstCanonicalPayload = {
+            responses: [
+                {
+                    responseId: 'user-turn',
+                    message: 'Question',
+                    sender: 'human',
+                    createTime: '2026-01-01T00:00:00.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-shared',
+                    parentResponseId: 'user-turn',
+                    message: 'Superseded answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:01.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-removed',
+                    parentResponseId: 'user-turn',
+                    message: 'Removed alternative',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:02.000Z',
+                    partial: false,
+                },
+            ],
+        };
+        const replacementCanonicalPayload = {
+            responses: [
+                {
+                    responseId: 'user-turn',
+                    message: 'Question',
+                    sender: 'human',
+                    createTime: '2026-01-01T00:00:00.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-shared',
+                    parentResponseId: 'user-turn',
+                    message: 'Replacement answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:03.000Z',
+                    partial: false,
+                },
+            ],
+        };
+
+        grokAdapter.parseInterceptedData(JSON.stringify(firstCanonicalPayload), META_URL);
+        const replacement = grokAdapter.parseInterceptedData(JSON.stringify(replacementCanonicalPayload), META_URL);
+
+        expect(replacement?.mapping['assistant-shared']?.message?.content?.parts?.[0]).toBe('Replacement answer');
+        expect(replacement?.mapping['assistant-removed']).toBeUndefined();
+        expect(replacement?.mapping['user-turn']?.children).toEqual(['assistant-shared']);
+
+        const incremental = grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                responseId: 'assistant-incremental',
+                parentResponseId: 'assistant-shared',
+                message: 'Incremental follow-up',
+                sender: 'assistant',
+                createTime: '2026-01-01T00:00:04.000Z',
+                partial: false,
+            }),
+            LOAD_RESPONSES_URL,
+        );
+
+        expect(incremental?.mapping['assistant-shared']).toBeDefined();
+        expect(incremental?.mapping['assistant-incremental']?.parent).toBe('assistant-shared');
+    });
+
     describe('out-of-order API responses (response-node → load-responses → meta)', () => {
         it('should handle out-of-order grok.com responses and build the correct tree', () => {
             const responseNodes = {

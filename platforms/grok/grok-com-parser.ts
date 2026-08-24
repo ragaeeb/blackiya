@@ -289,6 +289,14 @@ export const parseGrokComConversationMeta = (data: any, conversationId: string):
 const toRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 
+const hasCanonicalResponses = (value: unknown): boolean => {
+    const candidates = [value, toRecord(value)?.result];
+    return candidates.some((candidate) => {
+        const record = toRecord(candidate);
+        return !!record && (Array.isArray(record.responses) || normalizeGrokComResponses(record) !== null);
+    });
+};
+
 const parseGrokComConversationV2Chunk = (data: unknown, conversationId: string): ConversationData | null => {
     const candidates = [data, toRecord(data)?.result].filter((candidate): candidate is unknown => candidate != null);
     let result: ConversationData | null = null;
@@ -303,6 +311,21 @@ const parseGrokComConversationV2Chunk = (data: unknown, conversationId: string):
     return result;
 };
 
+const parseGrokComConversationV2Chunks = (chunks: unknown[], conversationId: string): ConversationData | null => {
+    if (chunks.some(hasCanonicalResponses)) {
+        createGrokComConversation(conversationId);
+    }
+
+    let result: ConversationData | null = null;
+    for (const chunk of chunks) {
+        const chunkResult = parseGrokComConversationV2Chunk(chunk, conversationId);
+        if (chunkResult) {
+            result = chunkResult;
+        }
+    }
+    return result;
+};
+
 const parseGrokComConversationV2Ndjson = (dataStr: string, conversationId: string): ConversationData | null => {
     const lines = dataStr
         .trim()
@@ -312,20 +335,16 @@ const parseGrokComConversationV2Ndjson = (dataStr: string, conversationId: strin
         return null;
     }
 
-    let result: ConversationData | null = null;
+    const chunks: unknown[] = [];
     for (const line of lines) {
         try {
-            const parsedLine = JSON.parse(line);
-            const lineResult = parseGrokComConversationV2Chunk(parsedLine, conversationId);
-            if (lineResult) {
-                result = lineResult;
-            }
+            chunks.push(JSON.parse(line));
         } catch {
             logger.warn(`[Blackiya/Grok] Failed to parse conversations_v2 NDJSON line: ${line.slice(0, 100)}`);
         }
     }
 
-    return result;
+    return parseGrokComConversationV2Chunks(chunks, conversationId);
 };
 
 const parseGrokComConversationV2SinglePayload = (dataStr: string, conversationId: string): ConversationData | null => {
@@ -333,7 +352,7 @@ const parseGrokComConversationV2SinglePayload = (dataStr: string, conversationId
     if (!parsed) {
         return null;
     }
-    return parseGrokComConversationV2Chunk(parsed, conversationId);
+    return parseGrokComConversationV2Chunks([parsed], conversationId);
 };
 
 export const parseGrokComConversationV2Payload = (data: unknown, conversationId: string): ConversationData | null => {
@@ -343,15 +362,14 @@ export const parseGrokComConversationV2Payload = (data: unknown, conversationId:
             return null;
         }
 
-        const conversation = (
+        const conversation =
             parseGrokComConversationV2Ndjson(dataStr, conversationId) ??
-            parseGrokComConversationV2SinglePayload(dataStr, conversationId)
-        );
+            parseGrokComConversationV2SinglePayload(dataStr, conversationId);
         const rawPayload = tryParseJsonIfNeeded(data) ?? data;
         return conversation ? ({ ...conversation, raw_payload: rawPayload } as ConversationData) : null;
     }
 
-    const conversation = parseGrokComConversationV2Chunk(data, conversationId);
+    const conversation = parseGrokComConversationV2Chunks([data], conversationId);
     return conversation ? ({ ...conversation, raw_payload: data } as ConversationData) : null;
 };
 

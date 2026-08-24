@@ -126,4 +126,52 @@ describe('Grok Adapter — evaluateReadiness', () => {
         expect(readiness?.terminal).toBeTrue();
         expect(readiness?.contentHash).not.toBeNull();
     });
+
+    it('should ignore an inactive in-progress alternative outside the current-node ancestry', () => {
+        const readiness = grokAdapter.evaluateReadiness?.({
+            ...baseData,
+            current_node: 'assistant-active',
+            mapping: {
+                root: { id: 'root', message: null, parent: null, children: ['user-turn'] },
+                'user-turn': {
+                    id: 'user-turn',
+                    parent: 'root',
+                    children: ['assistant-active', 'assistant-inactive'],
+                    message: {
+                        id: 'user-turn',
+                        author: { role: 'user', name: 'User', metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Question'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-active': {
+                    ...makeAssistantNode('assistant-active', {
+                        update_time: 2,
+                        content: { content_type: 'text', parts: ['Active final answer'] },
+                    }),
+                    parent: 'user-turn',
+                },
+                'assistant-inactive': {
+                    ...makeAssistantNode('assistant-inactive', {
+                        update_time: 3,
+                        content: { content_type: 'text', parts: ['Inactive partial answer'] },
+                        status: 'in_progress',
+                        end_turn: false,
+                    }),
+                    parent: 'user-turn',
+                },
+            },
+        });
+
+        expect(readiness?.ready).toBeTrue();
+        expect(readiness?.terminal).toBeTrue();
+        expect(readiness?.reason).toBe('terminal');
+    });
 });
