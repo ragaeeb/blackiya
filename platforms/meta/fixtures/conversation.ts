@@ -5,6 +5,7 @@ export const SYNTHETIC_META_INTERNAL_ID = 'synthetic-internal-conversation';
 type DetailFixtureOptions = {
     assistantContent?: string;
     assistantError?: Record<string, unknown> | null;
+    assistantStructuredContent?: Record<string, unknown>;
     assistantStreamingState?: string;
     hasPreviousPage?: boolean;
     includeStructuredContent?: boolean;
@@ -13,6 +14,22 @@ type DetailFixtureOptions = {
 export const createMetaDetailFixture = ({
     assistantContent = 'Synthetic terminal answer.',
     assistantError = null,
+    assistantStructuredContent = {
+        __typename: 'XMSGGenAIUnifiedResponse',
+        response_id: 'synthetic-unified-response',
+        sections: [
+            {
+                __typename: 'GenAIUnifiedResponseSection',
+                header: null,
+                view_model: {
+                    __typename: 'GenAISingleLayoutViewModel',
+                },
+            },
+        ],
+        embedded_screens: [],
+        footer_sections: null,
+        nested_responses: null,
+    },
     assistantStreamingState = 'DONE',
     hasPreviousPage = false,
     includeStructuredContent = true,
@@ -68,24 +85,7 @@ export const createMetaDetailFixture = ({
                                     sources: [],
                                     streamingState: assistantStreamingState,
                                 },
-                                unified_response: includeStructuredContent
-                                    ? {
-                                          __typename: 'XMSGGenAIUnifiedResponse',
-                                          response_id: 'synthetic-unified-response',
-                                          sections: [
-                                              {
-                                                  __typename: 'GenAIUnifiedResponseSection',
-                                                  header: null,
-                                                  view_model: {
-                                                      __typename: 'GenAISingleLayoutViewModel',
-                                                  },
-                                              },
-                                          ],
-                                          embedded_screens: [],
-                                          footer_sections: null,
-                                          nested_responses: null,
-                                      }
-                                    : null,
+                                unified_response: includeStructuredContent ? assistantStructuredContent : null,
                             },
                         },
                     },

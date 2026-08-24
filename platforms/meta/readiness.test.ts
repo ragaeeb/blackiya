@@ -11,6 +11,9 @@ const parseFixture = (payload: ReturnType<typeof createMetaDetailFixture>) => {
     return parsed;
 };
 
+const withUnifiedResponse = (unifiedResponse: Record<string, unknown>): ReturnType<typeof createMetaDetailFixture> =>
+    createMetaDetailFixture({ assistantContent: '', assistantStructuredContent: unifiedResponse });
+
 describe('Meta Muse readiness', () => {
     it('should accept a complete latest assistant message only when Meta reports DONE', () => {
         const readiness = evaluateMetaReadiness(parseFixture(createMetaDetailFixture()));
@@ -71,6 +74,43 @@ describe('Meta Muse readiness', () => {
         expect(readiness.terminal).toBeTrue();
         expect(readiness.latestAssistantTextLength).toBe(0);
         expect(readiness.contentHash).toBeNull();
+    });
+
+    it('should reject an empty unified response without plain text', () => {
+        const readiness = evaluateMetaReadiness(parseFixture(withUnifiedResponse({})));
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('assistant-content-missing');
+    });
+
+    it('should reject a recursively empty or false unified response without plain text', () => {
+        const readiness = evaluateMetaReadiness(
+            parseFixture(
+                withUnifiedResponse({
+                    sections: [],
+                    nested: {
+                        artifact: {},
+                        enabled: false,
+                        values: [null, '', false, { children: [] }],
+                    },
+                }),
+            ),
+        );
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('assistant-content-missing');
+    });
+
+    it('should accept a materially populated unified response without plain text', () => {
+        const readiness = evaluateMetaReadiness(
+            parseFixture(withUnifiedResponse({ nested: { artifact: { label: 'Synthetic artifact' } } })),
+        );
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal');
     });
 
     it('should reject an empty DONE response without text or structured output', () => {

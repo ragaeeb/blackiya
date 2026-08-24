@@ -13,6 +13,22 @@ type MetaMessageCandidate = {
 const isRecord = (value: unknown): value is JsonRecord =>
     value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const hasMaterialStructuredValue = (value: unknown): boolean => {
+    if (typeof value === 'string') {
+        return value.trim().length > 0;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value);
+    }
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.some(hasMaterialStructuredValue);
+    }
+    return isRecord(value) && Object.values(value).some(hasMaterialStructuredValue);
+};
+
 const isJsonValue = (value: unknown): value is RawConversationPayload => {
     if (value === null || ['boolean', 'number', 'string'].includes(typeof value)) {
         return true;
@@ -155,9 +171,10 @@ const buildMessage = (candidate: MetaMessageCandidate): Message => {
     );
     const text = getText(source, role);
     const structuredContent = getStructuredContent(source);
+    const hasStructuredContent = hasMaterialStructuredValue(structuredContent);
     const hasError = source.error !== null && source.error !== undefined;
     const terminal = role === 'assistant' ? isTerminalAssistant(source) : true;
-    const parts = text.length > 0 ? [text] : structuredContent ? [structuredContent] : [];
+    const parts = text.length > 0 ? [text] : structuredContent && hasStructuredContent ? [structuredContent] : [];
 
     return {
         id,
@@ -179,7 +196,7 @@ const buildMessage = (candidate: MetaMessageCandidate): Message => {
             meta: {
                 typename: source.__typename ?? source.__isMessage ?? null,
                 streamingStates: getStreamingStates(source),
-                hasStructuredContent: structuredContent !== null,
+                hasStructuredContent,
                 hasError,
             },
         },
