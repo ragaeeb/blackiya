@@ -1168,6 +1168,63 @@ describe('MAIN-world bootstrap request capture', () => {
         expect(conversationResponseCache.get('Meta Muse', conversationId)).toBeDefined();
     });
 
+    it('should preserve newer Meta assembly when an older initial request body finishes inspection late', async () => {
+        const conversationId = '44444444-4444-4444-8444-444444444444';
+        const withConversationId = (fixture: unknown) =>
+            JSON.parse(JSON.stringify(fixture).replaceAll(SYNTHETIC_META_CONVERSATION_ID, conversationId)) as unknown;
+        const detailRequest = buildMetaConversationDetailRequest(conversationId, {
+            documentId: 'synthetic-detail-document',
+        });
+        const paginationRequest = buildMetaConversationPaginationRequest(
+            { conversationId, before: 'synthetic-before-cursor', last: 20 },
+            { documentId: 'synthetic-pagination-document' },
+        );
+        if (!detailRequest || !paginationRequest) {
+            throw new Error('expected synthetic Meta requests');
+        }
+        const delayedRequestBody = createDeferredBodyClone(detailRequest.body);
+        const olderRequest = new Request(detailRequest.url, {
+            method: detailRequest.method,
+            headers: detailRequest.headers,
+            body: detailRequest.body,
+        });
+        olderRequest.clone = () => delayedRequestBody.clone as unknown as Request;
+        const responsePayloads = [
+            createMetaDetailFixture({ hasPreviousPage: true }),
+            createMetaDetailFixture({ hasPreviousPage: true }),
+            createMetaOlderPageFixture(),
+        ];
+        const windowInstance = new Window({ url: `https://www.meta.ai/prompt/${conversationId}` });
+        windowInstance.fetch = async () =>
+            new windowInstance.Response(JSON.stringify(withConversationId(responsePayloads.shift())));
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const olderFetch = windowInstance.fetch(olderRequest as unknown as Parameters<typeof windowInstance.fetch>[0]);
+        await windowInstance.fetch(detailRequest.url, {
+            method: detailRequest.method,
+            headers: detailRequest.headers,
+            body: detailRequest.body,
+        });
+        await waitForCapture();
+
+        delayedRequestBody.release();
+        await olderFetch;
+        await waitForCapture();
+        await windowInstance.fetch(paginationRequest.url, {
+            method: paginationRequest.method,
+            headers: paginationRequest.headers,
+            body: paginationRequest.body,
+        });
+        await waitForCapture();
+
+        expect(conversationResponseCache.get('Meta Muse', conversationId)).toBeDefined();
+    });
+
     it('should reject delayed Meta assembly from before provider auth invalidation', async () => {
         const conversationId = '55555555-5555-4555-8555-555555555555';
         const withConversationId = (fixture: unknown) =>

@@ -685,12 +685,14 @@ const prepareFetchCapturePlan = async (
         );
     }
     if (metaCaptureContext?.requestContext.kind === 'conversation-detail') {
-        metaGraphqlResponseAssembler.delete(metaCaptureContext.requestContext.conversationId);
         captureSequence = beginConversationCaptureSequence(
             'Meta Muse',
             metaCaptureContext.requestContext.conversationId,
             requestOrder,
         );
+        if (isConversationCaptureSequenceCurrent(captureSequence)) {
+            metaGraphqlResponseAssembler.delete(metaCaptureContext.requestContext.conversationId);
+        }
     } else if (metaCaptureContext) {
         captureSequence = currentConversationCaptureSequence(
             'Meta Muse',
