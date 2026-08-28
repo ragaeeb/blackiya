@@ -16,6 +16,12 @@ import {
     SYNTHETIC_CONVERSATION_ID as CLAUDE_CONVERSATION_ID,
     CLAUDE_DETAIL_URL,
 } from '@/platforms/claude/fixtures/conversation';
+import {
+    createCurrentDeepSeekHistoryResponse,
+    SYNTHETIC_DEEPSEEK_CONVERSATION_ID,
+    SYNTHETIC_DEEPSEEK_FULL_HISTORY_URL,
+    SYNTHETIC_DEEPSEEK_HISTORY_URL,
+} from '@/platforms/deepseek/fixtures/history-response';
 import { buildXGrokConversationItemsUrl } from '@/platforms/grok/x-url-utils';
 import {
     createMetaDetailFixture,
@@ -792,6 +798,40 @@ describe('MAIN-world bootstrap request capture', () => {
             conversationResponseCache.get('Grok', X_GROK_CONVERSATION_ID)?.mapping?.['2091428438666096641']?.message
                 ?.content.parts?.[0],
         ).toBe('Newer Grok XHR answer');
+    });
+
+    it('should preserve a complete DeepSeek snapshot across an empty conditional cache response', async () => {
+        const fullPayload = createCurrentDeepSeekHistoryResponse();
+        const conditionalPayload = createCurrentDeepSeekHistoryResponse();
+        conditionalPayload.data.biz_data.chat_messages = [];
+        const windowInstance = new Window({
+            url: `https://chat.deepseek.com/a/chat/s/${SYNTHETIC_DEEPSEEK_CONVERSATION_ID}`,
+        });
+        const transport = installDeferredXhrTransport(windowInstance);
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        const full = new windowInstance.XMLHttpRequest();
+        full.open('GET', SYNTHETIC_DEEPSEEK_FULL_HISTORY_URL);
+        full.send();
+        transport.respond(transport.pending[0]!, JSON.stringify(fullPayload));
+        await waitForCapture();
+        expect(conversationResponseCache.get('DeepSeek', SYNTHETIC_DEEPSEEK_CONVERSATION_ID)).toBeDefined();
+
+        const conditional = new windowInstance.XMLHttpRequest();
+        conditional.open('GET', SYNTHETIC_DEEPSEEK_HISTORY_URL);
+        conditional.send();
+        transport.respond(transport.pending[1]!, JSON.stringify(conditionalPayload));
+        await waitForCapture();
+
+        expect(
+            conversationResponseCache.get('DeepSeek', SYNTHETIC_DEEPSEEK_CONVERSATION_ID)?.mapping['202']?.message
+                ?.content.parts,
+        ).toEqual(['There is no single, universally agreed answer.']);
     });
 
     it('should not let an older delayed Nova XHR repopulate after a newer non-terminal detail', () => {

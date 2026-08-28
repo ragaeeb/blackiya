@@ -11,6 +11,7 @@ type CaptureInput = {
     cache: ConversationResponseCache;
     canMutate?: (platformName: string) => boolean;
     onNonTerminal?: (platformName: string, conversationId: string) => void;
+    transformText?: (text: string) => Promise<string | null>;
 };
 
 const isTerminal = (adapter: LLMPlatform, data: Parameters<ConversationResponseCache['set']>[1]) => {
@@ -155,7 +156,11 @@ export const captureTerminalConversationResponse = async (input: CaptureInput): 
         return false;
     }
     try {
-        const text = await readBoundedBodyText(input.response.clone(), maxBytes);
+        const capturedText = await readBoundedBodyText(input.response.clone(), maxBytes);
+        if (capturedText === null) {
+            return false;
+        }
+        const text = input.transformText ? await input.transformText(capturedText) : capturedText;
         if (text === null) {
             return false;
         }

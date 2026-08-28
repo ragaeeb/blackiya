@@ -136,7 +136,7 @@ const resolveRequest = (
 
     const authHeaders = deps.getAuthHeaders?.();
     const authSnapshot = authHeaders ? { ...authHeaders } : undefined;
-    if (platformKind === 'chatgpt' && !hasAuthorizationHeader(authSnapshot)) {
+    if ((platformKind === 'chatgpt' || adapter.name === 'DeepSeek') && !hasAuthorizationHeader(authSnapshot)) {
         return { ok: false, result: failure({ kind: 'missing_auth', platformName: adapter.name }) };
     }
 

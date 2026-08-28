@@ -142,17 +142,17 @@ const parseSession = (value: unknown): DeepSeekSession | null => {
 };
 
 const hasValidDeepSeekMessageGraph = (messages: DeepSeekMessage[], currentMessageId: string): boolean => {
-    const roots = messages.filter((message) => message.parentId === '0');
+    const roots = messages.filter((message) => message.parentId === null || message.parentId === '0');
     if (roots.length !== 1) {
         return false;
     }
 
     const childrenById = new Map(messages.map((message) => [message.messageId, [] as string[]]));
     for (const message of messages) {
-        if (message.parentId === null || message.parentId === message.messageId) {
+        if (message.parentId === message.messageId) {
             return false;
         }
-        if (message.parentId !== '0') {
+        if (message.parentId !== null && message.parentId !== '0') {
             const siblings = childrenById.get(message.parentId);
             if (!siblings) {
                 return false;
@@ -286,7 +286,7 @@ const buildMapping = (conversationId: string, messages: DeepSeekMessage[]) => {
         [rootId]: { id: rootId, message: null, parent: null, children: [] },
     };
     for (const message of messages) {
-        const parent = message.parentId === '0' ? rootId : message.parentId;
+        const parent = message.parentId === null || message.parentId === '0' ? rootId : message.parentId;
         mapping[message.messageId] = {
             id: message.messageId,
             message: buildNormalizedMessage(message),

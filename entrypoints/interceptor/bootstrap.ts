@@ -25,8 +25,9 @@ import { extractConversationIdFromSourcePath } from '@/platforms/gemini/rpc-pars
 import { extractGrokComConversationIdFromUrl } from '@/platforms/grok/url-utils';
 import { extractXGrokConversationId } from '@/platforms/grok/x-url-utils';
 import { extractMetaGraphqlRequestContext, type MetaGraphqlContextCandidate } from '@/platforms/meta/request';
-import { MetaGraphqlResponseAssembler } from '@/platforms/meta/response-assembler';
+import { metaGraphqlResponseAssembler } from '@/platforms/meta/response-assembler';
 import { NOVA_CONVERSATION_ID_PATTERN } from '@/platforms/nova/constants';
+import { decryptNovaConversationResponseText } from '@/platforms/nova/decryption';
 import { extractQwenConversationIdFromDetailUrl } from '@/platforms/qwen/requests';
 import { isZaiConversationId, ZAI_HOST } from '@/platforms/zai/constants';
 import { ZaiConversationResponseAssembler } from '@/platforms/zai/response-assembler';
@@ -42,7 +43,6 @@ const GEMINI_BATCHEXECUTE_PATH = '/_/bardchatui/data/batchexecute';
 const META_GRAPHQL_PATH = '/api/graphql';
 const REQUEST_BODY_CAPTURE_DEADLINE_MS = 25;
 const MAX_CONCURRENT_RESPONSE_CAPTURES = 3;
-const metaGraphqlResponseAssembler = new MetaGraphqlResponseAssembler();
 const zaiConversationResponseAssembler = new ZaiConversationResponseAssembler();
 const providerStateEpochs = new Map<SupportedPlatformName, number>();
 const conversationCaptureSequences = new Map<string, number>();
@@ -282,6 +282,10 @@ const invalidateDeterministicDetailRequestStart = (
 ): ConversationCaptureSequence | null => {
     const detail = resolveDeterministicDetailConversation(url, method, requestHeaders, requestBody);
     if (detail) {
+        const deepSeekContext = detail.platform === 'DeepSeek' ? parseDeepSeekHistoryRequestContext(url) : null;
+        if (deepSeekContext?.cacheVersion || deepSeekContext?.cacheResetAt) {
+            return currentConversationCaptureSequence(detail.platform, detail.conversationId);
+        }
         return beginConversationCaptureSequence(detail.platform, detail.conversationId, requestOrder);
     }
     return null;
@@ -782,6 +786,7 @@ const captureGenericFetchResponse = (
                 beginConversationCaptureSequence(captureEpoch.platform, conversationId);
             }
         },
+        transformText: captureEpoch.platform === 'Amazon Nova' ? decryptNovaConversationResponseText : undefined,
     }).finally(release);
 };
 
@@ -922,27 +927,38 @@ const captureGenericXhrResponse = (
     captureSequence: ConversationCaptureSequence | null,
 ): void => {
     try {
-        captureTerminalConversationText({
-            text: xhr.responseText,
-            url,
-            method,
-            requestHeaders: (xhr as any).__blackiyaRequestHeaders,
-            pageUrl: window.location.href,
-            resolveAdapter: getPlatformAdapter,
-            cache: conversationResponseCache,
-            canMutate: (platformName) =>
-                platformName === captureEpoch.platform &&
-                isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value) &&
-                isConversationCaptureSequenceCurrent(captureSequence),
-            onNonTerminal: (platformName, conversationId) => {
-                if (
+        const responseText = xhr.responseText;
+        const capture = async () => {
+            const text =
+                captureEpoch.platform === 'Amazon Nova'
+                    ? await decryptNovaConversationResponseText(responseText)
+                    : responseText;
+            if (text === null) {
+                return;
+            }
+            captureTerminalConversationText({
+                text,
+                url,
+                method,
+                requestHeaders: (xhr as any).__blackiyaRequestHeaders,
+                pageUrl: window.location.href,
+                resolveAdapter: getPlatformAdapter,
+                cache: conversationResponseCache,
+                canMutate: (platformName) =>
                     platformName === captureEpoch.platform &&
-                    isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
-                ) {
-                    beginConversationCaptureSequence(captureEpoch.platform, conversationId);
-                }
-            },
-        });
+                    isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value) &&
+                    isConversationCaptureSequenceCurrent(captureSequence),
+                onNonTerminal: (platformName, conversationId) => {
+                    if (
+                        platformName === captureEpoch.platform &&
+                        isProviderStateEpochCurrent(captureEpoch.platform, captureEpoch.value)
+                    ) {
+                        beginConversationCaptureSequence(captureEpoch.platform, conversationId);
+                    }
+                },
+            });
+        };
+        void capture();
     } catch {
         // Some XHR response types make responseText inaccessible.
     }

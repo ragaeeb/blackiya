@@ -5,6 +5,7 @@ export const DEEPSEEK_CONVERSATION_ID_PATTERN =
     /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 
 const DEEPSEEK_CLIENT_HEADER_NAMES = [
+    'authorization',
     'x-client-bundle-id',
     'x-client-locale',
     'x-client-platform',

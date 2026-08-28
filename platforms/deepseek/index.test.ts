@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
+    createCurrentDeepSeekHistoryResponse,
     createSyntheticDeepSeekHistoryResponse,
     SYNTHETIC_DEEPSEEK_CONVERSATION_ID,
+    SYNTHETIC_DEEPSEEK_FULL_HISTORY_URL,
     SYNTHETIC_DEEPSEEK_HISTORY_URL,
 } from './fixtures/history-response';
 import { deepSeekAdapter } from './index';
@@ -100,6 +102,23 @@ describe('DeepSeek adapter', () => {
         ]);
         expect(parsed?.raw_payload).toEqual(JSON.parse(JSON.stringify(payload)));
         expect(parsed?.raw_payload).not.toBe(payload);
+    });
+
+    it('should parse the current null-root history response with reasoning and answer text', () => {
+        const payload = createCurrentDeepSeekHistoryResponse();
+        const parsed = deepSeekAdapter.parseInterceptedData(
+            JSON.stringify(payload),
+            SYNTHETIC_DEEPSEEK_FULL_HISTORY_URL,
+        );
+
+        expect(parsed?.mapping['101']?.parent).toContain('deepseek-root-');
+        expect(parsed?.mapping['202']?.message?.content.thoughts?.[0]?.content).toContain(
+            'The user is asking about the total',
+        );
+        expect(parsed?.mapping['202']?.message?.content.parts).toEqual([
+            'There is no single, universally agreed answer.',
+        ]);
+        expect(deepSeekAdapter.evaluateReadiness?.(parsed!)).toMatchObject({ ready: true, terminal: true });
     });
 
     it('should format a sanitized bounded filename', () => {

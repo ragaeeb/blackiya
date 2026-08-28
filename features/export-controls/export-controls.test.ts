@@ -29,6 +29,7 @@ const flushMicrotasks = async () => {
 
 const createDependencies = (): ExportControlsDependencies => {
     return {
+        iconUrl: 'extension://blackiya/icon/48.png',
         resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'conv-1' })),
         onExport: mock(async () => {}),
     };
@@ -63,7 +64,7 @@ describe('v3 export controls', () => {
         return { controls, dependencies };
     };
 
-    it('should mount exactly one primary JSON save button fixed to document.body', () => {
+    it('should mount exactly one icon-only JSON save button fixed to document.body', () => {
         mount();
 
         const containers = document.querySelectorAll(`#${EXPORT_CONTROLS_CONTAINER_ID}`);
@@ -79,7 +80,12 @@ describe('v3 export controls', () => {
 
         const button = buttons[0] as HTMLButtonElement;
         expect(button.id).toBe(EXPORT_CHAT_BUTTON_ID);
-        expect(button.textContent).toBe('Save JSON');
+        expect(button.textContent).toBe('');
+        expect(button.getAttribute('aria-label')).toBe('Save conversation JSON (current data)');
+        const icon = button.querySelector('img');
+        expect(icon?.getAttribute('src')).toBe('extension://blackiya/icon/48.png');
+        expect(icon?.getAttribute('alt')).toBe('');
+        expect(icon?.getAttribute('aria-hidden')).toBe('true');
         expect(button.disabled).toBe(false);
     });
 
@@ -167,6 +173,7 @@ describe('v3 export controls', () => {
             releaseExport = resolve;
         });
         const { controls } = mount({
+            iconUrl: 'extension://blackiya/icon/48.png',
             resolveActionContext: mock(() => ({ platform: 'grok', conversationId: null })),
             onExport: mock(() => pendingExport),
         });
@@ -175,24 +182,28 @@ describe('v3 export controls', () => {
         button.click();
         expect(controls.getState()).toBe('loading');
         expect(button.disabled).toBe(true);
-        expect(button.textContent).toBe('Saving…');
+        expect(button.textContent).toBe('');
+        expect(button.getAttribute('aria-label')).toBe('Saving JSON...');
 
         releaseExport?.();
         await flushMicrotasks();
 
         expect(controls.getState()).toBe('success');
-        expect(button.textContent).toBe('✓ Saved');
+        expect(button.textContent).toBe('');
+        expect(button.getAttribute('aria-label')).toBe('JSON saved');
         expect(button.disabled).toBe(true);
 
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         expect(controls.getState()).toBe('idle');
-        expect(button.textContent).toBe('Save JSON');
+        expect(button.textContent).toBe('');
+        expect(button.getAttribute('aria-label')).toBe('Save conversation JSON (current data)');
         expect(button.disabled).toBe(false);
     });
 
     it('should transition idle -> loading -> error -> idle when export fails', async () => {
         const { controls } = mount({
+            iconUrl: 'extension://blackiya/icon/48.png',
             resolveActionContext: mock(() => ({ platform: 'gemini', conversationId: 'g-1' })),
             onExport: mock(async () => {
                 throw Object.assign(new Error('boom'), { kind: 'not_terminal' });
@@ -204,14 +215,16 @@ describe('v3 export controls', () => {
         await flushMicrotasks();
 
         expect(controls.getState()).toBe('error');
-        expect(button.textContent).toBe('⚠ Failed');
+        expect(button.textContent).toBe('');
+        expect(button.getAttribute('aria-label')).toBe('Save failed. Click to retry.');
         expect(button.disabled).toBe(true);
         expect(button.getAttribute(EXPORT_ERROR_KIND_ATTR)).toBe('not_terminal');
 
         await new Promise((resolve) => setTimeout(resolve, 30));
 
         expect(controls.getState()).toBe('idle');
-        expect(button.textContent).toBe('Save JSON');
+        expect(button.textContent).toBe('');
+        expect(button.getAttribute('aria-label')).toBe('Save conversation JSON (current data)');
         expect(button.disabled).toBe(false);
     });
 
@@ -222,6 +235,7 @@ describe('v3 export controls', () => {
         });
         const onExport = mock(() => pendingExport);
         const { controls } = mount({
+            iconUrl: 'extension://blackiya/icon/48.png',
             resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'c-1' })),
             onExport,
         });
@@ -251,12 +265,13 @@ describe('v3 export controls', () => {
         controls.mount();
 
         expect(controls.getState()).toBe('idle');
-        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.textContent).toBe('');
         expect(controls.getButton()?.disabled).toBe(false);
     });
 
     it('should remount idle after being destroyed during error', async () => {
         const { controls } = mount({
+            iconUrl: 'extension://blackiya/icon/48.png',
             resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'c-1' })),
             onExport: mock(async () => {
                 throw Object.assign(new Error('boom'), { kind: 'not_terminal' });
@@ -271,7 +286,7 @@ describe('v3 export controls', () => {
         controls.mount();
 
         expect(controls.getState()).toBe('idle');
-        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.textContent).toBe('');
         expect(controls.getButton()?.disabled).toBe(false);
         expect(controls.getButton()?.hasAttribute(EXPORT_ERROR_KIND_ATTR)).toBe(false);
     });
@@ -282,6 +297,7 @@ describe('v3 export controls', () => {
             releaseExport = resolve;
         });
         const { controls } = mount({
+            iconUrl: 'extension://blackiya/icon/48.png',
             resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'c-1' })),
             onExport: mock(() => pendingExport),
         });
@@ -298,13 +314,14 @@ describe('v3 export controls', () => {
         await flushMicrotasks();
 
         expect(controls.getState()).toBe('idle');
-        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.textContent).toBe('');
         expect(controls.getButton()?.disabled).toBe(false);
     });
 
     it('should not start a queued export after route teardown', async () => {
         const onExport = mock(async () => {});
         const { controls } = mount({
+            iconUrl: 'extension://blackiya/icon/48.png',
             resolveActionContext: mock(() => ({ platform: 'chatgpt', conversationId: 'conversation-a' })),
             onExport,
         });
@@ -318,6 +335,6 @@ describe('v3 export controls', () => {
 
         expect(onExport).toHaveBeenCalledTimes(0);
         expect(controls.getState()).toBe('idle');
-        expect(controls.getButton()?.textContent).toBe('Save JSON');
+        expect(controls.getButton()?.textContent).toBe('');
     });
 });

@@ -4,6 +4,8 @@ export const SYNTHETIC_DEEPSEEK_HISTORY_URL =
     `https://chat.deepseek.com/api/v0/chat/history_messages?chat_session_id=${SYNTHETIC_DEEPSEEK_CONVERSATION_ID}` +
     '&cache_version=7&cache_reset_at=1700000000';
 
+export const SYNTHETIC_DEEPSEEK_FULL_HISTORY_URL = `https://chat.deepseek.com/api/v0/chat/history_messages?chat_session_id=${SYNTHETIC_DEEPSEEK_CONVERSATION_ID}`;
+
 const syntheticDeepSeekHistoryResponse = {
     code: 0,
     msg: 'synthetic-success',
@@ -30,7 +32,7 @@ const syntheticDeepSeekHistoryResponse = {
             chat_messages: [
                 {
                     message_id: 101,
-                    parent_id: 0,
+                    parent_id: 0 as number | null,
                     role: 'USER',
                     status: 'FINISHED',
                     inserted_at: 1_700_000_001,
@@ -91,3 +93,11 @@ const syntheticDeepSeekHistoryResponse = {
 };
 
 export const createSyntheticDeepSeekHistoryResponse = () => structuredClone(syntheticDeepSeekHistoryResponse);
+
+export const createCurrentDeepSeekHistoryResponse = () => {
+    const payload = createSyntheticDeepSeekHistoryResponse();
+    payload.data.biz_data.chat_messages[0]!.parent_id = null;
+    payload.data.biz_data.chat_messages[1]!.fragments[0]!.content = 'The user is asking about the total.';
+    payload.data.biz_data.chat_messages[1]!.fragments[1]!.content = 'There is no single, universally agreed answer.';
+    return payload;
+};

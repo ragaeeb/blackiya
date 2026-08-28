@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { CLAUDE_DETAIL_URL, SYNTHETIC_CONVERSATION_ID, SYNTHETIC_ORGANIZATION_ID } from './fixtures/conversation';
+import {
+    CLAUDE_CURRENT_DETAIL_URL,
+    CLAUDE_DETAIL_URL,
+    SYNTHETIC_CONVERSATION_ID,
+    SYNTHETIC_ORGANIZATION_ID,
+} from './fixtures/conversation';
 import {
     buildClaudeConversationRequest,
     isClaudeConversationDetailRequest,
@@ -21,6 +26,10 @@ describe('Claude canonical detail request helpers', () => {
 
     it('should parse organization and conversation context from a canonical detail URL', () => {
         expect(parseClaudeConversationApiUrl(CLAUDE_DETAIL_URL)).toEqual({
+            organizationId: SYNTHETIC_ORGANIZATION_ID,
+            conversationId: SYNTHETIC_CONVERSATION_ID,
+        });
+        expect(parseClaudeConversationApiUrl(CLAUDE_CURRENT_DETAIL_URL)).toEqual({
             organizationId: SYNTHETIC_ORGANIZATION_ID,
             conversationId: SYNTHETIC_CONVERSATION_ID,
         });

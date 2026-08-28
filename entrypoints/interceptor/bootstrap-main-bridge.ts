@@ -10,6 +10,8 @@ import { conversationResponseCache } from '@/features/single-export/conversation
 import { performSingleExport } from '@/features/single-export/single-export-service';
 import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import { getPlatformAdapter } from '@/platforms/factory';
+import { extractMetaNextFlightConversation } from '@/platforms/meta/next-flight';
+import { metaGraphqlResponseAssembler } from '@/platforms/meta/response-assembler';
 import { downloadStringAsJsonFile } from '@/utils/dom-download';
 import { downloadAsJSON } from '@/utils/download';
 import { platformHeaderStore } from '@/utils/platform-header-store';
@@ -64,6 +66,23 @@ export const setupMainWorldBridge = () => {
             const error = new Error('Conversation changed before export started.') as Error & { kind?: string };
             error.kind = 'conversation_changed';
             throw error;
+        }
+
+        if (adapter.name === 'Meta Muse' && !conversationResponseCache.get(adapter.name, conversationId)) {
+            const embedded = extractMetaNextFlightConversation(
+                document.querySelectorAll('script'),
+                conversationId,
+                conversationResponseCache.getMaxBytesPerEntry(),
+            );
+            if (embedded) {
+                const data = metaGraphqlResponseAssembler.ingestInitialDocument(
+                    embedded.conversationId,
+                    embedded.responseText,
+                );
+                if (data) {
+                    conversationResponseCache.set(adapter.name, data);
+                }
+            }
         }
 
         const result = await performSingleExport(undefined, {

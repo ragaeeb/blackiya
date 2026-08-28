@@ -181,6 +181,16 @@ export class MetaGraphqlResponseAssembler {
         }
     }
 
+    ingestInitialDocument(conversationId: string, responseText: string): ConversationData | null {
+        return this.ingest(
+            JSON.stringify({
+                doc_id: 'next_flight_document',
+                variables: { id: conversationId, includeMessageList: true },
+            }),
+            responseText,
+        );
+    }
+
     getReadyConversation(conversationId: string): ConversationData | null {
         if (!isMetaConversationId(conversationId)) {
             return null;
@@ -357,3 +367,5 @@ export class MetaGraphqlResponseAssembler {
         this.entries.delete(conversationId);
     }
 }
+
+export const metaGraphqlResponseAssembler = new MetaGraphqlResponseAssembler();

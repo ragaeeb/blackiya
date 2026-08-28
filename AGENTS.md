@@ -8,7 +8,7 @@ Blackiya is a Chrome MV3 extension that exports conversation data from ChatGPT, 
 
 The v3 runtime has three user-facing surfaces:
 
-1. **Single-chat ready-terminal export** — an explicit `Save JSON` control on the active conversation. It first checks a bounded in-memory cache of terminal canonical detail responses already loaded by the page, then uses deterministic adapter-declared detail candidates only where the adapter supports a direct request. It validates the conversation id and ready-terminal state before injecting a JSON download. It is fail-fast.
+1. **Single-chat ready-terminal export** — an explicit Blackiya icon control (accessible as `Save JSON`) on the active conversation. It first checks a bounded in-memory cache of terminal canonical detail responses already loaded by the page, then uses deterministic adapter-declared detail candidates only where the adapter supports a direct request. It validates the conversation id and ready-terminal state before injecting a JSON download. It is fail-fast.
 2. **Bulk `Export Chats`** — a popup-driven export for ChatGPT, Gemini, and `grok.com`. It discovers conversation IDs from the platform list endpoint, fetches each detail payload, and downloads one JSON file per conversation.
 3. **Stream-debug capture** — raw ordered stream frames (SSE, NDJSON/line, or raw) are recorded in memory, bounded, and exported or cleared only on explicit request.
 
@@ -17,7 +17,7 @@ Hard-cut invariants (the v3 model):
 - **Explicit, ready-terminal-only export.** The single-chat kernel prefers an eligible cached response, otherwise resolves deterministic detail candidates where available, advances only after an eligible `404`, validates the server response is ready and terminal, and refuses to save otherwise.
 - **Terminal artifact support.** ChatGPT may finish with a multimodal/image, code, or execution artifact instead of text; `finished_successfully` plus `end_turn: true` is accepted for those non-text assistant nodes, an explicitly ended `reasoning_recap` (`metadata.reasoning_status: reasoning_ended`) is accepted even when `end_turn` is false, and a completed deep-research assistant-code node followed by a finished tool-code node is terminal. In-progress and non-terminal thoughts remain fail-fast.
 - **Fail-fast.** Every non-happy path returns a typed error — no retries, speculative warm fetch, snapshot replay, stabilization, or degraded export. A cache-only adapter fails when no fresh eligible response has been observed.
-- **Explicit export is the only write path.** Nothing is written to a user JSON file without a click (`Save JSON` or `Export Chats`).
+- **Explicit export is the only write path.** Nothing is written to a user JSON file without a click (the Blackiya icon or `Export Chats`).
 - **Bounded cache-first capture.** Page-owned responses are classified before cloning, clone bodies are read through a hard byte cap with at most three concurrent captures, then parsed, terminal-validated, and retained in memory for at most five minutes. Streamed request-body inspection fails open after 25ms, and explicit single/bulk response reads are capped at 16 MiB. The cache defaults to 12 entries, 16 MiB per entry, and 48 MiB total; it is never persisted and contains no captured credentials. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversation and pending assembly state, as does an observed `401/403`. Claude, Meta Muse, Amazon Nova, DeepSeek, and Z.ai do not expose a reliable non-secret account-switch or logout boundary in the current sanitized request evidence, so do not describe their caches as account-bound.
 - **Request-context capture without credential persistence.** Provider-allowlisted headers and Gemini batchexecute context are held in expiring page-local memory for eligible direct requests. They are never written into the exported JSON, the conversation-response cache, or persistent storage.
 - **No compatibility mode.** Reactive lifecycle badges, canonical/Save-vs-Force-Save controls, SFE probes/leases, calibration, Markdown export, snapshot recovery, and the legacy lifecycle wire protocol are all out of scope.
@@ -80,12 +80,12 @@ There is no SFE, no probe lease arbitration, and no calibration profile. The bac
 
 ### Cache-First Providers
 
-- Claude caches only canonical organization-scoped conversation detail responses.
-- Amazon Nova multiplexes RPCs through `POST /api`; capture is eligible only when the `x-amz-target` header identifies the conversation-detail operation.
-- Meta Muse multiplexes GraphQL operations through `POST /api/graphql`; capture classifies the request body and assembles the initial detail plus backward pages in cursor order before terminal caching.
+- Claude caches only canonical organization-scoped conversation detail responses. Current complete responses may use `tree=True`, `include_inline_comparison=true`, the nil UUID as the root parent, and `stop_sequence` as a terminal stop reason.
+- Amazon Nova multiplexes RPCs through `POST /api`; capture is eligible only when the `x-amz-target` header identifies the conversation-detail operation. Its AES-GCM message strings are decrypted with the response-local key, which is discarded before caching/export.
+- Meta Muse embeds the initial canonical detail in Next.js Flight data and multiplexes backward pagination through `POST /api/graphql`; explicit save joins the embedded detail with captured pages in cursor order before terminal caching.
 - Qwen caches canonical complete-history detail responses and can issue its deterministic detail `GET` when the cache misses. Its completion SSE endpoint is recognized for stream-debug.
 - Z.ai assembles the canonical conversation detail with the message-id batch response; neither half is independently eligible for export.
-- DeepSeek caches canonical history responses and can issue its deterministic history `GET` when the cache misses.
+- DeepSeek caches canonical history responses, accepts the current `parent_id: null` root shape, and can issue its deterministic history `GET` when the cache misses. Direct requests require the page-injected bearer `authorization` header; it remains in expiring MAIN-world request context only. Conditional cache requests do not invalidate a complete snapshot; responses with no messages remain ineligible.
 - Claude, Amazon Nova, Meta Muse, and Z.ai are cache-only. If no eligible response is fresh, single export fails fast with `missing_endpoint` rather than constructing a speculative request.
 
 ## 5) Coding Standards
@@ -207,7 +207,7 @@ Before shipping:
 
 1. Cache-first single export: an eligible page-owned terminal detail response is reused without another request; expired, oversized, mismatched, incomplete, or non-terminal entries are rejected. The cache remains bounded to 12 entries, 16 MiB per entry, 48 MiB total, and five minutes.
 2. ChatGPT and Gemini: cache hits save immediately; cache misses use their deterministic detail requests. ChatGPT still requires auth headers and advances to its declared fallback only after `404`; Gemini still requires batchexecute context.
-3. Grok: `grok.com` and valid `x.com/i/grok?conversation={id}` routes show `Save JSON`, while unrelated X routes do not. Both parse their canonical detail shape and use deterministic direct detail fallback when needed.
+3. Grok: `grok.com` and valid `x.com/i/grok?conversation={id}` routes show the Blackiya icon, while unrelated X routes do not. Both parse their canonical detail shape and use deterministic direct detail fallback when needed.
 4. Cache-first providers: Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek save only conversation-id-matched ready-terminal archives. Meta closes cursor pagination in order, Nova requires the exact target header, and Z.ai requires consistent detail-plus-batch assembly. Cache-only providers fail fast when no eligible response is present. Ordinary account changes for Claude, Nova, Meta, DeepSeek, and Z.ai are not claimed detectable from the currently supported request context.
 5. Bulk export: only ChatGPT, Gemini, and `grok.com` enumerate conversation lists; pacing/timeout, `Max chats` (`0 = all`), id/readiness validation, bounded `429` retry, and one-file-per-conversation behavior remain intact.
 6. Stream-debug: frames are captured in order, bounded, sanitized, and explicitly exportable/clearable without credential leakage. Qwen completion SSE is classified; unsupported new-provider generation endpoints are not guessed.

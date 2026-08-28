@@ -38,23 +38,39 @@ const createWindow = (): V3ContentRuntimeWindow => {
 describe('v3 content runtime', () => {
     it('should wire popup messages to MAIN-world export commands', async () => {
         const { host, dispatch } = createHost();
+        const forwardedProgress: unknown[] = [];
         const mainWorldBridge = {
             exportSingle: mock(async (_target) => ({
                 operation: 'single_export' as const,
                 platform: 'ChatGPT',
                 filename: 'x.json',
             })),
-            runBulkExport: mock(async () => ({
-                operation: 'bulk_export' as const,
-                platform: 'ChatGPT',
-                discovered: 2,
-                attempted: 2,
-                exported: 2,
-                failed: 0,
-                elapsedMs: 1,
-                limit: 0,
-                warnings: [],
-            })),
+            runBulkExport: mock(async (_options, onProgress) => {
+                onProgress?.({
+                    type: 'BLACKIYA_MAIN_WORLD_PROGRESS',
+                    requestId: 'bulk-1',
+                    operation: 'bulk_export',
+                    stage: 'progress',
+                    platform: 'ChatGPT',
+                    discovered: 5,
+                    attempted: 2,
+                    exported: 2,
+                    failed: 0,
+                    remaining: 3,
+                    __blackiyaToken: 'content-token',
+                });
+                return {
+                    operation: 'bulk_export' as const,
+                    platform: 'ChatGPT',
+                    discovered: 2,
+                    attempted: 2,
+                    exported: 2,
+                    failed: 0,
+                    elapsedMs: 1,
+                    limit: 0,
+                    warnings: [],
+                };
+            }),
             exportStreamDebug: mock(async () => ({
                 operation: 'stream_debug_export' as const,
                 streamCount: 0,
@@ -69,6 +85,7 @@ describe('v3 content runtime', () => {
             window: createWindow(),
             sessionToken: 'content-token',
             mainWorldBridge,
+            onBulkProgress: (message) => forwardedProgress.push(message),
         });
 
         await expect(
@@ -98,6 +115,18 @@ describe('v3 content runtime', () => {
         });
 
         expect(mainWorldBridge.runBulkExport).toHaveBeenCalledTimes(1);
+        expect(forwardedProgress).toEqual([
+            {
+                type: 'BLACKIYA_BULK_EXPORT_PROGRESS',
+                stage: 'progress',
+                platform: 'ChatGPT',
+                discovered: 5,
+                attempted: 2,
+                exported: 2,
+                failed: 0,
+                remaining: 3,
+            },
+        ]);
         dispose();
     });
 });

@@ -8,6 +8,11 @@ export const CLAUDE_DETAIL_URL =
     `/chat_conversations/${SYNTHETIC_CONVERSATION_ID}` +
     '?tree=true&rendering_mode=messages&render_all_tools=true&consistency=strong';
 
+export const CLAUDE_CURRENT_DETAIL_URL =
+    `https://claude.ai/api/organizations/${SYNTHETIC_ORGANIZATION_ID}` +
+    `/chat_conversations/${SYNTHETIC_CONVERSATION_ID}` +
+    '?tree=True&rendering_mode=messages&render_all_tools=true&include_inline_comparison=true&consistency=strong';
+
 export type ClaudeFixtureContentBlock = {
     type: string;
     [key: string]: unknown;
@@ -150,3 +155,31 @@ export const createClaudeTerminalPayload = (): ClaudeFixturePayload => ({
         },
     ],
 });
+
+export const createClaudeDeepResearchPayload = (): ClaudeFixturePayload => {
+    const payload = createClaudeTerminalPayload();
+    payload.chat_messages[0]!.parent_message_uuid = '00000000-0000-4000-8000-000000000000';
+    payload.chat_messages[0]!.content[0]!.text =
+        'Research this systematically, starting with identifying the evidence.';
+    payload.chat_messages[1]!.stop_reason = 'stop_sequence';
+    payload.chat_messages[1]!.content = [
+        {
+            type: 'thinking',
+            thinking: 'Substantial, well-triangulated evidence across the relevant sources.',
+            summaries: [],
+            hidden: false,
+            thinking_hidden: false,
+            cut_off: false,
+            truncated: false,
+        },
+        {
+            type: 'tool_result',
+            tool_use_id: 'synthetic-tool-use-1',
+            name: 'synthetic_search',
+            content: [{ type: 'text', text: 'https://docs.fallow.tools/cli/schema.md' }],
+            is_error: false,
+        },
+        { type: 'text', text: 'Sanitized final research answer.', citations: [] },
+    ];
+    return payload;
+};

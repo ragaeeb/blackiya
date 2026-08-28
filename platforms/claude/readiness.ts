@@ -2,6 +2,8 @@ import type { PlatformReadiness } from '@/platforms/types';
 import { hashText } from '@/utils/hash';
 import type { ConversationData, MessagePart } from '@/utils/types';
 
+const TERMINAL_STOP_REASONS = new Set(['end_turn', 'stop_sequence']);
+
 const notReady = (reason: string, terminal = false, latestAssistantTextLength = 0): PlatformReadiness => ({
     ready: false,
     terminal,
@@ -91,12 +93,16 @@ export const evaluateClaudeReadiness = (data: ConversationData): PlatformReadine
     const text = extractText(data);
 
     if (truncated) {
-        return notReady('assistant-truncated', stopReason === 'end_turn', text.length);
+        return notReady(
+            'assistant-truncated',
+            stopReason !== null && TERMINAL_STOP_REASONS.has(stopReason),
+            text.length,
+        );
     }
     if (stopReason === null) {
         return notReady('assistant-in-progress');
     }
-    if (stopReason !== 'end_turn') {
+    if (!TERMINAL_STOP_REASONS.has(stopReason)) {
         return notReady('assistant-non-terminal-stop-reason');
     }
     if (currentMessage.status !== 'finished_successfully' || currentMessage.end_turn !== true) {

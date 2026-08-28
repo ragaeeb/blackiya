@@ -12,11 +12,6 @@ import {
     type ExportControlsTimings,
 } from './contract';
 
-const IDLE_LABEL = 'Save JSON';
-const LOADING_LABEL = 'Saving…';
-const SUCCESS_LABEL = '✓ Saved';
-const ERROR_LABEL = '⚠ Failed';
-
 const CONTAINER_STYLES = `
     position: fixed;
     bottom: 20px;
@@ -34,13 +29,6 @@ const CONTAINER_STYLES = `
 
 const BUTTON_BACKGROUND_IDLE = 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
 const BUTTON_BACKGROUND_ERROR = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
-
-const STATE_LABELS: Record<ExportControlsState, string> = {
-    idle: IDLE_LABEL,
-    loading: LOADING_LABEL,
-    success: SUCCESS_LABEL,
-    error: ERROR_LABEL,
-};
 
 const STATE_TITLES: Record<ExportControlsState, string> = {
     idle: 'Save conversation JSON (current data)',
@@ -66,28 +54,37 @@ const createContainer = (): HTMLElement => {
     return container;
 };
 
-const createButton = (onClick: () => void): HTMLButtonElement => {
+const createButton = (onClick: () => void, iconUrl: string): HTMLButtonElement => {
     const button = document.createElement('button');
     button.id = EXPORT_CHAT_BUTTON_ID;
     button.type = 'button';
-    button.textContent = IDLE_LABEL;
-    button.title = 'Save conversation JSON (current data)';
-    button.setAttribute('aria-label', button.title);
+    button.title = STATE_TITLES.idle;
+    button.setAttribute('aria-label', STATE_TITLES.idle);
     button.style.cssText = `
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 6px 12px;
+        width: 44px;
+        height: 44px;
+        padding: 4px;
         border: none;
-        border-radius: 8px;
+        border-radius: 50%;
         background: ${BUTTON_BACKGROUND_IDLE};
         color: #fff;
-        font-size: 13px;
-        font-weight: 600;
         line-height: 1;
         cursor: pointer;
         transition: filter 0.2s ease, opacity 0.2s ease;
     `;
+
+    const icon = document.createElement('img');
+    icon.src = iconUrl;
+    icon.width = 36;
+    icon.height = 36;
+    icon.alt = '';
+    icon.draggable = false;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.style.cssText = 'display: block; width: 36px; height: 36px; border-radius: 50%;';
+    button.appendChild(icon);
     button.addEventListener('click', onClick);
     return button;
 };
@@ -116,11 +113,11 @@ export const createExportControls = (
         if (!button) {
             return;
         }
-        button.textContent = STATE_LABELS[state];
         button.disabled = state !== 'idle';
         button.style.background = state === 'error' ? BUTTON_BACKGROUND_ERROR : BUTTON_BACKGROUND_IDLE;
         button.title = STATE_TITLES[state];
         button.setAttribute('aria-label', button.title);
+        button.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
     };
 
     const setState = (next: ExportControlsState) => {
@@ -225,7 +222,7 @@ export const createExportControls = (
         removeStaleControls();
 
         container = createContainer();
-        button = createButton(handleExportClick);
+        button = createButton(handleExportClick, dependencies.iconUrl);
         container.appendChild(button);
         document.body.appendChild(container);
         setState(state);

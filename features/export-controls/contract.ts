@@ -14,6 +14,7 @@ export type ExportActionContext = {
 };
 
 export type ExportControlsDependencies = {
+    iconUrl: string;
     resolveActionContext: () => ExportActionContext;
     onExport: (context: ExportActionContext) => Promise<void>;
 };

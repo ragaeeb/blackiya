@@ -25,6 +25,11 @@ type ClaudeConversationPayload = Record<string, unknown> & {
     chat_messages: ClaudeMessagePayload[];
 };
 
+const CLAUDE_ROOT_MESSAGE_UUID = '00000000-0000-4000-8000-000000000000';
+const TERMINAL_STOP_REASONS = new Set(['end_turn', 'stop_sequence']);
+const normalizeParentId = (parentId: string | null): string | null =>
+    parentId === CLAUDE_ROOT_MESSAGE_UUID ? null : parentId;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -77,13 +82,15 @@ const hasValidClaudeMessageGraph = (messages: ClaudeMessagePayload[], currentLea
     if (messageIds.size !== messages.length || !messageIds.has(currentLeafId)) {
         return false;
     }
-    if (messages.filter((message) => message.parent_message_uuid === null).length !== 1) {
+    if (messages.filter((message) => normalizeParentId(message.parent_message_uuid) === null).length !== 1) {
         return false;
     }
     for (const message of messages) {
         if (
             message.parent_message_uuid !== null &&
-            (message.parent_message_uuid === message.uuid || !messageIds.has(message.parent_message_uuid))
+            (message.parent_message_uuid === message.uuid ||
+                (message.parent_message_uuid !== CLAUDE_ROOT_MESSAGE_UUID &&
+                    !messageIds.has(message.parent_message_uuid)))
         ) {
             return false;
         }
@@ -100,7 +107,7 @@ const hasValidClaudeMessageGraph = (messages: ClaudeMessagePayload[], currentLea
             return true;
         }
         states.set(messageId, 'visiting');
-        const parentId = messagesById.get(messageId)?.parent_message_uuid ?? null;
+        const parentId = normalizeParentId(messagesById.get(messageId)?.parent_message_uuid ?? null);
         if (parentId !== null && !reachesRoot(parentId)) {
             return false;
         }
@@ -160,7 +167,7 @@ const resolveMessageStatus = (message: ClaudeMessagePayload): Message['status'] 
     if (message.truncated) {
         return 'error';
     }
-    if (message.sender === 'human' || message.stop_reason === 'end_turn') {
+    if (message.sender === 'human' || (message.stop_reason && TERMINAL_STOP_REASONS.has(message.stop_reason))) {
         return 'finished_successfully';
     }
     return 'in_progress';
@@ -173,7 +180,10 @@ const buildMessage = (message: ClaudeMessagePayload): Message => {
     const createTime = parseTimestamp(message.created_at);
     const updateTime = parseTimestamp(message.updated_at);
     const isAssistantEndTurn =
-        message.sender === 'assistant' && message.stop_reason === 'end_turn' && !message.truncated;
+        message.sender === 'assistant' &&
+        !!message.stop_reason &&
+        TERMINAL_STOP_REASONS.has(message.stop_reason) &&
+        !message.truncated;
 
     return {
         id: message.uuid,
@@ -215,7 +225,7 @@ export const parseClaudeConversationPayload = (payload: unknown, requestUrl: str
         mapping[rawMessage.uuid] = {
             id: rawMessage.uuid,
             message: buildMessage(rawMessage),
-            parent: rawMessage.parent_message_uuid,
+            parent: normalizeParentId(rawMessage.parent_message_uuid),
             children: [],
         };
     }

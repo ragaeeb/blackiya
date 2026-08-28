@@ -8,7 +8,7 @@ Use the smallest artifact that still explains the failure. In the v3 runtime the
 2. **Fail-fast export errors** — typed, metadata-only error results from the single-chat kernel.
 3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
 
-The terminal conversation cache is not a log export. It expires after five minutes, is bounded to 12 entries, 16 MiB per entry, and 48 MiB total, and contains no captured request credentials. `Save JSON` checks it first, then makes a deterministic direct detail request only when the active adapter supports one.
+The terminal conversation cache is not a log export. It expires after five minutes, is bounded to 12 entries, 16 MiB per entry, and 48 MiB total, and contains no captured request credentials. The Blackiya icon checks it first, then makes a deterministic direct detail request only when the active adapter supports one.
 
 ### MAIN-world bridge note
 
@@ -79,7 +79,7 @@ The single-chat kernel returns a typed, fail-fast result and never writes a part
 | `id_mismatch` | Response `conversation_id` differs from the URL id | Stale/redirected id — reopen and retry |
 | `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete; an explicitly ended ChatGPT `reasoning_recap` or completed deep-research tool branch is accepted even when no final text assistant exists |
 
-There is no `degraded_manual_only` or partial/downgraded export path in v3. If `Save JSON` fails, the error variant tells you exactly which gate rejected it.
+There is no `degraded_manual_only` or partial/downgraded export path in v3. If the Blackiya icon export fails, the error variant tells you exactly which gate rejected it.
 
 ### Cache-first failure triage
 
@@ -87,12 +87,14 @@ Supported single-save providers are ChatGPT, Gemini, Grok on `grok.com` and `x.c
 
 For cache-only providers, first confirm the site made its normal canonical conversation request after the extension loaded:
 
-- **Claude:** canonical organization-scoped conversation detail `GET`.
-- **Amazon Nova:** `POST /api` with the exact conversation-detail target header. The URL alone is not sufficient because Nova multiplexes RPCs.
-- **Meta Muse:** `POST /api/graphql` requests whose bodies identify conversation detail and backward pagination. The assembler requires cursor order and a closed page range before caching.
+- **Claude:** canonical organization-scoped conversation detail `GET`; current complete responses may use `tree=True`, `include_inline_comparison=true`, a nil-UUID root parent, and terminal `stop_sequence`.
+- **Amazon Nova:** `POST /api` with the exact conversation-detail target header. The URL alone is not sufficient because Nova multiplexes RPCs; encrypted message strings must also decrypt successfully with the response-local key.
+- **Meta Muse:** initial conversation detail embedded in page-local Next.js Flight data plus `POST /api/graphql` requests whose bodies identify backward pagination. The assembler requires cursor order and a closed page range before caching.
 - **Z.ai:** both the conversation detail and its matching message batch. Either response alone is intentionally rejected.
 
-For direct-capable adapters—ChatGPT, Gemini, both Grok surfaces, Qwen, and DeepSeek—a cache miss proceeds to the adapter's deterministic detail request. It does not trigger retries, background warming, or speculative endpoint discovery. Authentication failures clear stale provider request context; malformed, mismatched, incomplete, and non-terminal responses remain fail-fast.
+For direct-capable adapters—ChatGPT, Gemini, both Grok surfaces, Qwen, and DeepSeek—a cache miss proceeds to the adapter's deterministic detail request. DeepSeek requires the bearer authorization injected by its page client; the session cookie alone returns `INVALID_TOKEN`. It does not trigger retries, background warming, or speculative endpoint discovery. Authentication failures clear stale provider request context; malformed, mismatched, incomplete, and non-terminal responses remain fail-fast.
+
+DeepSeek's complete history may use `parent_id: null` for the root message. A later conditional-cache response with an empty `chat_messages` array is not a complete archive, so it is ignored without evicting the prior complete snapshot.
 
 ## HAR Analysis
 
@@ -108,7 +110,7 @@ The analyzer writes redacted endpoint/timeline summaries plus hint matches for f
 
 1. Platform + exact URL(s) and extension version.
 2. Repro steps and timing.
-3. The fail-fast error result shown by `Save JSON` (if export failed).
+3. The fail-fast error result shown by the Blackiya icon (if export failed).
 4. The redacted HAR analysis if the issue involves endpoint or payload drift.
 5. A stream-debug export if the issue is framing/parse/transport related.
 6. Screenshot of the final UI state.

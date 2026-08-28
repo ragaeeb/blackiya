@@ -3,6 +3,7 @@ import { SYNTHETIC_DEEPSEEK_CONVERSATION_ID, SYNTHETIC_DEEPSEEK_HISTORY_URL } fr
 import { buildDeepSeekHistoryRequest, parseDeepSeekHistoryRequestContext } from './request';
 
 const syntheticClientHeaders = {
+    authorization: 'Bearer synthetic-deepseek-token',
     'x-client-bundle-id': 'synthetic-bundle',
     'x-client-locale': 'en-CA',
     'x-client-platform': 'web',

@@ -103,10 +103,19 @@ describe('proactive fetch headers', () => {
         ).toEqual({ 'bx-umidtoken': 'qwen-context', 'bx-ua': 'ua-context' });
         expect(
             toForwardableHeaderRecord(
-                { 'x-client-version': 'deepseek-version', 'x-client-platform': 'web', cookie: 'blocked' },
+                {
+                    authorization: 'Bearer deepseek-token',
+                    'x-client-version': 'deepseek-version',
+                    'x-client-platform': 'web',
+                    cookie: 'blocked',
+                },
                 'DeepSeek',
             ),
-        ).toEqual({ 'x-client-version': 'deepseek-version', 'x-client-platform': 'web' });
+        ).toEqual({
+            authorization: 'Bearer deepseek-token',
+            'x-client-version': 'deepseek-version',
+            'x-client-platform': 'web',
+        });
         expect(toForwardableHeaderRecord({ 'x-region': 'synthetic-region', cookie: 'blocked' }, 'Z.ai')).toEqual({
             'x-region': 'synthetic-region',
         });

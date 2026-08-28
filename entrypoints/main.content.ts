@@ -237,6 +237,7 @@ export default defineScript({
         });
 
         const controls = createExportControls({
+            iconUrl: browser.runtime.getURL('/icon/48.png'),
             resolveActionContext: () => {
                 const route = resolveSupportedConversationRoute(window.location.href);
                 if (!route) {

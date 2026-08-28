@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { RawConversationPayload } from '@/utils/types';
 import {
+    CLAUDE_CURRENT_DETAIL_URL,
     CLAUDE_DETAIL_URL,
+    createClaudeDeepResearchPayload,
     createClaudeTerminalPayload,
     SYNTHETIC_ASSISTANT_MESSAGE_ID,
     SYNTHETIC_CONVERSATION_ID,
@@ -30,6 +32,19 @@ describe('Claude adapter', () => {
     });
 
     describe('canonical detail parsing', () => {
+        it('should parse the current deep-research shape with its nil root and terminal stop sequence', () => {
+            const payload = createClaudeDeepResearchPayload();
+            const result = claudeAdapter.parseInterceptedData(JSON.stringify(payload), CLAUDE_CURRENT_DETAIL_URL);
+            const readiness = result ? claudeAdapter.evaluateReadiness?.(result) : null;
+
+            expect(result?.mapping[SYNTHETIC_USER_MESSAGE_ID]?.parent).toBeNull();
+            expect(readiness).toMatchObject({ ready: true, terminal: true });
+            const archiveText = JSON.stringify(result).toLowerCase();
+            expect(archiveText).toContain('research this systematically, starting with identifying');
+            expect(archiveText).toContain('substantial, well-triangulated evidence across');
+            expect(archiveText).toContain('https://docs.fallow.tools/cli/schema.md');
+        });
+
         it('should preserve the full provider payload and structured message blocks', () => {
             const payload = createClaudeTerminalPayload();
 

@@ -3,6 +3,7 @@ import { performSingleExport } from '@/features/single-export/single-export-serv
 import type { SingleExportDeps, SingleExportResult } from '@/features/single-export/types';
 import { SINGLE_EXPORT_DEFAULT_TIMEOUT_MS } from '@/features/single-export/types';
 import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { deepSeekAdapter } from '@/platforms/deepseek';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
 import type { LLMPlatform } from '@/platforms/types';
@@ -353,6 +354,19 @@ describe('performSingleExport — resolution and validation', () => {
             kind: 'failure',
             error: { kind: 'missing_auth', platformName: 'ChatGPT' },
         });
+        expect(testContext.fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('should fail with missing_auth before a DeepSeek cache-miss request without authorization', async () => {
+        const testContext = createTestContext({
+            pageUrl: `https://chat.deepseek.com/a/chat/s/${CHATGPT_ID}`,
+            adapter: deepSeekAdapter,
+        });
+        testContext.setAuthHeaders(undefined);
+
+        const result = await performSingleExport(SINGLE_EXPORT_DEFAULT_TIMEOUT_MS, testContext.deps);
+
+        expect(result).toEqual({ kind: 'failure', error: { kind: 'missing_auth', platformName: 'DeepSeek' } });
         expect(testContext.fetchImpl).not.toHaveBeenCalled();
     });
 

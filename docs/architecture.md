@@ -8,7 +8,7 @@ Blackiya is a Manifest V3 browser extension that lets the user archive their own
 
 There are exactly three user-facing behaviors:
 
-1. **Single-chat ready-terminal export.** An explicit `Save JSON` control first checks the terminal response cache. On a miss it resolves deterministic adapter-declared detail candidates only where the adapter supports a direct request. Every payload is conversation-id-checked and required to be **ready and terminal** before download. A direct candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error—there are no retries, speculative warm fetches, snapshot replay, stabilization, or degraded export.
+1. **Single-chat ready-terminal export.** An explicit Blackiya icon control (accessible as `Save JSON`) first checks the terminal response cache. On a miss it resolves deterministic adapter-declared detail candidates only where the adapter supports a direct request. Every payload is conversation-id-checked and required to be **ready and terminal** before download. A direct candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error—there are no retries, speculative warm fetches, snapshot replay, stabilization, or degraded export.
 2. **Bulk `Export Chats`.** From the popup, the user exports a ChatGPT, Gemini, or `grok.com` conversation list (one JSON file per conversation).
 3. **Stream-debug capture.** Raw ordered stream frames (SSE, NDJSON/line, or raw) are recorded in memory, bounded, and exported or cleared only on explicit request. The capture is in-memory only and sanitized for privacy.
 
@@ -26,7 +26,7 @@ There is no Signal Fusion Engine, no probe lease arbitration, no calibration, no
 - Entry point: `entrypoints/main.content.ts`
   - Initializes a session token (`utils/protocol/session-token.ts`).
   - Boots `createV3ContentRuntime(...)` against the browser message host.
-  - Wires the Save JSON control and popup commands to the MAIN-world command requester.
+  - Wires the Blackiya icon control and popup commands to the MAIN-world command requester.
 - Runtime core:
   - `features/runtime/v3-runtime.ts` — message types + typed handler (`createV3Runtime`).
   - `features/runtime/v3-content-runtime.ts` — boots the isolated runtime against the command requester.
@@ -64,7 +64,7 @@ The world command channel uses:
 
 The channel requires the exact page window (`event.source === window.self`) and exact page origin (`event.origin === window.location.origin`); absent, `null`, synthetic, and cross-origin values are rejected. This is an authorization gate for the extension command path, not a page confidentiality or command-integrity boundary: same-page scripts can observe and replay the token-stamped safe commands because a MAIN-world `window.postMessage` bridge cannot be extension-private. That hostile-page replay scenario is outside v3's threat model. Credentials, conversation payloads, stream records, and frame text never cross the channel.
 
-Bulk export progress is emitted as `BLACKIYA_BULK_EXPORT_PROGRESS` messages with stages `started`, `progress`, `completed`, `failed`.
+Bulk export progress is emitted as `BLACKIYA_BULK_EXPORT_PROGRESS` messages with stages `started`, `progress`, `completed`, `failed`. The isolated runtime removes the internal MAIN-world request envelope before forwarding each progress message to the background worker, which shows the remaining count on the extension action badge and clears it on completion.
 
 Export messages and MAIN-world command responses are token-stamped so a mismatched/absent session token is dropped (no compatibility mode).
 
@@ -77,9 +77,9 @@ Primary module: `features/single-export/single-export-service.ts`.
 1. Resolves the platform adapter and conversation id **only at click time** from the active page URL (`deps.resolveAdapter(pageUrl)`, `deps.getPageUrl()`).
 2. Looks up `{ adapter.name, conversationId }` in the bounded in-memory cache and revalidates identity plus ready-terminal state. An eligible hit is serialized and downloaded without another provider request.
 3. On a cache miss or ineligible entry, maps platform + conversation id to a deterministic detail-request candidate list via `features/single-export/endpoint-resolver.ts` (URL, method, headers, body). If the adapter has no deterministic request, the kernel returns `missing_endpoint` immediately.
-4. Dispatches direct candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). A candidate advances only when an eligible `404` is available; the timeout covers both headers and body reads. ChatGPT also requires a non-empty, case-insensitive `authorization` header before dispatch.
+4. Dispatches direct candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). A candidate advances only when an eligible `404` is available; the timeout covers both headers and body reads. ChatGPT and DeepSeek require a non-empty, case-insensitive `authorization` header before dispatch.
 5. Validates the direct response:
-   - Missing ChatGPT `authorization` → `missing_auth` before dispatch.
+   - Missing ChatGPT or DeepSeek `authorization` → `missing_auth` before dispatch.
    - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
    - Empty/bad body or parse failure → `parse_failure`.
    - A declared or streamed body above `16 MiB` is cancelled and returns `response_too_large`.
@@ -104,7 +104,7 @@ Default cache bounds:
 - maximum retained bytes: `48 MiB`
 - expiry: `5 minutes`
 
-The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, conversation-id-inconsistent, incomplete, or non-terminal candidates are not eligible. A matching non-terminal detail response or exact-provider generation start invalidates the prior terminal snapshot immediately, so an explicit save cannot export a superseded turn. Canonical ChatGPT, Gemini, Grok, Claude, Qwen, DeepSeek, and exact-target Nova request starts advance a per-conversation sequence; delayed responses from an older sequence cannot overwrite or evict a newer snapshot. Meta does this only for the initial detail operation and Z.ai only for the detail `GET`, not for pagination or message-batch halves. Expired entries and pending assembly text are pruned by scheduled expiry even without later cache access; oldest-entry removal enforces the entry and aggregate-byte bounds. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversations and pending multi-response assembly while advancing a provider epoch, so delayed pre-invalidation clones cannot repopulate state. An observed `401/403` also clears the recognized provider's request context and conversation state and advances that epoch.
+The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, conversation-id-inconsistent, incomplete, or non-terminal candidates are not eligible. A matching non-terminal detail response or exact-provider generation start invalidates the prior terminal snapshot immediately, so an explicit save cannot export a superseded turn. Canonical ChatGPT, Gemini, Grok, Claude, Qwen, DeepSeek, and exact-target Nova request starts advance a per-conversation sequence; delayed responses from an older sequence cannot overwrite or evict a newer snapshot. DeepSeek conditional-cache requests, Meta pagination, and Z.ai message-batch halves do not advance that sequence because they are not independently complete snapshots. Expired entries and pending assembly text are pruned by scheduled expiry even without later cache access; oldest-entry removal enforces the entry and aggregate-byte bounds. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversations and pending multi-response assembly while advancing a provider epoch, so delayed pre-invalidation clones cannot repopulate state. An observed `401/403` also clears the recognized provider's request context and conversation state and advances that epoch.
 
 That invalidation is deliberately not described as universally account-bound. The current sanitized request evidence establishes no reliable non-secret ordinary account-switch or logout marker for five providers:
 
@@ -113,15 +113,15 @@ That invalidation is deliberately not described as universally account-bound. Th
 | Claude | Organization id in the canonical conversation URL | Organization routing can change without identifying the signed-in account. |
 | Meta Muse | GraphQL document id, conversation id, and pagination cursor | These identify an operation or conversation, not the viewer account. |
 | Amazon Nova | RPC target and non-unique `userType`; request credentials are excluded from identity tracking | The target/type identifies the operation or class of caller, not one account. |
-| DeepSeek | Client version/platform/locale and cache version/reset fields | These are client/cache metadata shared across accounts. |
+| DeepSeek | Expiring bearer authorization plus client/cache metadata | Authorization changes invalidate provider state but are never persisted; the remaining metadata is shared across accounts. |
 | Z.ai | Region in request context; user ids occur only inside conversation responses | Region is not identity, and response identifiers are not promoted into a separate retained account tracker. |
 
 For those providers, state is still cleared on a recognized `401/403` and page/session teardown, and stale entries become ineligible through scheduled cache expiry. An ordinary in-tab account change that produces neither an identity-bearing request-context change nor an auth failure is not claimed detectable. New invalidation signals must be supported by sanitized evidence and must not require persisting an account identifier or credential.
 
 Multiplexed and multi-response transports require more context than URL/method matching:
 
-- **Meta Muse:** `POST /api/graphql` carries unrelated operations. The interceptor reads Request clones and response clones through the hard byte cap before parsing, parses the request body to distinguish initial conversation detail from backward pagination, invalidates the matching shared snapshot when a new initial operation starts, retains bounded cursor-keyed halves regardless of clone-completion order, then assembles only the canonical backward cursor chain. Pagination halves neither invalidate the shared snapshot nor advance provider identity epochs. The assembler uses the same five-minute/12-entry/16-MiB/48-MiB bounds plus a 100-page-per-conversation cap; only a closed, ready-terminal archive enters the shared cache.
-- **Amazon Nova:** unrelated RPCs share `POST /api`. The response is eligible only when the exact `x-amz-target` request header identifies the conversation-detail operation.
+- **Meta Muse:** `POST /api/graphql` carries unrelated operations. The interceptor reads Request clones and response clones through the hard byte cap before parsing, parses the request body to distinguish conversation detail from backward pagination, and retains bounded cursor-keyed halves regardless of clone-completion order. When Meta embeds the initial detail in the page's Next.js Flight data, the explicit save action reads that bounded page-local payload and joins it with the already captured backward pages. Pagination halves neither invalidate the shared snapshot nor advance provider identity epochs. The assembler uses the same five-minute/12-entry/16-MiB/48-MiB bounds plus a 100-page-per-conversation cap; only a closed, ready-terminal archive enters the shared cache.
+- **Amazon Nova:** unrelated RPCs share `POST /api`. The response is eligible only when the exact `x-amz-target` request header identifies the conversation-detail operation. Nova message strings are AES-GCM encrypted in that response; capture decrypts them with the response-local key, then discards the key and caches only the decrypted archive. A missing or invalid key fails closed.
 - **Z.ai:** the metadata detail and message batch are individually insufficient. Request and response clones are byte-capped before parsing, and either bounded half may finish cloning first. The detail `GET` invalidates the matching shared snapshot when a new sequence starts; a message-batch half does not invalidate it or advance provider identity epochs. Assembly requires matching finite `message_version` revisions, validates the conversation/current-node identity, exact requested message IDs, single-root cycle-free full graph coverage, and terminal current leaf before caching the merged archive.
 
 ### 4.2 Provider Support and Direct Requests
@@ -132,14 +132,14 @@ Multiplexed and multi-response transports require more context than URL/method m
 | Gemini | Conversation batchexecute RPC | Deterministic batchexecute `POST`; captured `at` context required | Yes |
 | Grok (`grok.com`) | Canonical REST conversation detail | Adapter-declared REST candidates | Yes |
 | Grok (`x.com/i/grok`) | Canonical conversation-items GraphQL query | Deterministic conversation-items GraphQL `GET` | No |
-| Claude | Canonical organization-scoped conversation detail | No; cache-only | No |
+| Claude | Canonical organization-scoped conversation detail, including current `tree=True`/inline-comparison responses with nil-root graphs | No; cache-only | No |
 | Amazon Nova | Target-header-classified conversation RPC | No; cache-only | No |
 | Meta Muse | Request-body-classified, cursor-complete GraphQL archive | No; cache-only | No |
 | Qwen | Canonical complete-history detail | Deterministic detail `GET` | No |
 | Z.ai | Identity-consistent detail + message batch assembly | No; cache-only | No |
-| DeepSeek | Canonical history detail | Deterministic history `GET` | No |
+| DeepSeek | Canonical history detail, including the current null-parent root shape | Deterministic history `GET` | No |
 
-Cache-only does not mean degraded or partial export. It means `Save JSON` reuses a fresh terminal response the site itself loaded and returns `missing_endpoint` when no eligible cached response exists.
+Cache-only does not mean degraded or partial export. It means the Blackiya icon reuses a fresh terminal response the site itself loaded and returns `missing_endpoint` when no eligible cached response exists.
 
 Canonical Grok detail payloads replace prior parser graph state so server-removed or replaced nodes cannot survive into a later export. Incremental Grok transports retain their merge behavior, and readiness follows only the active `current_node` ancestry rather than inactive alternative branches.
 
@@ -152,19 +152,19 @@ Every adapter-built candidate must use HTTPS, contain no userinfo, and match an 
 - Grok (`x.com`): canonical `GrokConversationItemsByRestId` GraphQL `GET` with numeric conversation identity.
 - Gemini: batchexecute `POST` to `/_/BardChatUi/data/batchexecute` with `rpcids`, `source-path=/app/{id}`, `_reqid`, and body containing `f.req` + the `at` token. Requires Gemini batchexecute context (`at`, plus optional `bl`, `f.sid`, `hl`, `reqid`, `rt`); missing `at` → `missing_auth`.
 - Qwen: canonical complete-history `GET` with the required history direction/limit query.
-- DeepSeek: canonical history `GET` keyed by the active conversation id.
+- DeepSeek: canonical history `GET` keyed by the active conversation id and requiring the captured page-injected bearer authorization. The full response may use `parent_id: null` for its root; later conditional-cache requests do not invalidate it, and responses with no messages are not exportable archives.
 
-## 5) Export Controls (Save JSON Button)
+## 5) Export Controls (Blackiya Icon)
 
 Primary module: `features/export-controls/export-controls.ts`.
 
-A single button (`#blackiya-v3-export-chat-btn`) inside a fixed container (`#blackiya-v3-export-controls`, attribute `data-blackiya-export-controls`).
+A single icon-only button (`#blackiya-v3-export-chat-btn`) inside a fixed container (`#blackiya-v3-export-controls`, attribute `data-blackiya-export-controls`). It uses the packaged Blackiya icon asset and keeps a state-aware accessible label and tooltip for idle, loading, success, and error states.
 
-Button states: `idle` ("Save JSON"), `loading` ("Saving…"), `success` ("✓ Saved"), `error` ("⚠ Failed"). The button is disabled unless `idle`. On success/error it resets to `idle` after a short timer.
+Button states: `idle` ("Save conversation JSON (current data)"), `loading` ("Saving JSON..."), `success` ("JSON saved"), `error` ("Save failed. Click to retry."). The button is disabled unless `idle`. On success/error it resets to `idle` after a short timer.
 
 On click it resolves an export action context (`{ platform, conversationId }`) and invokes `onExport`. Any failure resets the button to `error` for retry.
 
-There is one export control: `Save JSON`. The legacy controls are not mounted:
+There is one export control: the Blackiya icon. The legacy controls are not mounted:
 
 `blackiya-lifecycle-badge`, `blackiya-save-btn`, `blackiya-save-markdown-btn`, `blackiya-force-save-json-btn`, `blackiya-calibrate-btn` (see `DESCOPED_CONTROL_IDS` in `features/export-controls/contract.ts`).
 
@@ -245,7 +245,7 @@ Request context and conversation data remain separate:
 - Request-context stores contain only provider-allowlisted headers/RPC fields needed for eligible direct requests.
 - The conversation-response cache contains serialized terminal conversation archives and no captured request headers, cookies, or tokens.
 - Neither store is persisted, placed in extension storage, or transferred through the cross-world command channel.
-- Cache-first download is still explicit: observing a response only retains it temporarily; no file is written until `Save JSON` is clicked.
+- Cache-first download is still explicit: observing a response only retains it temporarily; no file is written until the Blackiya icon is clicked.
 
 If request-context is missing (`missing_auth`) or a cache-only provider has no eligible response (`missing_endpoint`), the kernel fails fast rather than guessing credentials or request shapes.
 

@@ -36,6 +36,7 @@ const FORWARDABLE_HEADERS_BY_PLATFORM: Record<SupportedPlatformName, ReadonlySet
     ]),
     Claude: new Set(),
     DeepSeek: new Set([
+        'authorization',
         'x-client-bundle-id',
         'x-client-locale',
         'x-client-platform',

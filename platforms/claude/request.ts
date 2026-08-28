@@ -6,6 +6,7 @@ const CLAUDE_CANONICAL_QUERY = {
     render_all_tools: 'true',
     consistency: 'strong',
 } as const;
+const CLAUDE_OPTIONAL_CANONICAL_QUERY = { include_inline_comparison: 'true' } as const;
 
 export const CLAUDE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,11 +39,23 @@ export const parseClaudeConversationApiUrl = (url: string): ClaudeConversationAp
             return null;
         }
         const canonicalQueryEntries = Object.entries(CLAUDE_CANONICAL_QUERY);
+        const allowedKeys = new Set([
+            ...Object.keys(CLAUDE_CANONICAL_QUERY),
+            ...Object.keys(CLAUDE_OPTIONAL_CANONICAL_QUERY),
+        ]);
         const hasCanonicalQuery =
-            [...parsedUrl.searchParams.keys()].length === canonicalQueryEntries.length &&
+            [...parsedUrl.searchParams.keys()].every((key) => allowedKeys.has(key)) &&
             canonicalQueryEntries.every(
                 ([key, value]) =>
-                    parsedUrl.searchParams.getAll(key).length === 1 && parsedUrl.searchParams.get(key) === value,
+                    parsedUrl.searchParams.getAll(key).length === 1 &&
+                    (key === 'tree'
+                        ? parsedUrl.searchParams.get(key)?.toLowerCase() === value
+                        : parsedUrl.searchParams.get(key) === value),
+            ) &&
+            Object.entries(CLAUDE_OPTIONAL_CANONICAL_QUERY).every(
+                ([key, value]) =>
+                    !parsedUrl.searchParams.has(key) ||
+                    (parsedUrl.searchParams.getAll(key).length === 1 && parsedUrl.searchParams.get(key) === value),
             );
         if (!hasCanonicalQuery) {
             return null;
