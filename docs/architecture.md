@@ -1,426 +1,275 @@
 # Blackiya Architecture
 
-> Scope: ChatGPT, Gemini, Grok capture pipeline (streaming + JSON/Markdown export)
+> Scope: ready-terminal single-chat JSON export for ChatGPT, Gemini, Grok (`grok.com` and `x.com`), Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek; bulk `Export Chats` for ChatGPT, Gemini, and `grok.com`; and bounded stream-debug capture (v3 hard cut).
 
 ## 1) System Overview
 
-Blackiya is a Manifest V3 browser extension that:
-1. Detects when an LLM response is in progress.
-2. Detects when it is complete.
-3. Captures canonical conversation JSON.
-4. Enables export only when readiness rules pass.
-5. Honors a global popup enable/disable setting before content-script bootstrap.
+Blackiya is a Manifest V3 browser extension that lets the user archive their own conversations from supported AI platforms as terminal JSON files. It does **not** run a reactive response-lifecycle state machine and never writes a conversation file automatically. It does passively clone narrowly classified, page-owned canonical detail responses into a bounded in-memory terminal cache so an explicit save can avoid a redundant request.
 
-The architecture is split across two runtime worlds:
-- MAIN world interceptor (hooks page `fetch`/`XMLHttpRequest`).
-- ISOLATED world runner (state machine, readiness gating, UI, export).
-- Popup storage settings gate whether either world boots on new tabs.
+There are exactly three user-facing behaviors:
 
-```mermaid
-flowchart LR
-    A["User prompt"] --> B["MAIN world interceptor\n/entrypoints/interceptor.content.ts -> /entrypoints/interceptor/bootstrap.ts"]
-    B --> C["postMessage protocol\nBLACKIYA_* events"]
-    C --> D["ISOLATED runner\n/utils/runner/runtime/platform-runtime.ts -> /utils/runner/engine/platform-runner-engine.ts"]
-    D --> E["InterceptionManager cache\n/utils/managers/interception-manager.ts"]
-    D --> F["Signal Fusion Engine (SFE)\n/utils/sfe/*"]
-    D --> G["ButtonManager UI\n/utils/ui/button-manager.ts"]
-    D --> H["JSON/Markdown export\n/utils/download.ts"]
-```
+1. **Single-chat ready-terminal export.** An explicit Blackiya icon control (accessible as `Save JSON`) first checks the terminal response cache. On a miss it resolves deterministic adapter-declared detail candidates only where the adapter supports a direct request. Every payload is conversation-id-checked and required to be **ready and terminal** before download. A direct candidate is tried only after an eligible `404`; every other non-happy path returns a typed, fail-fast error—there are no retries, speculative warm fetches, snapshot replay, stabilization, or degraded export.
+2. **Bulk `Export Chats`.** From the popup, the user exports a ChatGPT, Gemini, or `grok.com` conversation list (one JSON file per conversation).
+3. **Stream-debug capture.** Raw ordered stream frames (SSE, NDJSON/line, or raw) are recorded in memory, bounded, and exported or cleared only on explicit request. The capture is in-memory only and sanitized for privacy.
 
-## 2) Core Runtime Components
+Two runtime worlds exist:
 
-- Entry point:
-  - `entrypoints/main.content.ts`
+- **MAIN world privileged side** (`entrypoints/interceptor.content.ts` → `entrypoints/interceptor/bootstrap.ts` and `bootstrap-main-bridge.ts`): hooks page `fetch`/`XMLHttpRequest`, clones eligible page-owned detail responses, owns bounded response/request-context stores and raw stream frames, performs explicit provider requests, validates payloads, and triggers downloads.
+- **ISOLATED v3 content runtime** (`entrypoints/main.content.ts` → `features/runtime/v3-content-runtime.ts`): hosts the UI and browser-extension message handlers. It sends command-only requests to MAIN and receives typed status, error, and progress summaries.
+
+The worlds communicate through a token-validated `window.postMessage` command channel. Its messages contain operation names, bulk options, request ids, and sanitized summaries only. Platform headers, Gemini batchexecute context, stream records, frame text, conversation payloads, and serialized JSON never cross that channel.
+
+There is no Signal Fusion Engine, no probe lease arbitration, no calibration, no Markdown export, and no compatibility mode.
+
+## 2) Runtime Entry & File Map
+
+- Entry point: `entrypoints/main.content.ts`
+  - Initializes a session token (`utils/protocol/session-token.ts`).
+  - Boots `createV3ContentRuntime(...)` against the browser message host.
+  - Wires the Blackiya icon control and popup commands to the MAIN-world command requester.
+- Runtime core:
+  - `features/runtime/v3-runtime.ts` — message types + typed handler (`createV3Runtime`).
+  - `features/runtime/v3-content-runtime.ts` — boots the isolated runtime against the command requester.
+  - `features/runtime/main-world-command-contract.ts` — command, summary, error, and progress schemas.
+  - `features/runtime/main-world-command-request.ts` — isolated-side command requester; it never accepts sensitive payloads.
+  - `features/runtime/main-world-command-handler.ts` — token-validated MAIN-side command dispatcher.
 - Interceptor (MAIN world):
   - `entrypoints/interceptor.content.ts`
   - `entrypoints/interceptor/bootstrap.ts`
-  - `entrypoints/interceptor/bootstrap-main-bridge.ts`
-  - `entrypoints/interceptor/attempt-registry.ts`
-  - `entrypoints/interceptor/fetch-pipeline.ts`
-  - `entrypoints/interceptor/xhr-pipeline.ts`
-  - `entrypoints/interceptor/state.ts`
-  - `entrypoints/interceptor/signal-emitter.ts`
-  - `entrypoints/interceptor/discovery.ts`
-- Platform orchestrator:
-  - `utils/runner/runtime/platform-runtime.ts`
-  - `utils/runner/engine/platform-runner-engine.ts`
-  - `utils/runner/runtime/platform-runtime-wiring.ts`
-  - `utils/runner/runtime/platform-runtime-calibration.ts`
-  - `utils/runner/runtime/platform-runtime-stream-probe.ts`
-  - `utils/runner/*` (state/lifecycle/export/probe/calibration/bridge + attempt/readiness modules)
-  - `utils/runner/attempt-registry.ts` (attempt-id resolution: `resolveRunnerAttemptId` for writes, `peekRunnerAttemptId` for reads)
-  - `utils/runner/calibration-policy.ts` (calibration ordering + persistence policy helpers)
-  - `utils/runner/canonical-stabilization.ts` (canonical stabilization retry state helpers)
-  - `utils/runner/readiness.ts`
-  - `utils/runner/stream/stream-preview.ts` (pending/live stream preview merge and snapshot preservation)
-- Calibration profile management:
-  - `utils/calibration-profile.ts` (strategy defaults, `CalibrationStep` type, `buildCalibrationProfileFromStep` manual-strict policy)
-  - `utils/runner/calibration-runner.ts` (step prioritization, re-exports `CalibrationStep`)
-- Adapter interface + readiness contract:
+  - `entrypoints/interceptor/bootstrap-main-bridge.ts` — creates privileged operations over the existing MAIN-world stores.
+- Cache-first single export:
+  - `features/single-export/conversation-response-cache.ts` — five-minute, entry/byte-bounded terminal conversation cache.
+  - `features/single-export/conversation-response-capture.ts` — exact-request classification, parser/readiness gating, and response-clone ingestion.
+  - `platforms/meta/response-assembler.ts` — request-body-classified, cursor-ordered Meta GraphQL assembly.
+  - Z.ai platform assembly — combines the page-owned detail and message batch before producing one eligible terminal conversation.
+- Adapter interface + factory:
   - `platforms/types.ts`
-- Adapter drift registries (endpoint + selector constants):
-  - `platforms/chatgpt/registry.ts`
-  - `platforms/gemini/registry.ts`
-  - `platforms/grok/registry.ts`
-- Adapter factory:
   - `platforms/factory.ts`
-- SFE types + transitions:
-  - `utils/sfe/types.ts`
-  - `utils/sfe/signal-fusion-engine.ts`
-  - `utils/sfe/probe-lease-protocol.ts`
-  - `utils/sfe/probe-lease-coordinator.ts`
-  - `utils/sfe/probe-lease-store.ts`
-  - `utils/sfe/cross-tab-probe-lease.ts`
-- Background lease coordinator:
-  - `entrypoints/background.ts`
-- Protocol message definitions:
-  - `utils/protocol/messages.ts`
-- Shared text candidate collector:
-  - `utils/text-candidate-collector.ts`
 
-## 3) Wire Protocol (MAIN -> ISOLATED)
+## 3) Message Contract
 
-Primary events:
-- `BLACKIYA_RESPONSE_LIFECYCLE` (`prompt-sent`, `streaming`, `completed`, `terminated`)
-- `BLACKIYA_STREAM_DELTA` (live text/thinking fragments)
-- `BLACKIYA_RESPONSE_FINISHED` (completion hint)
-- `BLACKIYA_CONVERSATION_ID_RESOLVED` (late ID resolution)
-- `BLACKIYA_TITLE_RESOLVED` (stream-derived title)
-- `LLM_CAPTURE_DATA_INTERCEPTED` (raw canonical payload)
-  - Optional `promptHint` is attached for Grok attempts when captured from streaming request bodies.
-- `attemptId` is mandatory for lifecycle/finished/delta wire messages (legacy attempt-less compatibility removed in v2.0.2)
+The v3 runtime listens for messages on the browser message host (`V3RuntimeMessage`):
 
-See:
-- `utils/protocol/messages.ts`
+- `BLACKIYA_V3_EXPORT_CHATS` — payload holds `{ limit, delayMs, timeoutMs }`. Runs bulk export on the active tab.
+- `BLACKIYA_V3_EXPORT_STREAM_DEBUG` — exports the current stream-debug records.
+- `BLACKIYA_V3_CLEAR_STREAM_DEBUG` — clears the current stream-debug records.
 
-### 3.1 External Extension API
+Responses are `{ ok: true; result }` or `{ ok: false; error, errorKind? }`. The result is a bounded status summary: single export returns platform/filename, bulk returns counts/warnings, stream-debug export returns stream/frame counts and filename, and stream-debug clear returns the number of cleared streams. The MAIN side performs every download before sending success.
 
-External extension messaging is currently disabled in runtime.  
-`entrypoints/background.ts` does not register `runtime.onMessageExternal` or `runtime.onConnectExternal`, and runner flows do not emit external ready/update events.
+The world command channel uses:
 
-## 4) Lifecycle and Readiness Model
+- `BLACKIYA_MAIN_WORLD_COMMAND` — operation plus request id and, for bulk export, normalized options.
+- `BLACKIYA_MAIN_WORLD_PROGRESS` — bulk counts and sanitized progress messages.
+- `BLACKIYA_MAIN_WORLD_RESULT` — typed success or error summary.
 
-UI lifecycle (`platform-runner`): `idle -> prompt-sent -> streaming -> completed`
+The channel requires the exact page window (`event.source === window.self`) and exact page origin (`event.origin === window.location.origin`); absent, `null`, synthetic, and cross-origin values are rejected. This is an authorization gate for the extension command path, not a page confidentiality or command-integrity boundary: same-page scripts can observe and replay the token-stamped safe commands because a MAIN-world `window.postMessage` bridge cannot be extension-private. That hostile-page replay scenario is outside v3's threat model. Credentials, conversation payloads, stream records, and frame text never cross the channel.
 
-SFE lifecycle (`utils/sfe/types.ts`):
-- `idle`
-- `prompt_sent`
-- `streaming`
-- `completed_hint`
-- `canonical_probing`
-- `captured_ready`
-- `terminated_partial`
-- `error`
-- `superseded`
-- `disposed`
+Bulk export progress is emitted as `BLACKIYA_BULK_EXPORT_PROGRESS` messages with stages `started`, `progress`, `completed`, `failed`. The isolated runtime removes the internal MAIN-world request envelope before forwarding each progress message to the background worker, which shows the remaining count on the extension action badge and clears it on completion.
 
-Readiness decision modes:
-- `canonical_ready` (Save enabled)
-- `awaiting_stabilization` (Save disabled)
-- `degraded_manual_only` (Force Save only)
+Export messages and MAIN-world command responses are token-stamped so a mismatched/absent session token is dropped (no compatibility mode).
 
-The UI also exposes an explicit `Force Save JSON` control independently of
-readiness. It exports the currently cached `ConversationData` through the same
-JSON serializer and filename policy as Save, with degraded export metadata, so
-an interrupted or otherwise unresolved lifecycle cannot prevent a local archive.
+## 4) Single-Chat Terminal Export (Fail-Fast)
 
-Critical invariant:
-- Completion hint alone never guarantees export readiness.
-- Completion hints are advisory and must pass canonical-readiness gating before Save is enabled.
-- Every accepted `completed` lifecycle signal triggers one immediate canonical probe/pull attempt (ChatGPT skips this while DOM still reports generating; no additional backoff is introduced by the signal itself).
-- ChatGPT initial-load and conversation-switch recovery wait for the page-owned canonical response instead of issuing duplicate warm-fetch requests. Stabilization retries also skip network pulls when a ready cached snapshot already exists, and skip degraded snapshot retries (snapshot recovery only), avoiding duplicate `/backend-api/conversation/{id}` requests and 404s.
-- Network completion debounce is attempt-aware: same-conversation new attempts use a shorter debounce window than repeated same-attempt hints.
-- Generic/placeholder late title signals must never overwrite an already-resolved specific conversation title.
-- Lifecycle must be monotonic for the same attempt/conversation context (`completed` must not regress to `streaming` or `prompt-sent`).
-- Cross-world message ingress is token-validated for both live `postMessage` traffic and late-start queue drains (`__BLACKIYA_CAPTURE_QUEUE__`, `__BLACKIYA_LOG_QUEUE__`).
-- Session bootstrap token initialization is first-in-wins (`BLACKIYA_SESSION_INIT` accepts only the first valid token for the page session).
-- Drift diagnostics include selector-miss and endpoint-miss logs (throttled) so adapter drift surfaces early without discovery mode.
-- Interceptor queue trimming increments bounded drop counters and emits throttled warnings (log/capture/history queues) to surface silent drop pressure.
-- **Attempt-ID read/write separation:** `peekAttemptId` (read-only, no side effects) is used for logging, display, throttle key generation, and readiness checks. `resolveAttemptId` (mutating, creates/updates active attempt) is reserved for write paths: response-finished, stream-done probe, force-save recovery, visibility recovery, SFE ingestion.
-- **Calibration profile policy:** Two tiers exist: (a) generic strategy defaults (`buildDefaultCalibrationProfile`) with standard timings, and (b) manual-strict policy (`buildCalibrationProfileFromStep`) with tighter domQuietWindow (800ms vs 1200ms for conservative/snapshot) and always-disabled `['dom_hint', 'snapshot_fallback']`. `CalibrationStep` mapping is now reversible via a distinct `snapshot` strategy for `page-snapshot`. The runner exclusively uses the manual-strict policy path.
-- **Retention hygiene:** pending lifecycle cache is explicitly bounded with near-cap warning telemetry, and SFE resolution cache prunes stale terminal entries plus enforces a max-resolution bound.
+Primary module: `features/single-export/single-export-service.ts`.
 
-## 5) End-to-End Flow (Generic)
+`performSingleExport(timeoutMs, deps)`:
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant I as Interceptor (MAIN)
-    participant R as Runner (ISOLATED)
-    participant C as InterceptionManager
-    participant S as SFE
-    participant UI as Button UI
-    participant BG as Background
+1. Resolves the platform adapter and conversation id **only at click time** from the active page URL (`deps.resolveAdapter(pageUrl)`, `deps.getPageUrl()`).
+2. Looks up `{ adapter.name, conversationId }` in the bounded in-memory cache and revalidates identity plus ready-terminal state. An eligible hit is serialized and downloaded without another provider request.
+3. On a cache miss or ineligible entry, maps platform + conversation id to a deterministic detail-request candidate list via `features/single-export/endpoint-resolver.ts` (URL, method, headers, body). If the adapter has no deterministic request, the kernel returns `missing_endpoint` immediately.
+4. Dispatches direct candidates with one hard timeout budget (`AbortController`). Default `15000ms`, clamped to `[1000, 60000]` (`SINGLE_EXPORT_DEFAULT_TIMEOUT_MS`). A candidate advances only when an eligible `404` is available; the timeout covers both headers and body reads. ChatGPT and DeepSeek require a non-empty, case-insensitive `authorization` header before dispatch.
+5. Validates the direct response:
+   - Missing ChatGPT or DeepSeek `authorization` → `missing_auth` before dispatch.
+   - Non-2xx → `http_failure`; `401/403` → `missing_auth` and provider-scoped request-context invalidation.
+   - Empty/bad body or parse failure → `parse_failure`.
+   - A declared or streamed body above `16 MiB` is cancelled and returns `response_too_large`.
+   - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
+   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text. It also treats a `finished_successfully` `reasoning_recap` with `metadata.reasoning_status: reasoning_ended` as terminal when ChatGPT omits `end_turn`, and accepts a completed deep-research assistant-code node followed by a finished tool-code node. In-progress and non-terminal thoughts remain rejected.
+6. On success, serializes the complete platform archive (including the full normalized `mapping` tree and provider response retained in platform-specific raw payload fields) and injects the download via `deps.downloadJson(jsonString, filename)`. The boundary idempotently adds `.json` when needed. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
 
-    U->>I: Send prompt
-    I->>R: LIFECYCLE prompt-sent
-    I->>R: LIFECYCLE streaming
-    I->>R: STREAM_DELTA chunks
-    I->>R: CAPTURE_DATA_INTERCEPTED (raw response body)
-    R->>C: parse + cache ConversationData
-    R->>S: ingest canonical sample + lifecycle signals
-    I->>R: RESPONSE_FINISHED hint
-    R->>S: completed_hint + stabilization checks
-    S-->>R: canonical_ready OR awaiting_stabilization OR degraded_manual_only
-    R->>UI: Update status + Save/Force Save modes
-    U->>UI: Force Save JSON (cached data, readiness bypass)
-    UI->>R: Export cached ConversationData
-```
+The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
 
-## 6) Platform Flows
+`unsupported_platform`, `missing_conversation_id`, `missing_endpoint`, `missing_auth`, `http_failure`, `download_failure`, `timeout`, `response_too_large`, `parse_failure`, `id_mismatch`, `not_terminal`.
 
-### 6.1 ChatGPT
+Invariants: one explicit action per call, eligible cache first, deterministic `404` candidate fallback only, no retries/backoff, no fallback-on-timeout, no speculative warm request, no snapshot replay, no stabilization, and no degraded export.
 
-Key endpoints/signals:
-- Prompt stream: `/backend-api/f/conversation` (SSE)
-- Completion hint endpoint: `/backend-api/conversation/{id}/stream_status`
-- Canonical fetch candidate: `/backend-api/conversation/{id}`
+### 4.1 Cache-First Capture
 
-Flow:
-1. Interceptor detects POST to `/backend-api/f/conversation`.
-2. Monitors SSE frames token-by-token (`monitorChatGptSseLifecycle`).
-3. Emits lifecycle and deltas while streaming.
-4. Emits `TITLE_RESOLVED` from `title_generation` frames.
-5. Emits completion hint after stream done.
-6. Canonical readiness follows the active `current_node` parent chain and evaluates only the latest user turn. A later finished text supersedes earlier reasoning state, and `end_turn` is advisory for history payloads, so abandoned branches and stale message flags cannot block a completed history export. A settled history whose active branch ends on a User message, a terminal reasoning recap, or an interrupted, textless Assistant node is also exportable when the page has no active generation marker (including before turns render on a hard refresh); a terminal reasoning recap remains authoritative even if a stale stop control is still present. This preserves archives for conversations that were left on a final prompt or stopped response.
-7. Runner stabilizes the ready canonical sample and enables Save. The exported mapping remains unchanged and includes reasoning, tool, and alternate-branch nodes.
+The MAIN-world interceptor observes page-owned `fetch` and XHR traffic without consuming or delaying the page response. Page Fetch forwarding begins concurrently with capture planning; streamed request-body inspection fails open after `25ms` and cancels only its clone. It classifies status, URL, method, request context, and declared response size before cloning. Eligible response captures are sequence-checked before cloning, limited to three concurrent bounded reads, and stream-read through the cache's hard per-entry byte cap; oversized/erroring readers are cancelled. The bounded text is then parsed and terminal-validated before the normalized archive enters `ConversationResponseCache`.
 
-Primary code:
-- `entrypoints/interceptor/bootstrap.ts`
-- `platforms/chatgpt/index.ts`
+Default cache bounds:
 
-### 6.2 Gemini
+- maximum entries: `12`
+- maximum bytes per entry: `16 MiB`
+- maximum retained bytes: `48 MiB`
+- expiry: `5 minutes`
 
-Key endpoints/signals:
-- Generation endpoint: `/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate`
-- Metadata/title endpoint (non-generation): batchexecute `rpcids=MaZiqc`
-- Conversation payload endpoint (metadata and conversation mixes): batchexecute variants
+The cache is page-local and in-memory only. It is not browser storage, is not restored after reload/session teardown, and never contains request headers, cookies, tokens, or Gemini RPC context. Oversized, malformed, conversation-id-inconsistent, incomplete, or non-terminal candidates are not eligible. A matching non-terminal detail response or exact-provider generation start invalidates the prior terminal snapshot immediately, so an explicit save cannot export a superseded turn. Canonical ChatGPT, Gemini, Grok, Claude, Qwen, DeepSeek, and exact-target Nova request starts advance a per-conversation sequence; delayed responses from an older sequence cannot overwrite or evict a newer snapshot. DeepSeek conditional-cache requests, Meta pagination, and Z.ai message-batch halves do not advance that sequence because they are not independently complete snapshots. Expired entries and pending assembly text are pruned by scheduled expiry even without later cache access; oldest-entry removal enforces the entry and aggregate-byte bounds. First establishing or changing an allowlisted identity-bearing request-context field clears that provider's cached conversations and pending multi-response assembly while advancing a provider epoch, so delayed pre-invalidation clones cannot repopulate state. An observed `401/403` also clears the recognized provider's request context and conversation state and advances that epoch.
 
-Flow:
-1. Interceptor classifies generation endpoints via:
-   - `utils/gemini-request-classifier.ts`
-2. For StreamGenerate, monitor fetch/XHR progress and parse incremental buffer via:
-   - `utils/gemini-stream-parser.ts`
-3. Emit stream deltas, conversation-id resolved, and title candidates from stream metadata.
-4. XHR `loadend` completion is one-shot per attempt state to avoid duplicate `completed` lifecycle emission.
-5. Parse intercepted payloads into canonical `ConversationData`.
-6. Runner waits for canonical readiness before Save.
+That invalidation is deliberately not described as universally account-bound. The current sanitized request evidence establishes no reliable non-secret ordinary account-switch or logout marker for five providers:
 
-Title strategy:
-1. Stream-derived title (`BLACKIYA_TITLE_RESOLVED`) if available.
-2. Adapter-cached title from RPC parsing.
-3. DOM fallback at export time (`extractTitleFromDom`) if cached title is generic/stale:
-   - includes placeholders like `You said ...`
-   - checks heading and active sidebar conversation title nodes
+| Provider | Observable sanitized context | Why it is not an account/logout boundary |
+| :--- | :--- | :--- |
+| Claude | Organization id in the canonical conversation URL | Organization routing can change without identifying the signed-in account. |
+| Meta Muse | GraphQL document id, conversation id, and pagination cursor | These identify an operation or conversation, not the viewer account. |
+| Amazon Nova | RPC target and non-unique `userType`; request credentials are excluded from identity tracking | The target/type identifies the operation or class of caller, not one account. |
+| DeepSeek | Expiring bearer authorization plus client/cache metadata | Authorization changes invalidate provider state but are never persisted; the remaining metadata is shared across accounts. |
+| Z.ai | Region in request context; user ids occur only inside conversation responses | Region is not identity, and response identifiers are not promoted into a separate retained account tracker. |
 
-Primary code:
-- `platforms/gemini/index.ts`
-- `utils/gemini-stream-parser.ts`
+For those providers, state is still cleared on a recognized `401/403` and page/session teardown, and stale entries become ineligible through scheduled cache expiry. An ordinary in-tab account change that produces neither an identity-bearing request-context change nor an auth failure is not claimed detectable. New invalidation signals must be supported by sanitized evidence and must not require persisting an account identifier or credential.
 
-State management:
-- Mutable Gemini adapter state (title cache + active conversation cache) is encapsulated in `GeminiAdapterState`.
-- `resetGeminiAdapterState()` is exported for deterministic test isolation.
+Multiplexed and multi-response transports require more context than URL/method matching:
 
-### 6.3 Grok
+- **Meta Muse:** `POST /api/graphql` carries unrelated operations. The interceptor reads Request clones and response clones through the hard byte cap before parsing, parses the request body to distinguish conversation detail from backward pagination, and retains bounded cursor-keyed halves regardless of clone-completion order. When Meta embeds the initial detail in the page's Next.js Flight data, the explicit save action reads that bounded page-local payload and joins it with the already captured backward pages. Pagination halves neither invalidate the shared snapshot nor advance provider identity epochs. The assembler uses the same five-minute/12-entry/16-MiB/48-MiB bounds plus a 100-page-per-conversation cap; only a closed, ready-terminal archive enters the shared cache.
+- **Amazon Nova:** unrelated RPCs share `POST /api`. The response is eligible only when the exact `x-amz-target` request header identifies the conversation-detail operation. Nova message strings are AES-GCM encrypted in that response; capture decrypts them with the response-local key, then discards the key and caches only the decrypted archive. A missing or invalid key fails closed.
+- **Z.ai:** the metadata detail and message batch are individually insufficient. Request and response clones are byte-capped before parsing, and either bounded half may finish cloning first. The detail `GET` invalidates the matching shared snapshot when a new sequence starts; a message-batch half does not invalidate it or advance provider identity epochs. Assembly requires matching finite `message_version` revisions, validates the conversation/current-node identity, exact requested message IDs, single-root cycle-free full graph coverage, and terminal current leaf before caching the merged archive.
 
-Surfaces:
-- `grok.com` REST/NDJSON
-- `grok.x.com` streaming host (`/2/grok/add_response.json`)
+### 4.2 Provider Support and Direct Requests
 
-Permission note:
-- The extension only declares `https://grok.com/*` in `host_permissions` via [platforms/constants.ts](/Users/rhaq/workspace/blackiya/platforms/constants.ts) and `wxt.config.ts`.
-- That is intentional: the MAIN-world interceptor runs inside the `grok.com` page context and captures the page's own cross-origin fetch/XHR traffic to `grok.x.com`.
-- Because the request originates from page JavaScript on `grok.com`, Blackiya does not need a separate `https://grok.x.com/*` manifest permission. The README host-permissions section documents the same ownership boundary.
+| Provider | Eligible page-owned response | Direct fallback after cache miss | Bulk export |
+| :--- | :--- | :--- | :--- |
+| ChatGPT | Canonical conversation detail `GET` | Adapter-declared detail candidates; auth required | Yes |
+| Gemini | Conversation batchexecute RPC | Deterministic batchexecute `POST`; captured `at` context required | Yes |
+| Grok (`grok.com`) | Canonical REST conversation detail | Adapter-declared REST candidates | Yes |
+| Grok (`x.com/i/grok`) | Canonical conversation-items GraphQL query | Deterministic conversation-items GraphQL `GET` | No |
+| Claude | Canonical organization-scoped conversation detail, including current `tree=True`/inline-comparison responses with nil-root graphs | No; cache-only | No |
+| Amazon Nova | Target-header-classified conversation RPC | No; cache-only | No |
+| Meta Muse | Request-body-classified, cursor-complete GraphQL archive | No; cache-only | No |
+| Qwen | Canonical complete-history detail | Deterministic detail `GET` | No |
+| Z.ai | Identity-consistent detail + message batch assembly | No; cache-only | No |
+| DeepSeek | Canonical history detail, including the current null-parent root shape | Deterministic history `GET` | No |
 
-Generation and completion classification:
-- `utils/grok-request-classifier.ts`
-  - Generation lifecycle: `/rest/app-chat/conversations/new`, `/2/grok/add_response.json`
-  - Completion candidates: `response-node`, `load-responses`
-  - Explicitly excluded from completion hints: `/conversations/new`, `reconnect-response-v2`
+Cache-only does not mean degraded or partial export. It means the Blackiya icon reuses a fresh terminal response the site itself loaded and returns `missing_endpoint` when no eligible cached response exists.
 
-Streaming parser:
-- `utils/grok-stream-parser.ts`
-  - Extracts text candidates
-  - Extracts reasoning/thinking candidates (`deepsearch_headers`, `thinking_trace`)
-  - Handles partial NDJSON buffers across chunks
+Canonical Grok detail payloads replace prior parser graph state so server-removed or replaced nodes cannot survive into a later export. Incremental Grok transports retain their merge behavior, and readiness follows only the active `current_node` ancestry rather than inactive alternative branches.
 
-Flow:
-1. Interceptor observes Grok generation request.
-2. For `/2/grok/add_response.json`, interceptor extracts a prompt hint from request JSON and binds it to the active attempt.
-3. Emits `prompt-sent` and `streaming` only for generation endpoints.
-4. Parses NDJSON chunks and emits live stream deltas.
-5. Captures canonical payloads from response-node/load-responses.
-6. When an add_response capture is missing a user turn, InterceptionManager backfills a synthetic user message from `promptHint`.
-7. Emits completion hints only when parsed Grok payload is terminal-ready.
-8. Runner stabilizes and enables Save.
+Direct request details:
 
-Title strategy:
-1. `conversations_v2`-derived titles.
-2. DOM fallback on save for placeholder titles like `New conversation`.
+Every adapter-built candidate must use HTTPS, contain no userinfo, and match an exact origin declared by that adapter before captured request headers are read or forwarded. One unsafe candidate rejects the entire candidate set.
 
-Primary code:
-- `platforms/grok/index.ts`
-- `utils/grok-stream-parser.ts`
-- `utils/grok-request-classifier.ts`
+- ChatGPT: `/backend-api/conversation/{id}` (with `/backend-api/f/conversation/{id}` as fallback candidate), `GET`.
+- Grok (`grok.com`): `/rest/app-chat/conversations_v2/{id}?includeWorkspaces=true&includeTaskResult=true` (fallback: adapter `buildApiUrls`), `GET`.
+- Grok (`x.com`): canonical `GrokConversationItemsByRestId` GraphQL `GET` with numeric conversation identity.
+- Gemini: batchexecute `POST` to `/_/BardChatUi/data/batchexecute` with `rpcids`, `source-path=/app/{id}`, `_reqid`, and body containing `f.req` + the `at` token. Requires Gemini batchexecute context (`at`, plus optional `bl`, `f.sid`, `hl`, `reqid`, `rt`); missing `at` → `missing_auth`.
+- Qwen: canonical complete-history `GET` with the required history direction/limit query.
+- DeepSeek: canonical history `GET` keyed by the active conversation id and requiring the captured page-injected bearer authorization. The full response may use `parent_id: null` for its root; later conditional-cache requests do not invalidate it, and responses with no messages are not exportable archives.
 
-State management:
-- All mutable state (conversation titles LRU, active conversations LRU, last-active conversation ID) is encapsulated in `GrokAdapterState` class.
-- `resetGrokAdapterState()` is exported for test isolation and deterministic cleanup.
+## 5) Export Controls (Blackiya Icon)
 
-## 7) How Idle -> Streaming -> Completed Is Determined
+Primary module: `features/export-controls/export-controls.ts`.
 
-Source of truth priority:
-1. Interceptor lifecycle signals (platform-classified request flow)
-2. Completion hints (endpoint-classified and readiness-guarded)
-3. Canonical readiness checks in runner/SFE
-4. Fallback stabilization probes
+A single icon-only button (`#blackiya-v3-export-chat-btn`) inside a fixed container (`#blackiya-v3-export-controls`, attribute `data-blackiya-export-controls`). It uses the packaged Blackiya icon asset and keeps a state-aware accessible label and tooltip for idle, loading, success, and error states.
 
-The runner applies lifecycle updates only for active attempt/conversation bindings and drops stale/superseded signals.
-For the same attempt/conversation, regressive lifecycle transitions are rejected (`completed` remains terminal).
-For ChatGPT, `BLACKIYA_RESPONSE_LIFECYCLE phase=completed` is ignored while `adapter.isPlatformGenerating()` is still true; terminal transition waits for a non-generating signal path (typically `BLACKIYA_RESPONSE_FINISHED`) to avoid premature `Completed` UI state during reasoning.
-When lifecycle signals arrive before conversation ID resolution (common for Gemini XHR and Grok `/conversations/new`), the runner caches them as pending by attempt and replays once `BLACKIYA_CONVERSATION_ID_RESOLVED` is received. **The UI badge is updated immediately** for pending `prompt-sent` and `streaming` signals — callers see the lifecycle phase even before the conversation ID resolves.
-For Grok specifically, the original lifecycle attempt may be disposed by SPA navigation before the conversation ID resolves. When canonical capture data arrives on a new attempt with ready data, `shouldPromoteFromCanonicalCapture` promotes the lifecycle to `completed` — this promotion accepts `idle`, `prompt-sent`, and `streaming` states.
-When Grok SPA navigates from a null conversation ID to the new conversation URL (e.g., `/` → `/c/<id>`), the runner **preserves the active lifecycle state** (`prompt-sent`/`streaming`) via `isLifecycleActiveGeneration()` guard. This guard protects three code paths that would otherwise reset lifecycle to `idle`:
-1. `handleConversationSwitch` — skips `setLifecycleState('idle')` and `buttonManager.remove()` when transitioning from null → new conversation during active generation.
-2. `resetButtonStateForNoConversation` — called by `refreshButtonState`/health-check when conversation ID is null; now skips the idle reset during active generation.
-3. `injectSaveButton` no-conversation path — called during initial load retries; now skips the idle reset during active generation.
-Additionally, `handleConversationSwitch` skips `disposeInFlightAttemptsOnNavigation` during null→new-conversation active generation to prevent the interceptor stream monitor from exiting early, ensuring streaming data continues to flow.
-Cross-conversation navigation (from one existing conversation to another) continues to reset lifecycle to `idle` and dispose attempts as expected.
-On route changes, in-flight attempts bound to the destination conversation are preserved; unrelated in-flight attempts are disposed.
-Completion hints can move lifecycle state, but Save remains blocked until canonical readiness resolves to `canonical_ready`.
-For ChatGPT history loads that have no live prompt/stream signals, a terminal canonical `/backend-api/conversation/{id}` capture is also an implicit completion signal: the runner promotes `idle` to `completed` and enables Save only after canonical readiness passes. Button health checks locally re-ingest only adapter-ready samples that still need SFE stabilization; rejected or already-ready samples are not repeatedly processed.
+Button states: `idle` ("Save conversation JSON (current data)"), `loading` ("Saving JSON..."), `success` ("JSON saved"), `error` ("Save failed. Click to retry."). The button is disabled unless `idle`. On success/error it resets to `idle` after a short timer.
 
-Key methods:
-- `utils/runner/engine/platform-runner-engine.ts`:
-  - `handleLifecycleMessage`
-  - `handleResponseFinishedMessage`
-  - `resolveReadinessDecision`
-  - `refreshButtonState`
-  - `runStreamDoneProbe`
+On click it resolves an export action context (`{ platform, conversationId }`) and invokes `onExport`. Any failure resets the button to `error` for retry.
 
-## 8) Export Pipeline
+There is one export control: the Blackiya icon. The legacy controls are not mounted:
 
-Save pipeline:
-1. `handleSaveClick` or `handleSaveMarkdownClick` checks readiness (`canonical_ready` or explicit degraded force-save path).
-2. `getConversationData` fetches cached canonical conversation.
-3. Applies title fallback resolution if title is generic.
-4. Selects an explicit format:
-   - JSON keeps the original complete conversation tree.
-   - Markdown walks the active `current_node` parent chain and emits only non-empty `text` messages authored by User or Assistant.
-   - Markdown excludes reasoning/thoughts, system messages, tool calls and results, attachments, metadata, and inactive branches.
-5. JSON attaches `capture_meta`:
-   - `captureSource`
-   - `fidelity`
-   - `completeness`
-6. Downloads via `downloadAsJSON` or `downloadAsMarkdown`.
+`blackiya-lifecycle-badge`, `blackiya-save-btn`, `blackiya-save-markdown-btn`, `blackiya-force-save-json-btn`, `blackiya-calibrate-btn` (see `DESCOPED_CONTROL_IDS` in `features/export-controls/contract.ts`).
 
-The JSON archive is the full-fidelity source of truth. Markdown is a deliberately reduced reading format and never includes reasoning logs.
+## 6) Bulk Export Chats
 
-Existing JSON exports can use the same transcript serializer through `scripts/export-markdown.ts`, either one file at a time or recursively for a directory.
+Primary module: `features/bulk-export/orchestrator.ts` (`runBulkExport`).
 
-Primary code:
-- `utils/runner/engine/platform-runner-engine.ts`
-- `utils/runner/save-pipeline.ts`
-- `utils/markdown-transcript.ts`
-- `utils/download.ts`
+- Popup sends `BLACKIYA_V3_EXPORT_CHATS` (`BULK_EXPORT_CHATS_MESSAGE`) to the active tab with `{ limit, delayMs, timeoutMs }`. The isolated runtime forwards that operation to the MAIN-world command handler; provider requests and downloads stay in MAIN.
+- MAIN-side `runBulkExport` resolves the platform adapter from the active URL and:
+  1. Discovers conversation IDs from the platform list endpoint.
+  2. Fetches each detail payload (paced, per-request timeout).
+  3. Parses via the active adapter.
+  4. Validates the returned `conversation_id` matches the requested id and requires adapter readiness to be both ready and terminal before download; rejected payloads count as failures.
+  5. Attaches canonical export metadata (`captureSource`, `fidelity`, `completeness`).
+  6. Downloads one JSON file per conversation.
+- Options normalization (`features/bulk-export/options.ts`): default pacing delay `1200ms`, default timeout `20000ms`. `Max chats` of `0` equals all (default). Delay is clamped to `[250, 20000]`, timeout to `[5000, 60000]`.
+- Command waiting: the isolated MAIN-world requester does not apply the single/stream `15s` bridge deadline to bulk operations. It waits for the MAIN-side run to finish; each provider request and bounded `429` retry remains governed by the normalized bulk timeout, so the popup cannot report a bridge timeout while MAIN is still downloading files.
+- Fetch (`features/bulk-export/fetch.ts`): `429` is retried up to `MAX_429_RETRIES = 3` with `retry-after` / `x-rate-limit-reset` awareness, bounded by the remaining request deadline; `401/403` clears the platform headers cache and fails the active run before any candidate or later conversation can reuse its rejected request context; non-auth detail failures retain candidate fallback behavior.
+- Progress (`features/bulk-export/progress.ts`): `started` / `progress` / `completed` / `failed` messages with `discovered`, `attempted`, `exported`, `failed`, `remaining`.
+- Result summary: `{ platform, discovered, attempted, exported, failed, elapsedMs, limit, warnings }`.
 
-### 8.1 Title Consistency and Stickiness
+Platform coverage (intentionally unchanged by the wider single-save support):
 
-Title precedence (highest to lowest):
-1. Stream/API title signals (`BLACKIYA_TITLE_RESOLVED`, adapter-cached RPC titles).
-2. Cached specific-title preservation in interception cache (`InterceptionManager` remembers specific titles per conversation).
-3. Adapter DOM fallback only when the cached title is generic/placeholder.
-4. Export-time fallback (first-user-message derivation) as the final safety net.
+- ChatGPT: list endpoint + detail endpoints; requires a captured non-empty `authorization` header and validates each detail payload before download.
+- Grok (`grok.com`): `/rest/app-chat/conversations` list + detail variants.
+- Gemini: best-effort via batchexecute RPC (title list + conversation), using intercepted batchexecute request context; missing `at` fails fast rather than falling back to cookie-only detail GET.
 
-Invariant:
-- Generic late titles must not clobber specific resolved titles already seen for the same conversation.
-- Snapshot refresh ingestion preserves cache object identity when possible, so delayed adapter title updates (for example Gemini title RPCs that arrive after stream-done snapshot fallback) still apply to the cached conversation.
+`x.com` Grok, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek are not bulk providers in this release. The popup must fail clearly rather than implying that single-save support includes list enumeration.
 
-### 8.2 Cross-Tab Probe Lease Arbitration
+## 7) Stream-Debug Capture
 
-Lease model (v2.0.3):
-1. Runner always attempts cross-tab probe lease arbitration before stream-done canonical probe.
-2. Lease client (`utils/sfe/cross-tab-probe-lease.ts`) sends runtime messages:
-   - `BLACKIYA_PROBE_LEASE_CLAIM`
-   - `BLACKIYA_PROBE_LEASE_RELEASE`
-3. Background service worker owns arbitration via `ProbeLeaseCoordinator` and persists lease records in `chrome.storage.session` (with in-memory fallback if session storage is unavailable).
-4. Claims are owner-exclusive until expiry; release is owner-only and idempotent.
-5. If runtime transport is unavailable, lease client fails open so capture does not stall.
+Primary modules: `features/stream-debug/*`.
 
-Invariants:
-- Lease arbitration is always-on (no user setting gate).
-- Non-owner release cannot clear an active lease.
-- Expired leases are pruned and can be deterministically taken over.
-- Coordinator hydration is single-flight (concurrent claims share one hydration pass), and failed hydration attempts are retried on subsequent operations.
+Generation endpoints are classified (`features/stream-debug/generation-endpoint.ts`):
 
-### 8.3 Snapshot Fallback Fidelity
+- ChatGPT: `POST /backend-api/f/conversation`
+- Gemini: `POST /_/BardChatUi/data/assistant.lamda.bardfrontendservice/streamgenerate`
+- Grok: `POST /2/grok/add_response.json` or `POST /rest/app-chat/conversations/new`
+- Qwen: `POST /api/v2/chat/completions`
 
-Snapshot fallback now prioritizes raw intercepted replay payloads over synthesized snapshots.
+No generation endpoint is registered for Claude, Amazon Nova, Meta Muse, Z.ai, or DeepSeek in this release. Their supplied reload/detail traffic did not establish a generation transport, so the classifier does not speculate. Grok generation capture includes the exact `/2/grok/add_response.json` transport on its declared Grok and X origins.
 
-Priority order for `getPageConversationSnapshot`:
-1. Raw capture ring-buffer match (`__blackiyaSnapshotType: 'raw-capture'`)
-2. Known globals (`__NEXT_DATA__`, `__remixContext`, etc.)
-3. DOM snapshot
-4. Broad `window` BFS fallback
+The recorder (`features/stream-debug/recorder.ts`) stores in-memory records. Each record has a `streamId`, `platform`, `endpoint`, `method`, sanitized `path`, timestamps, ordered `frames`, terminal `termination`, raw and retained byte/frame accounting, and truncation counters.
 
-Raw capture match accepts explicit `conversationId`/`conversation_id` fields and conversation-object `id` matches when the object also resembles a conversation payload (`title`/`mapping`/`current_node`).
+Frames carry `sequence`, `frameId`, `kind` (`data`/`raw`/`raw_chunk`/`sse_event`/`ndjson_line`/`done`/`refusal`/`replacement`/`erase`/`transport`), optional event metadata, text, timestamps, byte accounting, and `truncated`.
 
-Ingestion invariants:
-- Stabilization retry snapshots replay raw payloads using original captured URL/data (not wrapper JSON).
-- Visibility recovery and force-save snapshot recovery also replay raw snapshots (including replay URL candidates), then evaluate readiness from cache.
-- This preserves richer fields (`model`, reasoning metadata/chunks) when direct canonical fetch candidates (`/backend-api/conversation/{id}`, `/backend-api/f/conversation/{id}`) are unavailable.
+Framing (`features/stream-debug/stream-monitor.ts`):
 
-### 8.4 Popup Bulk Export Chats
+- `sse` — split on double-newlines; `[DONE]` is marked as a `done` event.
+- `line` (NDJSON) — split on newlines.
+- `raw` — record each raw chunk.
 
-Blackiya also supports a popup-driven bulk export path (independent of live lifecycle reactivity):
+XHR streams (`features/stream-debug/xhr-monitor.ts`) append deltas read from `responseText` through the same frame assembler.
 
-1. User clicks `Export Chats` in popup and configures:
-   - `Max chats` (`0 = all`, default `0`)
-2. Popup sends `BLACKIYA_BULK_EXPORT_CHATS` to the active tab content script.
-3. Runner executes `runBulkChatExport`:
-   - discovers conversation IDs from the platform list endpoint
-   - fetches each conversation detail payload
-   - parses via the active adapter
-   - attaches export metadata to the original conversation payload
-   - downloads one JSON file per conversation (same filename policy as Save JSON)
-   - when list discovery fails, result warnings include HTTP status/message for easier diagnosis
+Bounded recorder defaults (`features/stream-debug/recorder.ts`):
 
-Rate-limit behavior:
-- Requests are paced by fixed internal delay (`1200ms`).
-- Per-request timeout uses fixed internal timeout (`20000ms`).
-- HTTP `429` is retried with `retry-after` / `x-rate-limit-reset` awareness (bounded retries).
-- Detail URL candidate fallback continues on `404` (endpoint drift).
+- max concurrent streams: `64`
+- max frames per stream: `512`
+- max bytes per frame: `64 KiB`
+- max bytes per stream: `512 KiB`
+- max retained bytes across streams: `8 MiB`
+- TTL: `15 minutes` (idle or ended streams are pruned by a scheduled in-memory expiry, even without another recorder operation)
 
-Current platform coverage:
-- ChatGPT (`/backend-api/conversations` with query fallback variants + `/backend-api/conversation/{id}`)
-- Grok.com (`/rest/app-chat/conversations` + conversation detail endpoints);
-  bulk detail fallback now also derives reconnect IDs from `response-node` payloads and probes
-  `/rest/app-chat/conversations/reconnect-response-v2/{responseId}` when `conversations_v2`/`response-node` are metadata-only.
-- Gemini best-effort via batchexecute RPC IDs (`MaZiqc` titles list + `hNvQHb` conversation);
-  when `MaZiqc` returns no parseable IDs (or fails), bulk export falls back to cached Gemini title IDs captured from intercepted traffic.
-  Gemini detail fetches use intercepted batchexecute request context (`bl`, `f.sid`, `hl`, `_reqid`, `at`) and issue `POST` `hNvQHb` requests rather than `GET`.
+The recorder clamps each frame to its byte budget. When a bound is reached it evicts ordinary frames before transport and terminal/refusal/replacement/erase frames, preserving the late signals needed to diagnose refusals and server-side replacement/erase events. Input truncation and evicted retained bytes are both reflected in the byte/frame counters and `truncated` flag. When the stream count exceeds the cap, the oldest streams are evicted.
+
+Explicit export + clear use the token-validated MAIN-world command handler (`features/runtime/main-world-command-handler.ts`). MAIN serializes the bounded records and triggers the stream-debug JSON download itself, then returns only `{ streamCount, frameCount, filename }`. Clear empties the recorder and returns only the cleared-stream count. Stream records and frame text never cross into the isolated runtime and are never written into conversation JSON exports.
+
+## 8) Request Context and Conversation Cache Privacy
+
+Primary modules: `entrypoints/main.content.ts`, `utils/platform-header-store.ts`, and `entrypoints/interceptor/gemini-batchexecute-context-store.ts`.
+
+At explicit export time, the MAIN-world command handler reads the active adapter, page URL, provider-allowlisted auth/client snapshot, and (for Gemini) batchexecute context directly from its page-local stores. The isolated runtime does not request or receive those values. The interceptor stores defensive request-context snapshots in memory with a five-minute expiry. When an allowlisted identity-bearing request-context field is available, establishing or changing that field replaces the prior platform snapshot and clears that provider's conversation/assembly cache. A recognized provider `401/403` response clears both request context and conversation state; Gemini also clears its batchexecute context.
+
+This is a request-context boundary, not a universal account-session detector. Claude, Meta Muse, Amazon Nova, DeepSeek, and Z.ai currently expose no reliable non-secret account-switch/logout signal in the sanitized request context described above. Their organization, operation, conversation, client, cache, region, and response-body user fields must not be treated as proof of an account change.
+
+Request context and conversation data remain separate:
+
+- Request-context stores contain only provider-allowlisted headers/RPC fields needed for eligible direct requests.
+- The conversation-response cache contains serialized terminal conversation archives and no captured request headers, cookies, or tokens.
+- Neither store is persisted, placed in extension storage, or transferred through the cross-world command channel.
+- Cache-first download is still explicit: observing a response only retains it temporarily; no file is written until the Blackiya icon is clicked.
+
+If request-context is missing (`missing_auth`) or a cache-only provider has no eligible response (`missing_endpoint`), the kernel fails fast rather than guessing credentials or request shapes.
 
 ## 9) Diagnostics and Debugging
 
 Debug artifacts:
-- Debug report (token-lean): `utils/minimal-logs.ts`
-- Full logs JSON: persistent logs storage
-- Readiness debug logs:
-  - canonical-ready decisions are TTL-deduped per conversation to avoid health-check log floods
+
+- Stream-debug record(s) — raw ordered stream frames, exported explicitly.
+- HAR analysis — `bun run har:analyze --input <file.har> ...` for endpoint drift.
+- Unit/integration tests — `bun test` cover readiness, single-export, bulk-export, runtime, and stream-debug behavior with sanitized fixtures.
+- Compile/build checks — `bun run compile` and `bun run build` validate the TypeScript graph and production MV3 bundle.
 
 Docs:
+
 - `docs/debug-logs-guide.md`
-- `docs/discovery-mode.md`
 
-## 10) Current Gaps / Ongoing Verification
+## 10) Non-Goals (Removed in v3)
 
-- ✅ Grok lifecycle regression fixed: pending signals now update UI badge immediately; canonical capture promotes from idle.
-- ✅ Attempt-ID read/write separation completed (H-01): read-only paths no longer mutate `activeAttemptId`.
-- ✅ Calibration builder centralized (H-02): no more duplicated profile construction between `calibration-profile.ts` and `runner/index.ts`.
-- ✅ Runner decomposition continuation completed (H-03): calibration policy, canonical stabilization, and stream preview helper clusters extracted into dedicated runner modules.
-- ✅ Interceptor decomposition continuation completed (H-04): attempt binding/lookup/disposal logic extracted to `entrypoints/interceptor/attempt-registry.ts`; bootstrap now consumes injected registry methods.
-- ✅ Grok adapter state isolated (H-05): all mutable state encapsulated in `GrokAdapterState` class; `resetGrokAdapterState()` available for test isolation.
-- Need continued multi-tab validation for Grok and Gemini under long reasoning sessions.
-- Keep regression suite expanding where smoke tests find platform-specific edge cases.
-- Remaining post-v2.0.6 backlog: P2 items (logging/type-hygiene/perf follow-ups) and P4 defense-in-depth hardening.
-- P4 defense-in-depth: token validation for InterceptionManager, snapshot response path, queue stamping, JSON bridge restoration, SESSION_INIT first-in-wins lock.
+The following v2 concepts are intentionally **not** part of the v3 runtime:
+
+- Response lifecycle state machine (`idle -> prompt-sent -> streaming -> completed`).
+- Signal Fusion Engine, readiness decision modes (`canonical_ready`, `awaiting_stabilization`, `degraded_manual_only`).
+- Save vs Force-Save gating and degraded/manual-only exports.
+- Probe leases, cross-tab arbitration, calibration, canonical stabilization, speculative warm-fetch requests, or snapshot/playback recovery. Bounded reuse of a terminal detail response that the page already loaded is part of v3 and is not snapshot recovery.
+- Markdown export/transcripts and `export:markdown` conversions.
+- Lifecycle/probe toasts and `stream-done` readiness states.
+- Compatibility mode and the legacy lifecycle wire protocol.

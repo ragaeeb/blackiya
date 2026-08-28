@@ -5,16 +5,32 @@
  */
 
 import { chatGPTAdapter } from '@/platforms/chatgpt';
+import { claudeAdapter } from '@/platforms/claude';
+import { deepSeekAdapter } from '@/platforms/deepseek';
 import { geminiAdapter } from '@/platforms/gemini';
 import { grokAdapter } from '@/platforms/grok';
+import { metaAdapter } from '@/platforms/meta';
+import { novaAdapter } from '@/platforms/nova';
+import { qwenAdapter } from '@/platforms/qwen';
 import type { LLMPlatform } from '@/platforms/types';
+import { zaiAdapter } from '@/platforms/zai';
 
 /**
  * Get all supported platforms.
  * Encapsulated in a function to allow future extension (e.g., dynamic registration).
  */
 const getPlatforms = () => {
-    return [chatGPTAdapter, geminiAdapter, grokAdapter];
+    return [
+        chatGPTAdapter,
+        geminiAdapter,
+        grokAdapter,
+        claudeAdapter,
+        deepSeekAdapter,
+        qwenAdapter,
+        zaiAdapter,
+        metaAdapter,
+        novaAdapter,
+    ];
 };
 
 /**
@@ -24,25 +40,14 @@ const getPlatforms = () => {
  * @returns The matching platform adapter or null if not found
  */
 export const getPlatformAdapter = (url: string): LLMPlatform | null => {
-    return getPlatforms().find((p) => p.isPlatformUrl(url)) || null;
-};
-
-/**
- * Get the platform adapter that matches an API endpoint URL
- *
- * @param url - The intercepted API endpoint URL
- * @returns The matching platform adapter or null if not found
- */
-export const getPlatformAdapterByApiUrl = (url: string): LLMPlatform | null => {
-    return getPlatforms().find((p) => p.apiEndpointPattern.test(url)) || null;
-};
-
-/**
- * Get the platform adapter that matches a completion trigger URL.
- *
- * @param url - The intercepted completion-trigger URL
- * @returns The matching platform adapter or null if not found
- */
-export const getPlatformAdapterByCompletionUrl = (url: string): LLMPlatform | null => {
-    return getPlatforms().find((p) => p.completionTriggerPattern?.test(url)) || null;
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return null;
+    }
+    if (parsed.protocol !== 'https:') {
+        return null;
+    }
+    return getPlatforms().find((platform) => platform.isPlatformUrl(parsed.href)) ?? null;
 };

@@ -1,0 +1,253 @@
+import { logger } from '@/utils/logger';
+import {
+    defaultExportControlsTimings,
+    EXPORT_CHAT_BUTTON_ID,
+    EXPORT_CONTROLS_CONTAINER_ATTR,
+    EXPORT_CONTROLS_CONTAINER_ID,
+    EXPORT_ERROR_KIND_ATTR,
+    type ExportActionContext,
+    type ExportControls,
+    type ExportControlsDependencies,
+    type ExportControlsState,
+    type ExportControlsTimings,
+} from './contract';
+
+const CONTAINER_STYLES = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 10000;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(30, 30, 30, 0.8);
+    backdrop-filter: blur(4px);
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+`;
+
+const BUTTON_BACKGROUND_IDLE = 'linear-gradient(135deg, #10a37f 0%, #0d8a6a 100%)';
+const BUTTON_BACKGROUND_ERROR = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+
+const STATE_TITLES: Record<ExportControlsState, string> = {
+    idle: 'Save conversation JSON (current data)',
+    loading: 'Saving JSON...',
+    success: 'JSON saved',
+    error: 'Save failed. Click to retry.',
+};
+
+const removeStaleControls = () => {
+    const marked = document.querySelectorAll(
+        `[${EXPORT_CONTROLS_CONTAINER_ATTR}="1"], #${EXPORT_CONTROLS_CONTAINER_ID}`,
+    );
+    for (const element of Array.from(marked)) {
+        element.parentElement?.removeChild(element);
+    }
+};
+
+const createContainer = (): HTMLElement => {
+    const container = document.createElement('div');
+    container.id = EXPORT_CONTROLS_CONTAINER_ID;
+    container.setAttribute(EXPORT_CONTROLS_CONTAINER_ATTR, '1');
+    container.style.cssText = CONTAINER_STYLES;
+    return container;
+};
+
+const createButton = (onClick: () => void, iconUrl: string): HTMLButtonElement => {
+    const button = document.createElement('button');
+    button.id = EXPORT_CHAT_BUTTON_ID;
+    button.type = 'button';
+    button.title = STATE_TITLES.idle;
+    button.setAttribute('aria-label', STATE_TITLES.idle);
+    button.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 4px;
+        border: none;
+        border-radius: 50%;
+        background: ${BUTTON_BACKGROUND_IDLE};
+        color: #fff;
+        line-height: 1;
+        cursor: pointer;
+        transition: filter 0.2s ease, opacity 0.2s ease;
+    `;
+
+    const icon = document.createElement('img');
+    icon.src = iconUrl;
+    icon.width = 36;
+    icon.height = 36;
+    icon.alt = '';
+    icon.draggable = false;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.style.cssText = 'display: block; width: 36px; height: 36px; border-radius: 50%;';
+    button.appendChild(icon);
+    button.addEventListener('click', onClick);
+    return button;
+};
+
+export const createExportControls = (
+    dependencies: ExportControlsDependencies,
+    timings: Partial<ExportControlsTimings> = {},
+): ExportControls => {
+    const resolvedTimings: ExportControlsTimings = { ...defaultExportControlsTimings(), ...timings };
+
+    let container: HTMLElement | null = null;
+    let button: HTMLButtonElement | null = null;
+    let state: ExportControlsState = 'idle';
+    let actionGeneration = 0;
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+    let reinjectionObserver: MutationObserver | null = null;
+
+    const clearResetTimer = () => {
+        if (resetTimer) {
+            clearTimeout(resetTimer);
+            resetTimer = null;
+        }
+    };
+
+    const render = () => {
+        if (!button) {
+            return;
+        }
+        button.disabled = state !== 'idle';
+        button.style.background = state === 'error' ? BUTTON_BACKGROUND_ERROR : BUTTON_BACKGROUND_IDLE;
+        button.title = STATE_TITLES[state];
+        button.setAttribute('aria-label', button.title);
+        button.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
+    };
+
+    const setState = (next: ExportControlsState) => {
+        state = next;
+        render();
+        if (next !== 'error') {
+            button?.removeAttribute(EXPORT_ERROR_KIND_ATTR);
+        }
+    };
+
+    const setErrorKind = (error: unknown) => {
+        const kind =
+            error && typeof error === 'object' && 'kind' in error && typeof error.kind === 'string'
+                ? error.kind
+                : 'unknown';
+        button?.setAttribute(EXPORT_ERROR_KIND_ATTR, kind);
+    };
+
+    const scheduleIdleReset = (delayMs: number) => {
+        clearResetTimer();
+        resetTimer = setTimeout(() => {
+            resetTimer = null;
+            setState('idle');
+        }, delayMs);
+    };
+
+    const ensureMountedAtBody = () => {
+        if (!container || !document.body) {
+            return;
+        }
+        if (!container.isConnected || container.parentElement !== document.body) {
+            document.body.appendChild(container);
+        }
+    };
+
+    const ensureReinjectionObserver = () => {
+        if (reinjectionObserver || typeof MutationObserver === 'undefined' || !document.body) {
+            return;
+        }
+        reinjectionObserver = new MutationObserver(() => {
+            if (!container) {
+                reinjectionObserver?.disconnect();
+                reinjectionObserver = null;
+                return;
+            }
+            ensureMountedAtBody();
+        });
+        reinjectionObserver.observe(document.body, { childList: true, subtree: true });
+    };
+
+    const handleExportClick = () => {
+        if (state === 'loading') {
+            return;
+        }
+
+        clearResetTimer();
+        const currentActionGeneration = ++actionGeneration;
+
+        let context: ExportActionContext;
+        try {
+            context = dependencies.resolveActionContext();
+        } catch (error) {
+            logger.warn('Failed to resolve export action context', error);
+            setState('error');
+            setErrorKind(error);
+            scheduleIdleReset(resolvedTimings.errorResetMs);
+            return;
+        }
+
+        setState('loading');
+        void Promise.resolve()
+            .then(() => {
+                if (currentActionGeneration !== actionGeneration) {
+                    return;
+                }
+                return dependencies.onExport(context);
+            })
+            .then(() => {
+                if (currentActionGeneration !== actionGeneration) {
+                    return;
+                }
+                setState('success');
+                scheduleIdleReset(resolvedTimings.successResetMs);
+            })
+            .catch((error) => {
+                if (currentActionGeneration !== actionGeneration) {
+                    return;
+                }
+                logger.warn('Single-chat export failed', error);
+                setState('error');
+                setErrorKind(error);
+                scheduleIdleReset(resolvedTimings.errorResetMs);
+            });
+    };
+
+    const mount = (): HTMLElement => {
+        if (container?.isConnected && container.parentElement === document.body) {
+            return container;
+        }
+
+        clearResetTimer();
+        removeStaleControls();
+
+        container = createContainer();
+        button = createButton(handleExportClick, dependencies.iconUrl);
+        container.appendChild(button);
+        document.body.appendChild(container);
+        setState(state);
+
+        ensureReinjectionObserver();
+        logger.info('V3 export controls mounted');
+        return container;
+    };
+
+    const destroy = () => {
+        actionGeneration += 1;
+        clearResetTimer();
+        setState('idle');
+        reinjectionObserver?.disconnect();
+        reinjectionObserver = null;
+        container?.parentElement?.removeChild(container);
+        container = null;
+        button = null;
+    };
+
+    return {
+        mount,
+        destroy,
+        getElement: () => container,
+        getButton: () => button,
+        getState: () => state,
+    };
+};

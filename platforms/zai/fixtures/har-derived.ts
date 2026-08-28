@@ -1,0 +1,204 @@
+export const ZAI_CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
+export const ZAI_USER_MESSAGE_ID = '22222222-2222-4222-8222-222222222222';
+export const ZAI_ASSISTANT_MESSAGE_ID = '33333333-3333-4333-8333-333333333333';
+export const ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID = '44444444-4444-4444-8444-444444444444';
+
+export const zaiDetailPayloadFixture = {
+    archived: false,
+    chat: {
+        enable_thinking: true,
+        extra: {},
+        features: [{ server: 'synthetic', status: 'enabled', type: 'tool' }],
+        history: {
+            currentId: ZAI_ASSISTANT_MESSAGE_ID,
+            messages: {
+                [ZAI_ASSISTANT_MESSAGE_ID]: {
+                    childrenIds: [],
+                    id: ZAI_ASSISTANT_MESSAGE_ID,
+                    parentId: ZAI_USER_MESSAGE_ID,
+                    role: 'assistant',
+                    timestamp: 1_700_000_002,
+                },
+                [ZAI_USER_MESSAGE_ID]: {
+                    childrenIds: [ZAI_ASSISTANT_MESSAGE_ID],
+                    content: 'Synthetic user prompt.',
+                    id: ZAI_USER_MESSAGE_ID,
+                    models: ['glm-synthetic'],
+                    parentId: null,
+                    role: 'user',
+                    timestamp: 1_700_000_001,
+                },
+            },
+        },
+        id: ZAI_CONVERSATION_ID,
+        models: ['glm-synthetic'],
+        params: {},
+        reasoning_effort: 'synthetic',
+        tags: [],
+        timestamp: 1_700_000_002_000,
+    },
+    created_at: 1_700_000_000,
+    folder_id: null,
+    id: ZAI_CONVERSATION_ID,
+    im_context: {
+        channel: 'synthetic-channel',
+        session_id: 'synthetic-session',
+        session_name: 'Synthetic session',
+        type: 'synthetic',
+        zai_user_id: 'synthetic-user',
+    },
+    message_version: 1,
+    meta: {
+        auto_web_search: false,
+        flags: ['synthetic'],
+        mcp_servers: [],
+        models: ['glm-synthetic'],
+        web_session_id: 'synthetic-web-session',
+        workspace_id: 'synthetic-workspace',
+    },
+    pinned: false,
+    share_id: null,
+    title: 'Synthetic Z.ai Conversation',
+    type: 'chat',
+    updated_at: 1_700_000_003,
+    user_id: 'synthetic-user',
+};
+
+export const zaiMessagesBatchPayloadFixture = {
+    chat_id: ZAI_CONVERSATION_ID,
+    data: {
+        [ZAI_ASSISTANT_MESSAGE_ID]: {
+            chat_id: ZAI_CONVERSATION_ID,
+            childrenIds: [],
+            content: null,
+            content_blocks: [
+                {
+                    content: 'Synthetic completed reasoning.',
+                    ended_at: 1_700_000_002,
+                    started_at: 1_700_000_001,
+                    type: 'reasoning',
+                },
+                {
+                    content: 'Synthetic interim answer.',
+                    type: 'text',
+                },
+                {
+                    content: [
+                        {
+                            function: { arguments: '{"query":"synthetic"}', name: 'synthetic_tool' },
+                            id: 'synthetic-tool-call',
+                            type: 'function',
+                        },
+                    ],
+                    ended_at: 1_700_000_002,
+                    results: [
+                        {
+                            content: 'Synthetic tool result.',
+                            status: 'completed',
+                            tool_call_id: 'synthetic-tool-call',
+                        },
+                    ],
+                    started_at: 1_700_000_001,
+                    type: 'tool_calls',
+                },
+                {
+                    content: 'Synthetic final reasoning.',
+                    started_at: 1_700_000_002,
+                    type: 'reasoning',
+                },
+                {
+                    content: 'Synthetic terminal answer.',
+                    type: 'text',
+                },
+            ],
+            created_at: 1_700_000_002,
+            done: true,
+            error: null,
+            extra: {
+                im_context: {
+                    channel: 'synthetic-channel',
+                    session_id: 'synthetic-session',
+                    trace_id: 'synthetic-trace',
+                    type: 'synthetic',
+                    zai_user_id: 'synthetic-user',
+                },
+            },
+            files: null,
+            id: ZAI_ASSISTANT_MESSAGE_ID,
+            model: 'glm-synthetic',
+            model_idx: 0,
+            model_name: 'glm-synthetic',
+            parentId: ZAI_USER_MESSAGE_ID,
+            parent_id: ZAI_USER_MESSAGE_ID,
+            role: 'assistant',
+            status: null,
+            status_history: null,
+            timestamp: 1_700_000_002,
+            updated_at: 1_700_000_003,
+            usage: {
+                completion_tokens: 42,
+                prompt_tokens: 21,
+                total_tokens: 63,
+            },
+            user_id: 'synthetic-user',
+        },
+        [ZAI_USER_MESSAGE_ID]: {
+            chat_id: ZAI_CONVERSATION_ID,
+            childrenIds: [ZAI_ASSISTANT_MESSAGE_ID],
+            content: 'Synthetic user prompt.',
+            content_blocks: null,
+            created_at: 1_700_000_001,
+            done: false,
+            error: null,
+            extra: {},
+            files: null,
+            id: ZAI_USER_MESSAGE_ID,
+            model: null,
+            model_idx: 0,
+            model_name: null,
+            parentId: null,
+            parent_id: null,
+            role: 'user',
+            status: null,
+            status_history: null,
+            timestamp: 1_700_000_001,
+            updated_at: 1_700_000_001,
+            usage: null,
+            user_id: 'synthetic-user',
+        },
+    },
+    message_version: 1,
+};
+
+export const createZaiAlternateBranchFixtures = () => {
+    const detail = structuredClone(zaiDetailPayloadFixture);
+    const batch = structuredClone(zaiMessagesBatchPayloadFixture);
+
+    detail.chat.history.messages[ZAI_USER_MESSAGE_ID].childrenIds.push(ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID);
+    Object.assign(detail.chat.history.messages, {
+        [ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID]: {
+            childrenIds: [],
+            id: ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID,
+            parentId: ZAI_USER_MESSAGE_ID,
+            role: 'assistant',
+            timestamp: 1_700_000_010,
+        },
+    });
+
+    batch.data[ZAI_USER_MESSAGE_ID].childrenIds.push(ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID);
+    Object.assign(batch.data, {
+        [ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID]: {
+            ...structuredClone(batch.data[ZAI_ASSISTANT_MESSAGE_ID]),
+            childrenIds: [],
+            content_blocks: [{ content: 'Synthetic inactive branch.', type: 'text' }],
+            done: false,
+            id: ZAI_ALTERNATE_ASSISTANT_MESSAGE_ID,
+            parentId: ZAI_USER_MESSAGE_ID,
+            parent_id: ZAI_USER_MESSAGE_ID,
+            timestamp: 1_700_000_010,
+            updated_at: 1_700_000_010,
+        },
+    });
+
+    return { detail, batch };
+};

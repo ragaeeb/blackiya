@@ -1,0 +1,104 @@
+import { describe, expect, it } from 'bun:test';
+
+import {
+    createNovaConversationFixture,
+    failedNovaConversation,
+    pendingDeepResearchNovaConversation,
+    pendingNovaConversation,
+    statuslessNovaConversation,
+    terminalArtifactNovaConversation,
+    terminalNovaConversation,
+} from './fixtures/conversation';
+import { parseNovaConversationPayload } from './parser';
+import { evaluateNovaReadiness } from './readiness';
+
+const parseFixture = (fixture: Parameters<typeof parseNovaConversationPayload>[0]) => {
+    const parsed = parseNovaConversationPayload(fixture);
+    expect(parsed).not.toBeNull();
+    if (!parsed) {
+        throw new Error('fixture did not parse');
+    }
+    return parsed;
+};
+
+describe('Amazon Nova readiness', () => {
+    it('should accept a successful terminal assistant response', () => {
+        const readiness = evaluateNovaReadiness(parseFixture(terminalNovaConversation));
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal');
+        expect(readiness.contentHash).not.toBeNull();
+    });
+
+    it('should accept a successful terminal structured artifact without text', () => {
+        const readiness = evaluateNovaReadiness(parseFixture(terminalArtifactNovaConversation));
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-structured-content');
+        expect(readiness.latestAssistantTextLength).toBe(0);
+    });
+
+    it('should reject metadata-only and recursively empty structured payloads as missing content', () => {
+        const assistantContents = [
+            [{ type: 'artifact', artifact: {} }],
+            [{ type: 'artifact', artifact: { files: [], nested: { enabled: false } } }],
+            [{ type: 'files', files: [] }],
+            [{ type: 'tool', toolUse: false }],
+        ];
+
+        for (const assistantContent of assistantContents) {
+            const readiness = evaluateNovaReadiness(parseFixture(createNovaConversationFixture({ assistantContent })));
+
+            expect(readiness.ready).toBeFalse();
+            expect(readiness.terminal).toBeTrue();
+            expect(readiness.reason).toBe('assistant-content-missing');
+        }
+    });
+
+    it('should accept materially populated recognized structured payload fields', () => {
+        for (const assistantContent of [
+            [{ type: 'artifact', artifact: { artifactId: 'synthetic-artifact' } }],
+            [{ type: 'files', files: [{ name: 'synthetic-file.txt' }] }],
+        ]) {
+            const readiness = evaluateNovaReadiness(parseFixture(createNovaConversationFixture({ assistantContent })));
+
+            expect(readiness.ready).toBeTrue();
+            expect(readiness.terminal).toBeTrue();
+            expect(readiness.reason).toBe('terminal-structured-content');
+        }
+    });
+
+    it('should reject in-progress responses as non-terminal', () => {
+        const readiness = evaluateNovaReadiness(parseFixture(pendingNovaConversation));
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
+        expect(readiness.reason).toBe('assistant-in-progress');
+    });
+
+    it('should reject a pending deep-research interaction despite terminal message text', () => {
+        const readiness = evaluateNovaReadiness(parseFixture(pendingDeepResearchNovaConversation));
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
+        expect(readiness.reason).toBe('assistant-in-progress');
+    });
+
+    it('should reject statusless responses rather than infer completion from text', () => {
+        const readiness = evaluateNovaReadiness(parseFixture(statuslessNovaConversation));
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
+        expect(readiness.reason).toBe('assistant-in-progress');
+    });
+
+    it('should reject failed assistant responses', () => {
+        const readiness = evaluateNovaReadiness(parseFixture(failedNovaConversation));
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('assistant-error');
+    });
+});

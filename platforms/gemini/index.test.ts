@@ -1,7 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { join } from 'node:path';
-
-import type { Message, MessageNode } from '@/utils/types';
+import { parseConversationPayload } from '@/platforms/gemini/conversation-parser';
+import { LRUCache } from '@/utils/lru-cache';
+import type { Message, MessageNode, RawConversationPayload } from '@/utils/types';
 
 const loggerSpies = {
     info: mock(() => {}),
@@ -43,6 +44,10 @@ describe('Gemini Adapter — integration', () => {
             expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/app/12345')).toBeTrue();
             expect(geminiAdapter.isPlatformUrl('https://gemini.google.com/')).toBeTrue();
             expect(geminiAdapter.isPlatformUrl('https://google.com')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('http://gemini.google.com/app/12345')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('https://gemini.google.com.evil.invalid/app/12345')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('https://claude.ai/chat/12345?source=gemini.google.com')).toBeFalse();
+            expect(geminiAdapter.isPlatformUrl('not-a-url')).toBeFalse();
         });
 
         it('should extract conversation IDs from app and share URLs', () => {
@@ -55,78 +60,10 @@ describe('Gemini Adapter — integration', () => {
 
         it('should return null when extracting conversation ID from Gemini API URL', () => {
             expect(
-                geminiAdapter.extractConversationIdFromUrl(
+                geminiAdapter.extractConversationId(
                     'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb',
                 ),
             ).toBeNull();
-        });
-    });
-
-    describe('API pattern matching', () => {
-        it('should match batchexecute URLs even when rpcids drift', () => {
-            const pattern = geminiAdapter.apiEndpointPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBeTrue();
-            expect(
-                pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?v=1&rpcids=hNvQHb&test=1'),
-            ).toBeTrue();
-        });
-
-        it('should match generic batchexecute URLs without requiring rpcids', () => {
-            const pattern = geminiAdapter.apiEndpointPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=otAQ7b')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute')).toBeTrue();
-        });
-
-        it('should match StreamGenerate URL (Gemini 3.0 — V2.1-025)', () => {
-            expect(
-                geminiAdapter.apiEndpointPattern.test(
-                    'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq_assistant-bard-web-server_20260210.04_p0&f.sid=-37108853284977362&hl=en&_reqid=2641802&rt=c',
-                ),
-            ).toBeTrue();
-        });
-
-        it('should match StreamGenerate as completion trigger (Gemini 3.0 — V2.1-025)', () => {
-            expect(
-                geminiAdapter.completionTriggerPattern.test(
-                    'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq',
-                ),
-            ).toBeTrue();
-        });
-
-        it('should match completion trigger URLs for generic batchexecute RPCs', () => {
-            const pattern = geminiAdapter.completionTriggerPattern;
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc')).toBeTrue();
-            expect(pattern.test('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D')).toBeTrue();
-        });
-    });
-
-    describe('Dual-match: URLs matching both apiEndpointPattern and completionTriggerPattern', () => {
-        it('StreamGenerate matches BOTH patterns (documents the overlap)', () => {
-            const url =
-                'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
-        });
-
-        it('hNvQHb batchexecute matches BOTH patterns', () => {
-            const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=hNvQHb';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
-        });
-
-        it('MaZiqc batchexecute matches completionTriggerPattern (suppressed at interceptor layer)', () => {
-            const url = 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc';
-            expect(geminiAdapter.apiEndpointPattern.test(url)).toBeTrue();
-            expect(geminiAdapter.completionTriggerPattern?.test(url)).toBeTrue();
-        });
-
-        it('extractConversationIdFromUrl returns null for StreamGenerate (no ID in URL)', () => {
-            const url =
-                'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?bl=boq';
-            expect(geminiAdapter.extractConversationIdFromUrl?.(url)).toBeNull();
         });
     });
 
@@ -151,13 +88,14 @@ describe('Gemini Adapter — integration', () => {
 
             const userMsg = messages.find((m) => m.author.role === 'user')!;
             expect(userMsg).toBeDefined();
-            const userText = userMsg.content.parts?.[0] || '';
+            const userText = typeof userMsg.content.parts?.[0] === 'string' ? userMsg.content.parts[0] : '';
             expect(userText.startsWith('ROLE: Expert academic translator')).toBeTrue();
             expect(userText.endsWith('دبر الصلوات يُؤتى بها ما يستطيع الإنسان وليس إلا.')).toBeTrue();
 
             const assistantMsg = messages.find((m) => m.author.role === 'assistant')!;
             expect(assistantMsg).toBeDefined();
-            const assistantText = assistantMsg.content.parts?.[0] || '';
+            const assistantText =
+                typeof assistantMsg.content.parts?.[0] === 'string' ? assistantMsg.content.parts[0] : '';
             expect(assistantText.startsWith('P258071 - The Shaykh: Yes.')).toBeTrue();
             expect(assistantText.endsWith('rforms of them what man is able, and nothing else.')).toBeTrue();
 
@@ -167,6 +105,53 @@ describe('Gemini Adapter — integration', () => {
             expect(thoughts![0]!.summary).toBe('Clarifying Key Parameters');
             expect(thoughts![0]!.content.startsWith("I've established key parameters for the task. This")).toBeTrue();
             expect(thoughts![0]!.content.endsWith("ch involves a question on Ibn Ḥajar's assessments.")).toBeTrue();
+        });
+
+        it('should preserve the complete multi-turn and branch payload in raw_payload', () => {
+            const conversationId = 'gemini-multi-turn-branch';
+            const assistantCandidate: RawConversationPayload[] = [
+                null,
+                ['first answer'],
+                {
+                    branchId: 'branch-a',
+                    followUp: { user: 'second question', assistant: 'second answer' },
+                },
+            ];
+            const conversationRoot: RawConversationPayload[] = [
+                [`c_${conversationId}`, { canonical: 'root-metadata' }],
+                null,
+                [[null, null, 'first question']],
+                [[assistantCandidate]],
+                null,
+                {
+                    turns: [
+                        { id: 'turn-1', role: 'user', text: 'first question' },
+                        { id: 'turn-2', role: 'user', text: 'second question' },
+                    ],
+                    branches: [
+                        { id: 'branch-a', answer: 'second answer' },
+                        { id: 'branch-b', answer: 'alternate answer' },
+                    ],
+                },
+            ];
+            const canonicalPayload: RawConversationPayload = [[conversationRoot]];
+
+            const result = parseConversationPayload(
+                canonicalPayload,
+                new LRUCache<string, string>(4),
+                new LRUCache<string, import('@/utils/types').ConversationData>(4),
+            );
+
+            expect(result).not.toBeNull();
+            if (!result) {
+                return;
+            }
+            expect(result.conversation_id).toBe(conversationId);
+            expect(result.raw_payload).toEqual(canonicalPayload);
+            expect(JSON.parse(JSON.stringify(result.raw_payload))).toEqual(canonicalPayload);
+            const rawLevel1 = (result.raw_payload as RawConversationPayload[])[0] as RawConversationPayload[];
+            const rawRoot = rawLevel1[0] as RawConversationPayload[];
+            expect(rawRoot[5]).toEqual(conversationRoot[5]);
         });
     });
 

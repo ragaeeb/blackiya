@@ -2,18 +2,28 @@ import type { PlatformReadiness } from '@/platforms/types';
 import { hashText } from '@/utils/hash';
 import type { ConversationData, MessageNode } from '@/utils/types';
 
+const collectActiveAssistantMessages = (data: ConversationData) => {
+    const messages: NonNullable<MessageNode['message']>[] = [];
+    const visited = new Set<string>();
+    let nodeId: string | null = data.current_node;
+
+    while (nodeId && !visited.has(nodeId)) {
+        visited.add(nodeId);
+        const node: MessageNode | undefined = data.mapping[nodeId];
+        if (!node) {
+            return [];
+        }
+        if (node.message?.author.role === 'assistant') {
+            messages.push(node.message);
+        }
+        nodeId = node.parent;
+    }
+
+    return messages.reverse();
+};
+
 export const evaluateGrokReadiness = (data: ConversationData): PlatformReadiness => {
-    const messages = Object.values(data.mapping)
-        .map((node) => node.message)
-        .filter(
-            (message): message is NonNullable<MessageNode['message']> =>
-                !!message && message.author.role === 'assistant',
-        )
-        .sort((left, right) => {
-            const leftTs = left.update_time ?? left.create_time ?? 0;
-            const rightTs = right.update_time ?? right.create_time ?? 0;
-            return leftTs - rightTs;
-        });
+    const messages = collectActiveAssistantMessages(data);
 
     if (messages.length === 0) {
         return {

@@ -33,6 +33,164 @@ const RESPONSE_NODE_URL = `https://grok.com/rest/app-chat/conversations/${CONV_I
 const LOAD_RESPONSES_URL = `https://grok.com/rest/app-chat/conversations/${CONV_ID}/load-responses`;
 
 describe('Grok Adapter — grok.com REST parsing', () => {
+    describe('conversation detail request classification', () => {
+        it('should require GET requests to exact grok.com canonical detail URLs', () => {
+            expect(grokAdapter.isConversationDetailRequest(META_URL, 'GET')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(RESPONSE_NODE_URL, 'get')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(LOAD_RESPONSES_URL, 'GET')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(META_URL, 'POST')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(META_URL.replace('https://grok.com', 'http://grok.com'), 'GET'),
+            ).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(META_URL.replace('grok.com', 'example.test'), 'GET'),
+            ).toBeFalse();
+            expect(grokAdapter.isConversationDetailRequest(`${META_URL}&extra=true`, 'GET')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(`${RESPONSE_NODE_URL}&includeThreads=false`, 'GET'),
+            ).toBeFalse();
+            expect(grokAdapter.isConversationDetailRequest(`${LOAD_RESPONSES_URL}?page=2`, 'GET')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(
+                    'https://grok.com/rest/app-chat/conversations_v2/not-a-uuid?includeWorkspaces=true',
+                    'GET',
+                ),
+            ).toBeFalse();
+        });
+
+        it('should require the exact x.com request method, operation, id, and query set', () => {
+            const xDetailUrl =
+                'https://x.com/i/api/graphql/JfjvClaXup5BQFcwzcDUpA/GrokConversationItemsByRestId' +
+                `?variables=${encodeURIComponent(JSON.stringify({ restId: '2091428436845772921' }))}` +
+                `&features=${encodeURIComponent(JSON.stringify({ synthetic_flag: true }))}`;
+
+            expect(grokAdapter.isConversationDetailRequest(xDetailUrl, 'GET')).toBeTrue();
+            expect(grokAdapter.isConversationDetailRequest(xDetailUrl, 'POST')).toBeFalse();
+            expect(grokAdapter.isConversationDetailRequest(`${xDetailUrl}&extra=true`, 'GET')).toBeFalse();
+            expect(
+                grokAdapter.isConversationDetailRequest(
+                    xDetailUrl.replace('2091428436845772921', 'not-numeric'),
+                    'GET',
+                ),
+            ).toBeFalse();
+        });
+    });
+
+    it('should preserve all canonical response branches and the raw provider payload', () => {
+        const payload = {
+            conversation: {
+                conversationId: CONV_ID,
+                title: 'Canonical Grok conversation',
+                providerMetadata: { region: 'us' },
+            },
+            responses: [
+                {
+                    responseId: 'user-turn',
+                    message: 'Question',
+                    sender: 'human',
+                    createTime: '2026-01-01T00:00:00.000Z',
+                    partial: false,
+                    providerBranch: 'main',
+                },
+                {
+                    responseId: 'assistant-main',
+                    parentResponseId: 'user-turn',
+                    message: 'Main answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:01.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-alt',
+                    parentResponseId: 'user-turn',
+                    message: 'Alternative answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:02.000Z',
+                    partial: false,
+                },
+            ],
+            providerTopLevelField: { retained: true },
+        };
+
+        const result = grokAdapter.parseInterceptedData(JSON.stringify(payload), META_URL);
+
+        expect(result).not.toBeNull();
+        expect(result?.mapping['assistant-main']?.parent).toBe('user-turn');
+        expect(result?.mapping['assistant-alt']?.parent).toBe('user-turn');
+        expect((result as unknown as Record<string, unknown>).raw_payload).toEqual(payload);
+    });
+
+    it('should replace canonical conversation state while preserving later incremental merges', () => {
+        const firstCanonicalPayload = {
+            responses: [
+                {
+                    responseId: 'user-turn',
+                    message: 'Question',
+                    sender: 'human',
+                    createTime: '2026-01-01T00:00:00.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-shared',
+                    parentResponseId: 'user-turn',
+                    message: 'Superseded answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:01.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-removed',
+                    parentResponseId: 'user-turn',
+                    message: 'Removed alternative',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:02.000Z',
+                    partial: false,
+                },
+            ],
+        };
+        const replacementCanonicalPayload = {
+            responses: [
+                {
+                    responseId: 'user-turn',
+                    message: 'Question',
+                    sender: 'human',
+                    createTime: '2026-01-01T00:00:00.000Z',
+                    partial: false,
+                },
+                {
+                    responseId: 'assistant-shared',
+                    parentResponseId: 'user-turn',
+                    message: 'Replacement answer',
+                    sender: 'assistant',
+                    createTime: '2026-01-01T00:00:03.000Z',
+                    partial: false,
+                },
+            ],
+        };
+
+        grokAdapter.parseInterceptedData(JSON.stringify(firstCanonicalPayload), META_URL);
+        const replacement = grokAdapter.parseInterceptedData(JSON.stringify(replacementCanonicalPayload), META_URL);
+
+        expect(replacement?.mapping['assistant-shared']?.message?.content?.parts?.[0]).toBe('Replacement answer');
+        expect(replacement?.mapping['assistant-removed']).toBeUndefined();
+        expect(replacement?.mapping['user-turn']?.children).toEqual(['assistant-shared']);
+
+        const incremental = grokAdapter.parseInterceptedData(
+            JSON.stringify({
+                responseId: 'assistant-incremental',
+                parentResponseId: 'assistant-shared',
+                message: 'Incremental follow-up',
+                sender: 'assistant',
+                createTime: '2026-01-01T00:00:04.000Z',
+                partial: false,
+            }),
+            LOAD_RESPONSES_URL,
+        );
+
+        expect(incremental?.mapping['assistant-shared']).toBeDefined();
+        expect(incremental?.mapping['assistant-incremental']?.parent).toBe('assistant-shared');
+    });
+
     describe('out-of-order API responses (response-node → load-responses → meta)', () => {
         it('should handle out-of-order grok.com responses and build the correct tree', () => {
             const responseNodes = {

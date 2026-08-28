@@ -50,7 +50,7 @@ describe('fetch-wrapper', () => {
         const result = await wrapped(new URL('https://example.com/path'));
         expect(result.status).toBe(200);
         const logEntry = logged[0] as unknown[];
-        expect(JSON.stringify(logEntry)).toContain('https://example.com/path');
+        expect(JSON.stringify(logEntry)).toContain('"requestUrl":"/path"');
     });
 
     it('resolves URL from a Request object when interceptor throws', async () => {
@@ -63,7 +63,7 @@ describe('fetch-wrapper', () => {
         const result = await wrapped(request);
         expect(result.status).toBe(200);
         const logEntry = logged[0] as unknown[];
-        expect(JSON.stringify(logEntry)).toContain('https://example.com/api');
+        expect(JSON.stringify(logEntry)).toContain('"requestUrl":"/api"');
     });
 
     it('uses method from init when interceptor throws', async () => {
@@ -110,5 +110,60 @@ describe('fetch-wrapper', () => {
         await wrapped('https://example.com/str-err');
         const logEntry = JSON.stringify(logged[0]);
         expect(logEntry).toContain('plain string error');
+    });
+
+    it('redacts query parameters from interception error logs', async () => {
+        const originalFetch = (() => Promise.resolve(new Response('ok', { status: 200 }))) as unknown as typeof fetch;
+        const wrapped = createFetchInterceptor(originalFetch, () => {
+            throw new Error('gemini-request-error');
+        });
+
+        await wrapped(
+            'https://gemini.google.com/_/BardChatUi/data/streamgenerate?at=secret-at-token&f.sid=secret-fsid&authorization=secret-auth',
+        );
+
+        const logEntry = JSON.stringify(logged[0]);
+        expect(logEntry).toContain('"requestUrl":"/_/BardChatUi/data/streamgenerate"');
+        expect(logEntry).not.toContain('secret-at-token');
+        expect(logEntry).not.toContain('secret-fsid');
+        expect(logEntry).not.toContain('secret-auth');
+    });
+
+    it('allows an expired error log entry to be emitted again', async () => {
+        let now = 1_000;
+        const originalFetch = (() => Promise.resolve(new Response('ok', { status: 200 }))) as unknown as typeof fetch;
+        const wrapped = createFetchInterceptor(
+            originalFetch,
+            () => {
+                throw new Error('expired-entry');
+            },
+            { now: () => now, errorLogTtlMs: 10 },
+        );
+
+        await wrapped('https://example.com/expired');
+        await wrapped('https://example.com/expired');
+        expect(logged).toHaveLength(1);
+
+        now = 1_010;
+        await wrapped('https://example.com/expired');
+        expect(logged).toHaveLength(2);
+    });
+
+    it('evicts the oldest error log entry when the bound is reached', async () => {
+        const originalFetch = (() => Promise.resolve(new Response('ok', { status: 200 }))) as unknown as typeof fetch;
+        const wrapped = createFetchInterceptor(
+            originalFetch,
+            () => {
+                throw new Error('bounded-entry');
+            },
+            { maxErrorLogEntries: 2 },
+        );
+
+        await wrapped('https://example.com/oldest');
+        await wrapped('https://example.com/newer');
+        await wrapped('https://example.com/latest');
+        await wrapped('https://example.com/oldest');
+
+        expect(logged).toHaveLength(4);
     });
 });

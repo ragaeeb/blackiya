@@ -5,7 +5,10 @@
  */
 
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
-
+import {
+    deepResearchCompletedConversation,
+    deepResearchInProgressConversation,
+} from './fixtures/deep-research-conversation';
 import { evaluateChatGPTReadiness } from './readiness';
 
 mock.module('@/utils/logger', () => ({
@@ -103,7 +106,7 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(r.terminal).toBeFalse();
     });
 
-    it('should accept a settled history whose active branch ends with a user message', () => {
+    it('should reject a settled history whose active branch ends with a user message', () => {
         const data = baseConversation(
             {
                 root: { id: 'root', message: null, parent: null, children: ['user-old'] },
@@ -185,14 +188,12 @@ describe('ChatGPT evaluateReadiness', () => {
 
         const r = adapter.evaluateReadiness(data);
 
-        expect(r.ready).toBeTrue();
-        expect(r.terminal).toBeTrue();
-        expect(r.reason).toBe('terminal-user-only');
-        expect(r.contentHash).toBeString();
-        expect(r.latestAssistantTextLength).toBe('Settled latest prompt'.length);
+        expect(r.ready).toBeFalse();
+        expect(r.terminal).toBeFalse();
+        expect(r.reason).toBe('assistant-missing');
     });
 
-    it('should accept a settled active branch ending in an interrupted assistant node', () => {
+    it('should reject an interrupted assistant node without a terminal marker', () => {
         const data = baseConversation(
             {
                 root: { id: 'root', message: null, parent: null, children: ['user-old'] },
@@ -254,13 +255,11 @@ describe('ChatGPT evaluateReadiness', () => {
             { current_node: 'assistant-stopped' },
         );
 
-        const readiness = evaluateChatGPTReadiness(data, { allowInterruptedAssistant: true });
+        const readiness = evaluateChatGPTReadiness(data);
 
-        expect(readiness.ready).toBeTrue();
-        expect(readiness.terminal).toBeTrue();
-        expect(readiness.reason).toBe('terminal-interrupted');
-        expect(readiness.contentHash).toBeString();
-        expect(readiness.latestAssistantTextLength).toBe(1);
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
+        expect(readiness.reason).toBe('assistant-in-progress');
     });
 
     it('should accept a terminal reasoning recap with no assistant text', () => {
@@ -302,9 +301,159 @@ describe('ChatGPT evaluateReadiness', () => {
 
         expect(readiness.ready).toBeTrue();
         expect(readiness.terminal).toBeTrue();
-        expect(readiness.reason).toBe('terminal-interrupted');
+        expect(readiness.reason).toBe('terminal-marker');
         expect(readiness.contentHash).toBeString();
         expect(readiness.latestAssistantTextLength).toBe(1);
+    });
+
+    it('should accept an explicitly ended reasoning recap when end_turn is false', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+                'user-1': {
+                    id: 'user-1',
+                    parent: 'root',
+                    children: ['assistant-recap'],
+                    message: {
+                        id: 'user-1',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Please finish the memo'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-recap': {
+                    id: 'assistant-recap',
+                    parent: 'user-1',
+                    children: [],
+                    message: assistantMessage('assistant-recap', {
+                        content: { content_type: 'reasoning_recap', content: 'hidden recap' },
+                        end_turn: false,
+                        metadata: {
+                            reasoning_status: 'reasoning_ended',
+                            can_save: false,
+                        },
+                    }),
+                },
+            },
+            { current_node: 'assistant-recap' },
+        );
+
+        const readiness = evaluateChatGPTReadiness(data);
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-marker');
+        expect(readiness.contentHash).toBeString();
+        expect(readiness.latestAssistantTextLength).toBe(1);
+    });
+
+    it('should reject a reasoning recap whose reasoning has not ended', () => {
+        const data = baseConversation({
+            root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+            'user-1': {
+                id: 'user-1',
+                parent: 'root',
+                children: ['assistant-recap'],
+                message: {
+                    id: 'user-1',
+                    author: { role: 'user', name: null, metadata: {} },
+                    create_time: 1,
+                    update_time: 1,
+                    content: { content_type: 'text', parts: ['Please finish the memo'] },
+                    status: 'finished_successfully',
+                    end_turn: true,
+                    weight: 1,
+                    metadata: {},
+                    recipient: 'all',
+                    channel: null,
+                },
+            },
+            'assistant-recap': {
+                id: 'assistant-recap',
+                parent: 'user-1',
+                children: [],
+                message: assistantMessage('assistant-recap', {
+                    content: { content_type: 'reasoning_recap', content: 'partial recap' },
+                    end_turn: false,
+                    metadata: { reasoning_status: 'is_reasoning' },
+                }),
+            },
+        });
+
+        const readiness = evaluateChatGPTReadiness(data);
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
+        expect(readiness.reason).toBe('assistant-text-missing');
+    });
+
+    it('should accept a finished terminal multimodal response with no assistant text', () => {
+        const data = baseConversation(
+            {
+                root: { id: 'root', message: null, parent: null, children: ['user-1'] },
+                'user-1': {
+                    id: 'user-1',
+                    parent: 'root',
+                    children: ['assistant-image'],
+                    message: {
+                        id: 'user-1',
+                        author: { role: 'user', name: null, metadata: {} },
+                        create_time: 1,
+                        update_time: 1,
+                        content: { content_type: 'text', parts: ['Generate a logo'] },
+                        status: 'finished_successfully',
+                        end_turn: true,
+                        weight: 1,
+                        metadata: {},
+                        recipient: 'all',
+                        channel: null,
+                    },
+                },
+                'assistant-image': {
+                    id: 'assistant-image',
+                    parent: 'user-1',
+                    children: [],
+                    message: assistantMessage('assistant-image', {
+                        content: {
+                            content_type: 'multimodal_text',
+                            parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'file-placeholder' }],
+                        },
+                        end_turn: true,
+                    }),
+                },
+            },
+            { current_node: 'assistant-image' },
+        );
+
+        const readiness = evaluateChatGPTReadiness(data);
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-marker');
+        expect(readiness.contentHash).toBeString();
+    });
+
+    it('should accept a completed deep-research tool branch without final assistant text', () => {
+        const readiness = evaluateChatGPTReadiness(deepResearchCompletedConversation);
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-marker');
+        expect(readiness.contentHash).toBeString();
+    });
+
+    it('should not accept a deep-research tool branch while the tool is in progress', () => {
+        const readiness = evaluateChatGPTReadiness(deepResearchInProgressConversation);
+
+        expect(readiness.ready).toBeFalse();
+        expect(readiness.terminal).toBeFalse();
     });
 
     it('should return assistant-in-progress when any assistant message is in_progress', () => {
@@ -341,7 +490,7 @@ describe('ChatGPT evaluateReadiness', () => {
         });
         const r = adapter.evaluateReadiness(data);
         expect(r.ready).toBeFalse();
-        expect(r.terminal).toBeTrue();
+        expect(r.terminal).toBeFalse();
         expect(r.reason).toBe('assistant-text-missing');
     });
 
@@ -357,7 +506,7 @@ describe('ChatGPT evaluateReadiness', () => {
         });
         const r = adapter.evaluateReadiness(data);
         expect(r.reason).toBe('assistant-text-missing');
-        expect(r.terminal).toBeTrue();
+        expect(r.terminal).toBeFalse();
     });
 
     it('should accept a finished latest text message without relying on end_turn', () => {

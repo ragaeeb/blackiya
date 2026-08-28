@@ -17,24 +17,19 @@ import {
     normalizeConversationCandidate,
 } from './conversation-normalizer';
 import { evaluateChatGPTReadiness } from './readiness';
-import { CHATGPT_ENDPOINT_REGISTRY, isChatGptGeneratingFromDom, resolveChatGptButtonInjectionTarget } from './registry';
 import { buildConversationFromSsePayloads, extractSsePayloads } from './sse-parser';
 import { CONVERSATION_ID_PATTERN, HOST_CANDIDATES, isPlaceholderTitle, tryParseJson } from './utils';
 
-// Exported constants used by the interceptor / runner layers
-
-export const CHATGPT_PROMPT_REQUEST_PATH_PATTERN = CHATGPT_ENDPOINT_REGISTRY.promptRequestPathPattern;
-
-// Adapter factory
-
 const MAX_TITLE_LENGTH = 80;
+const CHATGPT_HOSTNAMES = new Set(['chatgpt.com', 'chat.openai.com']);
 
-const canUseInterruptedReadiness = (): boolean => {
-    const doc = typeof document === 'undefined' ? null : document;
-    // The API snapshot can arrive before ChatGPT renders conversation turns on
-    // a hard refresh. Readiness is based on that canonical snapshot; only an
-    // active generation marker should prevent accepting an interrupted turn.
-    return !isChatGptGeneratingFromDom(doc);
+const isChatGPTUrl = (url: string) => {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' && CHATGPT_HOSTNAMES.has(parsed.hostname);
+    } catch {
+        return false;
+    }
 };
 
 /**
@@ -48,15 +43,9 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
 
     urlMatchPattern: 'https://chatgpt.com/*',
 
-    /**
-     * Matches the GET endpoint for fetching full conversation JSON.
-     * Format: backend-api/conversation/{uuid}
-     */
-    apiEndpointPattern: CHATGPT_ENDPOINT_REGISTRY.apiEndpointPattern,
+    detailRequestOrigins: ['https://chatgpt.com', 'https://chat.openai.com'],
 
-    completionTriggerPattern: CHATGPT_ENDPOINT_REGISTRY.completionTriggerPattern,
-
-    isPlatformUrl: (url: string) => url.includes('chatgpt.com') || url.includes('chat.openai.com'),
+    isPlatformUrl: isChatGPTUrl,
 
     /**
      * Extracts the conversation UUID from a ChatGPT page URL.
@@ -100,19 +89,28 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
         return CONVERSATION_ID_PATTERN.test(potentialId) ? potentialId : null;
     },
 
-    /** Extracts conversation ID from a stream_status completion trigger URL. */
-    extractConversationIdFromUrl(url: string): string | null {
-        const match = url.match(/\/backend-api\/(?:f\/)?conversation\/([a-f0-9-]+)\/stream_status/i);
-        if (!match?.[1]) {
-            return null;
-        }
-        return CONVERSATION_ID_PATTERN.test(match[1]) ? match[1] : null;
-    },
-
     buildApiUrl: (conversationId: string) => `https://chatgpt.com/backend-api/conversation/${conversationId}`,
 
     buildApiUrls: (conversationId: string) =>
-        HOST_CANDIDATES.map((host) => `${host}/backend-api/conversation/${conversationId}`),
+        HOST_CANDIDATES.flatMap((host) => [
+            `${host}/backend-api/conversation/${conversationId}`,
+            `${host}/backend-api/f/conversation/${conversationId}`,
+        ]),
+
+    isConversationDetailRequest: (url: string, method: string) => {
+        if (method.toUpperCase() !== 'GET') {
+            return false;
+        }
+        try {
+            const { hostname, pathname } = new URL(url);
+            return (
+                (hostname === 'chatgpt.com' || hostname === 'chat.openai.com') &&
+                /^\/backend-api\/(?:f\/)?conversation\/[a-f0-9-]+$/i.test(pathname)
+            );
+        } catch {
+            return false;
+        }
+    },
 
     /**
      * Parses intercepted ChatGPT API response (JSON object or raw SSE text).
@@ -162,12 +160,7 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
         return `${sanitizedTitle}_${timestamp}`;
     },
 
-    getButtonInjectionTarget: () => resolveChatGptButtonInjectionTarget(),
-
-    evaluateReadiness: (data: ConversationData) =>
-        evaluateChatGPTReadiness(data, { allowInterruptedAssistant: canUseInterruptedReadiness() }),
-
-    isPlatformGenerating: () => isChatGptGeneratingFromDom(),
+    evaluateReadiness: (data: ConversationData) => evaluateChatGPTReadiness(data),
 });
 
 /** ChatGPT Platform Adapter singleton. */

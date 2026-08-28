@@ -15,6 +15,8 @@ export const normalizeContentType = (value: unknown): MessageContent['content_ty
         case 'reasoning_recap':
         case 'code':
         case 'execution_output':
+        case 'multimodal_text':
+        case 'image_asset_pointer':
             return value;
         default:
             return 'text';

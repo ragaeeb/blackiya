@@ -1,154 +1,116 @@
 # Debug Logs Guide
 
 ## Purpose
-Use the smallest log artifact that still explains the failure. Default to token-lean debug reports, escalate to full logs only when needed.
 
-## Readiness Model (Current)
-Save/Copy are controlled by SFE readiness, not by a single lifecycle event:
+Use the smallest artifact that still explains the failure. In the v3 runtime there is no reactive lifecycle state. The interceptor may retain an eligible page-owned terminal detail response in a bounded in-memory cache, but readiness is revalidated during explicit save and no conversation file is written automatically. Diagnostics reduce to:
 
-1. Lifecycle hint observed: `prompt-sent` / `streaming` / `completed`.
-2. Canonical capture ingested and parseable.
-3. Readiness gate confirms terminal + stabilized payload.
-4. Final state:
-- `canonical_ready`: Save enabled.
-- `degraded_manual_only`: Force Save enabled (manual confirm required).
+1. **Stream-debug records** — raw ordered stream frames for transport/parse triage.
+2. **Fail-fast export errors** — typed, metadata-only error results from the single-chat kernel.
+3. **HAR analysis** — redacted endpoint/timeline summaries for platform drift.
 
-Important:
-- `completed` means stream hint ended.
-- `canonical_ready` means export is safe/complete.
-- `degraded_manual_only` means canonical capture timed out; export may be partial.
+The terminal conversation cache is not a log export. It expires after five minutes, is bounded to 12 entries, 16 MiB per entry, and 48 MiB total, and contains no captured request credentials. The Blackiya icon checks it first, then makes a deterministic direct detail request only when the active adapter supports one.
 
-## High-Signal Events (Debug TXT)
-These should usually be enough for first-pass triage:
+### MAIN-world bridge note
 
-- Capture/readiness:
-- `Successfully captured/cached data for conversation: ...`
-- `Capture reached ready state ... eventCode:"captured_ready"`
-- `readiness_timeout_manual_only`
-- `force_save_degraded_export`
-- `snapshot_degraded_mode_used`
+The command bridge accepts only events from the exact page window and exact page origin; absent, `null`, synthetic, and cross-origin source/origin values are rejected. Same-page scripts can nevertheless observe and replay the token-stamped safe commands because `window.postMessage` in MAIN cannot be extension-private. This hostile-page scenario is outside v3's threat model, and the bridge never carries credentials, conversation payloads, stream records, or frame text.
 
-- Lifecycle/stream:
-- `Lifecycle phase ...`
-- `Response finished signal ...`
-- `Stream done probe start`
-- `Stream done probe success`
-- `Stream done probe has no URL candidates`
-- Toast states like:
-  - `stream-done: canonical capture ready`
-  - `stream-done: degraded snapshot captured`
-  - `stream-done: awaiting canonical capture`
-  - `stream-done: no api url candidates`
+## Artifacts at a Glance
 
-- Race/disposal hygiene:
-- `attempt_alias_forwarded`
-- `late_signal_dropped_after_dispose`
-- `Probe lease claim transport failed; failing open`
+| Artifact | When to export | Contents |
+| :--- | :--- | :--- |
+| Stream-debug record(s) | Endpoint drift, framing/parse problems, malformed or truncated stream payloads | Ordered frames with byte accounting |
+| HAR analysis (JSON/MD) | Changed endpoints or unclear payload paths | Redacted endpoint/timeline summary from a `.har` |
 
-- UI state:
-- `Button state ...`
-- `Button target missing; retry pending`
+## Stream-Debug Records
 
-## Known Gap: Grok Placeholder Titles
-On `grok.com`, generic export titles can occur if streaming data is captured before conversation metadata arrives.
+Stream-debug capture is bounded, in-memory, and exported **explicitly** (it is not written into conversation JSON). The MAIN-world handler serializes and downloads the trace locally; the isolated UI receives only a stream/frame count and filename. Generation endpoints are recognized per platform:
 
-Typical signal pattern:
-1. `Successfully captured/cached data for conversation: ...` appears.
-2. `Title fallback check` shows `cachedTitle: "Grok Conversation"` with `resolvedSource: "fallback"`.
-3. No prior `conversations_v2` metadata was captured for that conversation.
+- ChatGPT: `POST /backend-api/f/conversation`
+- Gemini: `POST /_/BardChatUi/data/assistant.lamda.bardfrontendservice/streamgenerate`
+- Grok: `POST /2/grok/add_response.json`, `POST /rest/app-chat/conversations/new`
+- Qwen: `POST /api/v2/chat/completions`
 
-Why this happens:
-- Streaming on `grok.x.com/2/grok/add_response.json` does not include conversation title metadata.
-- Title metadata usually arrives via `conversations_v2` or another metadata fetch after the stream starts.
+No generation endpoint is guessed for Claude, Amazon Nova, Meta Muse, Z.ai, or DeepSeek. Grok generation capture recognizes the exact `/2/grok/add_response.json` transport on its declared Grok and X origins. Absence of stream-debug frames on unsupported platforms is therefore not evidence that their cache-first single export failed.
 
-Current workaround:
-1. Refresh the conversation or trigger a metadata fetch on the page.
-2. Re-export.
-3. Confirm logs show:
-   - `Successfully captured/cached data for conversation: ...`
-   - a subsequent `Title fallback check` with `resolvedSource: "cache"` or `resolvedSource: "dom"`
+Each record captures:
 
-## Bottom-Left Toast / Probe Panel Statuses
-These statuses are expected during normal capture retries unless noted otherwise.
+- identity: `streamId`, `platform`, `endpoint`, `method`, sanitized `path`
+- timing: `startedAt`, `lastActivityAt`, optional `endedAt`
+- ordered `frames` with `sequence`, `frameId`, `kind`, optional event metadata (`done`/`refusal`/`replacement`/`erase`/`close`/`abort`/`error`), text, timestamps, byte accounting, and `truncated`
+- termination: `termination` (`close`/`abort`/`error`) with timestamp
+- accounting: raw byte/frame totals, retained byte totals, dropped byte/frame totals, and `truncated`
 
-1. `stream: awaiting delta`
-- Meaning: lifecycle moved to streaming and Blackiya is waiting for first text chunk.
-- Concern if: it stays here after response visibly finished and never transitions to any `stream-done:*` status.
+Framing is `sse`, `line` (NDJSON), or `raw`. A `[DONE]` marker in an SSE stream is emitted as a `done` event frame.
 
-2. `stream: live mirror`
-- Meaning: token/chunk deltas are being mirrored live.
-- Concern if: the model is visibly streaming but this never appears (possible stream monitor regression).
+### Reading truncation
 
-3. `stream-done: fetching conversation`
-- Meaning: stream ended; Blackiya is probing canonical API/snapshot paths.
-- Concern if: it persists for a long time and Save/Force Save never resolves.
+The recorder is capped (max concurrent streams, max frames per stream, max bytes per stream, TTL). When a stream hits a cap:
 
-4. `stream-done: fetched full text`
-- Meaning: stream-done probe fetched a complete response body candidate.
-- Concern if: this appears but readiness never converges to `canonical_ready` or `degraded_manual_only`.
+- byte overflow is clamped and counted in the dropped/truncated byte and frame counters;
+- ordinary frames are evicted before transport and terminal/refusal/replacement/erase frames when a count or byte cap is hit;
+- the record `truncated` flag is set.
 
-5. `stream-done: using captured cache`
-- Meaning: canonical-ready data already exists in cache; probe used that immediately.
-- Concern if: Save stays disabled despite this status.
+This priority-aware eviction preserves late refusal, replacement, and erase signals when a platform streams a large body. The monitor also bounds incomplete framing buffers, so it does not retain an unbounded response body outside the recorder.
 
-6. `stream-done: canonical capture ready`
-- Meaning: canonical capture is ready and stabilized enough for normal Save flow.
-- Concern if: Save is still disabled.
+A `truncated` stream does **not** mean the export failed — it means the debug trace was bounded. Treat a truncated trace as expected only when the source stream genuinely exceeds the bounded budget.
 
-7. `stream-done: awaiting canonical capture`
-- Meaning: completion was detected, but canonical data is still being stabilized/retried.
-- Concern if: it never resolves and no `degraded_manual_only` path appears.
+### When to use
 
-8. `stream-done: degraded snapshot captured`
-- Meaning: fallback snapshot was captured; canonical capture is still pending.
-- Concern if: this is frequent on stable sessions (indicates canonical probe misses or parser drift).
+Use a stream-debug record when:
 
-9. `stream-done: no api url candidates`
-- Meaning: no direct canonical fetch URL was available for that adapter path; fallback logic is used.
-- Concern if: repeated on a platform where canonical URL probing is expected to work.
+1. The platform changed endpoints or payload framing (no frames captured, or a generation request is absent).
+2. A payload is malformed or does not parse on the expected platform path.
+3. A stream terminates unexpectedly (`abort`/`error`) and you need the raw ordered trace to see where it stopped.
 
-10. `stream-done: lease held by another tab`
-- Meaning: another tab currently owns probe arbitration for this conversation.
-- Concern if: it never clears after lease expiry/retry window.
-- Note: if you instead see repeated `Probe lease claim transport failed; failing open`, arbitration transport is degraded and multiple tabs may probe concurrently.
+## Metadata-Only Errors (Fail-Fast)
 
-Readiness tie-in:
-- `canonical_ready`: expected healthy end state; Save enabled.
-- `degraded_manual_only`: fallback end state after stabilization timeout; Force Save only.
-- Treat `degraded_manual_only` as occasional fallback, not automatic bug. Treat it as a bug when it becomes frequent/reproducible on otherwise healthy sessions.
+The single-chat kernel returns a typed, fail-fast result and never writes a partial export. Each error variant is metadata-only — it carries enough context to triage without exposing body contents or credentials.
 
-## Expected Noise
-These are often benign:
+| Error (`kind`) | Meaning | Next step |
+| :--- | :--- | :--- |
+| `unsupported_platform` | Adapter does not match the active page origin | Confirm you are on a supported host |
+| `missing_conversation_id` | No conversation id in the page URL | Open a real conversation URL |
+| `missing_endpoint` | No eligible cached response exists and the adapter has no deterministic direct request | For Claude, Amazon Nova, Meta Muse, or Z.ai, reload/reopen the completed conversation so the page loads its canonical detail response, then retry; otherwise verify endpoint drift via HAR |
+| `missing_auth` | No auth header / Gemini `at` context captured (or HTTP `401/403`; the stale provider snapshot is cleared and the active bulk run stops) | Trigger one normal platform request, then retry |
+| `http_failure` | Unexpected HTTP status (non-2xx, non-auth) | Inspect status + endpoint via HAR |
+| `download_failure` | The validated payload could not be handed to the browser download path | Retry the explicit save and inspect browser download permissions |
+| `timeout` | Request exceeded the hard timeout | Confirm the conversation is terminal, then retry explicitly; flag latency if persistent |
+| `parse_failure` | Empty body, parser returned null, or parser threw | Check payload shape via stream-debug/HAR |
+| `id_mismatch` | Response `conversation_id` differs from the URL id | Stale/redirected id — reopen and retry |
+| `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete; an explicitly ended ChatGPT `reasoning_recap` or completed deep-research tool branch is accepted even when no final text assistant exists |
 
-- parse misses on non-canonical/aux endpoints
-- endpoint candidate filtering by origin
-- bounded retry/backoff logs
+There is no `degraded_manual_only` or partial/downgraded export path in v3. If the Blackiya icon export fails, the error variant tells you exactly which gate rejected it.
 
-## Which Artifact To Export
-1. Debug report (TXT):
-- First choice for most bugs.
-- Fastest to review, best signal-to-noise.
+### Cache-first failure triage
 
-2. Full logs (JSON):
-- Use for race/order issues, especially multi-tab.
-- Use when debug TXT appears incomplete for background-tab behavior.
+Supported single-save providers are ChatGPT, Gemini, Grok on `grok.com` and `x.com`, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek. Bulk `Export Chats` remains limited to ChatGPT, Gemini, and `grok.com`.
 
+For cache-only providers, first confirm the site made its normal canonical conversation request after the extension loaded:
 
-4. HAR + HAR analysis (JSON/MD):
-- Use when endpoint families changed or stream payload paths are unclear.
-- Export `.har` from DevTools, then run:
-- `bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"`
-- Analyzer writes redacted endpoint/timeline summaries plus hint matches for faster adapter updates.
+- **Claude:** canonical organization-scoped conversation detail `GET`; current complete responses may use `tree=True`, `include_inline_comparison=true`, a nil-UUID root parent, and terminal `stop_sequence`.
+- **Amazon Nova:** `POST /api` with the exact conversation-detail target header. The URL alone is not sufficient because Nova multiplexes RPCs; encrypted message strings must also decrypt successfully with the response-local key.
+- **Meta Muse:** initial conversation detail embedded in page-local Next.js Flight data plus `POST /api/graphql` requests whose bodies identify backward pagination. The assembler requires cursor order and a closed page range before caching.
+- **Z.ai:** both the conversation detail and its matching message batch. Either response alone is intentionally rejected.
 
-## Multi-Tab Note
-In multi-tab runs, one debug TXT may not represent all tabs equally. For cross-tab bugs, include:
+For direct-capable adapters—ChatGPT, Gemini, both Grok surfaces, Qwen, and DeepSeek—a cache miss proceeds to the adapter's deterministic detail request. DeepSeek requires the bearer authorization injected by its page client; the session cookie alone returns `INVALID_TOKEN`. It does not trigger retries, background warming, or speculative endpoint discovery. Authentication failures clear stale provider request context; malformed, mismatched, incomplete, and non-terminal responses remain fail-fast.
 
-1. One debug TXT from a failing tab.
-2. One full logs JSON from the overall run.
+DeepSeek's complete history may use `parent_id: null` for the root message. A later conditional-cache response with an empty `chat_messages` array is not a complete archive, so it is ignored without evicting the prior complete snapshot.
+
+## HAR Analysis
+
+When endpoint families changed or stream payload paths are unclear:
+
+```bash
+bun run har:analyze --input logs/grok.com.har --host grok.com --hint "Agents thinking"
+```
+
+The analyzer writes redacted endpoint/timeline summaries plus hint matches for faster parser/classifier updates.
 
 ## Recommended Bug Report Bundle
-1. Platform + exact URL(s).
-2. Repro steps and timing (foreground/background tab, number of tabs).
-3. Debug report TXT.
-4. Full logs JSON (required for multi-tab/race bugs).
-5. Screenshot of final UI (status, Save/Force Save, Calibrate, toast).
+
+1. Platform + exact URL(s) and extension version.
+2. Repro steps and timing.
+3. The fail-fast error result shown by the Blackiya icon (if export failed).
+4. The redacted HAR analysis if the issue involves endpoint or payload drift.
+5. A stream-debug export if the issue is framing/parse/transport related.
+6. Screenshot of the final UI state.

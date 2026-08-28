@@ -37,15 +37,13 @@ describe('protocol/session-token', () => {
     it('should stamp payload with current session token', () => {
         setSessionToken('bk:stamp-test');
         const payload = {
-            type: 'BLACKIYA_RESPONSE_LIFECYCLE' as const,
-            platform: 'ChatGPT',
-            attemptId: 'a-1',
-            phase: 'streaming' as const,
+            type: 'BLACKIYA_SESSION_INIT' as const,
+            token: 'bk:stamp-test',
         };
         const stamped = stampToken(payload);
         expect(stamped.__blackiyaToken).toBe('bk:stamp-test');
-        expect(stamped.type).toBe('BLACKIYA_RESPONSE_LIFECYCLE');
-        expect(stamped.platform).toBe('ChatGPT');
+        expect(stamped.type).toBe('BLACKIYA_SESSION_INIT');
+        expect(stamped.token).toBe('bk:stamp-test');
     });
 
     it('should stamp with empty string when no token is set', () => {

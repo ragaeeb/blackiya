@@ -193,6 +193,7 @@ export const normalizeConversationCandidate = (candidate: unknown): Conversation
         currentNodeCandidate && mapping[currentNodeCandidate] ? currentNodeCandidate : deriveCurrentNode(mapping);
 
     return {
+        ...candidate,
         title: resolveConversationTitle(candidate.title, mapping),
         create_time: normalizeNumber(candidate.create_time) ?? times.create,
         update_time: normalizeNumber(candidate.update_time) ?? times.update,

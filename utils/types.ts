@@ -7,12 +7,20 @@ export type Author = {
     metadata: Record<string, unknown>;
 };
 
-/**
- * Content of a message - can be text, thoughts, or other content types
- */
+/** A text or structured artifact part in a provider message. */
+export type MessagePart = string | Record<string, unknown>;
+
+/** Content of a message - can be text, thoughts, or other content types. */
 export type MessageContent = {
-    content_type: 'text' | 'thoughts' | 'reasoning_recap' | 'code' | 'execution_output';
-    parts?: string[];
+    content_type:
+        | 'text'
+        | 'thoughts'
+        | 'reasoning_recap'
+        | 'code'
+        | 'execution_output'
+        | 'multimodal_text'
+        | 'image_asset_pointer';
+    parts?: MessagePart[];
     thoughts?: Array<{
         summary: string;
         content: string;
@@ -49,6 +57,15 @@ export type MessageNode = {
     children: string[];
 };
 
+/** JSON-compatible provider payload retained for verbatim single-chat exports. */
+export type RawConversationPayload =
+    | null
+    | boolean
+    | number
+    | string
+    | RawConversationPayload[]
+    | { [key: string]: RawConversationPayload };
+
 /**
  * Full conversation data structure from ChatGPT API
  */
@@ -67,4 +84,5 @@ export type ConversationData = {
     default_model_slug: string;
     safe_urls: string[];
     blocked_urls: string[];
+    raw_payload?: RawConversationPayload;
 };

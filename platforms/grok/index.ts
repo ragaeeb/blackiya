@@ -15,51 +15,21 @@ import { tryParseGrokComRestEndpoint, tryParseJsonIfNeeded } from './grok-com-pa
 import { tryParseGrokNdjson } from './ndjson-parser';
 import { evaluateGrokReadiness } from './readiness';
 import {
-    GROK_DEFAULT_TITLES,
-    GROK_ENDPOINT_REGISTRY,
-    GROK_SELECTOR_REGISTRY,
-    resolveGrokButtonInjectionTarget,
-} from './registry';
-import { extractGrokComConversationIdFromUrl, GROK_COM_CONVERSATION_ID_PATTERN } from './url-utils';
+    GROK_COM_CONVERSATION_ID_PATTERN,
+    isGrokComLoadResponsesEndpoint,
+    isGrokComMetaEndpoint,
+    isGrokComResponseNodesEndpoint,
+} from './url-utils';
+import { parseXGrokConversationItems } from './x-conversation-parser';
+import {
+    buildXGrokConversationItemsUrl,
+    extractXGrokConversationId,
+    isXGrokConversationItemsEndpoint,
+} from './x-url-utils';
 
 export { GrokAdapterState, grokState, resetGrokAdapterState } from './state';
 
 const MAX_TITLE_LENGTH = 80;
-const GROK_GENERIC_DOM_TITLES = new Set(['grok']);
-
-const normalizeDomTitle = (value: string | null | undefined): string => value?.replace(/\s+/g, ' ').trim() ?? '';
-
-const normalizeGrokDomTitleCandidate = (raw: string, defaultTitles: readonly string[]): string | null => {
-    const normalized = normalizeDomTitle(raw);
-    if (!normalized) {
-        return null;
-    }
-    const lower = normalized.toLowerCase();
-    if (GROK_GENERIC_DOM_TITLES.has(lower)) {
-        return null;
-    }
-    if (defaultTitles.some((title) => normalizeDomTitle(title).toLowerCase() === lower)) {
-        return null;
-    }
-    return normalized;
-};
-
-const queryGrokTitleFromDom = (defaultTitles: readonly string[]): string | null => {
-    for (const selector of GROK_SELECTOR_REGISTRY.domTitleCandidates) {
-        const element = document.querySelector(selector);
-        const text = normalizeDomTitle(element?.textContent ?? null);
-        if (!text) {
-            continue;
-        }
-        const normalized = normalizeGrokDomTitleCandidate(text, defaultTitles);
-        if (normalized) {
-            return normalized;
-        }
-    }
-
-    return null;
-};
-
 const parseDefaultGrokPayload = (data: string | any, url: string): ConversationData | null => {
     if (typeof data === 'string' && data.includes('\n')) {
         return tryParseGrokNdjson(data, url);
@@ -71,14 +41,19 @@ const parseDefaultGrokPayload = (data: string | any, url: string): ConversationD
 export const grokAdapter: LLMPlatform = {
     name: 'Grok',
     urlMatchPattern: 'https://grok.com/*',
-
-    apiEndpointPattern: GROK_ENDPOINT_REGISTRY.apiEndpointPattern,
-    completionTriggerPattern: GROK_ENDPOINT_REGISTRY.completionTriggerPattern,
+    detailRequestOrigins: ['https://grok.com', 'https://x.com'],
 
     isPlatformUrl(url: string): boolean {
         try {
-            const { hostname } = new URL(url);
-            return hostname === 'grok.com' || hostname === 'www.grok.com';
+            const urlObj = new URL(url);
+            const { hostname } = urlObj;
+            if (hostname === 'grok.com' || hostname === 'www.grok.com' || hostname === 'grok.x.com') {
+                return true;
+            }
+            return (
+                (hostname === 'x.com' || hostname === 'www.x.com') &&
+                (urlObj.pathname === '/i/grok' || isXGrokConversationItemsEndpoint(url))
+            );
         } catch {
             return false;
         }
@@ -88,6 +63,10 @@ export const grokAdapter: LLMPlatform = {
         try {
             const urlObj = new URL(url);
 
+            const xConversationId = extractXGrokConversationId(url);
+            if (xConversationId) {
+                return xConversationId;
+            }
             if (urlObj.hostname !== 'grok.com' && urlObj.hostname !== 'www.grok.com') {
                 return null;
             }
@@ -105,11 +84,11 @@ export const grokAdapter: LLMPlatform = {
         }
     },
 
-    extractConversationIdFromUrl(url: string): string | null {
-        return extractGrokComConversationIdFromUrl(url);
-    },
-
     buildApiUrls(conversationId: string): string[] {
+        const xUrl = buildXGrokConversationItemsUrl(conversationId);
+        if (xUrl) {
+            return [xUrl];
+        }
         if (!GROK_COM_CONVERSATION_ID_PATTERN.test(conversationId)) {
             return [];
         }
@@ -117,6 +96,18 @@ export const grokAdapter: LLMPlatform = {
             `https://grok.com/rest/app-chat/conversations_v2/${conversationId}?includeWorkspaces=true&includeTaskResult=true`,
             `https://grok.com/rest/app-chat/conversations/${conversationId}/response-node?includeThreads=true`,
         ];
+    },
+
+    isConversationDetailRequest(url: string, method: string): boolean {
+        if (method.toUpperCase() !== 'GET') {
+            return false;
+        }
+        return (
+            isXGrokConversationItemsEndpoint(url) ||
+            isGrokComMetaEndpoint(url) ||
+            isGrokComResponseNodesEndpoint(url) ||
+            isGrokComLoadResponsesEndpoint(url)
+        );
     },
 
     parseInterceptedData(data: string | any, url: string): ConversationData | null {
@@ -130,6 +121,11 @@ export const grokAdapter: LLMPlatform = {
             path: _dbgPath,
             dataLen: typeof data === 'string' ? data.length : -1,
         });
+
+        const xResult = parseXGrokConversationItems(data, url);
+        if (xResult) {
+            return xResult;
+        }
 
         const grokComResult = tryParseGrokComRestEndpoint(data, url);
         if (grokComResult !== undefined) {
@@ -153,30 +149,7 @@ export const grokAdapter: LLMPlatform = {
         return `${sanitizedTitle}_${timestamp}`;
     },
 
-    getButtonInjectionTarget(): HTMLElement | null {
-        return resolveGrokButtonInjectionTarget();
-    },
-
     evaluateReadiness(data: ConversationData) {
         return evaluateGrokReadiness(data);
-    },
-
-    isPlatformGenerating() {
-        // Grok generation gating is driven by network lifecycle/SFE signals.
-        return false;
-    },
-
-    defaultTitles: GROK_DEFAULT_TITLES,
-
-    extractTitleFromDom(): string | null {
-        const defaultTitles = this.defaultTitles ?? [];
-        const titleFromPage = normalizeGrokDomTitleCandidate(
-            normalizeDomTitle(document.title).replace(/\s*-\s*Grok$/i, ''),
-            defaultTitles,
-        );
-        if (titleFromPage) {
-            return titleFromPage;
-        }
-        return queryGrokTitleFromDom(defaultTitles);
     },
 };

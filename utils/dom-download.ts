@@ -30,7 +30,3 @@ const downloadStringAsFile = (content: string, filename: string, contentType: st
 export const downloadStringAsJsonFile = (jsonString: string, filename: string) => {
     downloadStringAsFile(jsonString, filename, 'application/json');
 };
-
-export const downloadStringAsMarkdownFile = (markdown: string, filename: string) => {
-    downloadStringAsFile(markdown, filename, 'text/markdown;charset=utf-8');
-};

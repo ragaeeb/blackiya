@@ -1,3 +1,20 @@
+## Unreleased (v3 hard cut)
+
+### Breaking Changes
+
+* **v3:** Replace the reactive lifecycle pipeline with an explicit, fail-fast ready-terminal JSON export.
+
+### What changed
+
+* **single-export:** Add on-demand ready-terminal `Save JSON` support for ChatGPT, Gemini, Grok on `grok.com` and `x.com`, Claude, Amazon Nova, Meta Muse, Qwen, Z.ai, and DeepSeek.
+* **cache-first:** Reuse narrowly classified terminal canonical detail responses already loaded by the page. The conversation cache expires after five minutes, is bounded by entry/per-entry/aggregate byte limits, contains no captured credentials, and is never persisted. On a miss, only adapters with deterministic detail builders make a direct request; cache-only providers fail fast.
+* **multiplexed-transports:** Classify Meta Muse GraphQL detail/pagination by request body and assemble backward pages in cursor order; classify Amazon Nova by its exact conversation target header; combine Z.ai detail and message-batch responses before terminal validation.
+* **bulk-export:** Rework popup `Export Chats` for ChatGPT, Gemini, and `grok.com` to discover conversation IDs and download one JSON file per conversation, with pacing, per-request timeout, and bounded `429` retry handling.
+* **stream-debug:** Add bounded, in-memory, ordered stream-debug capture (SSE/NDJSON/raw) with explicit export and clear. Qwen completion SSE joins the existing ChatGPT, Gemini, and Grok classifiers; generation endpoints for other new providers are not guessed. Request URLs are sanitized to paths.
+* **request-context:** Keep provider-allowlisted headers and Gemini batchexecute context in expiring MAIN-world memory. Context is never persisted, written into exports, placed in the conversation cache, or transferred across the command bridge.
+* **privacy:** Clarify the exact cache invalidation boundaries for providers without an evidence-backed non-secret account-switch signal, and disclose origin-wide `https://x.com/*` injection for SPA detection with route-gated controls and endpoint-gated conversation capture.
+* **removed:** Remove lifecycle state machine, Signal Fusion Engine, probe leases, calibration, canonical stabilization, Markdown export, snapshot recovery, and compatibility mode. The legacy lifecycle wire protocol and external extension API are out of scope.
+
 # [2.9.0](https://github.com/ragaeeb/blackiya/compare/v2.8.1...v2.9.0) (2026-08-14)
 
 

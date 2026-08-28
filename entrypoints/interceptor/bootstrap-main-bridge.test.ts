@@ -1,17 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Window } from 'happy-dom';
-import { setupMainWorldBridge, shouldApplySessionInitToken } from '@/entrypoints/interceptor/bootstrap-main-bridge';
+import {
+    isSameWindowOriginEvent,
+    setupMainWorldBridge,
+    shouldApplySessionInitToken,
+} from '@/entrypoints/interceptor/bootstrap-main-bridge';
 import {
     maybeCaptureGeminiBatchexecuteContext,
     resetGeminiBatchexecuteContext,
 } from '@/entrypoints/interceptor/gemini-batchexecute-context-store';
-import {
-    GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
-    GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE,
-} from '@/utils/gemini-batchexecute-bridge';
-import { PLATFORM_HEADERS_REQUEST_MESSAGE, PLATFORM_HEADERS_RESPONSE_MESSAGE } from '@/utils/platform-header-bridge';
+import { MAIN_WORLD_COMMAND_MESSAGE, MAIN_WORLD_RESULT_MESSAGE } from '@/features/runtime/main-world-command-contract';
+import { streamDebugRecorder } from '@/features/stream-debug/recorder';
 import { platformHeaderStore } from '@/utils/platform-header-store';
-import { MESSAGE_TYPES } from '@/utils/protocol/constants';
 import { getSessionToken, setSessionToken } from '@/utils/protocol/session-token';
 
 describe('bootstrap-main-bridge', () => {
@@ -25,6 +25,7 @@ describe('bootstrap-main-bridge', () => {
         setSessionToken('bk:test-main-bridge');
         platformHeaderStore.clear();
         resetGeminiBatchexecuteContext();
+        streamDebugRecorder.clear();
     });
 
     afterEach(() => {
@@ -38,138 +39,157 @@ describe('bootstrap-main-bridge', () => {
         expect(shouldApplySessionInitToken(undefined, '')).toBeFalse();
     });
 
+    it('should require the exact MAIN-world window and origin for session init', () => {
+        const pageWindow = { location: { origin: 'https://chatgpt.com' } };
+
+        expect(
+            isSameWindowOriginEvent({ source: pageWindow, origin: 'https://chatgpt.com' } as MessageEvent, pageWindow),
+        ).toBeTrue();
+        expect(
+            isSameWindowOriginEvent(
+                { source: undefined, origin: 'https://chatgpt.com' } as unknown as MessageEvent,
+                pageWindow,
+            ),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent({ source: null, origin: 'https://chatgpt.com' } as MessageEvent, pageWindow),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent({ source: pageWindow, origin: undefined } as unknown as MessageEvent, pageWindow),
+        ).toBeFalse();
+        expect(isSameWindowOriginEvent({ source: pageWindow, origin: 'null' } as MessageEvent, pageWindow)).toBeFalse();
+        expect(
+            isSameWindowOriginEvent({ source: {}, origin: 'https://chatgpt.com' } as MessageEvent, pageWindow),
+        ).toBeFalse();
+        expect(
+            isSameWindowOriginEvent({ source: pageWindow, origin: 'https://evil.example' } as MessageEvent, pageWindow),
+        ).toBeFalse();
+    });
+
     it('should not expose window.__blackiya', () => {
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
-        });
+        setupMainWorldBridge();
 
         expect((windowInstance as any).__blackiya).toBeUndefined();
     });
 
-    it('should process ATTEMPT_DISPOSED for matching session token', () => {
-        const cleanupDisposedAttempt = mock(() => {});
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt,
-        });
-
-        windowInstance.postMessage(
-            {
-                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
-                attemptId: 'attempt-1',
-                __blackiyaToken: getSessionToken(),
-            },
-            windowInstance.location.origin,
-        );
-        return new Promise<void>((resolve) => {
-            windowInstance.setTimeout(() => {
-                expect(cleanupDisposedAttempt).toHaveBeenCalledWith('attempt-1');
-                resolve();
-            }, 0);
-        });
-    });
-
-    it('should ignore ATTEMPT_DISPOSED when session token is mismatched', () => {
-        const cleanupDisposedAttempt = mock(() => {});
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt,
-        });
-
-        windowInstance.postMessage(
-            {
-                type: MESSAGE_TYPES.ATTEMPT_DISPOSED,
-                attemptId: 'attempt-1',
-                __blackiyaToken: 'bk:wrong-token',
-            },
-            windowInstance.location.origin,
-        );
-        return new Promise<void>((resolve) => {
-            windowInstance.setTimeout(() => {
-                expect(cleanupDisposedAttempt).not.toHaveBeenCalled();
-                resolve();
-            }, 0);
-        });
-    });
-
-    it('should respond to platform headers requests with captured headers', () => {
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
-        });
+    it('should not expose captured platform headers through page messages', async () => {
+        setupMainWorldBridge();
 
         platformHeaderStore.update('ChatGPT', {
             authorization: 'Bearer test',
             'oai-device-id': 'device-1',
         });
 
-        return new Promise<void>((resolve) => {
-            const requestId = 'request-1';
-            const onMessage = (event: MessageEvent) => {
-                const message = event.data as Record<string, unknown> | null;
-                if (
-                    message?.type !== PLATFORM_HEADERS_RESPONSE_MESSAGE ||
-                    message.requestId !== requestId ||
-                    message.platformName !== 'ChatGPT'
-                ) {
-                    return;
-                }
-                windowInstance.removeEventListener('message', onMessage as any);
-                const headers = message.headers as Record<string, string> | undefined;
-                expect(headers?.authorization).toBe('Bearer test');
-                expect(headers?.['oai-device-id']).toBe('device-1');
-                resolve();
-            };
-
-            windowInstance.addEventListener('message', onMessage as any);
-            windowInstance.postMessage(
-                {
-                    type: PLATFORM_HEADERS_REQUEST_MESSAGE,
-                    requestId,
-                    platformName: 'ChatGPT',
-                    __blackiyaToken: getSessionToken(),
-                },
-                windowInstance.location.origin,
-            );
-        });
+        let responseCount = 0;
+        windowInstance.addEventListener('message', ((event: MessageEvent) => {
+            if ((event.data as Record<string, unknown>).type === 'BLACKIYA_PLATFORM_HEADERS_RESPONSE') {
+                responseCount += 1;
+            }
+        }) as any);
+        windowInstance.postMessage(
+            {
+                type: 'BLACKIYA_PLATFORM_HEADERS_REQUEST',
+                requestId: 'request-1',
+                platformName: 'ChatGPT',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(responseCount).toBe(0);
     });
 
-    it('should respond to gemini batchexecute context requests', () => {
+    it('should not expose Gemini batchexecute context through page messages', async () => {
         maybeCaptureGeminiBatchexecuteContext(
             'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=MaZiqc&bl=boq&f.sid=123&hl=en&_reqid=42&rt=c',
             'f.req=%5B%5D&at=AJvToken%3A1&',
         );
 
-        setupMainWorldBridge({
-            getRawCaptureHistory: () => [],
-            cleanupDisposedAttempt: () => {},
+        setupMainWorldBridge();
+
+        let responseCount = 0;
+        windowInstance.addEventListener('message', ((event: MessageEvent) => {
+            if ((event.data as Record<string, unknown>).type === 'BLACKIYA_GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE') {
+                responseCount += 1;
+            }
+        }) as any);
+        windowInstance.postMessage(
+            {
+                type: 'BLACKIYA_GEMINI_BATCHEXECUTE_CONTEXT_REQUEST',
+                requestId: 'gemini-context-1',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(responseCount).toBe(0);
+    });
+
+    it('should clear stream-debug records in MAIN and return only a count summary', async () => {
+        const streamId = streamDebugRecorder.startStream({
+            streamId: 'main-clear-1',
+            platform: 'ChatGPT',
+            endpoint: 'generation',
+            method: 'POST',
+            url: '/stream',
         });
+        streamDebugRecorder.appendFrame(streamId, 'private frame', { kind: 'raw_chunk' });
+        setupMainWorldBridge();
 
-        return new Promise<void>((resolve) => {
-            const requestId = 'gemini-context-1';
-            const onMessage = (event: MessageEvent) => {
-                const message = event.data as Record<string, unknown> | null;
-                if (message?.type !== GEMINI_BATCHEXECUTE_CONTEXT_RESPONSE_MESSAGE || message.requestId !== requestId) {
-                    return;
+        const response = new Promise<Record<string, unknown>>((resolve) => {
+            windowInstance.addEventListener('message', ((event: MessageEvent) => {
+                if ((event.data as Record<string, unknown>).type === MAIN_WORLD_RESULT_MESSAGE) {
+                    resolve(event.data as Record<string, unknown>);
                 }
-                windowInstance.removeEventListener('message', onMessage as any);
-                const context = message.context as Record<string, unknown> | undefined;
-                expect(context?.bl).toBe('boq');
-                expect(context?.fSid).toBe('123');
-                expect(context?.at).toBe('AJvToken:1');
-                resolve();
-            };
+            }) as any);
+        });
+        windowInstance.postMessage(
+            {
+                type: MAIN_WORLD_COMMAND_MESSAGE,
+                operation: 'stream_debug_clear',
+                requestId: 'clear-main-1',
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
 
-            windowInstance.addEventListener('message', onMessage as any);
-            windowInstance.postMessage(
-                {
-                    type: GEMINI_BATCHEXECUTE_CONTEXT_REQUEST_MESSAGE,
-                    requestId,
-                    __blackiyaToken: getSessionToken(),
-                },
-                windowInstance.location.origin,
-            );
+        await expect(response).resolves.toMatchObject({
+            type: MAIN_WORLD_RESULT_MESSAGE,
+            operation: 'stream_debug_clear',
+            ok: true,
+            result: { operation: 'stream_debug_clear', clearedStreams: 1 },
+        });
+        expect(streamDebugRecorder.exportRecords()).toHaveLength(0);
+    });
+
+    it('should reject a single-export command when MAIN has navigated to another conversation', async () => {
+        windowInstance.location.href = 'https://chatgpt.com/c/conversation-b';
+        setupMainWorldBridge();
+
+        const response = new Promise<Record<string, unknown>>((resolve) => {
+            windowInstance.addEventListener('message', ((event: MessageEvent) => {
+                if ((event.data as Record<string, unknown>).type === MAIN_WORLD_RESULT_MESSAGE) {
+                    resolve(event.data as Record<string, unknown>);
+                }
+            }) as any);
+        });
+        windowInstance.postMessage(
+            {
+                type: MAIN_WORLD_COMMAND_MESSAGE,
+                operation: 'single_export',
+                requestId: 'stale-single-command',
+                target: { platform: 'ChatGPT', conversationId: 'conversation-a' },
+                __blackiyaToken: getSessionToken(),
+            },
+            windowInstance.location.origin,
+        );
+
+        await expect(response).resolves.toMatchObject({
+            type: MAIN_WORLD_RESULT_MESSAGE,
+            operation: 'single_export',
+            ok: false,
+            error: 'Conversation changed before export started.',
+            errorKind: 'conversation_changed',
         });
     });
 });
