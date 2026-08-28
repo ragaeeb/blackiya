@@ -33,9 +33,10 @@ export const listConversationIdsGemini = async (
     const parsedIds = extractGeminiConversationIdsFromBatchexecuteText(response.text);
     if (parsedIds.length > 0) {
         return {
-            ids: options.maxItems === null
-                ? uniqueStrings(parsedIds)
-                : uniqueStrings(parsedIds).slice(0, options.maxItems),
+            ids:
+                options.maxItems === null
+                    ? uniqueStrings(parsedIds)
+                    : uniqueStrings(parsedIds).slice(0, options.maxItems),
             warnings,
         };
     }

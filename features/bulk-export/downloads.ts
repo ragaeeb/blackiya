@@ -1,8 +1,8 @@
 import type { LLMPlatform } from '@/platforms/types';
 import { downloadAsJSON } from '@/utils/download';
+import { resolveExportConversationTitleDecision } from '@/utils/title-resolver';
 import type { ConversationData } from '@/utils/types';
 import { ensureUniqueFilename } from './utils';
-import { resolveExportConversationTitleDecision } from '@/utils/title-resolver';
 
 export type CanonicalExportMeta = {
     captureSource: 'canonical_api';

@@ -78,9 +78,7 @@ describe('bulk export downloads', () => {
         expect(first.filename).toBe('derived title');
         expect(second.filename).toBe('derived title_2');
         expect((first.payload as Record<string, unknown>).title).toBe('derived title');
-        expect(
-            ((first.payload as Record<string, unknown>).__blackiya as Record<string, unknown>).exportMeta,
-        ).toEqual({
+        expect(((first.payload as Record<string, unknown>).__blackiya as Record<string, unknown>).exportMeta).toEqual({
             captureSource: 'canonical_api',
             fidelity: 'high',
             completeness: 'complete',

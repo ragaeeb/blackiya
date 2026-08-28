@@ -158,5 +158,4 @@ describe('downloadStringAsJsonFile', () => {
             document.body.appendChild = originalAppendChild;
         }
     });
-
 });

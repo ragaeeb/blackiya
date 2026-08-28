@@ -4,7 +4,7 @@ import type { GeminiBatchexecuteContext } from '@/utils/gemini-batchexecute-cont
 import type { HeaderRecord } from '@/utils/proactive-fetch-headers';
 import type { ConversationData } from '@/utils/types';
 import type { BulkExportChatsSuccessResponse, BulkExportProgressMessage } from './contract';
-import { downloadCanonicalConversation, type BulkDownloadImpl } from './downloads';
+import { type BulkDownloadImpl, downloadCanonicalConversation } from './downloads';
 import type { FetchContext, FetchImplementation } from './fetch';
 import { normalizeOptions } from './options';
 import { createProgressReporter } from './progress';
@@ -12,8 +12,7 @@ import { fetchConversationByIdChatGpt, listConversationIdsChatGpt } from './prov
 import { fetchConversationByIdGemini, listConversationIdsGemini } from './provider-gemini';
 import { fetchConversationByIdGrokCom, listConversationIdsGrokCom } from './provider-grok';
 
-const sleep = (milliseconds: number) =>
-    new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds));
+const sleep = (milliseconds: number) => new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds));
 
 export type PlatformKind = 'chatgpt' | 'gemini' | 'grok-com' | 'unsupported';
 
@@ -178,7 +177,8 @@ type BulkExportContext = {
 
 const hasAuthorizationHeader = (headers: HeaderRecord | undefined): boolean =>
     Object.entries(headers ?? {}).some(
-        ([name, value]) => name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
+        ([name, value]) =>
+            name.toLowerCase() === 'authorization' && typeof value === 'string' && value.trim().length > 0,
     );
 
 const hasGeminiAtContext = (context: GeminiBatchexecuteContext | undefined): boolean =>
@@ -233,9 +233,7 @@ const createBulkExportContext = (
     };
 };
 
-type ConversationExportOutcome =
-    | { ok: true; downloaded: boolean }
-    | { ok: false; error: unknown };
+type ConversationExportOutcome = { ok: true; downloaded: boolean } | { ok: false; error: unknown };
 
 const exportConversationSafely = async (
     conversationId: string,
@@ -296,12 +294,7 @@ const runBulkExportWithProgress = async (
     const usedFilenames = new Set<string>();
     for (const conversationId of ids) {
         counts.attempted += 1;
-        const outcome = await exportConversationSafely(
-            conversationId,
-            context,
-            usedFilenames,
-            deps.downloadImpl,
-        );
+        const outcome = await exportConversationSafely(conversationId, context, usedFilenames, deps.downloadImpl);
         if (!outcome.ok) {
             counts.failed += 1;
             throw outcome.error;
@@ -348,5 +341,5 @@ export const runBulkExport = async (
     }
 };
 
-export const createBulkExportRunner = (deps: BulkExportDependencies) =>
-    (options: V3BulkExportOptions) => runBulkExport(options, deps);
+export const createBulkExportRunner = (deps: BulkExportDependencies) => (options: V3BulkExportOptions) =>
+    runBulkExport(options, deps);

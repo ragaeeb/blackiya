@@ -2,11 +2,7 @@ import type { ConversationData, Message, MessageNode } from '@/utils/types';
 
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
 
-const createMessage = (
-    id: string,
-    role: Message['author']['role'],
-    overrides: Partial<Message> = {},
-): Message => ({
+const createMessage = (id: string, role: Message['author']['role'], overrides: Partial<Message> = {}): Message => ({
     id,
     author: { role, name: null, metadata: {} },
     create_time: 1,

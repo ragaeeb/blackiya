@@ -1,7 +1,4 @@
-import {
-    BULK_EXPORT_PROGRESS_MESSAGE,
-    type BulkExportProgressMessage,
-} from './contract';
+import { BULK_EXPORT_PROGRESS_MESSAGE, type BulkExportProgressMessage } from './contract';
 
 export type ProgressCounts = {
     discovered: number;

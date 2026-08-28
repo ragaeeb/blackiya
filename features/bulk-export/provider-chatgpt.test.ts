@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import type { FetchContext } from './fetch';
-import { CHATGPT_HOSTS, buildChatGptDetailUrls, listConversationIdsChatGpt } from './provider-chatgpt';
+import { buildChatGptDetailUrls, CHATGPT_HOSTS, listConversationIdsChatGpt } from './provider-chatgpt';
 
 const createMockFetchContext = (overrides: Partial<FetchContext> = {}): FetchContext => ({
     fetchImpl: mock(() => Promise.resolve(new Response('', { status: 200 }))),
@@ -46,7 +46,9 @@ describe('listConversationIdsChatGpt', () => {
                 return Promise.resolve(
                     new Response(
                         JSON.stringify({
-                            items: Array.from({ length: 100 }, (_, i) => ({ id: `abc${page}def${String(i).padStart(5, '0')}` })),
+                            items: Array.from({ length: 100 }, (_, i) => ({
+                                id: `abc${page}def${String(i).padStart(5, '0')}`,
+                            })),
                         }),
                         { status: 200 },
                     ),
@@ -73,7 +75,9 @@ describe('listConversationIdsChatGpt', () => {
                 return Promise.resolve(
                     new Response(
                         JSON.stringify({
-                            items: Array.from({ length: items }, (_, i) => ({ id: `abc${page}def${String(i).padStart(5, '0')}` })),
+                            items: Array.from({ length: items }, (_, i) => ({
+                                id: `abc${page}def${String(i).padStart(5, '0')}`,
+                            })),
                         }),
                         { status: 200 },
                     ),
@@ -128,9 +132,7 @@ describe('listConversationIdsChatGpt', () => {
         );
 
         expect(result.ids).toEqual([]);
-        expect(result.warnings).toContain(
-            'ChatGPT list endpoint failed at offset=0: status=500 message=Server Error',
-        );
+        expect(result.warnings).toContain('ChatGPT list endpoint failed at offset=0: status=500 message=Server Error');
     });
 
     it('should use correct host from location', async () => {

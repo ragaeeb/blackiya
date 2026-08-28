@@ -5,12 +5,11 @@
  */
 
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
-
-import { evaluateChatGPTReadiness } from './readiness';
 import {
     deepResearchCompletedConversation,
     deepResearchInProgressConversation,
 } from './fixtures/deep-research-conversation';
+import { evaluateChatGPTReadiness } from './readiness';
 
 mock.module('@/utils/logger', () => ({
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, setLevel: () => {} },

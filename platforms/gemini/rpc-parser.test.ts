@@ -5,8 +5,8 @@ mock.module('@/utils/logger', () => ({
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
 }));
 
-import { findConversationRpc } from './rpc-parser';
 import { parseConversationPayload } from './conversation-parser';
+import { findConversationRpc } from './rpc-parser';
 
 describe('Gemini rpc-parser', () => {
     it('should preserve the complete canonical payload alongside the normalized view', () => {

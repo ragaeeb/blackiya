@@ -1,7 +1,4 @@
-import {
-    isBulkExportProgressMessage,
-    type BulkExportProgressMessage,
-} from '@/features/bulk-export/contract';
+import { type BulkExportProgressMessage, isBulkExportProgressMessage } from '@/features/bulk-export/contract';
 
 export type V3BackgroundActionApi = {
     setBadgeText: (details: { text: string; tabId?: number }) => Promise<void> | void;

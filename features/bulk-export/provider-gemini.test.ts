@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { geminiState } from '../../platforms/gemini/state';
 import type { ConversationData } from '@/utils/types';
+import { geminiState } from '../../platforms/gemini/state';
 import type { FetchContext } from './fetch';
 import { fetchConversationByIdGemini, listConversationIdsGemini } from './provider-gemini';
 
@@ -77,7 +77,9 @@ describe('fetchConversationByIdGemini', () => {
             await expect(
                 listConversationIdsGemini(
                     { maxItems: null, delayMs: 0, timeoutMs: 5_000 },
-                    buildContext((async () => new Response('unauthorized', { status: 401 })) as unknown as typeof fetch),
+                    buildContext(
+                        (async () => new Response('unauthorized', { status: 401 })) as unknown as typeof fetch,
+                    ),
                     'https://gemini.google.com/app',
                     { extractConversationId: () => null } as any,
                 ),

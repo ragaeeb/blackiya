@@ -15,9 +15,7 @@ export type V3RuntimeMessage =
     | { type: typeof V3_MESSAGE_TYPES.EXPORT_STREAM_DEBUG }
     | { type: typeof V3_MESSAGE_TYPES.CLEAR_STREAM_DEBUG };
 
-export type V3RuntimeResponse =
-    | { ok: true; result?: unknown }
-    | { ok: false; error: string };
+export type V3RuntimeResponse = { ok: true; result?: unknown } | { ok: false; error: string };
 
 export type V3RuntimeDependencies = {
     runBulkExport: (options: V3BulkExportOptions) => Promise<unknown>;
@@ -42,7 +40,9 @@ const isFiniteNonNegativeNumber = (value: unknown): value is number => {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 };
 
-const isBulkExportOptions = (value: Record<string, unknown>): value is Record<string, unknown> & V3BulkExportOptions => {
+const isBulkExportOptions = (
+    value: Record<string, unknown>,
+): value is Record<string, unknown> & V3BulkExportOptions => {
     return (
         typeof value.limit === 'number' &&
         Number.isInteger(value.limit) &&
@@ -56,10 +56,7 @@ const errorMessage = (error: unknown): string => {
     return error instanceof Error ? error.message : String(error);
 };
 
-const handleV3RuntimeMessage = async (
-    message: unknown,
-    deps: V3RuntimeDependencies,
-): Promise<V3RuntimeResponse> => {
+const handleV3RuntimeMessage = async (message: unknown, deps: V3RuntimeDependencies): Promise<V3RuntimeResponse> => {
     if (!isRecord(message) || typeof message.type !== 'string') {
         return { ok: false, error: 'Unsupported v3 message.' };
     }

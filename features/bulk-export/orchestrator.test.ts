@@ -308,7 +308,9 @@ describe('runBulkExport', () => {
                         });
                     }
                     const conversationId = url.includes(secondId) ? secondId : firstId;
-                    return new Response(JSON.stringify(buildConversation(conversationId, conversationId)), { status: 200 });
+                    return new Response(JSON.stringify(buildConversation(conversationId, conversationId)), {
+                        status: 200,
+                    });
                 }) as unknown as typeof fetch,
             },
         );
@@ -492,7 +494,9 @@ describe('runBulkExport', () => {
                             });
                         }
                         const conversationId = url.includes(secondId) ? secondId : firstId;
-                        return new Response(JSON.stringify(buildConversation(conversationId, conversationId)), { status: 200 });
+                        return new Response(JSON.stringify(buildConversation(conversationId, conversationId)), {
+                            status: 200,
+                        });
                     }) as unknown as typeof fetch,
                 },
             ),

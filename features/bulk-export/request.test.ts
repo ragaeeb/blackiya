@@ -84,5 +84,4 @@ describe('bulk export request client', () => {
         });
         expect(attempts).toBe(3);
     });
-
 });

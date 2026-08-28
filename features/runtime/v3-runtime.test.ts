@@ -1,9 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test';
 import {
     createV3Runtime,
+    V3_MESSAGE_TYPES,
     type V3RuntimeDependencies,
     type V3RuntimeHost,
-    V3_MESSAGE_TYPES,
 } from '@/features/runtime/v3-runtime';
 
 const createHost = () => {

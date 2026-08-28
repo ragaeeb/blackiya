@@ -118,13 +118,9 @@ const resolveTerminalAssistantReadiness = (
     const latestUserIndex = activeBranchMessages.findLastIndex((message) => message.author.role === 'user');
     const latestMessageText = latestMessage ? extractMessageText(latestMessage) : '';
     const hasTerminalMarker =
-        (latestMessage?.author.role === 'assistant' &&
-            isTerminalNonTextAssistant(latestMessage, latestMessageText)) ||
+        (latestMessage?.author.role === 'assistant' && isTerminalNonTextAssistant(latestMessage, latestMessageText)) ||
         isTerminalDeepResearchToolBranch(activeBranchMessages);
-    if (
-        latestUserIndex < 0 ||
-        !hasTerminalMarker
-    ) {
+    if (latestUserIndex < 0 || !hasTerminalMarker) {
         return null;
     }
     return {
@@ -148,9 +144,7 @@ const resolveTerminalAssistantReadiness = (
  * `end_turn` is advisory for history payloads. Modern ChatGPT responses can
  * leave it false or null even after a later text message is finished.
  */
-export const evaluateChatGPTReadiness = (
-    data: ConversationData,
-): PlatformReadiness => {
+export const evaluateChatGPTReadiness = (data: ConversationData): PlatformReadiness => {
     const activeBranchMessages = collectActiveBranchMessages(data);
     const assistantMessages = collectCurrentTurnAssistantMessages(data);
 

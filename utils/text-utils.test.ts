@@ -28,5 +28,4 @@ describe('Text Utils', () => {
             expect(stripMagicHeader(input)).toBe('{"a":1}');
         });
     });
-
 });

@@ -8,68 +8,45 @@ import {
 describe('extractGrokComConversationIdsFromPayload', () => {
     it('should extract IDs from items array', () => {
         const payload = {
-            items: [
-                { id: '12345678-1234-1234-1234-123456789abc' },
-                { id: 'abcdef12-3456-7890-abcd-ef1234567890' },
-            ],
+            items: [{ id: '12345678-1234-1234-1234-123456789abc' }, { id: 'abcdef12-3456-7890-abcd-ef1234567890' }],
         };
         const result = extractGrokComConversationIdsFromPayload(payload);
-        expect(result).toEqual([
-            '12345678-1234-1234-1234-123456789abc',
-            'abcdef12-3456-7890-abcd-ef1234567890',
-        ]);
+        expect(result).toEqual(['12345678-1234-1234-1234-123456789abc', 'abcdef12-3456-7890-abcd-ef1234567890']);
     });
 
     it('should extract from conversationId field', () => {
         const payload = {
             conversations: [{ conversationId: '12345678-1234-1234-1234-123456789abc' }],
         };
-        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual([
-            '12345678-1234-1234-1234-123456789abc',
-        ]);
+        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual(['12345678-1234-1234-1234-123456789abc']);
     });
 
     it('should extract from nested conversation.id', () => {
         const payload = {
             items: [{ conversation: { id: '12345678-1234-1234-1234-123456789abc' } }],
         };
-        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual([
-            '12345678-1234-1234-1234-123456789abc',
-        ]);
+        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual(['12345678-1234-1234-1234-123456789abc']);
     });
 
     it('should extract from grokConversation.rest_id', () => {
         const payload = {
             items: [{ grokConversation: { rest_id: '12345678-1234-1234-1234-123456789abc' } }],
         };
-        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual([
-            '12345678-1234-1234-1234-123456789abc',
-        ]);
+        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual(['12345678-1234-1234-1234-123456789abc']);
     });
 
     it('should deduplicate IDs', () => {
         const payload = {
-            items: [
-                { id: '12345678-1234-1234-1234-123456789abc' },
-                { id: '12345678-1234-1234-1234-123456789abc' },
-            ],
+            items: [{ id: '12345678-1234-1234-1234-123456789abc' }, { id: '12345678-1234-1234-1234-123456789abc' }],
         };
-        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual([
-            '12345678-1234-1234-1234-123456789abc',
-        ]);
+        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual(['12345678-1234-1234-1234-123456789abc']);
     });
 
     it('should filter invalid UUIDs', () => {
         const payload = {
-            items: [
-                { id: '12345678-1234-1234-1234-123456789abc' },
-                { id: 'not-a-uuid' },
-                { id: '12345678-1234' },
-            ],
+            items: [{ id: '12345678-1234-1234-1234-123456789abc' }, { id: 'not-a-uuid' }, { id: '12345678-1234' }],
         };
-        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual([
-            '12345678-1234-1234-1234-123456789abc',
-        ]);
+        expect(extractGrokComConversationIdsFromPayload(payload)).toEqual(['12345678-1234-1234-1234-123456789abc']);
     });
 
     it('should return empty array for non-object payload', () => {

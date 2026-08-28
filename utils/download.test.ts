@@ -118,5 +118,4 @@ describe('Download Utilities', () => {
             expect(downloadCalls).toEqual([{ jsonString: '{\n  "ok": true\n}', filename: 'test.json' }]);
         });
     });
-
 });
