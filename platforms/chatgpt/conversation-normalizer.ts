@@ -8,6 +8,7 @@
  */
 
 import type { ConversationData, Message, MessageNode } from '@/utils/types';
+import { normalizeMessage } from './message-normalizer';
 import {
     CONVERSATION_ID_PATTERN,
     isPlaceholderTitle,
@@ -163,6 +164,42 @@ export const resolveConversationTitle = (title: unknown, mapping: Record<string,
 
 // Top-level conversation normalizer
 
+const buildFlatMessageMapping = (candidate: Record<string, unknown>): Record<string, MessageNode> | null => {
+    const pageInfo = candidate.page_info;
+    if (
+        !Array.isArray(candidate.messages) ||
+        candidate.messages.length === 0 ||
+        !isRecord(pageInfo) ||
+        pageInfo.has_previous_page !== false ||
+        pageInfo.has_next_page !== false
+    ) {
+        return null;
+    }
+
+    const mapping: Record<string, MessageNode> = {};
+    let previousId: string | null = null;
+    for (const rawMessage of candidate.messages) {
+        const message = normalizeMessage(rawMessage);
+        if (!message || mapping[message.id]) {
+            return null;
+        }
+        const id = message.id;
+        mapping[id] = {
+            id,
+            message,
+            parent: previousId,
+            children: [],
+        };
+        if (previousId) {
+            mapping[previousId]!.children.push(id);
+        }
+        previousId = id;
+    }
+
+    // ponytail: this endpoint exposes only ordered messages; retain them verbatim and chain that order until graph edges ship.
+    return mapping;
+};
+
 /**
  * Attempts to parse an unknown payload into a valid `ConversationData`.
  * Returns null if the payload is missing required fields or has an invalid conversation id.
@@ -172,8 +209,8 @@ export const normalizeConversationCandidate = (candidate: unknown): Conversation
         return null;
     }
 
-    const mappingValue = candidate.mapping;
-    if (!isRecord(mappingValue)) {
+    const mappingValue = isRecord(candidate.mapping) ? candidate.mapping : buildFlatMessageMapping(candidate);
+    if (!mappingValue) {
         return null;
     }
 

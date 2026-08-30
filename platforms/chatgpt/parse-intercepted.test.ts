@@ -19,7 +19,7 @@ const minimalMapping = () => ({
 
 const rawMessage = (
     id: string,
-    role: 'user' | 'assistant',
+    role: 'system' | 'user' | 'assistant' | 'tool',
     content: Record<string, unknown>,
     overrides: Record<string, unknown> = {},
 ) => ({
@@ -231,6 +231,39 @@ describe('ChatGPT parseInterceptedData', () => {
             expect(exported).toContain('Evaluating how to explain Ushman to a non-technical');
             expect(exported).toContain('Analyzing file output and citations');
             expect(exported).toContain('citations but try to keep them minimal');
+        });
+
+        it('should parse a complete flattened conversation detail response', () => {
+            const messages = [
+                rawMessage('system', 'system', { content_type: 'text', parts: [''] }, { end_turn: null }),
+                rawMessage('user', 'user', { content_type: 'text', parts: ['Research this'] }, { end_turn: null }),
+                rawMessage(
+                    'assistant-code',
+                    'assistant',
+                    { content_type: 'code', text: '' },
+                    { end_turn: false, metadata: { is_complete: true, message_type: 'next' } },
+                ),
+                rawMessage(
+                    'tool-code',
+                    'tool',
+                    { content_type: 'code', text: '{"result":"sanitized"}' },
+                    { end_turn: null, metadata: { message_type: 'next' } },
+                ),
+            ];
+            const payload = {
+                title: 'Deep research',
+                conversation_id: VALID_ID,
+                current_node: 'tool-code',
+                messages,
+                page_info: { has_previous_page: false, has_next_page: false },
+            };
+
+            const result = adapter.parseInterceptedData(JSON.stringify(payload), BACKEND_API_URL);
+
+            expect(result).not.toBeNull();
+            expect(result.messages).toEqual(messages);
+            expect(result.mapping['tool-code']?.parent).toBe('assistant-code');
+            expect(adapter.evaluateReadiness(result)).toMatchObject({ ready: true, terminal: true });
         });
     });
 

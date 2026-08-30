@@ -602,7 +602,7 @@ describe('MAIN-world bootstrap request capture', () => {
         expect(conversationResponseCache.get('ChatGPT', conversationId)).toBeUndefined();
     });
 
-    it('should not let an older delayed terminal detail replace a newer terminal detail', async () => {
+    it('should not let an older delayed plural ChatGPT detail replace a newer terminal detail', async () => {
         const conversationId = '67f0a0b3-1234-4abc-8def-1234567890ab';
         const olderText = JSON.stringify(createTerminalChatGptPayload(conversationId, 'Older snapshot'));
         const newerText = JSON.stringify(createTerminalChatGptPayload(conversationId, 'Newer snapshot'));
@@ -624,7 +624,7 @@ describe('MAIN-world bootstrap request capture', () => {
         });
 
         (bootstrapScript as { main: () => void }).main();
-        const detailUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
+        const detailUrl = `https://chatgpt.com/backend-api/conversations/${conversationId}?include_has_versions=true&num_turns=10`;
         await windowInstance.fetch(detailUrl);
         await windowInstance.fetch(detailUrl);
         await waitForCapture();

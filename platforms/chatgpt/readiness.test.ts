@@ -449,6 +449,27 @@ describe('ChatGPT evaluateReadiness', () => {
         expect(readiness.contentHash).toBeString();
     });
 
+    it('should accept a completed deep-research tool branch followed by an empty terminal assistant', () => {
+        const data = structuredClone(deepResearchCompletedConversation);
+        data.mapping['tool-code']!.children = ['assistant-placeholder'];
+        data.mapping['assistant-placeholder'] = {
+            id: 'assistant-placeholder',
+            parent: 'tool-code',
+            children: [],
+            message: assistantMessage('assistant-placeholder', {
+                content: { content_type: 'text', parts: [''] },
+                metadata: { message_type: 'next' },
+            }),
+        };
+        data.current_node = 'assistant-placeholder';
+
+        const readiness = evaluateChatGPTReadiness(data);
+
+        expect(readiness.ready).toBeTrue();
+        expect(readiness.terminal).toBeTrue();
+        expect(readiness.reason).toBe('terminal-marker');
+    });
+
     it('should not accept a deep-research tool branch while the tool is in progress', () => {
         const readiness = evaluateChatGPTReadiness(deepResearchInProgressConversation);
 

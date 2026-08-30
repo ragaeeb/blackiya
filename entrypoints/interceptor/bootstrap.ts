@@ -229,7 +229,11 @@ const extractDetailConversationId = (
 ): string | null => {
     switch (platform) {
         case 'ChatGPT':
-            return new URL(requestUrl).pathname.match(/^\/backend-api\/(?:f\/)?conversation\/([^/]+)$/)?.[1] ?? null;
+            return (
+                new URL(requestUrl).pathname.match(
+                    /^\/backend-api\/(?:f\/conversation|conversations?)\/([^/]+)$/,
+                )?.[1] ?? null
+            );
         case 'Gemini':
             return extractConversationIdFromSourcePath(requestUrl);
         case 'Claude':
