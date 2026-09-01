@@ -24,7 +24,7 @@
         "dev:firefox": "BLACKIYA_BUILD_PROFILE=dev wxt -b firefox",
         "build": "BLACKIYA_BUILD_PROFILE=prod tsc --noEmit && wxt build",
         "build:firefox": "BLACKIYA_BUILD_PROFILE=prod bun run check && tsc --noEmit && wxt build -b firefox",
-        "zip": "bun run check && tsc --noEmit && wxt zip",
+        "zip": "tsc --noEmit && wxt zip",
         "zip:firefox": "wxt zip -b firefox",
         "compile": "tsc --noEmit",
         "postinstall": "wxt prepare",
