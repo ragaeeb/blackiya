@@ -1,3 +1,10 @@
+# [3.1.0](https://github.com/ragaeeb/blackiya/compare/v3.0.0...v3.1.0) (2026-09-01)
+
+
+### Features
+
+* **gpt:** Add support for paginated ChatGPT conversation responses, preserve message ordering ([#50](https://github.com/ragaeeb/blackiya/issues/50)) ([231efc8](https://github.com/ragaeeb/blackiya/commit/231efc84890d4aeea9426ecdf94c3696afc8a913))
+
 ## Unreleased (v3 hard cut)
 
 ### Breaking Changes

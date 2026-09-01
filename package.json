@@ -2,7 +2,7 @@
     "name": "blackiya",
     "description": "Chrome extension to capture and export conversations from ChatGPT and other LLMs",
     "private": true,
-    "version": "3.0.1",
+    "version": "3.1.0",
     "type": "module",
     "author": "Ragaeeb Haq",
     "license": "MIT",
