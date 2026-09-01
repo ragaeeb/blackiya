@@ -85,14 +85,24 @@ const isCompletedDeepResearchAssistant = (message: Message | undefined): boolean
     message.metadata?.is_complete === true &&
     message.metadata?.message_type === 'next';
 
+const isEmptyTerminalAssistantPlaceholder = (message: Message | undefined): boolean =>
+    message?.author.role === 'assistant' &&
+    message.status === 'finished_successfully' &&
+    message.end_turn === true &&
+    message.content.content_type === 'text' &&
+    message.metadata?.message_type === 'next' &&
+    extractMessageText(message).length === 0;
+
 const isTerminalDeepResearchToolBranch = (activeBranchMessages: Message[]): boolean => {
     const latestMessage = activeBranchMessages.at(-1);
-    const precedingMessage = activeBranchMessages.at(-2);
+    const hasTrailingPlaceholder = isEmptyTerminalAssistantPlaceholder(latestMessage);
+    const toolMessage = activeBranchMessages.at(hasTrailingPlaceholder ? -2 : -1);
+    const precedingMessage = activeBranchMessages.at(hasTrailingPlaceholder ? -3 : -2);
     return (
-        latestMessage?.author.role === 'tool' &&
-        latestMessage.status === 'finished_successfully' &&
-        latestMessage.content.content_type === 'code' &&
-        latestMessage.metadata?.message_type === 'next' &&
+        toolMessage?.author.role === 'tool' &&
+        toolMessage.status === 'finished_successfully' &&
+        toolMessage.content.content_type === 'code' &&
+        toolMessage.metadata?.message_type === 'next' &&
         isCompletedDeepResearchAssistant(precedingMessage)
     );
 };

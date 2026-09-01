@@ -77,7 +77,7 @@ The single-chat kernel returns a typed, fail-fast result and never writes a part
 | `timeout` | Request exceeded the hard timeout | Confirm the conversation is terminal, then retry explicitly; flag latency if persistent |
 | `parse_failure` | Empty body, parser returned null, or parser threw | Check payload shape via stream-debug/HAR |
 | `id_mismatch` | Response `conversation_id` differs from the URL id | Stale/redirected id — reopen and retry |
-| `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete; an explicitly ended ChatGPT `reasoning_recap` or completed deep-research tool branch is accepted even when no final text assistant exists |
+| `not_terminal` | `evaluateReadiness.ready` or `.terminal` was false | Response was not ready/terminal — retry when complete; an explicitly ended ChatGPT `reasoning_recap` or completed deep-research tool branch is accepted, including the trailing empty terminal assistant shape |
 
 There is no `degraded_manual_only` or partial/downgraded export path in v3. If the Blackiya icon export fails, the error variant tells you exactly which gate rejected it.
 
@@ -93,6 +93,8 @@ For cache-only providers, first confirm the site made its normal canonical conve
 - **Z.ai:** both the conversation detail and its matching message batch. Either response alone is intentionally rejected.
 
 For direct-capable adapters—ChatGPT, Gemini, both Grok surfaces, Qwen, and DeepSeek—a cache miss proceeds to the adapter's deterministic detail request. DeepSeek requires the bearer authorization injected by its page client; the session cookie alone returns `INVALID_TOKEN`. It does not trigger retries, background warming, or speculative endpoint discovery. Authentication failures clear stale provider request context; malformed, mismatched, incomplete, and non-terminal responses remain fail-fast.
+
+ChatGPT page loads may use `/backend-api/conversations/{id}` with a flat `messages` array. Blackiya caches only a closed response (`page_info.has_previous_page` and `has_next_page` are both false), retains those source messages, and builds the ordered mapping used for readiness. A valid cache hit means clicking the Blackiya icon does not make another detail request.
 
 DeepSeek's complete history may use `parent_id: null` for the root message. A later conditional-cache response with an empty `chat_messages` array is not a complete archive, so it is ignored without evicting the prior complete snapshot.
 

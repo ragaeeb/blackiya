@@ -105,7 +105,7 @@ export const createChatGPTAdapter = (): LLMPlatform => ({
             const { hostname, pathname } = new URL(url);
             return (
                 (hostname === 'chatgpt.com' || hostname === 'chat.openai.com') &&
-                /^\/backend-api\/(?:f\/)?conversation\/[a-f0-9-]+$/i.test(pathname)
+                /^\/backend-api\/(?:f\/conversation|conversations?)\/[a-f0-9-]+$/i.test(pathname)
             );
         } catch {
             return false;

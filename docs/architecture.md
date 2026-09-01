@@ -84,7 +84,7 @@ Primary module: `features/single-export/single-export-service.ts`.
    - Empty/bad body or parse failure → `parse_failure`.
    - A declared or streamed body above `16 MiB` is cancelled and returns `response_too_large`.
    - `parsed.conversation_id` must equal the id from the URL → else `id_mismatch`.
-   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text. It also treats a `finished_successfully` `reasoning_recap` with `metadata.reasoning_status: reasoning_ended` as terminal when ChatGPT omits `end_turn`, and accepts a completed deep-research assistant-code node followed by a finished tool-code node. In-progress and non-terminal thoughts remain rejected.
+   - `evaluateReadiness.ready` and `evaluateReadiness.terminal` must both be `true` → else `not_terminal`. ChatGPT treats a `finished_successfully` assistant node with `end_turn: true` as terminal even when its output is a multimodal/image, code, or execution artifact with no text. It also treats a `finished_successfully` `reasoning_recap` with `metadata.reasoning_status: reasoning_ended` as terminal when ChatGPT omits `end_turn`, and accepts a completed deep-research assistant-code/tool-code branch with or without ChatGPT's trailing empty terminal assistant placeholder. In-progress and non-terminal thoughts remain rejected.
 6. On success, serializes the complete platform archive (including the full normalized `mapping` tree and provider response retained in platform-specific raw payload fields) and injects the download via `deps.downloadJson(jsonString, filename)`. The boundary idempotently adds `.json` when needed. In production this kernel runs in the MAIN-world privileged command handler; the isolated button receives only a typed status summary or error.
 
 The kernel returns a discriminated `SingleExportResult`. It never throws on a contract failure path. Errors:
@@ -128,7 +128,7 @@ Multiplexed and multi-response transports require more context than URL/method m
 
 | Provider | Eligible page-owned response | Direct fallback after cache miss | Bulk export |
 | :--- | :--- | :--- | :--- |
-| ChatGPT | Canonical conversation detail `GET` | Adapter-declared detail candidates; auth required | Yes |
+| ChatGPT | Canonical mapping detail `GET`, or a closed flat-message `/backend-api/conversations/{id}` detail response | Adapter-declared detail candidates; auth required | Yes |
 | Gemini | Conversation batchexecute RPC | Deterministic batchexecute `POST`; captured `at` context required | Yes |
 | Grok (`grok.com`) | Canonical REST conversation detail | Adapter-declared REST candidates | Yes |
 | Grok (`x.com/i/grok`) | Canonical conversation-items GraphQL query | Deterministic conversation-items GraphQL `GET` | No |
@@ -146,6 +146,8 @@ Canonical Grok detail payloads replace prior parser graph state so server-remove
 Direct request details:
 
 Every adapter-built candidate must use HTTPS, contain no userinfo, and match an exact origin declared by that adapter before captured request headers are read or forwarded. One unsafe candidate rejects the entire candidate set.
+
+ChatGPT's page may load a closed flat-message detail response from `/backend-api/conversations/{id}`. The interceptor caches it only when `page_info` reports neither a previous nor next page, retains the source `messages` array verbatim, and builds the ordered mapping used by shared readiness validation. This cache hit avoids a redundant explicit request. Paginated flat responses remain ineligible.
 
 - ChatGPT: `/backend-api/conversation/{id}` (with `/backend-api/f/conversation/{id}` as fallback candidate), `GET`.
 - Grok (`grok.com`): `/rest/app-chat/conversations_v2/{id}?includeWorkspaces=true&includeTaskResult=true` (fallback: adapter `buildApiUrls`), `GET`.

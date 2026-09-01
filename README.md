@@ -30,7 +30,7 @@ A high-performance Chrome extension for exporting terminal conversation JSON fro
 - ✅ **Request-Context Without Credential Persistence**: Allowlisted provider headers and Gemini batchexecute context remain in expiring page-local memory and are never written into exports, cached conversation records, or persistent storage.
 - ✅ **Smart Titles**: Automatic conversation title resolution and export-time filename generation.
 - ✅ **Popup Controls**: Bulk export, stream-debug export, and stream-debug clearing in one place.
-- ✅ **Complete Conversation Data**: Preserves ChatGPT's native `mapping` tree verbatim; other adapters build a normalized message graph while retaining the complete canonical provider response in `raw_payload`.
+- ✅ **Complete Conversation Data**: Preserves ChatGPT's native `mapping` tree verbatim when supplied; its closed flat-message response keeps the source `messages` array while building an ordered mapping. Other adapters build a normalized message graph while retaining the complete canonical provider response in `raw_payload`.
 - ✅ **Extensive Testing**: Regression-focused unit/integration coverage for adapters, single-export, bulk-export, and stream-debug.
 - ✅ **Automated Releases**: CI/CD pipeline with Semantic Versioning and automated GitHub Releases.
 
@@ -144,7 +144,7 @@ Claude accepts its current complete deep-research detail shape, including nil-ro
 
 Downloads use `{conversation-title}_{timestamp}.json`.
 
-The exported JSON contains complete conversation metadata and a normalized message graph. ChatGPT's native `mapping` is preserved verbatim; other adapters retain their complete canonical provider response in `raw_payload` so structured reasoning, tools, artifacts, and provider-specific fields are not discarded.
+The exported JSON contains complete conversation metadata and a normalized message graph. ChatGPT's native `mapping` is preserved verbatim when supplied; a closed flat-message detail response retains its source `messages` array and adds an ordered mapping. Other adapters retain their complete canonical provider response in `raw_payload` so structured reasoning, tools, artifacts, and provider-specific fields are not discarded.
 
 ### Fail-Fast Errors
 
