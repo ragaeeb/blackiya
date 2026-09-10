@@ -25,6 +25,7 @@ import {
 import { buildXGrokConversationItemsUrl } from '@/platforms/grok/x-url-utils';
 import {
     createMetaDetailFixture,
+    createMetaMessagesOnlyFixture,
     createMetaOlderPageFixture,
     SYNTHETIC_META_CONVERSATION_ID,
 } from '@/platforms/meta/fixtures/conversation';
@@ -1039,6 +1040,34 @@ describe('MAIN-world bootstrap request capture', () => {
             body: paginationRequest.body,
         });
         await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(conversationResponseCache.get('Meta Muse', SYNTHETIC_META_CONVERSATION_ID)).toBeDefined();
+    });
+
+    it('should cache a closed Meta messages GraphQL response that omits includeMessageList', async () => {
+        const windowInstance = new Window({
+            url: `https://www.meta.ai/prompt/${SYNTHETIC_META_CONVERSATION_ID}`,
+        });
+        windowInstance.fetch = async () =>
+            new windowInstance.Response(JSON.stringify(createMetaMessagesOnlyFixture()), {
+                headers: { 'content-type': 'application/json' },
+            });
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: windowInstance,
+            writable: true,
+        });
+
+        (bootstrapScript as { main: () => void }).main();
+        await windowInstance.fetch('https://www.meta.ai/api/graphql', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                doc_id: 'synthetic-messages-document',
+                variables: { conversationId: SYNTHETIC_META_CONVERSATION_ID },
+            }),
+        });
+        await waitForCapture();
+
         expect(conversationResponseCache.get('Meta Muse', SYNTHETIC_META_CONVERSATION_ID)).toBeDefined();
     });
 

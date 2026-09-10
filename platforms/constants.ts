@@ -10,7 +10,7 @@
 /**
  * Supported LLM Platform URLs
  * These patterns are used in:
- * - wxt.config.ts (host_permissions)
+ * - wxt.config.ts (host_permissions, plus META_ARTIFACT_URLS for Meta iframe artifacts)
  * - entrypoints/main.content.ts (content script matches)
  * - entrypoints/interceptor.content.ts (interceptor matches)
  */
@@ -28,6 +28,8 @@ export const SUPPORTED_PLATFORM_URLS = [
     'https://meta.ai/*',
     'https://nova.amazon.com/*',
 ] as const;
+
+export const META_ARTIFACT_URLS = ['https://*.a.metaaiusercontent.com/*'] as const;
 
 /**
  * Type-safe platform URL type

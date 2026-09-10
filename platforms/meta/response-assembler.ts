@@ -25,6 +25,12 @@ type StoredResponse = {
     byteLength: number;
 };
 
+type StoredArtifact = {
+    content: string;
+    byteLength: number;
+    updatedAt: number;
+};
+
 type ResponseEntry = {
     initialResponse: StoredResponse | null;
     paginationResponses: Map<string, StoredResponse>;
@@ -130,6 +136,7 @@ const isReadyTerminal = (data: ConversationData): boolean => {
 
 export class MetaGraphqlResponseAssembler {
     private readonly entries = new Map<string, ResponseEntry>();
+    private readonly artifacts = new Map<string, StoredArtifact>();
     private readonly maxEntries: number;
     private readonly maxPagesPerEntry: number;
     private readonly maxBytesPerEntry: number;
@@ -191,6 +198,22 @@ export class MetaGraphqlResponseAssembler {
         );
     }
 
+    ingestArtifact(artifactUuid: string, content: string): void {
+        const now = this.now();
+        this.pruneExpired(now);
+        try {
+            const bytes = boundedByteLength(content, this.maxBytesPerEntry);
+            if (!isMetaConversationId(artifactUuid) || content.length === 0 || bytes === null) {
+                return;
+            }
+            this.artifacts.delete(artifactUuid);
+            this.artifacts.set(artifactUuid, { content, byteLength: bytes, updatedAt: now });
+            this.enforceArtifactBounds();
+        } finally {
+            this.scheduleExpiryPrune();
+        }
+    }
+
     getReadyConversation(conversationId: string): ConversationData | null {
         if (!isMetaConversationId(conversationId)) {
             return null;
@@ -211,6 +234,7 @@ export class MetaGraphqlResponseAssembler {
 
     clear(): void {
         this.entries.clear();
+        this.artifacts.clear();
         this.totalBytes = 0;
         this.scheduleExpiryPrune();
     }
@@ -293,9 +317,10 @@ export class MetaGraphqlResponseAssembler {
         if (!entry.initialResponse) {
             return null;
         }
+        const artifacts = this.artifactContents();
         const orderedResponses: string[] = [];
         const visitedCursors = new Set<string>();
-        let parsed = parseMetaConversationArchive(entry.initialResponse.responseText, orderedResponses);
+        let parsed = parseMetaConversationArchive(entry.initialResponse.responseText, orderedResponses, artifacts);
         while (parsed) {
             const pageInfo = getOldestPageInfo(parsed);
             if (!pageInfo) {
@@ -314,15 +339,28 @@ export class MetaGraphqlResponseAssembler {
             }
             visitedCursors.add(cursor);
             orderedResponses.push(page.responseText);
-            parsed = parseMetaConversationArchive(entry.initialResponse.responseText, orderedResponses);
+            parsed = parseMetaConversationArchive(entry.initialResponse.responseText, orderedResponses, artifacts);
         }
         return null;
+    }
+
+    private artifactContents(): ReadonlyMap<string, string> {
+        const contents = new Map<string, string>();
+        for (const [artifactUuid, artifact] of this.artifacts) {
+            contents.set(artifactUuid, artifact.content);
+        }
+        return contents;
     }
 
     private pruneExpired(now: number): void {
         for (const [conversationId, entry] of this.entries) {
             if (now - entry.updatedAt >= this.maxAgeMs) {
                 this.deleteEntry(conversationId);
+            }
+        }
+        for (const [artifactUuid, artifact] of this.artifacts) {
+            if (now - artifact.updatedAt >= this.maxAgeMs) {
+                this.artifacts.delete(artifactUuid);
             }
         }
     }
@@ -332,13 +370,16 @@ export class MetaGraphqlResponseAssembler {
             this.cancelPruneCallback(this.pruneHandle);
             this.pruneHandle = null;
         }
-        if (this.entries.size === 0) {
+        if (this.entries.size === 0 && this.artifacts.size === 0) {
             return;
         }
 
         let earliestExpiry = Number.POSITIVE_INFINITY;
         for (const entry of this.entries.values()) {
             earliestExpiry = Math.min(earliestExpiry, entry.updatedAt + this.maxAgeMs);
+        }
+        for (const artifact of this.artifacts.values()) {
+            earliestExpiry = Math.min(earliestExpiry, artifact.updatedAt + this.maxAgeMs);
         }
         const delayMs = Math.max(0, earliestExpiry - this.now());
         this.pruneHandle = this.schedulePruneCallback(() => {
@@ -355,6 +396,16 @@ export class MetaGraphqlResponseAssembler {
                 return;
             }
             this.deleteEntry(oldestConversationId);
+        }
+    }
+
+    private enforceArtifactBounds(): void {
+        while (this.artifacts.size > this.maxPagesPerEntry) {
+            const oldestArtifactUuid = this.artifacts.keys().next().value as string | undefined;
+            if (!oldestArtifactUuid) {
+                return;
+            }
+            this.artifacts.delete(oldestArtifactUuid);
         }
     }
 

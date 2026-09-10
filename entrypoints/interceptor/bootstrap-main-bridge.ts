@@ -68,20 +68,23 @@ export const setupMainWorldBridge = () => {
             throw error;
         }
 
-        if (adapter.name === 'Meta Muse' && !conversationResponseCache.get(adapter.name, conversationId)) {
-            const embedded = extractMetaNextFlightConversation(
-                document.querySelectorAll('script'),
-                conversationId,
-                conversationResponseCache.getMaxBytesPerEntry(),
-            );
-            if (embedded) {
-                const data = metaGraphqlResponseAssembler.ingestInitialDocument(
-                    embedded.conversationId,
-                    embedded.responseText,
+        if (adapter.name === 'Meta Muse') {
+            if (!conversationResponseCache.get(adapter.name, conversationId)) {
+                const embedded = extractMetaNextFlightConversation(
+                    document.querySelectorAll('script'),
+                    conversationId,
+                    conversationResponseCache.getMaxBytesPerEntry(),
                 );
-                if (data) {
-                    conversationResponseCache.set(adapter.name, data);
+                if (embedded) {
+                    metaGraphqlResponseAssembler.ingestInitialDocument(
+                        embedded.conversationId,
+                        embedded.responseText,
+                    );
                 }
+            }
+            const assembled = metaGraphqlResponseAssembler.getReadyConversation(conversationId);
+            if (assembled) {
+                conversationResponseCache.set(adapter.name, assembled);
             }
         }
 

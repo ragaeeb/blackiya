@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
+    attachMetaArtifactSandbox,
     createMetaDetailFixture,
+    createMetaMessagesOnlyFixture,
     createMetaOlderPageFixture,
     SYNTHETIC_META_CONVERSATION_ID,
 } from './fixtures/conversation';
@@ -51,6 +53,59 @@ describe('MetaGraphqlResponseAssembler', () => {
         expect(result?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
         expect(JSON.stringify(result?.raw_payload)).toBe(JSON.stringify(createMetaDetailFixture()));
         expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toEqual(result);
+    });
+
+    it('should join captured artifact bodies into a ready conversation without blocking export', () => {
+        const markdownUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const payload = createMetaDetailFixture();
+        attachMetaArtifactSandbox(payload, {
+            uuid: markdownUuid,
+            artifact_type: 'MARKDOWN',
+            file_extension: 'md',
+            title: 'REPORT',
+        });
+        const assembler = new MetaGraphqlResponseAssembler();
+        expect(assembler.ingest(detailBody(), JSON.stringify(payload))).not.toBeNull();
+
+        assembler.ingestArtifact(markdownUuid, 'computed from 4.4M edges, teacher/student');
+        const ready = assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID);
+
+        expect(ready?.mapping['synthetic-assistant-message']?.message?.content.parts).toEqual([
+            'Synthetic terminal answer.',
+            'computed from 4.4M edges, teacher/student',
+        ]);
+    });
+
+    it('should return a closed messages-only GraphQL response as ready-terminal', () => {
+        const assembler = new MetaGraphqlResponseAssembler();
+        const requestBody = JSON.stringify({
+            doc_id: 'synthetic-messages-document',
+            variables: { conversationId: SYNTHETIC_META_CONVERSATION_ID },
+        });
+        const responseText = JSON.stringify(createMetaMessagesOnlyFixture());
+
+        const result = assembler.ingest(requestBody, responseText);
+
+        expect(result?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
+        expect(result?.title).toBe('');
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toEqual(result);
+        expect(
+            assembler.ingest(
+                JSON.stringify({
+                    doc_id: DETAIL_DOCUMENT_ID,
+                    variables: { id: SYNTHETIC_META_CONVERSATION_ID },
+                }),
+                JSON.stringify({
+                    data: {
+                        conversation: {
+                            id: SYNTHETIC_META_CONVERSATION_ID,
+                            title: 'Synthetic Meta Muse Conversation',
+                            type: 'CHAT',
+                        },
+                    },
+                }),
+            ),
+        ).toBeNull();
     });
 
     it('should assemble cursor-ordered pagination and return only after history is complete', () => {
