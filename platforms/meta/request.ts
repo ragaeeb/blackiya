@@ -128,18 +128,25 @@ export const extractMetaGraphqlRequestContext = (body: string): MetaGraphqlConte
         };
     }
 
-    if (
-        typeof variables.conversationId === 'string' &&
-        isMetaConversationId(variables.conversationId) &&
-        isCursor(variables.before) &&
-        isPageSize(variables.last)
-    ) {
+    if (typeof variables.conversationId !== 'string' || !isMetaConversationId(variables.conversationId)) {
+        return null;
+    }
+
+    if (isCursor(variables.before) && isPageSize(variables.last)) {
         return {
             kind: 'conversation-pagination',
             conversationId: variables.conversationId,
             documentId: parsed.doc_id,
             before: variables.before,
             last: variables.last,
+        };
+    }
+
+    if (variables.before === undefined && variables.last === undefined) {
+        return {
+            kind: 'conversation-detail',
+            conversationId: variables.conversationId,
+            documentId: parsed.doc_id,
         };
     }
 

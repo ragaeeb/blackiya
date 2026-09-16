@@ -152,6 +152,31 @@ const getStructuredContent = (node: JsonRecord): JsonRecord | null => {
     return renderer && isRecord(renderer.unified_response) ? renderer.unified_response : null;
 };
 
+const getArtifactContents = (node: JsonRecord, artifacts: ReadonlyMap<string, string>): string[] => {
+    const unified = getStructuredContent(node);
+    if (!unified || !Array.isArray(unified.sections)) {
+        return [];
+    }
+    const contents: string[] = [];
+    const seen = new Set<string>();
+    for (const section of unified.sections) {
+        if (!isRecord(section) || !isRecord(section.view_model) || !isRecord(section.view_model.primitive)) {
+            continue;
+        }
+        const sandbox = section.view_model.primitive.html_artifact_sandbox;
+        if (!isRecord(sandbox) || typeof sandbox.uuid !== 'string' || seen.has(sandbox.uuid)) {
+            continue;
+        }
+        const content = artifacts.get(sandbox.uuid);
+        if (content === undefined || content.length === 0) {
+            continue;
+        }
+        seen.add(sandbox.uuid);
+        contents.push(content);
+    }
+    return contents;
+};
+
 const getStreamingStates = (node: JsonRecord): string[] => {
     const rendererMessage = getRendererMessage(node);
     return [node.streamingState, rendererMessage?.streamingState].filter(
@@ -164,7 +189,7 @@ const isTerminalAssistant = (node: JsonRecord): boolean => {
     return states.length > 0 && states.every((state) => state === 'DONE');
 };
 
-const buildMessage = (candidate: MetaMessageCandidate): Message => {
+const buildMessage = (candidate: MetaMessageCandidate, artifacts: ReadonlyMap<string, string>): Message => {
     const { id, role, source } = candidate;
     const createdAt = parseTimestamp(
         source.createdAt ?? (role === 'assistant' ? source.assistantCreatedAt : source.userCreatedAt),
@@ -174,7 +199,13 @@ const buildMessage = (candidate: MetaMessageCandidate): Message => {
     const hasStructuredContent = hasMaterialStructuredValue(structuredContent);
     const hasError = source.error !== null && source.error !== undefined;
     const terminal = role === 'assistant' ? isTerminalAssistant(source) : true;
-    const parts = text.length > 0 ? [text] : structuredContent && hasStructuredContent ? [structuredContent] : [];
+    const artifactContents = getArtifactContents(source, artifacts);
+    const parts =
+        text.length > 0 || artifactContents.length > 0
+            ? [...(text.length > 0 ? [text] : []), ...artifactContents]
+            : structuredContent && hasStructuredContent
+              ? [structuredContent]
+              : [];
 
     return {
         id,
@@ -205,14 +236,17 @@ const buildMessage = (candidate: MetaMessageCandidate): Message => {
     };
 };
 
-const buildMapping = (candidates: MetaMessageCandidate[]): Record<string, MessageNode> => {
+const buildMapping = (
+    candidates: MetaMessageCandidate[],
+    artifacts: ReadonlyMap<string, string>,
+): Record<string, MessageNode> => {
     const mapping: Record<string, MessageNode> = {};
     for (const [index, candidate] of candidates.entries()) {
         const parent = candidates[index - 1]?.id ?? null;
         const child = candidates[index + 1]?.id;
         mapping[candidate.id] = {
             id: candidate.id,
-            message: buildMessage(candidate),
+            message: buildMessage(candidate, artifacts),
             parent,
             children: child ? [child] : [],
         };
@@ -268,9 +302,6 @@ export const isMetaConversationPayload = (value: unknown): boolean => {
         return false;
     }
     if (conversation.type !== undefined && conversation.type !== 'CHAT') {
-        return false;
-    }
-    if (typeof conversation.title !== 'string' && typeof conversation.displayTitle !== 'string') {
         return false;
     }
     return getEdges(conversation) !== null;
@@ -331,7 +362,11 @@ const buildRawArchivePayload = (
               pagination_responses: pages,
           };
 
-export const parseMetaConversationArchive = (initialValue: unknown, pageValues: unknown[]): ConversationData | null => {
+export const parseMetaConversationArchive = (
+    initialValue: unknown,
+    pageValues: unknown[],
+    artifacts: ReadonlyMap<string, string> = new Map(),
+): ConversationData | null => {
     const initial = parseJsonPayload(initialValue);
     if (!initial || !isMetaConversationPayload(initial)) {
         return null;
@@ -364,7 +399,7 @@ export const parseMetaConversationArchive = (initialValue: unknown, pageValues: 
         title,
         create_time: createTime,
         update_time: updatedAt,
-        mapping: buildMapping(candidates),
+        mapping: buildMapping(candidates, artifacts),
         conversation_id: conversationId,
         current_node: candidates.at(-1)!.id,
         moderation_results: [],

@@ -107,6 +107,44 @@ export const createMetaDetailFixture = ({
     },
 });
 
+export const createMetaMessagesOnlyFixture = (options: DetailFixtureOptions = {}) => {
+    const detail = createMetaDetailFixture(options);
+    return {
+        data: {
+            conversation: {
+                latestBranchPath: detail.data.conversation.latestBranchPath,
+                id: detail.data.conversation.id,
+                isUnread: false,
+                messages: detail.data.conversation.messages,
+            },
+        },
+    };
+};
+
+export const attachMetaArtifactSandbox = (
+    payload: ReturnType<typeof createMetaDetailFixture>,
+    sandbox: Record<string, unknown>,
+    text = '',
+) => {
+    const node = payload.data.conversation.messages.edges[1]?.node as
+        | {
+              contentRenderer?: { unified_response?: { sections?: unknown[] } };
+          }
+        | undefined;
+    node?.contentRenderer?.unified_response?.sections?.push({
+        __typename: 'GenAIUnifiedResponseSection',
+        header: null,
+        view_model: {
+            __typename: 'GenAISingleLayoutViewModel',
+            primitive: {
+                __typename: 'GenAIMarkdownTextUXPrimitive',
+                text,
+                html_artifact_sandbox: sandbox,
+            },
+        },
+    });
+};
+
 export const createMetaOlderPageFixture = (conversationId = SYNTHETIC_META_CONVERSATION_ID) => ({
     data: {
         conversation: {

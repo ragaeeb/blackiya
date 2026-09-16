@@ -84,6 +84,43 @@ describe('Meta Muse GraphQL request helpers', () => {
             before: 'synthetic-before-cursor',
             last: 20,
         });
+
+        expect(
+            extractMetaGraphqlRequestContext(
+                JSON.stringify({
+                    doc_id: 'synthetic-messages-document',
+                    variables: { conversationId: SYNTHETIC_META_CONVERSATION_ID },
+                }),
+            ),
+        ).toEqual({
+            kind: 'conversation-detail',
+            conversationId: SYNTHETIC_META_CONVERSATION_ID,
+            documentId: 'synthetic-messages-document',
+        });
+    });
+
+    it('should ignore metadata-only and nested conversation ids', () => {
+        expect(
+            extractMetaGraphqlRequestContext(
+                JSON.stringify({
+                    doc_id: DETAIL_DOCUMENT_ID,
+                    variables: { id: SYNTHETIC_META_CONVERSATION_ID },
+                }),
+            ),
+        ).toBeNull();
+        expect(
+            extractMetaGraphqlRequestContext(
+                JSON.stringify({
+                    doc_id: 'synthetic-survey-document',
+                    variables: {
+                        input: {
+                            conversationId: SYNTHETIC_META_CONVERSATION_ID,
+                            agentType: 'think_hard',
+                        },
+                    },
+                }),
+            ),
+        ).toBeNull();
     });
 
     it('should reject malformed ids, document context, cursors, and page sizes', () => {

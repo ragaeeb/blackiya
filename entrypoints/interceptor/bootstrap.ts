@@ -24,6 +24,7 @@ import { getPlatformAdapter } from '@/platforms/factory';
 import { extractConversationIdFromSourcePath } from '@/platforms/gemini/rpc-parser';
 import { extractGrokComConversationIdFromUrl } from '@/platforms/grok/url-utils';
 import { extractXGrokConversationId } from '@/platforms/grok/x-url-utils';
+import { ingestMetaArtifactMessageEvent } from '@/platforms/meta/artifacts';
 import { extractMetaGraphqlRequestContext, type MetaGraphqlContextCandidate } from '@/platforms/meta/request';
 import { metaGraphqlResponseAssembler } from '@/platforms/meta/response-assembler';
 import { NOVA_CONVERSATION_ID_PATTERN } from '@/platforms/nova/constants';
@@ -1142,5 +1143,10 @@ export default defineScript({
         };
 
         setupMainWorldBridge();
+        window.addEventListener('message', (event: MessageEvent) => {
+            ingestMetaArtifactMessageEvent(event, window, (artifactUuid, content) => {
+                metaGraphqlResponseAssembler.ingestArtifact(artifactUuid, content);
+            });
+        });
     },
 });

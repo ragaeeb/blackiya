@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
+    attachMetaArtifactSandbox,
     createMetaDetailFixture,
+    createMetaMessagesOnlyFixture,
     createMetaOlderPageFixture,
     SYNTHETIC_META_CONVERSATION_ID,
 } from './fixtures/conversation';
@@ -63,5 +65,58 @@ describe('Meta Muse conversation parser', () => {
         );
         expect(parseMetaConversationPayload('{')).toBeNull();
         expect(isMetaConversationPayload(payload)).toBeTrue();
+    });
+
+    it('should parse a closed messages-only GraphQL payload without title fields', () => {
+        const payload = createMetaMessagesOnlyFixture();
+
+        expect(isMetaConversationPayload(payload)).toBeTrue();
+        const parsed = parseMetaConversationPayload(payload);
+        expect(parsed?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
+        expect(parsed?.title).toBe('');
+        expect(parsed?.current_node).toBe('synthetic-assistant-message');
+        expect(parsed?.raw_payload as unknown).toEqual(payload);
+        expect(
+            isMetaConversationPayload({
+                data: { conversation: { id: SYNTHETIC_META_CONVERSATION_ID, title: 'x' } },
+            }),
+        ).toBeFalse();
+    });
+
+    it('should append captured markdown and JSON artifact bodies onto the assistant parts', () => {
+        const markdownUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const documentUuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+        const payload = createMetaDetailFixture();
+        attachMetaArtifactSandbox(
+            payload,
+            {
+                uuid: markdownUuid,
+                artifact_type: 'MARKDOWN',
+                file_extension: 'md',
+                title: 'REPORT',
+            },
+            '📎 REPORT.md',
+        );
+        attachMetaArtifactSandbox(
+            payload,
+            {
+                uuid: documentUuid,
+                artifact_type: 'DOCUMENT',
+                file_extension: 'json',
+                title: 'Report',
+            },
+            '📎 report.json',
+        );
+        const artifacts = new Map([
+            [markdownUuid, 'Provides kunya resolution and grade mapping\n'],
+            [documentUuid, '{"edges":4400000,"note":"teacher/student"}'],
+        ]);
+
+        const parsed = parseMetaConversationArchive(payload, [], artifacts);
+        expect(parsed?.mapping['synthetic-assistant-message']?.message?.content.parts).toEqual([
+            'Synthetic terminal answer.',
+            'Provides kunya resolution and grade mapping\n',
+            '{"edges":4400000,"note":"teacher/student"}',
+        ]);
     });
 });

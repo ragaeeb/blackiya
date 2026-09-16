@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
+    attachMetaArtifactSandbox,
     createMetaDetailFixture,
+    createMetaMessagesOnlyFixture,
     createMetaOlderPageFixture,
     SYNTHETIC_META_CONVERSATION_ID,
 } from './fixtures/conversation';
@@ -51,6 +53,59 @@ describe('MetaGraphqlResponseAssembler', () => {
         expect(result?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
         expect(JSON.stringify(result?.raw_payload)).toBe(JSON.stringify(createMetaDetailFixture()));
         expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toEqual(result);
+    });
+
+    it('should join captured artifact bodies into a ready conversation without blocking export', () => {
+        const markdownUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const payload = createMetaDetailFixture();
+        attachMetaArtifactSandbox(payload, {
+            uuid: markdownUuid,
+            artifact_type: 'MARKDOWN',
+            file_extension: 'md',
+            title: 'REPORT',
+        });
+        const assembler = new MetaGraphqlResponseAssembler();
+        expect(assembler.ingest(detailBody(), JSON.stringify(payload))).not.toBeNull();
+
+        assembler.ingestArtifact(markdownUuid, 'computed from 4.4M edges, teacher/student');
+        const ready = assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID);
+
+        expect(ready?.mapping['synthetic-assistant-message']?.message?.content.parts).toEqual([
+            'Synthetic terminal answer.',
+            'computed from 4.4M edges, teacher/student',
+        ]);
+    });
+
+    it('should return a closed messages-only GraphQL response as ready-terminal', () => {
+        const assembler = new MetaGraphqlResponseAssembler();
+        const requestBody = JSON.stringify({
+            doc_id: 'synthetic-messages-document',
+            variables: { conversationId: SYNTHETIC_META_CONVERSATION_ID },
+        });
+        const responseText = JSON.stringify(createMetaMessagesOnlyFixture());
+
+        const result = assembler.ingest(requestBody, responseText);
+
+        expect(result?.conversation_id).toBe(SYNTHETIC_META_CONVERSATION_ID);
+        expect(result?.title).toBe('');
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toEqual(result);
+        expect(
+            assembler.ingest(
+                JSON.stringify({
+                    doc_id: DETAIL_DOCUMENT_ID,
+                    variables: { id: SYNTHETIC_META_CONVERSATION_ID },
+                }),
+                JSON.stringify({
+                    data: {
+                        conversation: {
+                            id: SYNTHETIC_META_CONVERSATION_ID,
+                            title: 'Synthetic Meta Muse Conversation',
+                            type: 'CHAT',
+                        },
+                    },
+                }),
+            ),
+        ).toBeNull();
     });
 
     it('should assemble cursor-ordered pagination and return only after history is complete', () => {
@@ -214,6 +269,118 @@ describe('MetaGraphqlResponseAssembler', () => {
         expect(assembler.ingest(detailBody(SECOND_CONVERSATION_ID), second)).not.toBeNull();
         expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toBeNull();
         expect(assembler.getReadyConversation(SECOND_CONVERSATION_ID)).not.toBeNull();
+    });
+
+    it('should count artifact bytes toward the shared total budget', () => {
+        const artifactUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const first = JSON.stringify(createMetaDetailFixture());
+        const secondPayload = withConversationId(createMetaDetailFixture(), SECOND_CONVERSATION_ID);
+        attachMetaArtifactSandbox(secondPayload, {
+            uuid: artifactUuid,
+            artifact_type: 'MARKDOWN',
+            file_extension: 'md',
+            title: 'REPORT',
+        });
+        const second = JSON.stringify(secondPayload);
+        const firstBytes = new TextEncoder().encode(first).byteLength;
+        const secondBytes = new TextEncoder().encode(second).byteLength;
+        const artifact = 'x'.repeat(64);
+        const artifactBytes = new TextEncoder().encode(artifact).byteLength;
+        const assembler = new MetaGraphqlResponseAssembler({
+            maxBytesPerEntry: Math.max(firstBytes, secondBytes, artifactBytes),
+            maxTotalBytes: firstBytes + secondBytes + artifactBytes - 1,
+        });
+
+        expect(assembler.ingest(detailBody(), first)).not.toBeNull();
+        expect(assembler.ingest(detailBody(SECOND_CONVERSATION_ID), second)).not.toBeNull();
+        assembler.ingestArtifact(artifactUuid, artifact);
+
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).toBeNull();
+        expect(
+            assembler.getReadyConversation(SECOND_CONVERSATION_ID)?.mapping['synthetic-assistant-message']?.message
+                ?.content.parts,
+        ).toEqual(['Synthetic terminal answer.', artifact]);
+    });
+
+    it('should replace artifact bytes without leaking the previous size into the total budget', () => {
+        const firstArtifactUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const secondArtifactUuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+        const payload = createMetaDetailFixture();
+        attachMetaArtifactSandbox(payload, {
+            uuid: firstArtifactUuid,
+            artifact_type: 'MARKDOWN',
+            file_extension: 'md',
+            title: 'REPORT',
+        });
+        attachMetaArtifactSandbox(payload, {
+            uuid: secondArtifactUuid,
+            artifact_type: 'DOCUMENT',
+            file_extension: 'json',
+            title: 'Report',
+        });
+        const responseText = JSON.stringify(payload);
+        const responseBytes = new TextEncoder().encode(responseText).byteLength;
+        const smallArtifact = 'small-artifact';
+        const largeArtifact = 'x'.repeat(64);
+        const smallBytes = new TextEncoder().encode(smallArtifact).byteLength;
+        const largeBytes = new TextEncoder().encode(largeArtifact).byteLength;
+        const assembler = new MetaGraphqlResponseAssembler({
+            maxBytesPerEntry: Math.max(responseBytes, largeBytes),
+            maxTotalBytes: responseBytes + smallBytes + largeBytes,
+        });
+
+        expect(assembler.ingest(detailBody(), responseText)).not.toBeNull();
+        assembler.ingestArtifact(firstArtifactUuid, largeArtifact);
+        assembler.ingestArtifact(firstArtifactUuid, smallArtifact);
+        assembler.ingestArtifact(secondArtifactUuid, largeArtifact);
+
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)?.mapping[
+            'synthetic-assistant-message'
+        ]?.message?.content.parts).toEqual(['Synthetic terminal answer.', smallArtifact, largeArtifact]);
+    });
+
+    it('should drop expired artifact bytes so a later conversation can use the budget', () => {
+        const artifactUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        let now = 100;
+        const responseText = JSON.stringify(createMetaDetailFixture());
+        const responseBytes = new TextEncoder().encode(responseText).byteLength;
+        const assembler = new MetaGraphqlResponseAssembler({
+            maxAgeMs: 10,
+            now: () => now,
+            maxBytesPerEntry: responseBytes,
+            maxTotalBytes: responseBytes,
+        });
+
+        assembler.ingestArtifact(artifactUuid, 'expired-artifact-bytes');
+        now = 110;
+        expect(assembler.ingest(detailBody(), responseText)).not.toBeNull();
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)).not.toBeNull();
+    });
+
+    it('should evict the oldest artifact when the artifact count bound is exceeded', () => {
+        const firstArtifactUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const secondArtifactUuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+        const payload = createMetaDetailFixture();
+        attachMetaArtifactSandbox(payload, {
+            uuid: firstArtifactUuid,
+            artifact_type: 'MARKDOWN',
+            file_extension: 'md',
+            title: 'REPORT',
+        });
+        attachMetaArtifactSandbox(payload, {
+            uuid: secondArtifactUuid,
+            artifact_type: 'DOCUMENT',
+            file_extension: 'json',
+            title: 'Report',
+        });
+        const assembler = new MetaGraphqlResponseAssembler({ maxPagesPerEntry: 1 });
+        expect(assembler.ingest(detailBody(), JSON.stringify(payload))).not.toBeNull();
+        assembler.ingestArtifact(firstArtifactUuid, 'first-artifact');
+        assembler.ingestArtifact(secondArtifactUuid, 'second-artifact');
+
+        expect(assembler.getReadyConversation(SYNTHETIC_META_CONVERSATION_ID)?.mapping[
+            'synthetic-assistant-message'
+        ]?.message?.content.parts).toEqual(['Synthetic terminal answer.', 'second-artifact']);
     });
 
     it('should bound retained pagination page count without returning partial history', () => {

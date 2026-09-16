@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { defineConfig } from 'wxt';
-import { SUPPORTED_PLATFORM_URLS } from './platforms/constants';
+import { META_ARTIFACT_URLS, SUPPORTED_PLATFORM_URLS } from './platforms/constants';
 
 const ALLITERATION_CODENAMES = [
     'Agile Aardvark',
@@ -81,7 +81,7 @@ export default defineConfig({
         name: MANIFEST_NAME,
         description: 'Capture and save conversation JSON from ChatGPT, Gemini, and other LLMs',
         permissions: ['storage'],
-        host_permissions: [...SUPPORTED_PLATFORM_URLS],
+        host_permissions: [...SUPPORTED_PLATFORM_URLS, ...META_ARTIFACT_URLS],
         action: {
             default_icon: {
                 '16': 'icon/16.png',
