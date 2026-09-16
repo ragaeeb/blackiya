@@ -206,9 +206,11 @@ export class MetaGraphqlResponseAssembler {
             if (!isMetaConversationId(artifactUuid) || content.length === 0 || bytes === null) {
                 return;
             }
-            this.artifacts.delete(artifactUuid);
+            this.deleteArtifact(artifactUuid);
             this.artifacts.set(artifactUuid, { content, byteLength: bytes, updatedAt: now });
+            this.totalBytes += bytes;
             this.enforceArtifactBounds();
+            this.enforceBounds();
         } finally {
             this.scheduleExpiryPrune();
         }
@@ -360,7 +362,7 @@ export class MetaGraphqlResponseAssembler {
         }
         for (const [artifactUuid, artifact] of this.artifacts) {
             if (now - artifact.updatedAt >= this.maxAgeMs) {
-                this.artifacts.delete(artifactUuid);
+                this.deleteArtifact(artifactUuid);
             }
         }
     }
@@ -392,10 +394,15 @@ export class MetaGraphqlResponseAssembler {
     private enforceBounds(): void {
         while (this.entries.size > this.maxEntries || this.totalBytes > this.maxTotalBytes) {
             const oldestConversationId = this.entries.keys().next().value as string | undefined;
-            if (!oldestConversationId) {
+            if (oldestConversationId) {
+                this.deleteEntry(oldestConversationId);
+                continue;
+            }
+            const oldestArtifactUuid = this.artifacts.keys().next().value as string | undefined;
+            if (!oldestArtifactUuid) {
                 return;
             }
-            this.deleteEntry(oldestConversationId);
+            this.deleteArtifact(oldestArtifactUuid);
         }
     }
 
@@ -405,7 +412,7 @@ export class MetaGraphqlResponseAssembler {
             if (!oldestArtifactUuid) {
                 return;
             }
-            this.artifacts.delete(oldestArtifactUuid);
+            this.deleteArtifact(oldestArtifactUuid);
         }
     }
 
@@ -416,6 +423,15 @@ export class MetaGraphqlResponseAssembler {
         }
         this.totalBytes -= entry.byteLength;
         this.entries.delete(conversationId);
+    }
+
+    private deleteArtifact(artifactUuid: string): void {
+        const artifact = this.artifacts.get(artifactUuid);
+        if (!artifact) {
+            return;
+        }
+        this.totalBytes -= artifact.byteLength;
+        this.artifacts.delete(artifactUuid);
     }
 }
 
