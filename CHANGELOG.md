@@ -1,3 +1,10 @@
+# [3.2.0](https://github.com/ragaeeb/blackiya/compare/v3.1.0...v3.2.0) (2026-09-16)
+
+
+### Features
+
+* **artifact:** Include Markdown and JSON artifacts, fix Muse export not working ([#51](https://github.com/ragaeeb/blackiya/issues/51)) ([cedb40c](https://github.com/ragaeeb/blackiya/commit/cedb40c9a89c2f7dcfb5926dbcb3a3a98ef082c3))
+
 # [3.1.0](https://github.com/ragaeeb/blackiya/compare/v3.0.0...v3.1.0) (2026-09-01)
 
 
